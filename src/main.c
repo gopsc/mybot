@@ -270,6 +270,7 @@ static void     core1_main()
         printf("Enjoyable Mac times now begin:\n\n");
 
         while (true) {
+                // umac相关的周期性处理函数
                 poll_umac();
         }
 }
