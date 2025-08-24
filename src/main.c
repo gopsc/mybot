@@ -287,6 +287,9 @@ int     main()
 
         /* This happens on core 0: */
 	while (true) {
+                //TinyUSB 库中用于 USB 主机模式（USB Host） 的核心任务处理函数。与
+                // tud_task()（用于 USB 设备模式）不同，tuh_task() 负责处理作为
+                // USB 主机时的所有 USB 事件（如设备插入 / 拔出、数据传输等）。
                 tuh_task();
                 hid_app_task();
                 poll_led_etc();
