@@ -68,6 +68,7 @@ static const uint8_t umac_rom[] = {
 #include "umac-rom.h"
 };
 
+// ？？？
 static uint8_t umac_ram[RAM_SIZE];
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -246,11 +247,13 @@ no_sd:
 // 核1主函数
 static void     core1_main()
 {
+        // ？？？像是整数型
         disc_descr_t discs[DISC_NUM_DRIVES] = {0};
 
         printf("Core 1 started\n");
         disc_setup(discs);
 
+        // 初始化umac，在umac项目里
         umac_init(umac_ram, (void *)umac_rom, discs);
         /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
          * core 0's USB activity.
@@ -258,6 +261,7 @@ static void     core1_main()
          * IRQs：中断请求
          * 视频跑在核1，中断请求和DMA不受核0的usb活动影响
          */
+         // 初始化视频，应该在本项目里
         video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
 
         printf("Enjoyable Mac times now begin:\n\n");
