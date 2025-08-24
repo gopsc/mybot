@@ -61,12 +61,12 @@ extern int cursor_y;
 extern int cursor_button;
 
 // Mac binary data:  disc and ROM images
-static const uint8_t umac_disc[] = {
-#include "umac-disc.h"
-};
-static const uint8_t umac_rom[] = {
-#include "umac-rom.h"
-};
+//static const uint8_t umac_disc[] = {
+//#include "umac-disc.h"
+//};
+//static const uint8_t umac_rom[] = {
+//#include "umac-rom.h"
+//};
 
 /* ？？？
  * 分配一段内存，该内存被传输给
@@ -251,9 +251,11 @@ no_sd:
         /* If we don't find (or look for) an SD-based image, attempt
          * to use in-flash disc image:
          */
-        discs[0].base = (void *)umac_disc;
+        //discs[0].base = (void *)umac_disc;
+        discs[0].base = NULL;
         discs[0].read_only = 1;
-        discs[0].size = sizeof(umac_disc);
+        //discs[0].size = sizeof(umac_disc);
+        discs[0].size = 0;
 }
 
 // 核1主函数
@@ -262,11 +264,11 @@ static void     core1_main()
 {
         // ？？？像是整数型
         // 硬盘描述符！！
-        disc_descr_t discs[DISC_NUM_DRIVES] = {0};
+        //disc_descr_t discs[DISC_NUM_DRIVES] = {0};
 
         printf("Core 1 started\n");
         // 硬盘初始化！
-        disc_setup(discs);
+        //disc_setup(discs);
 
         /* 初始化umac，在umac项目里。这里可能有
          * umac的桌面
@@ -290,6 +292,16 @@ static void     core1_main()
         video_init((uint32_t *)umac_ram);
 
         printf("Enjoyable Mac times now begin:\n\n");
+        
+        size_t len_x = 480 / 8;
+        unsigned char *p = umac_ram;
+        for (int i = 0; i < 10; ++i) {
+          unsigned char *tmp = p;
+          for (int j=0; j < 10; ++j) {
+            *(tmp++) = 255;
+          }
+          p += len_x;
+        }
 
         //while (true) {
                 /* umac相关的周期性处理函数 */
