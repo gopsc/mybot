@@ -180,6 +180,7 @@ static int      disc_do_write(void *ctx, uint8_t *data, unsigned int offset, uns
 static FIL discfp;
 #endif
 
+// 设置硬盘（TF卡）
 static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
 {
 #if USE_SD
