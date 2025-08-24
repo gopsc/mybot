@@ -243,6 +243,7 @@ no_sd:
         discs[0].size = sizeof(umac_disc);
 }
 
+// 核1主函数
 static void     core1_main()
 {
         disc_descr_t discs[DISC_NUM_DRIVES] = {0};
@@ -263,6 +264,7 @@ static void     core1_main()
         }
 }
 
+// 项目主函数，入口
 int     main()
 {
         // 设置时钟频率，第二个实参
