@@ -264,8 +264,10 @@ static void     core1_main()
          *
          * IRQs：中断请求
          * 视频跑在核1，中断请求和DMA不受核0的usb活动影响
+         *
+         * 初始化视频，应该在本项目里。这里可能
+         * 有DMA和中断请求相关的配置
          */
-         // 初始化视频，应该在本项目里
         video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
 
         printf("Enjoyable Mac times now begin:\n\n");
