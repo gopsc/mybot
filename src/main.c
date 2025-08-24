@@ -99,7 +99,9 @@ static void     poll_led_etc()
 static int umac_cursor_x = 0;
 static int umac_cursor_y = 0;
 static int umac_cursor_button = 0;
-
+/*
+ * umac的事件循环
+ */
 static void     poll_umac()
 {
         static absolute_time_t last_1hz = 0;
