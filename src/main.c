@@ -271,12 +271,18 @@ int     main()
         // 代表失败时保持当前状态并且返回false
         set_sys_clock_khz(250*1000, true);
 
+        // 一次性初始化所有可用的标准输入输出接口，包括
+        // 1.USB虚拟串口。2.UART硬件串口。3.其他。
 	stdio_init_all();
+        // (这是一个用户自定义的初始化函数)
         io_init();
 
+        // 启动核1
         multicore_launch_core1(core1_main);
 
 	printf("Starting, init usb\n");
+        // TinyUSB 库提供的初始化函数，用于配置树莓派 Pico 的 
+        // USB 功能（如 USB 串口、HID 设备、MSC 存储设备等）
         tusb_init();
 
         /* This happens on core 0: */
