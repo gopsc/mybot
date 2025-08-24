@@ -257,7 +257,8 @@ static void     core1_main()
         printf("Core 1 started\n");
         disc_setup(discs);
 
-        // 初始化umac，在umac项目里
+        // 初始化umac，在umac项目里。这里可能有
+        // umac的桌面
         umac_init(umac_ram, (void *)umac_rom, discs);
         /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
          * core 0's USB activity.
