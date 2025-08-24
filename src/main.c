@@ -253,9 +253,11 @@ no_sd:
 static void     core1_main()
 {
         // ？？？像是整数型
+        // 硬盘描述符！！
         disc_descr_t discs[DISC_NUM_DRIVES] = {0};
 
         printf("Core 1 started\n");
+        // 硬盘初始化！
         disc_setup(discs);
 
         // 初始化umac，在umac项目里。这里可能有
