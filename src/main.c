@@ -140,6 +140,7 @@ static void     poll_umac()
                 update = 1;
         }
         if (update) {
+                // 这里应该有图像绘制的方法
                 umac_mouse(dx, -dy, b);
         }
 
