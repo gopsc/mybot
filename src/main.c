@@ -279,6 +279,9 @@ static void     core1_main()
          *
          * 初始化视频，应该在本项目里。这里可能
          * 有DMA和中断请求相关的配置
+         *
+         * 这个函数会以单缓冲区设置DMA，只需要在这里魔改
+         * 即可
          */
         video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
 
