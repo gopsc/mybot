@@ -199,10 +199,10 @@ static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
                 goto no_sd;
         }
 
-        /* Look for a disc image */
+        /* Look for a disc image 寻找一个硬盘镜像*/
         DIR di = {0};
         FILINFO fi = {0};
-        fr = f_findfirst(&di, &fi, "/", disc0_pattern);
+        fr = f_findfirst(&di, &fi, "/", disc0_pattern); //在指定目录中查找第一个符合条件的文件或
         if (fr != FR_OK) {
                 printf("  Can't find images %s: %s (%d)\n", disc0_pattern, FRESULT_str(fr), fr);
                 goto no_sd;
