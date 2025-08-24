@@ -68,7 +68,10 @@ static const uint8_t umac_rom[] = {
 #include "umac-rom.h"
 };
 
-// ？？？
+/* ？？？
+ * 分配一段内存，该内存被传输给
+ * umac_init() 与 video_init()
+ */
 static uint8_t umac_ram[RAM_SIZE];
 
 ////////////////////////////////////////////////////////////////////////////////
