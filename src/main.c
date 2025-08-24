@@ -192,8 +192,8 @@ static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
         printf("Starting SPI/FatFS:\n");
         set_spi_dma_irq_channel(true, false);   // （这是个自定义函数）
         sd_card_t *pSD = sd_get_by_num(0);      // 这个函数在本项目的sd_hw_config.c里面
-        FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);
-        printf("  mount: %d\n", fr);
+        FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);      // 将文件系统挂载到指定的逻辑驱动器（通常对应物理存储设备，如 SD 卡），是进行
+        printf("  mount: %d\n", fr);                            // 所有文件操作（如读写文件、遍历目录）的前置步骤。
         if (fr != FR_OK) {
                 printf("  error mounting disc: %s (%d)\n", FRESULT_str(fr), fr);
                 goto no_sd;
