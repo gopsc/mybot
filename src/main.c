@@ -254,6 +254,9 @@ static void     core1_main()
         umac_init(umac_ram, (void *)umac_rom, discs);
         /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
          * core 0's USB activity.
+         *
+         * IRQs：中断请求
+         * 视频跑在核1，中断请求和DMA不受核0的usb活动影响
          */
         video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
 
