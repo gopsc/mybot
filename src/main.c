@@ -265,6 +265,10 @@ static void     core1_main()
 
 int     main()
 {
+        // 设置时钟频率，第二个实参
+        // 表示当频率达不到要求时的行为，true
+        // 代表失败时进行断言终止，false
+        // 代表失败时保持当前状态并且返回false
         set_sys_clock_khz(250*1000, true);
 
 	stdio_init_all();
