@@ -291,7 +291,9 @@ int     main()
                 // tud_task()（用于 USB 设备模式）不同，tuh_task() 负责处理作为
                 // USB 主机时的所有 USB 事件（如设备插入 / 拔出、数据传输等）。
                 tuh_task();
+                // 用户自定义函数，处理HID设备
                 hid_app_task();
+                // 用户自定义函数，周期性处理led
                 poll_led_etc();
 	}
 
