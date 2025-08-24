@@ -268,9 +268,12 @@ static void     core1_main()
         // 硬盘初始化！
         disc_setup(discs);
 
-        // 初始化umac，在umac项目里。这里可能有
-        // umac的桌面
-        umac_init(umac_ram, (void *)umac_rom, discs);
+        /* 初始化umac，在umac项目里。这里可能有
+         * umac的桌面
+         */
+        //umac_init(umac_ram, (void *)umac_rom, discs);
+
+
         /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
          * core 0's USB activity.
          *
@@ -283,14 +286,15 @@ static void     core1_main()
          * 这个函数会以单缓冲区设置DMA，只需要在这里魔改
          * 即可
          */
-        video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
+        //video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
+        video_init((uint32_t *)umac_ram);
 
         printf("Enjoyable Mac times now begin:\n\n");
 
-        while (true) {
-                // umac相关的周期性处理函数
-                poll_umac();
-        }
+        //while (true) {
+                /* umac相关的周期性处理函数 */
+                //poll_umac();
+        //}
 }
 
 // 项目主函数，入口
