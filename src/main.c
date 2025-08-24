@@ -213,7 +213,7 @@ static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
         int read_only = !strcmp(disc0_name, disc0_ro_name);
         printf("  Opening %s (R%c)\n", disc0_name, read_only ? 'O' : 'W');
 
-        /* Open image, set up disc info: */
+        /* Open image, set up disc info:  打开镜像，设置硬盘信息 */
         fr = f_open(&discfp, disc0_name, FA_OPEN_EXISTING | FA_READ | FA_WRITE);
         if (fr != FR_OK && fr != FR_EXIST) {
                 printf("  *** Can't open %s: %s (%d)!\n", disc0_name, FRESULT_str(fr), fr);
@@ -222,7 +222,7 @@ static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
                 printf("  Opened, size 0x%x\n", f_size(&discfp));
                 if (read_only)
                         printf("  (disc is read-only)\n");
-                discs[0].base = 0; // Means use R/W ops
+                discs[0].base = 0; // Means use R/W ops  意思是使用读取、写入的方法
                 discs[0].read_only = read_only;
                 discs[0].size = f_size(&discfp);
                 discs[0].op_ctx = &discfp;
@@ -236,6 +236,11 @@ static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
          * We could also implement a menu here to select an image,
          * writing text to the framebuffer and checking kbd_queue_*()
          * for user input.
+         *
+         * 设计意见：其他文件也可以存储在SD卡，像日志、NVRAM
+         
+         * 我们可以在这里部署一个菜单去选择镜像。
+         * 向帧缓冲区写内容并检查用户输入的键盘队列
          */
         return;
 
