@@ -249,6 +249,7 @@ no_sd:
 }
 
 // 核1主函数
+// 视频、中断处理、DMA设置
 static void     core1_main()
 {
         // ？？？像是整数型
@@ -280,6 +281,8 @@ static void     core1_main()
 }
 
 // 项目主函数，入口
+// 初始化io，核1主函数
+// 初始化usb，维护usb与led
 int     main()
 {
         // 设置时钟频率，第二个实参
