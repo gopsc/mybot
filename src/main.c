@@ -190,7 +190,7 @@ static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
 
         /* Mount SD filesystem */
         printf("Starting SPI/FatFS:\n");
-        set_spi_dma_irq_channel(true, false);
+        set_spi_dma_irq_channel(true, false);   // （这是个自定义函数）
         sd_card_t *pSD = sd_get_by_num(0);      // 这个函数在本项目的sd_hw_config.c里面
         FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);
         printf("  mount: %d\n", fr);
