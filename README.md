@@ -1,3 +1,9 @@
+# bb2-pico
+大家好，我们这个项目fork了github上的一个pico-mac项目。
+
+下面是他的readme原文。
+
+
 # Pico Micro Mac (pico-umac)
 
 v0.21 20 December 2024
