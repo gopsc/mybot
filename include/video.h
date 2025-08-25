@@ -28,6 +28,29 @@
 
 #include <inttypes.h>
 
+/* 我不知道为什么列宽、单行会是这些值，也不知道
+ * 它会不会在数据改变后发生改变（很可能会变）
+ *
+ * 原来作者在下面有说明
+ */
+#define ONE_COL 342
+#define ONE_LINE 480*2/15
+#define ONE_LINE 64
+#define ONE_LINE_BITS 480*16/15
+#define ONE_LINE_BITS 512
+#define CHAR_HEIGHT 18 /* 字模高 */
+#define CHAR_WIDTH 9 /* 字模宽 */
+
+/* 初始化PIO和DMA */
 void    video_init(uint32_t *framebuffer);
+/* 绘制一个点（bpp=1） */
+void p1(int x, int y);
+/* 绘制一条线 */
+void line(int x0, int y0, int x1, int y1);
+/* 绘制矩形 */
+void rectangle(int x1, int y1, int x2, int y2, int filled);
+/* 绘制文字 */
+void drawvfont(int x, int y, wchar_t z);
+
 
 #endif

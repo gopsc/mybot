@@ -302,22 +302,16 @@ static void     video_init_dma()
          */
 }
 ///////////////////////////////
-/* 我不知道为什么列宽、单行会是这些值，也不知道
- * 它会不会在数据改变后发生改变（很可能会变）
- *
- * 原来作者在下面有说明
- */
-#define ONE_COL 342
-#define ONE_LINE 480*2/15
-#define ONE_LINE 64
-#define ONE_LINE_BITS 480*16/15
-#define ONE_LINE_BITS 512
+/* 图像相关的内容 */
+
 /* 每像素1比特的绘制点函数 */
 void p1(int x, int y) {
+  if (x  <0 || x>=ONE_LINE_BITS || y <0 || y >= ONE_COL)
+    return;
   unsigned char *ptr = video_framebuffer;
   ptr += y * ONE_LINE;
   ptr += x/8; // 右移3位
-  *ptr |= (1 << (7-x%8));
+  *ptr |= (1 << (7-x%8)); // 先左移，再右移
 }
 
 /* 20250403
@@ -385,11 +379,6 @@ void rectangle(int x1, int y1, int x2, int y2, int filled) {
 /////////////////////////////
 /*
  * 字库相关的内容
- */
-#define CHAR_HEIGHT 18 /* 字模高 */
-#define CHAR_WIDTH 9 /* 字模宽 */
-
-/*
  * 以下变量在 chsf.c 中声明
  */
 extern uint8_t ttu[];
