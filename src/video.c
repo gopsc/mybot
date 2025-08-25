@@ -307,7 +307,7 @@ static void     video_init_dma()
 /* 每像素1比特的绘制点函数 */
 void p1(int x, int y) {
   if (x  <0 || x>=ONE_LINE_BITS || y <0 || y >= ONE_COL)
-    return;
+    return; // 越界
   unsigned char *ptr = video_framebuffer;
   ptr += y * ONE_LINE;
   ptr += x/8; // 右移3位
