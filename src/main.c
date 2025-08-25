@@ -292,16 +292,6 @@ static void     core1_main()
         video_init((uint32_t *)umac_ram);
 
         printf("Enjoyable Mac times now begin:\n\n");
-        
-        size_t len_x = 480 / 8;
-        unsigned char *p = umac_ram;
-        for (int i = 0; i < 10; ++i) {
-          unsigned char *tmp = p;
-          for (int j=0; j < 10; ++j) {
-            *(tmp++) = 255;
-          }
-          p += len_x;
-        }
 
         //while (true) {
                 /* umac相关的周期性处理函数 */

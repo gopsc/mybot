@@ -301,7 +301,16 @@ static void     video_init_dma()
          * to start video.
          */
 }
-
+///////////////////////////////
+#define ONE_COL 342
+#define ONE_LINE 480*2/15
+#define ONE_LINE_TRUE 480*16/15
+void p8(int x, int y) {
+  unsigned char *ptr = video_framebuffer;
+  ptr += y * ONE_LINE;
+  ptr += x/8;
+  *ptr |= (1 << (7-x%8));
+}
 ////////////////////////////////////////////////////////////////////////////////
 
 /* Initialise PIO, DMA, start sending pixels.  Passed a pointer to a 512x342x1
@@ -342,4 +351,16 @@ void    video_init(uint32_t *framebuffer)
         /* Set up pointers to first line, and start DMA */
         video_dma_prep_new();
         dma_channel_start(video_dmach_descr_cfg);
+        
+        unsigned char *tmp = framebuffer;
+        for (int i = 0; i < ONE_COL; ++i) {
+          for (int j=0; j < ONE_LINE; ++j) {
+            *(tmp++) |= 0x00;
+          }
+        }
+        for (int i = 0; i < 10; ++i) {
+          for (int j=0; j < 10; ++j) {
+            p8(10+i, 10+j);
+          }
+        }
 }
