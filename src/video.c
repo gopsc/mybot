@@ -302,12 +302,17 @@ static void     video_init_dma()
          */
 }
 ///////////////////////////////
-// 我不知道为什么列宽、单行会是这些值，也不知道
-// 它会不会在数据改变后发生改变（很可能会变）
+/* 我不知道为什么列宽、单行会是这些值，也不知道
+ * 它会不会在数据改变后发生改变（很可能会变）
+ *
+ * 原来作者在下面有说明
+ */
 #define ONE_COL 342
 #define ONE_LINE 480*2/15
-#define ONE_LINE_TRUE 480*16/15
-// 每像素1比特的绘制点函数
+#define ONE_LINE 64
+#define ONE_LINE_BITS 480*16/15
+#define ONE_LINE_BITS 512
+/* 每像素1比特的绘制点函数 */
 void p1(int x, int y) {
   unsigned char *ptr = video_framebuffer;
   ptr += y * ONE_LINE;
@@ -321,6 +326,11 @@ void p1(int x, int y) {
  *
  * FIXME: Add an API to change the FB base after init live, e.g. for bank
  * switching.
+ *
+ *
+ * 初始化 PIO（可编程输入输出），DMA（直接内存访问），开始发送像素。传入的参数为
+ * 一个指向 512×342×1（分辨率 512 像素 ×342 像素，1 个颜色通道）
+ * Mac 字节序帧缓冲区的指针。
  */
 void    video_init(uint32_t *framebuffer)
 {
@@ -354,16 +364,4 @@ void    video_init(uint32_t *framebuffer)
         /* Set up pointers to first line, and start DMA */
         video_dma_prep_new();
         dma_channel_start(video_dmach_descr_cfg);
-        
-        unsigned char *tmp = framebuffer;
-        for (int i = 0; i < ONE_COL; ++i) {
-          for (int j=0; j < ONE_LINE; ++j) {
-            *(tmp++) |= 0x00;
-          }
-        }
-        for (int i = 0; i < 10; ++i) {
-          for (int j=0; j < 10; ++j) {
-            p1(10+i, 10+j);
-          }
-        }
 }
