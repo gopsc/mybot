@@ -302,9 +302,12 @@ static void     video_init_dma()
          */
 }
 ///////////////////////////////
+// 我不知道为什么列宽、单行会是这些值，也不知道
+// 它会不会在数据改变后发生改变（很可能会变）
 #define ONE_COL 342
 #define ONE_LINE 480*2/15
 #define ONE_LINE_TRUE 480*16/15
+// 每像素1比特的绘制点函数
 void p1(int x, int y) {
   unsigned char *ptr = video_framebuffer;
   ptr += y * ONE_LINE;
