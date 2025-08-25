@@ -305,7 +305,7 @@ static void     video_init_dma()
 #define ONE_COL 342
 #define ONE_LINE 480*2/15
 #define ONE_LINE_TRUE 480*16/15
-void p8(int x, int y) {
+void p1(int x, int y) {
   unsigned char *ptr = video_framebuffer;
   ptr += y * ONE_LINE;
   ptr += x/8;
@@ -360,7 +360,7 @@ void    video_init(uint32_t *framebuffer)
         }
         for (int i = 0; i < 10; ++i) {
           for (int j=0; j < 10; ++j) {
-            p8(10+i, 10+j);
+            p1(10+i, 10+j);
           }
         }
 }
