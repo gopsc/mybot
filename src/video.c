@@ -319,6 +319,37 @@ void p1(int x, int y) {
   ptr += x/8;
   *ptr |= (1 << (7-x%8));
 }
+
+/* 20250403
+ * Bresenham 画直线算法
+ *
+ * Deepseek of qing
+ */
+void line(int x0, int y0, int x1, int y1) {
+    int dx = x1 > x0 ? x1 - x0 : x0 - x1;
+    int dy = y1 > y0 ? y1 - y0 : y0 - y1;
+    int sx = x0 < x1 ? 1 : -1;
+    int sy = y0 < y1 ? 1 : -1;
+    int err = (dx > dy ? dx : -dy) / 2;
+    int e2;
+    
+    while (1) {
+        p1(x0, y0);
+        if (x0 == x1 && y0 == y1) break;
+
+        e2 = err;
+
+        if (e2 > -dx) {
+            err -= dy;
+            x0 += sx;
+        }
+
+        if (e2 < dy) {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
 ////////////////////////////////////////////////////////////////////////////////
 
 /* Initialise PIO, DMA, start sending pixels.  Passed a pointer to a 512x342x1
