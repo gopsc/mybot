@@ -42,6 +42,7 @@
 #include "pio_video.pio.h"
 
 #include "hw.h"
+#include "video.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 /* VESA VGA mode 640x480@60 */
