@@ -316,7 +316,7 @@ static void     video_init_dma()
 void p1(int x, int y) {
   unsigned char *ptr = video_framebuffer;
   ptr += y * ONE_LINE;
-  ptr += x/8;
+  ptr += x/8; // 右移3位
   *ptr |= (1 << (7-x%8));
 }
 
