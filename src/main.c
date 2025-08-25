@@ -290,9 +290,10 @@ static void     core1_main()
          */
         //video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
         video_init((uint32_t *)umac_ram);
-
+        
         printf("Enjoyable Mac times now begin:\n\n");
 
+        drawvfont(100, 140, L'国');
         //while (true) {
                 /* umac相关的周期性处理函数 */
                 //poll_umac();

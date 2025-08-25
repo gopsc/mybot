@@ -309,7 +309,7 @@ static void     video_init_dma()
 void p1(int x, int y) {
   if (x  <0 || x>=ONE_LINE_BITS || y <0 || y >= ONE_COL)
     return; // 越界
-  unsigned char *ptr = video_framebuffer;
+  unsigned char *ptr = (unsigned char *)video_framebuffer;
   ptr += y * ONE_LINE;
   ptr += x/8; // 右移3位
   *ptr |= (1 << (7-x%8)); // 先左移，再右移
@@ -382,10 +382,10 @@ void rectangle(int x1, int y1, int x2, int y2, int filled) {
  * 字库相关的内容
  * 以下变量在 chsf.c 中声明
  */
-extern uint8_t ttu[];
+extern const uint8_t ttu[];
 extern int ttunumber;
-extern uint8_t zzhi[];
-extern uint8_t zzhi32[];
+extern const uint8_t zzhi[];
+extern const uint8_t zzhi32[];
 extern int zzhinumber;
 extern int zzhinumber32;
 

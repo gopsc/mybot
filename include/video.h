@@ -34,9 +34,7 @@
  * 原来作者在下面有说明
  */
 #define ONE_COL 342
-#define ONE_LINE 480*2/15
 #define ONE_LINE 64
-#define ONE_LINE_BITS 480*16/15
 #define ONE_LINE_BITS 512
 #define CHAR_HEIGHT 18 /* 字模高 */
 #define CHAR_WIDTH 9 /* 字模宽 */
