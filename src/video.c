@@ -311,8 +311,8 @@ void p1(int x, int y) {
     return; // 越界
   uint8_t *ptr = (uint8_t *)video_framebuffer;
   ptr += y * ONE_LINE;
-  ptr += x/8; // 右移3位
-  *ptr |= (1 << (7-x%8)); // 先左移，再右移
+  ptr += x/8; // x >> 3
+  *ptr |= (1 << (7-x%8)); // x << 5 >> 5
 }
 
 /* 屏幕内容向上移动，并且填充空出来的部分 */

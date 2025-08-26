@@ -286,8 +286,7 @@ void lines_roll(int h) {
 }
 
 /*
- * 打印到vga，现在尚不能向上滚动
- * 你需要保证每一行的高度是相等的。
+ * 打印到vga，你需要保证每一行的高度是相等的。
  */
 int print_to_vga(wchar_t *wstr) {
   size_t len = wcslen(wstr);
@@ -295,7 +294,7 @@ int print_to_vga(wchar_t *wstr) {
     wchar_t wc = wstr[i];
     int target_w = (is_wchar_ascii(wc)) ? CHAR_WIDTH_CN : CHAR_WIDTH;
     int target_h  = CHAR_HEIGHT;
-    if (wc == L'\n') {
+    if (wc == L'\n' || wc == L'\r') {
       change_line(target_h);
       continue;
     }
@@ -347,7 +346,9 @@ static void     core1_main()
         //printf("Enjoyable Mac times now begin:\n\n");
         printf("Bb2 now running.\n");
         
-        print_to_vga(L"你好，世界。");
+        print_to_vga(L"-------------------\n");
+        print_to_vga(L"你好，世界。\n");
+        
         //while (true) {
                 /* umac相关的周期性处理函数 */
                 //poll_umac();
