@@ -348,6 +348,10 @@ static void     core1_main()
         
         print_to_vga(L"-------------------\n");
         print_to_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
+        print_to_vga(L"我们的项目地址是\n");
+        print_to_vga(L"https://gitcode.com/qingss0/bb2-pico\n");
+        print_to_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
+        print_to_vga(L"-------------------\n");
         
         //while (true) {
                 /* umac相关的周期性处理函数 */
