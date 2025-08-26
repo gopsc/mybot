@@ -309,10 +309,21 @@ static void     video_init_dma()
 void p1(int x, int y) {
   if (x  <0 || x>=ONE_LINE_BITS || y <0 || y >= ONE_COL)
     return; // 越界
-  unsigned char *ptr = (unsigned char *)video_framebuffer;
+  uint8_t *ptr = (uint8_t *)video_framebuffer;
   ptr += y * ONE_LINE;
   ptr += x/8; // 右移3位
   *ptr |= (1 << (7-x%8)); // 先左移，再右移
+}
+
+/* 屏幕内容向上移动，并且填充空出来的部分 */
+void up1(size_t h) {
+  size_t length = ONE_LINE * h;
+  size_t target = FB_LEN_BYTE - length;
+  uint8_t *src = (uint8_t *)video_framebuffer;
+  uint8_t *dest = src + length;
+  uint8_t *blank = src + target;
+  memcpy(dest, src, target);
+  memset(blank, 0, target);
 }
 
 /* 20250403
@@ -392,7 +403,7 @@ extern int zzhinumber32;
 /* 这些变量似乎用于以某种格式访问字库内存 */
 uint16_t *chss;
 uint32_t *chss32;
-uint8_t *vec;
+uint8_t const *vec;
 int zn;
 int zn32;
 int vennum;
@@ -404,7 +415,7 @@ int vennum;
  *
  * 此函数的开发者为陈必红老师
  */
-unsigned char *drawvect(int x, int y, unsigned char *vect, int width, int high) {
+unsigned char const *drawvect(int x, int y, unsigned char const *vect, int width, int high) {
     if (!vect) return 0;
 
     int i = 0, j = 1; // 指向第一对数字
@@ -478,13 +489,13 @@ unsigned char *drawvect(int x, int y, unsigned char *vect, int width, int high) 
     return vect + i;
 }
 
-
 /* 20250404
  * 该函数用于以一个点为左上角绘制矢量字体
- *
  * 此函数的作者为陈必红老师
+ *
+ * 20250826(qing): 经过修改，该函数可以输入打印字符的长宽了
  */
-void drawvfont(int x, int y, wchar_t z) {
+void drawvfont(int x, int y, wchar_t z, int target_width, int target_height) {
     chss = (uint16_t *)zzhi;
     chss32 = (uint32_t *) zzhi32;
     vec = ttu;
@@ -517,8 +528,7 @@ void drawvfont(int x, int y, wchar_t z) {
         }
     }
 
-    if (k < j) return;
-    drawvect(x, y, ttu + 2 * i, CHAR_WIDTH * 2, CHAR_HEIGHT);
+    drawvect(x, y, ttu + 2 * i, target_width, target_height);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

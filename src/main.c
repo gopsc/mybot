@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <wchar.h>
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/pio.h"
@@ -72,8 +73,10 @@ extern int cursor_button;
  * 分配一段内存，该内存被传输给
  * umac_init() 与 video_init()
  */
-static uint8_t umac_ram[RAM_SIZE];
+//static uint8_t umac_ram[RAM_SIZE];
 
+/* 用于传输视频的内存空间 */
+static uint8_t video_ram[ONE_COL * ONE_LINE];
 ////////////////////////////////////////////////////////////////////////////////
 
 static void     io_init()
@@ -102,55 +105,55 @@ static int umac_cursor_button = 0;
 /*
  * umac的事件循环
  */
-static void     poll_umac()
-{
-        static absolute_time_t last_1hz = 0;
-        static absolute_time_t last_vsync = 0;
-        absolute_time_t now = get_absolute_time();
+//static void     poll_umac()
+//{
+//        static absolute_time_t last_1hz = 0;
+//        static absolute_time_t last_vsync = 0;
+//        absolute_time_t now = get_absolute_time();
 
-        umac_loop();
+//        umac_loop();
 
-        int64_t p_1hz = absolute_time_diff_us(last_1hz, now);
-        int64_t p_vsync = absolute_time_diff_us(last_vsync, now);
-        if (p_vsync >= 16667) {
+//        int64_t p_1hz = absolute_time_diff_us(last_1hz, now);
+//        int64_t p_vsync = absolute_time_diff_us(last_vsync, now);
+//        if (p_vsync >= 16667) {
                 /* FIXME: Trigger this off actual vsync */
-                umac_vsync_event();
-                last_vsync = now;
-        }
-        if (p_1hz >= 1000000) {
-                umac_1hz_event();
-                last_1hz = now;
-        }
+ //               umac_vsync_event();
+ //               last_vsync = now;
+ //       }
+//        if (p_1hz >= 1000000) {
+//                umac_1hz_event();
+//                last_1hz = now;
+//        }
 
-        int update = 0;
-        int dx = 0;
-        int dy = 0;
-        int b = umac_cursor_button;
-        if (cursor_x != umac_cursor_x) {
-                dx = cursor_x - umac_cursor_x;
-                umac_cursor_x = cursor_x;
-                update = 1;
-        }
-        if (cursor_y != umac_cursor_y) {
-                dy = cursor_y - umac_cursor_y;
-                umac_cursor_y = cursor_y;
-                update = 1;
-        }
-        if (cursor_button != umac_cursor_button) {
-                b = cursor_button;
-                umac_cursor_button = cursor_button;
-                update = 1;
-        }
-        if (update) {
+//        int update = 0;
+//        int dx = 0;
+//        int dy = 0;
+//        int b = umac_cursor_button;
+//        if (cursor_x != umac_cursor_x) {
+//                dx = cursor_x - umac_cursor_x;
+//                umac_cursor_x = cursor_x;
+//                update = 1;
+//        }
+//        if (cursor_y != umac_cursor_y) {
+//                dy = cursor_y - umac_cursor_y;
+//                umac_cursor_y = cursor_y;
+//                update = 1;
+//        }
+//        if (cursor_button != umac_cursor_button) {
+//                b = cursor_button;
+//                umac_cursor_button = cursor_button;
+//                update = 1;
+//        }
+//        if (update) {
                 // 这里应该有图像绘制的方法
-                umac_mouse(dx, -dy, b);
-        }
+//                umac_mouse(dx, -dy, b);
+//        }
 
-        if (!kbd_queue_empty()) {
-                uint16_t k = kbd_queue_pop();
-                umac_kbd_event(k & 0xff, !!(k & 0x8000));
-        }
-}
+//        if (!kbd_queue_empty()) {
+//                uint16_t k = kbd_queue_pop();
+//                umac_kbd_event(k & 0xff, !!(k & 0x8000));
+//        }
+//}
 
 #if USE_SD
 static int      disc_do_read(void *ctx, uint8_t *data, unsigned int offset, unsigned int len)
@@ -258,8 +261,58 @@ no_sd:
         discs[0].size = 0;
 }
 
-// 核1主函数
-// 视频、中断处理、DMA设置
+/* 帧缓冲区打印用游标 */
+int fb_cursor_x = 0;
+int fb_cursor_y = 0;
+
+
+/* 判断宽字符是否为ASCII字符 */
+int is_wchar_ascii(wchar_t wc) {
+  /* ASCII字符范围：0-127 */
+  return (wc >= 0 && wc <= 0x7F);
+}
+
+
+/* 换行 */
+void change_line(int h) {
+  fb_cursor_x = 0;
+  fb_cursor_y += h;
+}
+
+/* 屏幕滚动 */
+void lines_roll(int h) {
+  up1(h);
+  fb_cursor_y -= h;
+}
+
+/*
+ * 打印到vga，现在尚不能向上滚动
+ * 你需要保证每一行的高度是相等的。
+ */
+int print_to_vga(wchar_t *wstr) {
+  size_t len = wcslen(wstr);
+  for (size_t i=0; i<len; ++i) {
+    wchar_t wc = wstr[i];
+    int target_w = (is_wchar_ascii(wc)) ? CHAR_WIDTH_CN : CHAR_WIDTH;
+    int target_h  = CHAR_HEIGHT;
+    if (wc == L'\n') {
+      change_line(target_h);
+      continue;
+    }
+    drawvfont(fb_cursor_x, fb_cursor_y, wstr[i], target_w, target_h);
+    fb_cursor_x += target_w;
+    if (fb_cursor_x >= ONE_LINE_BITS) { // 换行
+      change_line(target_h);
+    }
+    if (fb_cursor_y >= ONE_COL) { // 屏幕上移动
+      lines_roll(target_h);
+    }
+  }
+}
+
+/* 核1主函数
+ * 视频、中断处理、DMA设置
+ */
 static void     core1_main()
 {
         // ？？？像是整数型
@@ -289,11 +342,12 @@ static void     core1_main()
          * 即可
          */
         //video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
-        video_init((uint32_t *)umac_ram);
+        video_init((uint32_t *)video_ram);
         
-        printf("Enjoyable Mac times now begin:\n\n");
-
-        drawvfont(100, 140, L'国');
+        //printf("Enjoyable Mac times now begin:\n\n");
+        printf("Bb2 now running.\n");
+        
+        print_to_vga(L"你好，世界。");
         //while (true) {
                 /* umac相关的周期性处理函数 */
                 //poll_umac();

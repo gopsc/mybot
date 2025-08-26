@@ -36,19 +36,23 @@
 #define ONE_COL 342
 #define ONE_LINE 64
 #define ONE_LINE_BITS 512
-#define CHAR_HEIGHT 18 /* 字模高 */
-#define CHAR_WIDTH 9 /* 字模宽 */
+#define FB_LEN_BYTE ONE_LINE * ONE_COL
+#define FB_LEN_BITS ONE_LINE_BITS * ONE_COL
+#define CHAR_HEIGHT 16 /* 字模高 */
+#define CHAR_WIDTH 8 /* 字模宽 */
+#define CHAR_WIDTH_CN CHAR_WIDTH * 2 /* 汉字字模宽是英文的两倍 */
 
 /* 初始化PIO和DMA */
 void    video_init(uint32_t *framebuffer);
 /* 绘制一个点（bpp=1） */
 void p1(int x, int y);
+/* 屏幕向上移动，并且填充空出来的部分白色 */
+void up1(size_t h);
 /* 绘制一条线 */
 void line(int x0, int y0, int x1, int y1);
 /* 绘制矩形 */
 void rectangle(int x1, int y1, int x2, int y2, int filled);
-/* 绘制文字 */
-void drawvfont(int x, int y, wchar_t z);
-
+/* 绘制文字，需要输入打印字符的长宽 */
+void drawvfont(int x, int y, wchar_t z, int target_width, int target_height);
 
 #endif
