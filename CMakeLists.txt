@@ -23,30 +23,49 @@
 # SOFTWARE.
 #
 #
+#
+# 指定最低要求的 CMake 版本为 3.13
+# 这确保了项目使用的 CMake 特性与该版本及以上兼容
 cmake_minimum_required(VERSION 3.13)
 
-# Options that should be defined when initialising the build
-# directory with cmake, e.g. "cmake .. -DOPTION=true":
-#
+# 以下是初始化构建目录时可以定义的选项
+# 使用方式示例: "cmake .. -DOPTION=true"
+# 这些选项允许用户在配置构建时自定义功能和硬件参数
 
+# 定义一个名为 USE_SD 的构建选项，默认值为 OFF（不启用）
+# 当设置为 ON 时，将在项目中包含 SD 卡支持的相关代码和配置
 option(USE_SD "Build in SD support" OFF)
 set(SD_TX 3 CACHE STRING "SD SPI TX pin")
 set(SD_RX 4 CACHE STRING "SD SPI RX pin")
 set(SD_SCK 2 CACHE STRING "SD SPI SCK pin")
 set(SD_CS 5 CACHE STRING "SD SPI CS pin")
 set(SD_MHZ 5 CACHE STRING "SD SPI speed in MHz")
+
+# 定义一个名为 USE_VGA_RES 的构建选项，默认值为 OFF
+# 当设置为 ON 时，视频输出将使用 VGA 分辨率（640x480）
 option(USE_VGA_RES "Video uses VGA (640x480) resolution" OFF)
+
+# 定义视频输出的 GPIO 基础引脚
+# 说明中提到该引脚后会依次跟随 VS（场同步）、CLK（时钟）、HS（行同步）引脚
 set(VIDEO_PIN 18 CACHE STRING "Video GPIO base pin (followed by VS, CLK, HS)")
 
+# 说明：可以通过 -DMEMSIZE=<KB数值> 来配置umac的内存大小，
+# 此参数会覆盖默认的内存配置值
 # See below, -DMEMSIZE=<size in KB> will configure umac's memory size,
 # overriding defaults.
 
-# initialize the SDK based on PICO_SDK_PATH
-# note: this must happen before project()
+# 根据 PICO_SDK_PATH 环境变量初始化 Raspberry Pi Pico SDK
+# 注意：这一步必须在 project() 命令之前执行，
+# 因为SDK需要在项目创建前设置必要的编译环境和工具链
 include(pico_sdk_import.cmake)
 
+# 定义项目名称为 "firmware"，这将作为生成的固件文件的基础名称
+# 同时会初始化CMake的项目环境，包括编译器设置等
 project(firmware)
 
+# 初始化 Raspberry Pi Pico SDK
+# 该函数会设置SDK所需的各种编译选项、链接库和包含路径，
+# 为Pico系列微控制器构建环境做准备
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
