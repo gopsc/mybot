@@ -69,10 +69,20 @@ project(firmware)
 # initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-# For TUSB host stuff:
+
+# 配置 TinyUSB 主机相关功能的设置
+
+# 设置目标芯片系列为 rp2040（Raspberry Pi Pico 使用的芯片）
+# 这是 TinyUSB 库需要的关键配置，用于适配特定硬件的 USB 功能
 set(FAMILY rp2040)
+
+# 指定目标开发板为 raspberry_pi_pico
+# 开发板信息用于 TinyUSB 针对特定硬件布局进行配置（如引脚分配等）
 set(BOARD raspberry_pi_pico)
 
+# 设置 TinyUSB 库的路径
+# 将其指向 Pico SDK 中内置的 TinyUSB 库目录，避免单独安装
+# PICO_SDK_PATH 是 Pico SDK 安装路径的环境变量
 set(TINYUSB_PATH ${PICO_SDK_PATH}/lib/tinyusb)
 
 # umac subproject (and Musashi sub-subproject)
@@ -105,6 +115,7 @@ if (USE_SD)
    add_compile_definitions(SD_TX=${SD_TX} SD_RX=${SD_RX} SD_SCK=${SD_SCK} SD_CS=${SD_CS} SD_MHZ=${SD_MHZ})
 endif()
 
+# ！！
 if (USE_VGA_RES)
    add_compile_definitions(USE_VGA_RES=1)
    add_compile_definitions(DISP_WIDTH=640)
