@@ -25,7 +25,7 @@
         {
             if(i!=k)
             {
-                l=l*(xa-x[i])/x[k]-x[i]);
+                l=l*(xa-x[i])/(x[k]-x[i]);
             }
         }
         ff=ff+l*f[k];
