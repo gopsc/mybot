@@ -347,7 +347,7 @@ static void     core1_main()
         printf("Bb2 now running.\n");
         
         print_to_vga(L"-------------------\n");
-        print_to_vga(L"你好，世界。\n");
+        print_to_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
         
         //while (true) {
                 /* umac相关的周期性处理函数 */
