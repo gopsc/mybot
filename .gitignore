@@ -1,0 +1,14 @@
+.git/
+.vscode/
+.idea/
+.cache/
+
+#
+build/
+target/
+output/
+
+# 
+log/
+report/
+tmp/
