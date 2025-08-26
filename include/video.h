@@ -39,8 +39,8 @@
 #define FB_LEN_BYTE ONE_LINE * ONE_COL
 #define FB_LEN_BITS ONE_LINE_BITS * ONE_COL
 #define CHAR_HEIGHT 20 /* 字模高 */
-#define CHAR_WIDTH 10 /* 字模宽 */
-#define CHAR_WIDTH_CN CHAR_WIDTH * 2 /* 汉字字模宽是英文的两倍 */
+#define CHAR_WIDTH_CN CHAR_HEIGHT /* 汉字字模宽是英文的两倍 */
+#define CHAR_WIDTH CHAR_WIDTH_CN * 0.5 /* 字模宽 */
 
 /* 初始化PIO和DMA */
 void    video_init(uint32_t *framebuffer);

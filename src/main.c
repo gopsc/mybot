@@ -292,14 +292,14 @@ int print_to_vga(wchar_t *wstr) {
   size_t len = wcslen(wstr);
   for (size_t i=0; i<len; ++i) {
     wchar_t wc = wstr[i];
-    int target_w = (is_wchar_ascii(wc)) ? CHAR_WIDTH : CHAR_WIDTH_CN;
+    int target_w = CHAR_WIDTH_CN;
     int target_h  = CHAR_HEIGHT;
     if (wc == L'\n' || wc == L'\r') {
       change_line(target_h);
       continue;
     }
     drawvfont(fb_cursor_x, fb_cursor_y, wstr[i], target_w, target_h);
-    fb_cursor_x += target_w;
+    fb_cursor_x += (is_wchar_ascii(wc)) ? CHAR_WIDTH : target_w; // 英文比汉字窄
     if (fb_cursor_x >= ONE_LINE_BITS) { // 换行
       change_line(target_h);
     }
@@ -349,8 +349,9 @@ static void     core1_main()
         print_to_vga(L"-------------------\n");
         print_to_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
         print_to_vga(L"我们的项目地址是：");
-        print_to_vga(L"https://gitcode.com/qingss0/bb2-pico\n");
+        print_to_vga(L"https://gitcode.com/qingss0/pico-vga\n");
         print_to_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
+        print_to_vga(L"————：qing，2025年8月26日\n");
         print_to_vga(L"-------------------\n");
         
         //while (true) {
