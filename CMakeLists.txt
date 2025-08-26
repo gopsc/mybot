@@ -43,7 +43,7 @@ set(SD_MHZ 5 CACHE STRING "SD SPI speed in MHz")
 
 # 定义一个名为 USE_VGA_RES 的构建选项，默认值为 OFF
 # 当设置为 ON 时，视频输出将使用 VGA 分辨率（640x480）
-option(USE_VGA_RES "Video uses VGA (640x480) resolution" OFF)
+option(USE_VGA_RES "Video uses VGA (640x480) resolution" ON)
 
 # 定义视频输出的 GPIO 基础引脚
 # 说明中提到该引脚后会依次跟随 VS（场同步）、CLK（时钟）、HS（行同步）引脚
@@ -86,22 +86,22 @@ set(BOARD raspberry_pi_pico)
 set(TINYUSB_PATH ${PICO_SDK_PATH}/lib/tinyusb)
 
 # umac subproject (and Musashi sub-subproject)
-set(UMAC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/external/umac)
-set(UMAC_MUSASHI_PATH ${UMAC_PATH}/external/Musashi)
-set(UMAC_INCLUDE_PATHS ${UMAC_PATH}/include ${UMAC_MUSASHI_PATH})
+#set(UMAC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/external/umac)
+#set(UMAC_MUSASHI_PATH ${UMAC_PATH}/external/Musashi)
+#set(UMAC_INCLUDE_PATHS ${UMAC_PATH}/include ${UMAC_MUSASHI_PATH})
 
 # This isn't very nice, but hey it's Sunday :p
-set(UMAC_SOURCES
-  ${UMAC_PATH}/src/disc.c
-  ${UMAC_PATH}/src/main.c
-  ${UMAC_PATH}/src/rom.c
-  ${UMAC_PATH}/src/scc.c
-  ${UMAC_PATH}/src/via.c
-  ${UMAC_MUSASHI_PATH}/m68kcpu.c
-  ${UMAC_MUSASHI_PATH}/m68kdasm.c
-  ${UMAC_MUSASHI_PATH}/m68kops.c
-  ${UMAC_MUSASHI_PATH}/softfloat/softfloat.c
-  )
+#set(UMAC_SOURCES
+#  ${UMAC_PATH}/src/disc.c
+#  ${UMAC_PATH}/src/main.c
+#  ${UMAC_PATH}/src/rom.c
+#  ${UMAC_PATH}/src/scc.c
+#  ${UMAC_PATH}/src/via.c
+#  ${UMAC_MUSASHI_PATH}/m68kcpu.c
+#  ${UMAC_MUSASHI_PATH}/m68kdasm.c
+#  ${UMAC_MUSASHI_PATH}/m68kops.c
+#  ${UMAC_MUSASHI_PATH}/softfloat/softfloat.c
+#  )
 
 set(MEMSIZE 128 CACHE STRING "Memory size, in KB")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -DPICO -DMUSASHI_CNF=\\\"../include/m68kconf.h\\\" -DUMAC_MEMSIZE=${MEMSIZE}")
@@ -140,14 +140,14 @@ if (TARGET tinyusb_device)
     )
 
   # The umac sources need to prepare Musashi (some sources are generated):
-  add_custom_command(OUTPUT ${UMAC_MUSASHI_PATH}/m68kops.c
-    COMMAND echo "*** Preparing umac source ***"
-    COMMAND make -C ${UMAC_PATH} prepare
-    )
-  add_custom_target(prepare_umac
-    DEPENDS ${UMAC_MUSASHI_PATH}/m68kops.c
-    )
-  add_dependencies(firmware prepare_umac)
+  #add_custom_command(OUTPUT ${UMAC_MUSASHI_PATH}/m68kops.c
+  #  COMMAND echo "*** Preparing umac source ***"
+  #  COMMAND make -C ${UMAC_PATH} prepare
+  #  )
+  #add_custom_target(prepare_umac
+  #  DEPENDS ${UMAC_MUSASHI_PATH}/m68kops.c
+  #  )
+  #add_dependencies(firmware prepare_umac)
 
   target_link_libraries(firmware
     pico_stdlib

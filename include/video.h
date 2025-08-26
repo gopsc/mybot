@@ -33,13 +33,13 @@
  *
  * 原来作者在下面有说明
  */
-#define ONE_COL 342
-#define ONE_LINE 64
-#define ONE_LINE_BITS 512
+#define ONE_COL DISP_HEIGHT
+#define ONE_LINE_BITS DISP_WIDTH
+#define ONE_LINE ONE_LINE_BITS / 8
 #define FB_LEN_BYTE ONE_LINE * ONE_COL
 #define FB_LEN_BITS ONE_LINE_BITS * ONE_COL
-#define CHAR_HEIGHT 16 /* 字模高 */
-#define CHAR_WIDTH 8 /* 字模宽 */
+#define CHAR_HEIGHT 20 /* 字模高 */
+#define CHAR_WIDTH 10 /* 字模宽 */
 #define CHAR_WIDTH_CN CHAR_WIDTH * 2 /* 汉字字模宽是英文的两倍 */
 
 /* 初始化PIO和DMA */

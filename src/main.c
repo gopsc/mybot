@@ -44,7 +44,7 @@
 #include "bsp/rp2040/board.h"
 #include "tusb.h"
 
-#include "umac.h"
+//#include "umac.h"
 
 #if USE_SD
 #include "f_util.h"
@@ -186,54 +186,54 @@ static FIL discfp;
 #endif
 
 // 设置硬盘（TF卡）
-static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
-{
-#if USE_SD
-        char *disc0_name;
-        const char *disc0_ro_name = "umac0ro.img";
-        const char *disc0_pattern = "umac0*.img";
+//static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
+//{
+//#if USE_SD
+//        char *disc0_name;
+//        const char *disc0_ro_name = "umac0ro.img";
+//        const char *disc0_pattern = "umac0*.img";
 
         /* Mount SD filesystem */
-        printf("Starting SPI/FatFS:\n");
-        set_spi_dma_irq_channel(true, false);   // （这是个自定义函数）
-        sd_card_t *pSD = sd_get_by_num(0);      // 这个函数在本项目的sd_hw_config.c里面
-        FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);      // 将文件系统挂载到指定的逻辑驱动器（通常对应物理存储设备，如 SD 卡），是进行
-        printf("  mount: %d\n", fr);                            // 所有文件操作（如读写文件、遍历目录）的前置步骤。
-        if (fr != FR_OK) {
-                printf("  error mounting disc: %s (%d)\n", FRESULT_str(fr), fr);
-                goto no_sd;
-        }
+//        printf("Starting SPI/FatFS:\n");
+//        set_spi_dma_irq_channel(true, false);   // （这是个自定义函数）
+//        sd_card_t *pSD = sd_get_by_num(0);      // 这个函数在本项目的sd_hw_config.c里面
+//        FRESULT fr = f_mount(&pSD->fatfs, pSD->pcName, 1);      // 将文件系统挂载到指定的逻辑驱动器（通常对应物理存储设备，如 SD 卡），是进行
+//        printf("  mount: %d\n", fr);                            // 所有文件操作（如读写文件、遍历目录）的前置步骤。
+//        if (fr != FR_OK) {
+//                printf("  error mounting disc: %s (%d)\n", FRESULT_str(fr), fr);
+//                goto no_sd;
+//        }
 
         /* Look for a disc image 寻找一个硬盘镜像*/
-        DIR di = {0};
-        FILINFO fi = {0};
-        fr = f_findfirst(&di, &fi, "/", disc0_pattern); //在指定目录中查找第一个符合条件的文件或
-        if (fr != FR_OK) {
-                printf("  Can't find images %s: %s (%d)\n", disc0_pattern, FRESULT_str(fr), fr);
-                goto no_sd;
-        }
-        disc0_name = fi.fname;
-        f_closedir(&di);
+//        DIR di = {0};
+//        FILINFO fi = {0};
+//        fr = f_findfirst(&di, &fi, "/", disc0_pattern); //在指定目录中查找第一个符合条件的文件或
+//        if (fr != FR_OK) {
+//                printf("  Can't find images %s: %s (%d)\n", disc0_pattern, FRESULT_str(fr), fr);
+//                goto no_sd;
+//        }
+//        disc0_name = fi.fname;
+//        f_closedir(&di);
 
-        int read_only = !strcmp(disc0_name, disc0_ro_name);
-        printf("  Opening %s (R%c)\n", disc0_name, read_only ? 'O' : 'W');
+//        int read_only = !strcmp(disc0_name, disc0_ro_name);
+//        printf("  Opening %s (R%c)\n", disc0_name, read_only ? 'O' : 'W');
 
         /* Open image, set up disc info:  打开镜像，设置硬盘信息 */
-        fr = f_open(&discfp, disc0_name, FA_OPEN_EXISTING | FA_READ | FA_WRITE);
-        if (fr != FR_OK && fr != FR_EXIST) {
-                printf("  *** Can't open %s: %s (%d)!\n", disc0_name, FRESULT_str(fr), fr);
-                goto no_sd;
-        } else {
-                printf("  Opened, size 0x%x\n", f_size(&discfp));
-                if (read_only)
-                        printf("  (disc is read-only)\n");
-                discs[0].base = 0; // Means use R/W ops  意思是使用读取、写入的方法
-                discs[0].read_only = read_only;
-                discs[0].size = f_size(&discfp);
-                discs[0].op_ctx = &discfp;
-                discs[0].op_read = disc_do_read;
-                discs[0].op_write = disc_do_write;
-        }
+//        fr = f_open(&discfp, disc0_name, FA_OPEN_EXISTING | FA_READ | FA_WRITE);
+//        if (fr != FR_OK && fr != FR_EXIST) {
+//                printf("  *** Can't open %s: %s (%d)!\n", disc0_name, FRESULT_str(fr), fr);
+//                goto no_sd;
+//        } else {
+//                printf("  Opened, size 0x%x\n", f_size(&discfp));
+//                if (read_only)
+//                        printf("  (disc is read-only)\n");
+//                discs[0].base = 0; // Means use R/W ops  意思是使用读取、写入的方法
+//                discs[0].read_only = read_only;
+//                discs[0].size = f_size(&discfp);
+//                discs[0].op_ctx = &discfp;
+//                discs[0].op_read = disc_do_read;
+//                discs[0].op_write = disc_do_write;
+//        }
 
         /* FIXME: Other files can be stored on SD too, such as logging
          * and NVRAM storage.
@@ -247,19 +247,19 @@ static void     disc_setup(disc_descr_t discs[DISC_NUM_DRIVES])
          * 我们可以在这里部署一个菜单去选择镜像。
          * 向帧缓冲区写内容并检查用户输入的键盘队列
          */
-        return;
+//        return;
 
-no_sd:
-#endif
+//no_sd:
+//#endif
         /* If we don't find (or look for) an SD-based image, attempt
          * to use in-flash disc image:
          */
         //discs[0].base = (void *)umac_disc;
-        discs[0].base = NULL;
-        discs[0].read_only = 1;
+//        discs[0].base = NULL;
+//        discs[0].read_only = 1;
         //discs[0].size = sizeof(umac_disc);
-        discs[0].size = 0;
-}
+//        discs[0].size = 0;
+//}
 
 /* 帧缓冲区打印用游标 */
 int fb_cursor_x = 0;
@@ -292,7 +292,7 @@ int print_to_vga(wchar_t *wstr) {
   size_t len = wcslen(wstr);
   for (size_t i=0; i<len; ++i) {
     wchar_t wc = wstr[i];
-    int target_w = (is_wchar_ascii(wc)) ? CHAR_WIDTH_CN : CHAR_WIDTH;
+    int target_w = (is_wchar_ascii(wc)) ? CHAR_WIDTH : CHAR_WIDTH_CN;
     int target_h  = CHAR_HEIGHT;
     if (wc == L'\n' || wc == L'\r') {
       change_line(target_h);
@@ -348,7 +348,7 @@ static void     core1_main()
         
         print_to_vga(L"-------------------\n");
         print_to_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
-        print_to_vga(L"我们的项目地址是\n");
+        print_to_vga(L"我们的项目地址是：");
         print_to_vga(L"https://gitcode.com/qingss0/bb2-pico\n");
         print_to_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
         print_to_vga(L"-------------------\n");
