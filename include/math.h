@@ -13,3 +13,6 @@
  * | 适用场景 | 简单固定节点插值 | 动态节点插值       | 需导数信息、高光滑性场景 |
  * +-------------------------------------------------------------------+
  */
+
+/* 拉格朗日插值法，输入xa，求fa */ 
+double algorithm_Lagrange_Interpolation(double* x, double *f, int n, double xa)；
