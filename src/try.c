@@ -4,8 +4,11 @@
  * 也许我们可以增加一些字符串赋值、拼接的能力
  * 同时未来也需要加入系统调用的能力
  *
+ *
  * 20250827(qing): 增加了宽字符支持。
  * 20250827(qing): 修复了Str漏匹配的BUG
+ * 20250827(qing): 该脚本在操作不当的情况下可能会发生内存泄漏
+ * 20250827(qing): 使用longjmp()代替exit()
  */
 
 #include <stdlib.h>
@@ -13,6 +16,7 @@
 #include <string.h>
 #include <wchar.h>
 #include <wctype.h>
+#include <setjmp.h>
 #define POOLSIZE (16 * 1024)  /* 任意大小 */
 #define SYMTABSIZE (1 * 1024) /* ！符号表栈的大小 */
 #define MAXNAMESIZE 16        /* 变量/函数名称的长度 */
@@ -60,6 +64,11 @@ union tokenValue {
 } ;
 
 static union tokenValue token_val;
+/* ---------------- 跳转 ---------------- */
+
+/* 保存跳转状态的全局变量 */
+jmp_buf mainEnv;
+
 /*--------------- 函数声明 ---------------*/
 static double function();
 static double statement();
@@ -169,7 +178,7 @@ static void next() {
         src ++;
         numCount ++;
       }
-      if (*src) {
+      if (*src) { /* 解析出字符串就会创建动态内存，那么可能会有风险！ */
         *src = 0;
         token_val.ptr = malloc(sizeof(wchar_t) * (numCount + 1));
         *(wchar_t*)token_val.ptr = L'0';
@@ -233,6 +242,13 @@ static void next() {
   }
 }
 
+static void clearThis() {      
+  /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
+  if (token_val.ptr->type == Str && token_val.ptr->pointer.funcp)
+    free(token_val.ptr->pointer.funcp);  
+  else if (token_val.ptr->type == ArraySym && token_val.ptr->pointer.list)
+    free(token_val.ptr->pointer.list);
+}
 /* 检查是否匹配 */
 static void match(int tk) {
   if (token == tk) {
@@ -244,9 +260,11 @@ static void match(int tk) {
     }
     next(); /* 检查下一个标记 */
   }
-  else {
+  else { /* 直接让程序死亡，似乎不妥 */
     wprintf(L"line %.*ls:expected token: %d\n", (int)(src - old_src), old_src,  tk);
-    exit(-1);
+    //exit(-1);
+    clearThis();
+    longjmp(mainEnv, 1);
   }
 }
 
@@ -447,13 +465,7 @@ static double statement() {
     }
     else if (token == Sym || token == ArraySym) {
         symbol* s = token_val.ptr;
-        
-        /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
-        if (s->type == Str && s->pointer.funcp)
-          free(s->pointer.funcp);  
-        else if (s->type == ArraySym && s->pointer.list)
-          free(s->pointer.list);
-              
+        clearThis();  
         int tktype = token;
         int index;
         match(tktype);
@@ -488,13 +500,7 @@ static double statement() {
     else if (token == Array) {
         match(Array);
         symbol* s = token_val.ptr;
-        
-        /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
-        if (s->type == Str && s->pointer.funcp)
-          free(s->pointer.funcp);  
-        else if (s->type == ArraySym && s->pointer.list)
-          free(s->pointer.list);
-          
+        clearThis();
         match(Sym);
         match(L'(');
         int length = (int)expression();
@@ -509,13 +515,7 @@ static double statement() {
     else if (token == Func) {
         match(Func);
         symbol* s = token_val.ptr;
-        
-        /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
-        if (s->type == Str && s->pointer.funcp)
-          free(s->pointer.funcp);  
-        else if (s->type == ArraySym && s->pointer.list)
-          free(s->pointer.list);
-        
+        clearThis();
         s->type = FuncSym;
         match(Sym);
         s->pointer.funcp = src;
@@ -593,7 +593,7 @@ static double function() {
 }
 /*----------------------------------------------------------------*/
 
-int main()
+int try()
 {
     /* 将所有字段赋值为0 */
     memset(symtab, 0, sizeof(symtab));
@@ -613,7 +613,7 @@ int main()
     wcscpy(src, L"ab = 1;\nccd = \"123\"; \nwhile(ab < 10) {\nab = ab + 1;\nputs(ccd);\n}\n");
     next();
     
-    while (token != 0) {
+    while (!setjmp(mainEnv) && token != 0) {
         statement();
     }
 
