@@ -80,7 +80,8 @@ static double factor();
 static double term();
 static void match(int tk);
 static void next();
-
+/////
+static void clearThis();
 /* -------------------  词法分析  -------------------*/
 
 /* 输入字符串的下一个标记 */
@@ -136,6 +137,7 @@ static void next() {
             // ？？？
             else {
               token = symtab[i].type;
+              token_val.ptr = NULL; /* 以防万一，为当前记号存储器赋个值！因为Array记号可能到这里来，它会在检查失败后检查释放 */
             }
           }
           
@@ -242,13 +244,14 @@ static void next() {
   }
 }
 
+/* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
 static void clearThis() {      
-  /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
   if (token_val.ptr->type == Str && token_val.ptr->pointer.funcp)
     free(token_val.ptr->pointer.funcp);  
   else if (token_val.ptr->type == ArraySym && token_val.ptr->pointer.list)
     free(token_val.ptr->pointer.list);
 }
+
 /* 检查是否匹配 */
 static void match(int tk) {
   if (token == tk) {
@@ -263,7 +266,7 @@ static void match(int tk) {
   else { /* 直接让程序死亡，似乎不妥 */
     wprintf(L"line %.*ls:expected token: %d\n", (int)(src - old_src), old_src,  tk);
     //exit(-1);
-    clearThis();
+    clearThis(); /* 退出前先检查是否是堆内存类型，可能会出现意外情况 */
     longjmp(mainEnv, 1);
   }
 }
