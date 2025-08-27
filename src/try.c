@@ -315,6 +315,7 @@ static double factor() {
   return temp;
 }
 
+/* 加减法表达式 */
 static double expression() {
   double temp = term();
   while (token == L'+' || token == L'-') {
@@ -483,7 +484,7 @@ static double statement() {
         }
         else {
             match(L'=');
-            if (token == Str) {
+            if (token == Str) { /* 在这里加入字符串拼接的表达式？ */
                 s->pointer.funcp = (wchar_t*)token_val.ptr;
                 s->type = Str;
                 match(Str);
@@ -596,7 +597,7 @@ static double function() {
 }
 /*----------------------------------------------------------------*/
 
-int try()
+int main()
 {
     /* 将所有字段赋值为0 */
     memset(symtab, 0, sizeof(symtab));
