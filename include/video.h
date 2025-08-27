@@ -54,5 +54,6 @@ void line(int x0, int y0, int x1, int y1);
 void rectangle(int x1, int y1, int x2, int y2, int filled);
 /* 绘制文字，需要输入打印字符的长宽 */
 void drawvfont(int x, int y, wchar_t z, int target_width, int target_height);
-
+/* 清空屏幕，需要传入每个字节的值 */
+void clear(uint8_t a);
 #endif

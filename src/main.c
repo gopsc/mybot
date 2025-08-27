@@ -342,6 +342,7 @@ static void     core1_main()
          */
         //video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
         video_init((uint32_t *)video_ram);
+        clear(255);
         
         //printf("Enjoyable Mac times now begin:\n\n");
         printf("Bb2 now running.\n");

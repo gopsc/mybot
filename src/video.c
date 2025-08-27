@@ -303,7 +303,14 @@ static void     video_init_dma()
          */
 }
 ///////////////////////////////
+///////////////////////////////
+///////////////////////////////
 /* 图像相关的内容 */
+
+/* 清空屏幕，需要传入每个字节的值 */
+void clear(uint8_t a) {
+  memset(video_framebuffer, a, FB_LEN_BYTE);
+}
 
 /* 每像素1比特的绘制点函数 */
 void p1(int x, int y) {
@@ -311,8 +318,9 @@ void p1(int x, int y) {
     return; // 越界
   uint8_t *ptr = (uint8_t *)video_framebuffer;
   ptr += y * ONE_LINE;
-  ptr += x/8; // x >> 3
-  *ptr |= (1 << (7-x%8)); // x << 5 >> 5
+  ptr += x >> 3; // x >> 3
+  //*ptr |= (1 << (7-x%8));
+  *ptr &= ~(1 << (7-x%8));
 }
 
 /* 屏幕内容向上移动，并且填充空出来的部分 */

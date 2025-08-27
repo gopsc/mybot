@@ -597,7 +597,7 @@ static double function() {
 }
 /*----------------------------------------------------------------*/
 
-int main()
+int try()
 {
     /* 将所有字段赋值为0 */
     memset(symtab, 0, sizeof(symtab));
