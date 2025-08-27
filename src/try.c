@@ -10,6 +10,7 @@
 
 #include <stdlib.h>
 #include <float.h>
+#include <string.h>
 #include <wchar.h>
 #include <wctype.h>
 #define POOLSIZE (16 * 1024)  /* 任意大小 */
@@ -446,6 +447,13 @@ static double statement() {
     }
     else if (token == Sym || token == ArraySym) {
         symbol* s = token_val.ptr;
+        
+        /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
+        if (s->type == Str && s->pointer.funcp)
+          free(s->pointer.funcp);  
+        else if (s->type == ArraySym && s->pointer.list)
+          free(s->pointer.list);
+              
         int tktype = token;
         int index;
         match(tktype);
@@ -480,6 +488,13 @@ static double statement() {
     else if (token == Array) {
         match(Array);
         symbol* s = token_val.ptr;
+        
+        /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
+        if (s->type == Str && s->pointer.funcp)
+          free(s->pointer.funcp);  
+        else if (s->type == ArraySym && s->pointer.list)
+          free(s->pointer.list);
+          
         match(Sym);
         match(L'(');
         int length = (int)expression();
@@ -494,6 +509,13 @@ static double statement() {
     else if (token == Func) {
         match(Func);
         symbol* s = token_val.ptr;
+        
+        /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
+        if (s->type == Str && s->pointer.funcp)
+          free(s->pointer.funcp);  
+        else if (s->type == ArraySym && s->pointer.list)
+          free(s->pointer.list);
+        
         s->type = FuncSym;
         match(Sym);
         s->pointer.funcp = src;
@@ -573,6 +595,9 @@ static double function() {
 
 int main()
 {
+    /* 将所有字段赋值为0 */
+    memset(symtab, 0, sizeof(symtab));
+    
     int i;
     src = L"array func else if return while print puts read";
     for (i = Array; i <= Read; ++i) {
