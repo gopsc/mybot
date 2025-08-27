@@ -1,3 +1,9 @@
+/* 魔改自github tryC项目。手写简易的解释器，我们
+ * 将用它来作为操作界面的shell。
+ *
+ * 20250827(qing): 增加了宽字符支持。
+ */
+
 #include <stdlib.h>
 #include <float.h>
 #include <wchar.h>
@@ -24,10 +30,14 @@ static int currentlevel = 0;   /* 当前嵌套层级 */
 
 static wchar_t *src, *old_src; /* 当前正处理的文本 */
 
+/* 解释器状态枚举
+ *
+ * 20250827(qing): 使用int直接接受匿名枚举我第一次见
+ */
 enum {
   debug, run
 };
-static int compileState = run; /* 当前解释器状态 */
+static int compileState = debug; /* 当前解释器状态 */
 
 static double return_val = 0;  /* 用于保存函数的返回值 */
 
@@ -64,29 +74,29 @@ static void next() {
   wchar_t *last_pos;
   while(token = *src) {
     ++src;
-    if (token == L'\n') {           // 新的一行
-      if (compileState == debug)    // 如果在调试模式，打印当前程序行
+    if (token == L'\n') {           /* 新的一行 */
+      if (compileState == debug)    /* 如果在调试模式，打印当前程序行 */
         wprintf(L"%.*ls", (int)(src-old_src), old_src);
       old_src = src;
     }
-    else if (token == L'#') {       // 跳过注释
+    else if (token == L'#') {       /* 跳过注释 */
       while(*src != 0 && *src != L'\n') {
         src++;
       }
     }
     /* 20250827(qing): 修改以适应中文标记 */
     else if ((token >= L'a' && token <= L'z') || (token >= L'A' && token <= L'Z') || (token == L'_') || (token > 0x7F)) {
-      last_pos = src -1; // 程序标识符
+      last_pos = src -1; /* 程序标识符 */
       wchar_t nameBuffer[MAXNAMESIZE];
       nameBuffer[0] = token;
       while ((*src >= L'a' && *src <= L'z') || (*src >= L'A' && *src <= L'Z') || (*src >= L'0' && *src <= L'9') || (*src == L'_') || (*src > 0x7f)) {
         nameBuffer[src-last_pos] = *src;
         src++;
       }
-      nameBuffer[src-last_pos] = 0;   // 获取标识符名
+      nameBuffer[src-last_pos] = 0;   /* 获取标识符名 */
       int i;
-      for (i=symPointer-1; i>=0; --i) { // 在符号表中搜索符号
-        if (wcscmp(nameBuffer, symtab[i].name) == 0) {  // 如果找到符号：根据符号类型返回标记
+      for (i=symPointer-1; i>=0; --i) { /* 在符号表中搜索符号 */
+        if (wcscmp(nameBuffer, symtab[i].name) == 0) {  /* 如果找到符号：根据符号类型返回标记 */
         
           if (symtab[i].type == Num || symtab[i].type == Char) {
             token_val.ptr = &symtab[i];
@@ -111,7 +121,7 @@ static void next() {
           return;
         }
       }
-      wcscpy(symtab[symPointer].name, nameBuffer);    // 如果标记未被发现，创建一个新的
+      wcscpy(symtab[symPointer].name, nameBuffer);    /* 如果标记未被发现，创建一个新的 */
       symtab[symPointer].levelNum = currentlevel;
       symtab[symPointer].type = Void;
       token_val.ptr = &symtab[symPointer];
@@ -150,6 +160,7 @@ static void next() {
       if (*src) {
         *src = 0;
         token_val.ptr = malloc(sizeof(wchar_t) * numCount + sizeof(wchar_t));
+        *(wchar_t*)token_val.ptr = L'0';
         wcscpy((wchar_t*)token_val.ptr, last_pos);
         *src = token;
         src++;
@@ -210,15 +221,16 @@ static void next() {
   }
 }
 
+/* 检查是否匹配 */
 static void match(int tk) {
   if (token == tk) {
     if (compileState==debug) {
-      if (iswprint(tk))
+      if (iswprint(tk)) /* 该字符是否能够打印 */
         wprintf(L"match: %lc\n", tk);
       else
         wprintf(L"match: %d\n", tk);
     }
-    next();
+    next(); /* 检查下一个标记 */
   }
   else {
     wprintf(L"line %.*ls:expected token: %d\n", (int)(src - old_src), old_src,  tk);
@@ -410,7 +422,7 @@ static double statement() {
         do {
             src = whileStartPos;
             old_src = whileStartOldPos;
-            token = L'(';
+            token = L'('; /* 不加行会报错 */
             match(L'(');
             boolresult = boolOR();
             match(L')');
@@ -500,7 +512,7 @@ static double statement() {
             wprintf(L"%ls\n", (wchar_t*)token_val.ptr);
             match(Str);
             break;
-        case Read:
+        case Read: /* 单片机上怎么弄？ */
             wscanf(L"%lf", &token_val.ptr->value);
             token_val.ptr->type = Num;
             match(Sym);
@@ -547,7 +559,7 @@ static double function() {
 }
 /*----------------------------------------------------------------*/
 
-int try()
+int main()
 {
     int i;
     src = L"array func else if return while print puts read";
@@ -561,7 +573,7 @@ int try()
     }
 
     src[0] = 0; // add EOF character
-    wcscpy(src, L"ab = 1;\nwhile(ab < 10){\nab = ab + 1;\nprint(ab);}\n");
+    wcscpy(src, L"ab = 1;\nccd = \"123\"; \nwhile(ab < 10) {\nab = ab + 1;\nputs(ccd);\n}\n");
     next();
     
     while (token != 0) {
