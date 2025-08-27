@@ -47,7 +47,7 @@ void    video_init(uint32_t *framebuffer);
 /* 绘制一个点（bpp=1） */
 void p1(int x, int y);
 /* 屏幕向上移动，并且填充空出来的部分白色 */
-void up1(size_t h);
+void up1(size_t h, uint8_t a);
 /* 绘制一条线 */
 void line(int x0, int y0, int x1, int y1);
 /* 绘制矩形 */

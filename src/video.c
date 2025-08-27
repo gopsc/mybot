@@ -324,14 +324,14 @@ void p1(int x, int y) {
 }
 
 /* 屏幕内容向上移动，并且填充空出来的部分 */
-void up1(size_t h) {
+void up1(size_t h, uint8_t a) {
   size_t length = ONE_LINE * h;
   size_t target = FB_LEN_BYTE - length;
   uint8_t *src = (uint8_t *)video_framebuffer;
   uint8_t *dest = src + length;
   uint8_t *blank = src + target;
-  memcpy(dest, src, target);
-  memset(blank, 0, target);
+  memcpy(src, dest, target);
+  memset(blank, a, length);
 }
 
 /* 20250403

@@ -281,7 +281,7 @@ void change_line(int h) {
 
 /* 屏幕滚动 */
 void lines_roll(int h) {
-  up1(h);
+  up1(h, 255);
   fb_cursor_y -= h;
 }
 
@@ -355,10 +355,11 @@ static void     core1_main()
         print_to_vga(L"————：qing，2025年8月26日\n");
         print_to_vga(L"-------------------\n");
         
-        //while (true) {
+        while (true) {
+          print_to_vga(L"你好！");
                 /* umac相关的周期性处理函数 */
                 //poll_umac();
-        //}
+        }
 }
 
 // 项目主函数，入口
