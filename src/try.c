@@ -37,7 +37,7 @@ static wchar_t *src, *old_src; /* 当前正处理的文本 */
 enum {
   debug, run
 };
-static int compileState = debug; /* 当前解释器状态 */
+static int compileState = run; /* 当前解释器状态 */
 
 static double return_val = 0;  /* 用于保存函数的返回值 */
 
@@ -102,6 +102,10 @@ static void next() {
             token_val.ptr = &symtab[i];
             token = Sym;
           }
+          else if (symtab[i].type == Str) { /* 20250827(qing): 新增此分支，修复BUG */
+              token = Str;
+              token_val.ptr = (symbol *)symtab[i].pointer.funcp;
+          }
           else if (symtab[i].type == FuncSym) {
             token_val.ptr = &symtab[i];
             token = symtab[i].type;
@@ -115,7 +119,10 @@ static void next() {
               token = Sym;
               token_val.ptr = &symtab[i];
             }
-            else token = symtab[i].type;
+            // ？？？
+            else {
+              token = symtab[i].type;
+            }
           }
           
           return;
@@ -159,7 +166,7 @@ static void next() {
       }
       if (*src) {
         *src = 0;
-        token_val.ptr = malloc(sizeof(wchar_t) * numCount + sizeof(wchar_t));
+        token_val.ptr = malloc(sizeof(wchar_t) * (numCount + 1));
         *(wchar_t*)token_val.ptr = L'0';
         wcscpy((wchar_t*)token_val.ptr, last_pos);
         *src = token;
@@ -509,6 +516,7 @@ static double statement() {
             wprintf(L"%lf\n", temp);
             break;
         case Puts: 
+            /* 这一句切换不过来 */
             wprintf(L"%ls\n", (wchar_t*)token_val.ptr);
             match(Str);
             break;
