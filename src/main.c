@@ -261,6 +261,10 @@ static FIL discfp;
 //        discs[0].size = 0;
 //}
 
+/* 输入框的参数 */
+#define IPT_H           3 * CHAR_HEIGHT
+#define IPT_PLACE_H     (ONE_COL - IPT_H)
+
 /* 帧缓冲区打印用游标 */
 int fb_cursor_x = 0;
 int fb_cursor_y = 0;
@@ -274,37 +278,37 @@ int is_wchar_ascii(wchar_t wc) {
 
 
 /* 换行 */
-void change_line(int h) {
-  fb_cursor_x = 0;
-  fb_cursor_y += h;
+void change_line(int h, int *px, int *py) {
+  *px = 0;
+  *py += h;
 }
 
 /* 屏幕滚动 */
-void lines_roll(int h) {
-  up1(h, 255);
-  fb_cursor_y -= h;
+void lines_roll(int h, int *py) {
+  up1(h, 255, IPT_H);
+  *py -= h;
 }
 
-/*
- * 打印到vga，你需要保证每一行的高度是相等的。
+/* 打印到vga的某个位置，你需要保证每一行的高度是相等的。
+ * 需要传入打印位置的指针
  */
-int print_to_vga(wchar_t *wstr) {
+int print_to_vga(wchar_t *wstr, int *px, int *py) {
   size_t len = wcslen(wstr);
   for (size_t i=0; i<len; ++i) {
     wchar_t wc = wstr[i];
     int target_w = CHAR_WIDTH_CN;
     int target_h  = CHAR_HEIGHT;
     if (wc == L'\n' || wc == L'\r') {
-      change_line(target_h);
+      change_line(target_h, px, py);
       continue;
     }
-    drawvfont(fb_cursor_x, fb_cursor_y, wstr[i], target_w, target_h);
-    fb_cursor_x += (is_wchar_ascii(wc)) ? CHAR_WIDTH : target_w; // 英文比汉字窄
-    if (fb_cursor_x >= ONE_LINE_BITS) { // 换行
-      change_line(target_h);
+    drawvfont(*px, *py, wstr[i], target_w, target_h);
+    *px += (is_wchar_ascii(wc)) ? CHAR_WIDTH : target_w; // 英文比汉字窄
+    if (*px >= ONE_LINE_BITS) { // 换行
+      change_line(target_h, px, py);
     }
-    if (fb_cursor_y >= ONE_COL) { // 屏幕上移动
-      lines_roll(target_h);
+    if (*py >= ONE_COL - IPT_H) { // 屏幕上移动
+      lines_roll(target_h, py);
     }
   }
 }
@@ -346,17 +350,20 @@ static void     core1_main()
         
         //printf("Enjoyable Mac times now begin:\n\n");
         printf("Bb2 now running.\n");
+        /* 打印分割线 */
+        int x = 0, y = IPT_PLACE_H;
+        print_to_vga(L"------", &x, &y);
         
-        print_to_vga(L"-------------------\n");
-        print_to_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
-        print_to_vga(L"我们的项目地址是：");
-        print_to_vga(L"https://gitcode.com/qingss0/pico-vga\n");
-        print_to_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
-        print_to_vga(L"————：qing，2025年8月26日\n");
-        print_to_vga(L"-------------------\n");
-        
+        print_to_vga(L"-------------------\n", &fb_cursor_x, &fb_cursor_y);
+        print_to_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n", &fb_cursor_x, &fb_cursor_y);
+        print_to_vga(L"我们的项目地址是：", &fb_cursor_x, &fb_cursor_y);
+        print_to_vga(L"https://gitcode.com/qingss0/pico-vga\n", &fb_cursor_x, &fb_cursor_y);
+        print_to_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n", &fb_cursor_x, &fb_cursor_y);
+        print_to_vga(L"————：qing，2025年8月26日\n", &fb_cursor_x, &fb_cursor_y);
+        print_to_vga(L"-------------------\n", &fb_cursor_x, &fb_cursor_y);
+
         while (true) {
-          print_to_vga(L"你好！");
+          print_to_vga(L"你好！", &fb_cursor_x, &fb_cursor_y);
                 /* umac相关的周期性处理函数 */
                 //poll_umac();
         }
