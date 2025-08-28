@@ -313,7 +313,7 @@ void print_at_vga(wchar_t *wstr, int *px, int *py) {
       change_line(target_h, px, py);
     }
     if (*py >= ONE_COL - IPT_H) { // 越界直接退出
-      return
+      return;
     }
   }
 }
@@ -322,7 +322,7 @@ void print_at_vga(wchar_t *wstr, int *px, int *py) {
 void print_vga(wchar_t *wstr) {
     print_at_vga(wstr, &fb_cursor_x, &fb_cursor_y);
     if (fb_cursor_y >= ONE_COL - IPT_H) {       // 处理越界
-      lines_roll(target_h, &fb_cursor_y);       // 屏幕上移动
+      lines_roll(1, &fb_cursor_y);       // 屏幕上移动
     }
 }
 
@@ -339,7 +339,7 @@ void print_vga(wchar_t *wstr) {
 
 
 /* 直接输入缓冲区，刚好能容纳一行英文内容 */
-static wchar_t jipt_buf[ONE_LINE_CHAR * 2 + 1] = {0};
+static wchar_t jipt_buf[(int)(ONE_LINE_CHAR) * 2 + 1] = {0};
 
 /* 记录直入缓冲的长度 */
 static int jipt_len = 0;
@@ -353,12 +353,12 @@ void init_console() {
 
     /* 打印分割线，可以使用line()绘制 */
     int x = 0, y = IPT_PLACE_H;
-    print(L"------", &x, &y);
+    print_at_vga(L"------", &x, &y);
         
     print_vga(L"-------------------\n");
     print_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
     print_vga(L"我们的项目地址是：");
-    prinprint_vgat_to_vga(L"https://gitcode.com/qingss0/pico-vga\n");
+    print_vga(L"https://gitcode.com/qingss0/pico-vga\n");
     print_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
     print_vga(L"————：qing，2025年8月26日\n");
     print_vga(L"-------------------\n");
@@ -410,7 +410,7 @@ static void     core1_main()
 
         /* 周期性处理 */
         while (true) {
-            print_vga(L"你好！");
+            //print_vga(L"你好！"); /* 测试*/
             if (!kbd_queue_empty()) {
                 uint16_t k = kbd_queue_pop();
                 swprintf(jipt_buf, sizeof(jipt_buf), L"%u", k);
