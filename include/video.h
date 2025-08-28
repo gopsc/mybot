@@ -46,8 +46,10 @@
 void    video_init(uint32_t *framebuffer);
 /* 绘制一个点（bpp=1） */
 void p1(int x, int y);
-/* 屏幕向上移动，并且填充空出来的部分白色 */
-void up1(size_t h, uint8_t a);
+/* 屏幕向上移动，并且填充空出来的部分白色
+ * 需要传入移动的高度、填充的字节以及底部例外的高度
+ */
+void up1(size_t h, uint8_t a, uint8_t exh);
 /* 绘制一条线 */
 void line(int x0, int y0, int x1, int y1);
 /* 绘制矩形 */
