@@ -26,6 +26,9 @@
  * SOFTWARE.
  */
 
+/* 提示，源代码经过qing的修改，仍然遵循
+ * MIT协议。
+ */
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -275,7 +278,9 @@ int fb_cursor_x = 0;
 int fb_cursor_y = 0;
 
 
-/* 判断宽字符是否为ASCII字符 */
+/* 判断宽字符是否为ASCII字符。用于判断
+ * 字符是否需要更少缩进
+ */
 int is_wchar_ascii(wchar_t wc) {
   /* ASCII字符范围：0-127 */
   return (wc >= 0 && wc <= 0x7F);
@@ -308,11 +313,11 @@ void print_at_vga(wchar_t *wstr, int *px, int *py) {
       continue;
     }
     drawvfont(*px, *py, wstr[i], target_w, target_h);
-    *px += (is_wchar_ascii(wc)) ? CHAR_WIDTH : target_w; // 英文比汉字窄
-    if (*px >= ONE_LINE_BITS) { // 换行
+    *px += (is_wchar_ascii(wc) && !wc == L'-') ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
+    if (*px >= ONE_LINE_BITS) { /* 换行 */
       change_line(target_h, px, py);
     }
-    if (*py >= ONE_COL - IPT_H) { // 越界直接退出
+    if (*py >= ONE_COL - IPT_H) { /* 越界直接退出 */
       return;
     }
   }
@@ -332,14 +337,12 @@ void print_vga(wchar_t *wstr) {
 
 
 /* 每行几个字 */
-#define ONE_LINE_CHAR   ONE_LINE_BITS / CHAR_WIDTH
-
+#define ONE_LINE_CHAR   (ONE_LINE_BITS / CHAR_WIDTH)
 /* 每列几个字 */
-#define ONE_COL_CHAR    ONE_COL / CHAR_HEIGHT
-
+#define ONE_COL_CHAR    (ONE_COL / CHAR_HEIGHT)
 
 /* 直接输入缓冲区，刚好能容纳一行英文内容 */
-static wchar_t jipt_buf[(int)(ONE_LINE_CHAR) * 2 + 1] = {0};
+static wchar_t jipt_buf[(int)ONE_LINE_CHAR * 2 + 1] = {0};
 
 /* 记录直入缓冲的长度 */
 static int jipt_len = 0;
