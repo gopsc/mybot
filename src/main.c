@@ -330,7 +330,26 @@ void print_vga(wchar_t *wstr) {
 /////////////////////////////////////////////////////////////////////
 /* 控制台相关的内容 */
 
+
+/* 每行几个字 */
+#define ONE_LINE_CHAR   ONE_LINE_BITS / CHAR_WIDTH
+
+/* 每列几个字 */
+#define ONE_COL_CHAR    ONE_COL / CHAR_HEIGHT
+
+
+/* 直接输入缓冲区，刚好能容纳一行英文内容 */
+static wchar_t jipt_buf[ONE_LINE_CHAR * 2 + 1] = {0};
+
+/* 记录直入缓冲的长度 */
+static int jipt_len = 0;
+
+/* 初始化控制台 */
 void init_console() {
+
+    /* 初始化缓冲区，直接把长度记为0即可 */
+    //memset(jipt_buf, 0, sizeof(jipt_buf));
+    jipt_len = 0;
 
     /* 打印分割线，可以使用line()绘制 */
     int x = 0, y = IPT_PLACE_H;
@@ -343,6 +362,7 @@ void init_console() {
     print_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
     print_vga(L"————：qing，2025年8月26日\n");
     print_vga(L"-------------------\n");
+
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -391,7 +411,10 @@ static void     core1_main()
         /* 周期性处理 */
         while (true) {
             print_vga(L"你好！");
-                //poll_umac();
+            if (!kbd_queue_empty()) {
+                uint16_t k = kbd_queue_pop();
+                wsprintf()
+            }
         }
 }
 
