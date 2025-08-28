@@ -319,14 +319,18 @@ void p1(int x, int y) {
   uint8_t *ptr = (uint8_t *)video_framebuffer;
   ptr += y * ONE_LINE;
   ptr += x >> 3; // x >> 3
-  //*ptr |= (1 << (7-x%8));
-  *ptr &= ~(1 << (7-x%8));
+  //*ptr |= (1 << (7-x%8));  /* 涂黑 */
+  *ptr &= ~(1 << (7-x%8));   /* 涂白 */
 }
 
-/* 屏幕内容向上移动，并且填充空出来的部分 */
-void up1(size_t h, uint8_t a) {
-  size_t length = ONE_LINE * h;
-  size_t target = FB_LEN_BYTE - length;
+/* 屏幕内容向上移动，并且填充空出来的部分
+ * 需要传入向上移动多少，以什么字节填充新的区域，
+ * 以及例外区域
+ */
+void up1(size_t h, uint8_t a, uint8_t exh) {
+  static size_t length = ONE_LINE * h; /* 被上移覆盖的字节数 */
+  static size_t explen = ONE_LINE * exh; /* 上移例外的区域 */
+  static size_t target = FB_LEN_BYTE - length - explen; /* 需要上移的字节数 */
   uint8_t *src = (uint8_t *)video_framebuffer;
   uint8_t *dest = src + length;
   uint8_t *blank = src + target;
