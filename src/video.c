@@ -328,9 +328,9 @@ void p1(int x, int y) {
  * 以及例外区域
  */
 void up1(size_t h, uint8_t a, uint8_t exh) {
-  static size_t length = ONE_LINE * h; /* 被上移覆盖的字节数 */
-  static size_t explen = ONE_LINE * exh; /* 上移例外的区域 */
-  static size_t target = FB_LEN_BYTE - length - explen; /* 需要上移的字节数 */
+  size_t length = ONE_LINE * h; /* 被上移覆盖的字节数 */
+  size_t explen = ONE_LINE * exh; /* 上移例外的区域 */
+  size_t target = FB_LEN_BYTE - length - explen; /* 需要上移的字节数 */
   uint8_t *src = (uint8_t *)video_framebuffer;
   uint8_t *dest = src + length;
   uint8_t *blank = src + target;
