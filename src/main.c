@@ -413,7 +413,9 @@ static void     core1_main()
             print_vga(L"你好！");
             if (!kbd_queue_empty()) {
                 uint16_t k = kbd_queue_pop();
-                wsprintf()
+                swprintf(jipt_buf, sizeof(jipt_buf), L"%u", k);
+                int x = 0, y = IPT_PLACE_H + 2;
+                print_at_vga(jipt_buf, &x, &y); /* 测试 */
             }
         }
 }
