@@ -327,7 +327,7 @@ void print_at_vga(wchar_t *wstr, int *px, int *py) {
 void print_vga(wchar_t *wstr) {
     print_at_vga(wstr, &fb_cursor_x, &fb_cursor_y);
     if (fb_cursor_y >= ONE_COL - IPT_H) {       // 处理越界
-      lines_roll(1, &fb_cursor_y);       // 屏幕上移动
+      lines_roll(CHAR_HEIGHT, &fb_cursor_y);       // 屏幕上移动
     }
 }
 
@@ -413,7 +413,7 @@ static void     core1_main()
 
         /* 周期性处理 */
         while (true) {
-            //print_vga(L"你好！"); /* 测试*/
+            print_vga(L"你好！"); /* 测试*/
             if (!kbd_queue_empty()) {
                 uint16_t k = kbd_queue_pop();
                 swprintf(jipt_buf, sizeof(jipt_buf), L"%u", k);
