@@ -294,13 +294,15 @@ void change_line(int h, int *px, int *py) {
 }
 
 /* 屏幕滚动 */
-void lines_roll(int h, int *py) {
+void lines_roll(int *px, int *py, int h) {
   up1(h, 255, IPT_H);
+  *px = 0;
   *py -= h;
 }
 
 /* 打印到vga的某个位置，你需要保证每一行的高度是相等的。
- * 需要传入打印位置的指针
+ * 需要传入打印位置的指针。这个函数必须在绘制之前就判断
+ * 是否会越界
  */
 void print_at_vga(wchar_t *wstr, int *px, int *py) {
   size_t len = wcslen(wstr);
@@ -312,23 +314,21 @@ void print_at_vga(wchar_t *wstr, int *px, int *py) {
       change_line(target_h, px, py);
       continue;
     }
-    drawvfont(*px, *py, wstr[i], target_w, target_h);
-    *px += (is_wchar_ascii(wc) && !wc == L'-') ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
-    if (*px >= ONE_LINE_BITS) { /* 换行 */
+    int temp = (is_wchar_ascii(wc) && !wc == L'-') ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
+    if (*px + temp >= ONE_LINE_BITS) { /* xx越界换行 */
       change_line(target_h, px, py);
     }
-    if (*py >= ONE_COL - IPT_H) { /* 越界直接退出 */
-      return;
+    if (*py >= ONE_COL - IPT_H) { /* yy越界直接退出 */
+      lines_roll(&fb_cursor_x, &fb_cursor_y, CHAR_HEIGHT);// 屏幕上移动
     }
+    drawvfont(*px, *py, wstr[i], target_w, target_h);
+    *px += temp;
   }
 }
 
 /* 使用游标进行打印 */
 void print_vga(wchar_t *wstr) {
     print_at_vga(wstr, &fb_cursor_x, &fb_cursor_y);
-    if (fb_cursor_y >= ONE_COL - IPT_H) {       // 处理越界
-      lines_roll(CHAR_HEIGHT, &fb_cursor_y);       // 屏幕上移动
-    }
 }
 
 

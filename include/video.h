@@ -38,7 +38,7 @@
 #define ONE_LINE ONE_LINE_BITS / 8
 #define FB_LEN_BYTE ONE_LINE * ONE_COL
 #define FB_LEN_BITS ONE_LINE_BITS * ONE_COL
-#define CHAR_HEIGHT 20 /* 字模高 */
+#define CHAR_HEIGHT 16 /* 字模高 */
 #define CHAR_WIDTH_CN CHAR_HEIGHT /* 汉字字模宽是英文的两倍 */
 #define CHAR_WIDTH CHAR_WIDTH_CN * 0.5 /* 字模宽 */
 
