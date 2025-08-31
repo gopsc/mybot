@@ -317,7 +317,7 @@ void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
     wchar_t wc = wstr[i];
     int target_w = CHAR_WIDTH_CN;
     int target_h  = CHAR_HEIGHT;
-    int temp = (is_wchar_ascii(wc) && !(wc == L'-')) ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
+    int temp = (is_wchar_ascii(wc)) ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
     
     
     /* 使用while确保移动到合适的范围内？*/
@@ -374,15 +374,15 @@ void init_console() {
 
     /* 打印分割线，可以使用line()绘制 */
     int x = 0, y = IPT_PLACE_H;
-    print_at_vga(L"------", &x, &y, 0);
+    print_at_vga(L"- - - - - -", &x, &y, 0);
         
-    print_vga(L"-------------------\n");
+    print_vga(L"- - - - - - - - - - - - - - - - - - -\n");
     print_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
     print_vga(L"我们的项目地址是：");
     print_vga(L"https://gitcode.com/qingss0/pico-vga\n");
     print_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
     print_vga(L"————：qing，2025年8月26日\n");
-    print_vga(L"-------------------\n");
+    print_vga(L"- - - - - - - - - - - - - - - - - - -\n");
 
 }
 
@@ -428,15 +428,15 @@ static void     core1_main()
         printf("Bb2 now running.\n");
 
         init_console();
-
+        uint16_t k;
         /* 周期性处理 */
         while (true) {
             //print_vga(L"你好！"); /* 测试*/
-            if (!kbd_queue_empty()) {
-                uint16_t k = kbd_queue_pop();
-                swprintf(jipt_buf, sizeof(jipt_buf), L"%u", k);
+            if (!kbd_queue_empty() && (k = kbd_queue_pop())) {
+                swprintf(jipt_buf, sizeof(jipt_buf), L"%c", k);
                 print_vga(jipt_buf); /* 测试 */
-                print_vga(L"\n");
+                //swprintf(jipt_buf, sizeof(jipt_buf), L"%u", k);
+                //print_vga(jipt_buf); /* 测试 */
             }
         }
 }
