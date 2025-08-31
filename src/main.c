@@ -270,7 +270,11 @@ static FIL discfp;
 
 
 /* 输入框的参数 */
-#define IPT_H           3 * CHAR_HEIGHT
+#define IPT_H          (4 * CHAR_HEIGHT) /* 一行分割符、
+                                         * 一行输入法输出、
+                                         * 一行输入法界面、
+                                         * 一行直接输入 
+                                         */
 #define IPT_PLACE_H     (ONE_COL - IPT_H)
 
 /* 帧缓冲区打印用游标 */
@@ -293,42 +297,55 @@ void change_line(int h, int *px, int *py) {
   *py += h;
 }
 
-/* 屏幕滚动 */
-void lines_roll(int *px, int *py, int h) {
-  up1(h, 255, IPT_H);
-  *px = 0;
-  *py -= h;
+/* 屏幕向上滚动，返回滚动的幅度 */
+int lines_roll(int y, int ipt_h) {
+  int exh = y + ipt_h - ONE_COL; /* y轴游标超过了多少 */
+  int h = exh + 1 * CHAR_HEIGHT; /* 还差多少能移够一个字符的空间 */
+  up1(h, 255, ipt_h);
+  return h;
 }
 
 /* 打印到vga的某个位置，你需要保证每一行的高度是相等的。
  * 需要传入打印位置的指针。这个函数必须在绘制之前就判断
  * 是否会越界
  */
-void print_at_vga(wchar_t *wstr, int *px, int *py) {
-  size_t len = wcslen(wstr);
+void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
+  size_t len = wcslen(wstr); /* 直接使用while */
+  
   for (size_t i=0; i<len; ++i) {
     wchar_t wc = wstr[i];
     int target_w = CHAR_WIDTH_CN;
     int target_h  = CHAR_HEIGHT;
+    int temp = (is_wchar_ascii(wc) && !(wc == L'-')) ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
+    
+    
+    /* 使用while确保移动到合适的范围内？*/
+    
+    /* xx越界换行 */
+    while (*px + temp >= ONE_LINE_BITS) { 
+      change_line(target_h, px, py);
+    }
+    
+    /* yy越界滚动 */
+    while (*py + target_h >= (ONE_COL - ipt_h)) { 
+      *px = 0;
+      *py -= lines_roll(*py + target_h, ipt_h);// 屏幕上移至1个字符高;
+    }
+    
     if (wc == L'\n' || wc == L'\r') {
       change_line(target_h, px, py);
-      continue;
     }
-    int temp = (is_wchar_ascii(wc) && !wc == L'-') ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
-    if (*px + temp >= ONE_LINE_BITS) { /* xx越界换行 */
-      change_line(target_h, px, py);
+    else {
+      drawvfont(*px, *py, wstr[i], target_w, target_h);
+      *px += temp;
     }
-    if (*py >= ONE_COL - IPT_H) { /* yy越界直接退出 */
-      lines_roll(&fb_cursor_x, &fb_cursor_y, CHAR_HEIGHT);// 屏幕上移动
-    }
-    drawvfont(*px, *py, wstr[i], target_w, target_h);
-    *px += temp;
+    
   }
 }
 
 /* 使用游标进行打印 */
 void print_vga(wchar_t *wstr) {
-    print_at_vga(wstr, &fb_cursor_x, &fb_cursor_y);
+    print_at_vga(wstr, &fb_cursor_x, &fb_cursor_y, IPT_H);
 }
 
 
@@ -356,7 +373,7 @@ void init_console() {
 
     /* 打印分割线，可以使用line()绘制 */
     int x = 0, y = IPT_PLACE_H;
-    print_at_vga(L"------", &x, &y);
+    print_at_vga(L"------", &x, &y, 0);
         
     print_vga(L"-------------------\n");
     print_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
@@ -413,12 +430,12 @@ static void     core1_main()
 
         /* 周期性处理 */
         while (true) {
-            print_vga(L"你好！"); /* 测试*/
+            //print_vga(L"你好！"); /* 测试*/
             if (!kbd_queue_empty()) {
                 uint16_t k = kbd_queue_pop();
                 swprintf(jipt_buf, sizeof(jipt_buf), L"%u", k);
-                int x = 0, y = IPT_PLACE_H + 2;
-                print_at_vga(jipt_buf, &x, &y); /* 测试 */
+                print_vga(jipt_buf); /* 测试 */
+                print_vga(L"\n");
             }
         }
 }
