@@ -321,10 +321,8 @@ int lines_roll(int y, int ipt_h) {
  * 拆分函数
  */
 void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
-  size_t len = wcslen(wstr); /* 直接使用while */
-  
-  for (size_t i=0; i<len; ++i) {
-    wchar_t wc = wstr[i];
+  while (*wstr != L'\0') {
+    wchar_t wc = *(wstr++);
     int target_w = CHAR_WIDTH_CN;
     int target_h  = CHAR_HEIGHT;
     int temp = (is_wchar_ascii(wc)) ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
