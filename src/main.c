@@ -290,7 +290,6 @@ int is_wchar_ascii(wchar_t wc) {
   return (wc >= 0 && wc <= 0x7F);
 }
 
-
 /* 换行 */
 void change_line(int h, int *px, int *py) {
   *px = 0;
@@ -308,6 +307,8 @@ int lines_roll(int y, int ipt_h) {
 /* 打印到vga的某个位置，你需要保证每一行的高度是相等的。
  * 需要传入打印位置的指针。这个函数必须在绘制之前就判断
  * 是否会越界
+ *
+ * 还需要从外部输入输入框的高度，以实现输入法例外
  */
 void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
   size_t len = wcslen(wstr); /* 直接使用while */
@@ -343,7 +344,7 @@ void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
   }
 }
 
-/* 使用游标进行打印 */
+/* 终端正常打印 */
 void print_vga(wchar_t *wstr) {
     print_at_vga(wstr, &fb_cursor_x, &fb_cursor_y, IPT_H);
 }
