@@ -28,6 +28,8 @@
 
 /* 提示，源代码经过qing的修改，仍然遵循
  * MIT协议。
+ *
+ * “无论经过怎样的阻挡，最终还是回到你的身边。”
  */
 #include <stdio.h>
 #include <unistd.h>
@@ -308,7 +310,15 @@ int lines_roll(int y, int ipt_h) {
  * 需要传入打印位置的指针。这个函数必须在绘制之前就判断
  * 是否会越界
  *
+ * 应当传入要打印的字符大小
+ *
  * 还需要从外部输入输入框的高度，以实现输入法例外
+ *
+ *
+ * 1.使用while确保移动到合适的范围内。
+ * 
+ * 2.问题在于在非终端打印下亦可造成换行，建议
+ * 拆分函数
  */
 void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
   size_t len = wcslen(wstr); /* 直接使用while */
@@ -318,9 +328,6 @@ void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
     int target_w = CHAR_WIDTH_CN;
     int target_h  = CHAR_HEIGHT;
     int temp = (is_wchar_ascii(wc)) ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
-    
-    
-    /* 使用while确保移动到合适的范围内？*/
     
     /* xx越界换行 */
     while (*px + temp >= ONE_LINE_BITS) { 
@@ -333,6 +340,7 @@ void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
       *py -= lines_roll(*py + target_h, ipt_h);// 屏幕上移至1个字符高;
     }
     
+    //////////////////////
     if (wc == L'\n' || wc == L'\r') {
       change_line(target_h, px, py);
     }
@@ -340,7 +348,7 @@ void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
       drawvfont(*px, *py, wstr[i], target_w, target_h);
       *px += temp;
     }
-    
+    //////////////////////
   }
 }
 
