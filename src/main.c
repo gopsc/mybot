@@ -342,10 +342,10 @@ static int get_dx(wchar_t wc) {
 void printtovga(wchar_t *wstr) {
   while (*wstr != L'\0') {
     wchar_t wc = *(wstr++);
-    int temp = get_dx(wc);
+    int dx = get_dx(wc);
     
     /* xx越界换行 */
-    while (fb_cursor_x + temp >= ONE_LINE_BITS) { 
+    while (fb_cursor_x + dx >= ONE_LINE_BITS) { 
       change_line(CHAR_HEIGHT, &fb_cursor_x, &fb_cursor_y);
     }
     
@@ -354,16 +354,17 @@ void printtovga(wchar_t *wstr) {
       fb_cursor_x = 0;
       fb_cursor_y -= lines_roll(fb_cursor_y + CHAR_HEIGHT, IPT_H);// 屏幕上移至1个字符高;
     }
-    
-    
-    print_vga(wc, &fb_cursor_x, &fb_cursor_y, CHAR_WIDTH_CN, CHAR_HEIGHT, temp);
+  
+    print_vga(wc, &fb_cursor_x, &fb_cursor_y, CHAR_WIDTH_CN, CHAR_HEIGHT, dx);
   }
 }
 
 /* 终端定位打印，暂时更换游标。也许
  * 这游标应该用访问器封装？
+ *
+ * 特别注意不要让终端换行
  */
-void printatvga(wchar_t *wstr, int start_x, int start_y) {
+void printvgaat(wchar_t *wstr, int start_x, int start_y) {
     int old_x = fb_cursor_x;
     int old_y = fb_cursor_y;
     fb_cursor_x  = start_x;
@@ -395,7 +396,7 @@ void init_console() {
     jipt_buf[jipt_len] = L'\0';
 
     /* 打印分割线，可以使用line()绘制 */
-    printatvga(L"- - - - - -", 0, IPT_PLACE_H);
+    printvgaat(L"- - - - - -", 0, IPT_PLACE_H);
         
     printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
     printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
