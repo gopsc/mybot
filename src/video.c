@@ -316,15 +316,16 @@ void clear(uint8_t a) {
   memset(video_framebuffer, a, FB_LEN_BYTE);
 }
 
-/* 每像素1比特的绘制点函数 */
-void p1(int x, int y) {
+/* 每像素1比特的绘制点函数，有时我们
+ * 需要绘制深色，有时是浅色 */
+void p1(int x, int y, int clr) {
   if (x  <0 || x>=ONE_LINE_BITS || y <0 || y >= ONE_COL)
     return; // 越界
   uint8_t *ptr = (uint8_t *)video_framebuffer;
   ptr += y * ONE_LINE;
-  ptr += x >> 3; // x >> 3
-  //*ptr |= (1 << (7-x%8));  /* 涂黑 */
-  *ptr &= ~(1 << (7-x%8));   /* 涂白 */
+  ptr += x >> 3; // x / 8
+  if (clr) *ptr |= (1 << (7-x%8));  /* 涂黑 */
+  else *ptr &= ~(1 << (7-x%8));   /* 涂白 */
 }
 
 /* 屏幕内容向上移动，并且填充空出来的部分
@@ -346,8 +347,10 @@ void up1(size_t h, uint8_t a, uint8_t exh) {
  * Bresenham 画直线算法
  *
  * Deepseek of qing
+ *
+ * color是个布尔型
  */
-void line(int x0, int y0, int x1, int y1) {
+void line(int x0, int y0, int x1, int y1, int color) {
     int dx = x1 > x0 ? x1 - x0 : x0 - x1;
     int dy = y1 > y0 ? y1 - y0 : y0 - y1;
     int sx = x0 < x1 ? 1 : -1;
@@ -356,7 +359,7 @@ void line(int x0, int y0, int x1, int y1) {
     int e2;
     
     while (1) {
-        p1(x0, y0);
+        p1(x0, y0, color);
         if (x0 == x1 && y0 == y1) break;
 
         e2 = err;
@@ -381,8 +384,10 @@ void line(int x0, int y0, int x1, int y1) {
  * @param filled    是否填充（1填充 / 0不填充）
  *
  * Deepseek of qing
+ *
+ * 颜色参数是布尔型
  */
-void rectangle(int x1, int y1, int x2, int y2, int filled) {
+void rectangle(int x1, int y1, int x2, int y2, int color, int filled) {
     // 确保 x_start <= x_end, y_start <= y_end
     int x_start = (x1 < x2) ? x1 : x2;
     int x_end = (x1 < x2) ? x2 : x1;
@@ -392,15 +397,15 @@ void rectangle(int x1, int y1, int x2, int y2, int filled) {
     // 绘制填充（逐行画水平线）
     if (filled) {
         for (int y = y_start; y <= y_end; y++) {
-            line(x_start, y, x_end, y);
+            line(x_start, y, x_end, y, color);
         }
     }
     // 绘制边框（4条边）
     else {
-        line(x_start, y_start, x_end, y_start); // 上边
-        line(x_end, y_start, x_end, y_end);     // 右边
-        line(x_start, y_end, x_end, y_end);     // 下边
-        line(x_start, y_start, x_start, y_end); // 左边
+        line(x_start, y_start, x_end, y_start, color); // 上边
+        line(x_end, y_start, x_end, y_end, color);     // 右边
+        line(x_start, y_end, x_end, y_end, color);     // 下边
+        line(x_start, y_start, x_start, y_end, color); // 左边
     }
 }
 
@@ -430,8 +435,10 @@ int vennum;
  * x, y是左上角坐标，vect指向矢量字库数据，width和high分别代表要绘制的图的宽和高
  *
  * 此函数的开发者为陈必红老师
+ *
+ * 颜色参数是布尔型
  */
-unsigned char const *drawvect(int x, int y, unsigned char const *vect, int width, int high) {
+unsigned char const *drawvect(int x, int y, unsigned char const *vect, int width, int high, int color) {
     if (!vect) return 0;
 
     int i = 0, j = 1; // 指向第一对数字
@@ -490,7 +497,7 @@ unsigned char const *drawvect(int x, int y, unsigned char const *vect, int width
             y1 = high * y1 / 128.0;
             ii1 = (int)(x1 + x);
             jj1 = (int)(y1 + y);
-            line(ii1, jj1, ii2, jj2);
+            line(ii1, jj1, ii2, jj2, color);
 
             if (isend || isallend) {
                 break;
@@ -510,8 +517,9 @@ unsigned char const *drawvect(int x, int y, unsigned char const *vect, int width
  * 此函数的作者为陈必红老师
  *
  * 20250826(qing): 经过修改，该函数可以输入打印字符的长宽了
+ * 20250901(qing): color参数是bool
  */
-void drawvfont(int x, int y, wchar_t z, int target_width, int target_height) {
+void drawvfont(int x, int y, wchar_t z, int target_width, int target_height, int color) {
     chss = (uint16_t *)zzhi;
     chss32 = (uint32_t *) zzhi32;
     vec = ttu;
@@ -544,7 +552,7 @@ void drawvfont(int x, int y, wchar_t z, int target_width, int target_height) {
         }
     }
 
-    drawvect(x, y, ttu + 2 * i, target_width, target_height);
+    drawvect(x, y, ttu + 2 * i, target_width, target_height, color);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
