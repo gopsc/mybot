@@ -327,6 +327,7 @@ void print_vga(wchar_t wc, int *px, int *py, int target_w, int target_h, int dx)
       change_line(target_h, px, py);
     }
     else {
+      rectangle(*px, *py, *px + target_w - 1, *py + target_h - 1, 1); /* 包含原点所以减一 */
       drawvfont(*px, *py, wc, target_w, target_h);
       *px += dx;
     }
