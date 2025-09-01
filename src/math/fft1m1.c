@@ -22,7 +22,7 @@ void main(void)
   fprintf(fp,"FFT, direct transform ( Ak -> xj ), xj: \n");
   printf("FFT, direct transform ( Ak -> xj ), xj: \n");
   for(i=0;i<N;i++)
-    fprintf(fp,"%4lu: %15.9f %15.9ei\t-> %lf\n",i, A[0][i], A[1][i], sqrt(pow(A[0][i],2) + pow(A[1][i],2)));
+    fprintf(fp,"%4lu: %15.9f %15.9ei\t-> %lf\n",i, A[0][i], A[1][i], sqrt(pow(A[0][i],2) + pow(A[1][i],2))/N);
   fft1(A, -1);
   fprintf(fp, "iFFT, inverse transform (x -> A), Ak:\n");
   printf("iFFT, inverse transform (x -> A), Ak:\n");
