@@ -318,41 +318,59 @@ int lines_roll(int y, int ipt_h) {
  * 1.使用while确保移动到合适的范围内。
  * 
  * 2.问题在于在非终端打印下亦可造成换行，建议
- * 拆分函数
+ * 拆分函数。可拆分之后定位打印如何实现？
  */
-void print_at_vga(wchar_t *wstr, int *px, int *py, int ipt_h) {
-  while (*wstr != L'\0') {
-    wchar_t wc = *(wstr++);
-    int target_w = CHAR_WIDTH_CN;
-    int target_h  = CHAR_HEIGHT;
-    int temp = (is_wchar_ascii(wc)) ? CHAR_WIDTH : target_w; /* 英文比汉字窄 */
-    
-    /* xx越界换行 */
-    while (*px + temp >= ONE_LINE_BITS) { 
-      change_line(target_h, px, py);
-    }
-    
-    /* yy越界滚动 */
-    while (*py + target_h >= (ONE_COL - ipt_h)) { 
-      *px = 0;
-      *py -= lines_roll(*py + target_h, ipt_h);// 屏幕上移至1个字符高;
-    }
+void print_vga(wchar_t wc, int *px, int *py, int target_w, int target_h, int dx) {
     
     //////////////////////
     if (wc == L'\n' || wc == L'\r') {
       change_line(target_h, px, py);
     }
     else {
-      drawvfont(*px, *py, wstr[i], target_w, target_h);
-      *px += temp;
+      drawvfont(*px, *py, wc, target_w, target_h);
+      *px += dx;
     }
     //////////////////////
-  }
+}
+
+/* x轴游标向后移动的量，英文比汉字窄 */
+static int get_dx(wchar_t wc) {
+    return (is_wchar_ascii(wc)) ? CHAR_WIDTH_EN : CHAR_WIDTH_CN; 
 }
 
 /* 终端正常打印 */
-void print_vga(wchar_t *wstr) {
-    print_at_vga(wstr, &fb_cursor_x, &fb_cursor_y, IPT_H);
+void printtovga(wchar_t *wstr) {
+  while (*wstr != L'\0') {
+    wchar_t wc = *(wstr++);
+    int temp = get_dx(wc);
+    
+    /* xx越界换行 */
+    while (fb_cursor_x + temp >= ONE_LINE_BITS) { 
+      change_line(CHAR_HEIGHT, &fb_cursor_x, &fb_cursor_y);
+    }
+    
+    /* yy越界滚动 */
+    while (fb_cursor_y + CHAR_HEIGHT >= (ONE_COL - IPT_H)) { 
+      fb_cursor_x = 0;
+      fb_cursor_y -= lines_roll(fb_cursor_y + CHAR_HEIGHT, IPT_H);// 屏幕上移至1个字符高;
+    }
+    
+    
+    print_vga(wc, &fb_cursor_x, &fb_cursor_y, CHAR_WIDTH_CN, CHAR_HEIGHT, temp);
+  }
+}
+
+/* 终端定位打印，暂时更换游标。也许
+ * 这游标应该用访问器封装？
+ */
+void printatvga(wchar_t *wstr, int start_x, int start_y) {
+    int old_x = fb_cursor_x;
+    int old_y = fb_cursor_y;
+    fb_cursor_x  = start_x;
+    fb_cursor_y  = start_y;
+    printtovga(wstr);
+    fb_cursor_x  = old_x;
+    fb_cursor_y  = old_y;
 }
 
 
@@ -361,35 +379,31 @@ void print_vga(wchar_t *wstr) {
 
 
 /* 每行几个字 */
-#define ONE_LINE_CHAR   (ONE_LINE_BITS / CHAR_WIDTH)
+#define ONE_LINE_CHAR_EN   (ONE_LINE_BITS / CHAR_WIDTH_EN)
 /* 每列几个字 */
 #define ONE_COL_CHAR    (ONE_COL / CHAR_HEIGHT)
 
 /* 直接输入缓冲区，刚好能容纳一行英文内容 */
-static wchar_t jipt_buf[(int)ONE_LINE_CHAR * 2 + 1] = {0};
-
+wchar_t jipt_buf[(int)ONE_LINE_CHAR_EN + 1] = {0};
 /* 记录直入缓冲的长度 */
-static int jipt_len = 0;
+int jipt_len = 0;
 
 /* 初始化控制台 */
 void init_console() {
-
-    /* 初始化缓冲区，直接把长度记为0即可 */
-    //memset(jipt_buf, 0, sizeof(jipt_buf));
+    /* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
     jipt_len = 0;
+    jipt_buf[jipt_len] = L'\0';
 
     /* 打印分割线，可以使用line()绘制 */
-    int x = 0, y = IPT_PLACE_H;
-    print_at_vga(L"- - - - - -", &x, &y, 0);
+    printatvga(L"- - - - - -", 0, IPT_PLACE_H);
         
-    print_vga(L"- - - - - - - - - - - - - - - - - - -\n");
-    print_vga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
-    print_vga(L"我们的项目地址是：");
-    print_vga(L"https://gitcode.com/qingss0/pico-vga\n");
-    print_vga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
-    print_vga(L"————：qing，2025年8月26日\n");
-    print_vga(L"- - - - - - - - - - - - - - - - - - -\n");
-
+    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
+    printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
+    printtovga(L"我们的项目地址是：");
+    printtovga(L"https://gitcode.com/qingss0/pico-vga\n");
+    printtovga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
+    printtovga(L"————：qing，2025年8月26日\n");
+    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -440,7 +454,7 @@ static void     core1_main()
             //print_vga(L"你好！"); /* 测试*/
             if (!kbd_queue_empty() && (k = kbd_queue_pop())) {
                 swprintf(jipt_buf, sizeof(jipt_buf), L"%c", k);
-                print_vga(jipt_buf); /* 测试 */
+                printtovga(jipt_buf); /* 测试 */
                 //swprintf(jipt_buf, sizeof(jipt_buf), L"%u", k);
                 //print_vga(jipt_buf); /* 测试 */
             }
