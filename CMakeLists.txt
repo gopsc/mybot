@@ -135,7 +135,8 @@ if (TARGET tinyusb_device)
     src/kbd.c
     src/hid.c
     src/try.c
-    src/math.c
+    src/math/lagrange.c
+    #src/math/fft1m1.c
     ${EXTRA_SD_SRC}
 
     ${UMAC_SOURCES}
