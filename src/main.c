@@ -45,6 +45,7 @@
 #include "hw.h"
 #include "video.h"
 #include "kbd.h"
+#include "cncc.h"
 
 #include "bsp/rp2040/board.h"
 #include "tusb.h"
@@ -408,7 +409,7 @@ void init_console() {
 
 /////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////
-static is_letter(wchar_t wc) {
+static int is_letter(wchar_t wc) {
     return (wc >= L'a' && wc <= L'z') || (wc >= L'A' && wc <= L'Z');
 }
 /* 核1主函数
@@ -453,10 +454,15 @@ static void     core1_main()
         uint16_t k;
         wchar_t *p = jipt_buf;
         int jipt_x = -CHAR_WIDTH_EN;
+        int flag = 0;
         /* 周期性处理 */
         while (true) {
             if (!kbd_queue_empty() && (k = kbd_queue_pop())) {
             
+              /* FLAG：是否已经进行了拼音匹配
+               * 一旦有风吹草动就赋值为0。 */
+              flag = 0;
+              
               /* 匹配输入模式 */
               if (k < 256 && is_letter(k)) {
                 if (jipt_top < ONE_LINE_CHAR_EN - 1) {
@@ -475,6 +481,14 @@ static void     core1_main()
                 jipt_x-=CHAR_WIDTH_EN;
               }
               
+            }
+            
+            else if (!flag) {
+              flag = 1; /* 已经匹配 
+                          可以利用flag进行字符串分段 */
+              
+              wchar_t *tmp = py_ime(jipt_buf);
+              printvgaat(tmp, 0, PY_LELECT_H);
             }
         }
 }

@@ -135,8 +135,9 @@ if (TARGET tinyusb_device)
     src/kbd.c
     src/hid.c
     src/try.c
-    src/math/lagrange.c
-    #src/math/fft1m1.c
+    src/cncc.c
+    src/mathh/lagrange.c
+    src/mathh/fft1.c
     ${EXTRA_SD_SRC}
 
     ${UMAC_SOURCES}
@@ -152,14 +153,21 @@ if (TARGET tinyusb_device)
   #  )
   #add_dependencies(firmware prepare_umac)
 
+# 启用浮点运算
+pico_set_float_implementation( firmware default)
+pico_set_double_implementation(firmware default)
+
   target_link_libraries(firmware
     pico_stdlib
     pico_multicore
+    pico_float
+    pico_double
     tinyusb_host
     tinyusb_board
     hardware_dma
     hardware_pio
     hardware_sync
+    m
     ${EXTRA_SD_LIB}
     )
 

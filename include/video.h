@@ -43,6 +43,7 @@
 #define CHAR_WIDTH_EN (int)(CHAR_WIDTH_CN * 0.5) /* 字模宽 */
 #define ONE_LINE_CHAR_EN   (int)(ONE_LINE_BITS / CHAR_WIDTH_EN)/* 每行几个字 */
 #define ONE_COL_CHAR   (int) (ONE_COL / CHAR_HEIGHT)/* 每列几个字 */
+#define PY_LELECT_H (IPT_PLACE_H + 1 * CHAR_HEIGHT)
 #define JIPT_H (IPT_PLACE_H + 3* CHAR_HEIGHT)/* 直接输入区显示的位置 *//* 输入框的参数 */
 #define IPT_H          (5 * CHAR_HEIGHT) /* 一行分割符、
                                          * 一行输入法输出、
