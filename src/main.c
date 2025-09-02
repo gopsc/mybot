@@ -270,15 +270,6 @@ static FIL discfp;
 /////////////////////////////////////////////////////////////////////
 /* 打印文字相关的内容 */
 
-
-/* 输入框的参数 */
-#define IPT_H          (5 * CHAR_HEIGHT) /* 一行分割符、
-                                         * 一行输入法输出、
-                                         * 一行输入法界面、
-                                         * 一行直接输入 
-                                         */
-#define IPT_PLACE_H     (ONE_COL - IPT_H)
-
 /* 帧缓冲区打印用游标 */
 int fb_cursor_x = 0;
 int fb_cursor_y = 0;
@@ -341,7 +332,7 @@ static int get_dx(wchar_t wc) {
 }
 
 /* 终端正常打印 */
-void printtovga(wchar_t *wstr, int con_height) {
+void _printtovga(wchar_t *wstr, int con_height) {
   while (*wstr != L'\0') {
     wchar_t wc = *(wstr++);
     int dx = get_dx(wc);
@@ -352,7 +343,7 @@ void printtovga(wchar_t *wstr, int con_height) {
     }
     
     /* yy越界滚动 */
-    while (fb_cursor_y >= con_height) {
+    while (fb_cursor_y + CHAR_HEIGHT >= con_height) {
       fb_cursor_y -= lines_roll(fb_cursor_y, IPT_H, 255);// 屏幕上移至1个字符高;
     }
   
@@ -370,32 +361,31 @@ void printvgaat(wchar_t *wstr, int start_x, int start_y) {
     int old_y = fb_cursor_y;
     fb_cursor_x  = start_x;
     fb_cursor_y  = start_y;
-    printtovga(wstr, ONE_COL);
+    _printtovga(wstr, ONE_COL);
     fb_cursor_x  = old_x;
     fb_cursor_y  = old_y;
+}
+
+
+void printtovga(wchar_t *wstr) {
+  _printtovga(wstr, IPT_PLACE_H);
 }
 
 
 /////////////////////////////////////////////////////////////////////
 /* 控制台相关的内容 */
 
-
-/* 每行几个字 */
-#define ONE_LINE_CHAR_EN   (ONE_LINE_BITS / CHAR_WIDTH_EN)
-/* 每列几个字 */
-#define ONE_COL_CHAR    (ONE_COL / CHAR_HEIGHT)
-
 /* 直接输入缓冲区，刚好能容纳一行英文内容 */
-wchar_t jipt_buf[(int)ONE_LINE_CHAR_EN + 1] = {0};
+wchar_t jipt_buf[(int)ONE_LINE_CHAR_EN] = {0};
 /* 记录直入缓冲的长度 */
-int jipt_len = 0;
+int jipt_top = 0;
 
 /* 初始化控制台 */
 void init_console() {
 
     /* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
-    jipt_len = 0;
-    jipt_buf[jipt_len] = L'\0';
+    jipt_top = 0;
+    jipt_buf[jipt_top] = L'\0';
 
     // 以深色填充屏幕
     clear(255);
@@ -403,19 +393,24 @@ void init_console() {
     /* 打印分割线，可以使用line()绘制 */
     printvgaat(L"- - - - - -", 0, IPT_PLACE_H);
         
-    printtovga(L"- - - - - - - - - - - - - - - - - - -\n", IPT_PLACE_H);
-    printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n", IPT_PLACE_H);
-    printtovga(L"我们的项目地址是：", IPT_PLACE_H);
-    printtovga(L"https://gitcode.com/qingss0/pico-vga\n", IPT_PLACE_H);
-    printtovga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n", IPT_PLACE_H);
-    printtovga(L"————：qing，2025年8月26日\n", IPT_PLACE_H);
-    printtovga(L"- - - - - - - - - - - - - - - - - - -\n", IPT_PLACE_H);
+    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
+    printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
+    printtovga(L"我们的项目地址是：");
+    printtovga(L"https://gitcode.com/qingss0/pico-vga\n");
+    printtovga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
+    printtovga(L"————：qing，2025年8月26日\n");
+    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
     
+    wchar_t buf[100];
+    swprintf(buf, sizeof(buf), L"一行的比特数：%d\n英文字符的宽度：%d\n即时输入缓冲区的长度：%d\n", ONE_LINE_BITS, CHAR_WIDTH_EN, ONE_LINE_CHAR_EN);
+    printtovga(buf);
 }
 
 /////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////
-
+static is_letter(wchar_t wc) {
+    return (wc >= L'a' && wc <= L'z') || (wc >= L'A' && wc <= L'Z');
+}
 /* 核1主函数
  * 视频、中断处理、DMA设置
  */
@@ -454,15 +449,32 @@ static void     core1_main()
         printf("Bb2 now running.\n");
 
         init_console();
+        
         uint16_t k;
+        wchar_t *p = jipt_buf;
+        int jipt_x = -CHAR_WIDTH_EN;
         /* 周期性处理 */
         while (true) {
-            //print_vga(L"你好！"); /* 测试*/
             if (!kbd_queue_empty() && (k = kbd_queue_pop())) {
-                swprintf(jipt_buf, sizeof(jipt_buf), L"%c", k);
-                printtovga(jipt_buf, IPT_PLACE_H); /* 测试 */
-                //swprintf(jipt_buf, sizeof(jipt_buf), L"%u", k);
-                //print_vga(jipt_buf); /* 测试 */
+            
+              /* 匹配输入模式 */
+              if (k < 256 && is_letter(k)) {
+                if (jipt_top < ONE_LINE_CHAR_EN - 1) {
+                  *(p++) = (wchar_t)k;
+                  *p = L'\0';
+                  jipt_top++;
+                  printvgaat(p - 1, jipt_x+=CHAR_WIDTH_EN, JIPT_H); /* 操作后进行刷新 */
+                }
+              }
+              
+              /* 匹配删减模式 */
+              else if (k == L'\b' && jipt_top > 0) {
+                *(p--) = L'\0';
+                jipt_top--;
+                rectangle(jipt_x, JIPT_H, jipt_x + CHAR_WIDTH_EN - 1, JIPT_H + CHAR_HEIGHT - 1, 1, 1); /* 包含原点所以减一 */
+                jipt_x-=CHAR_WIDTH_EN;
+              }
+              
             }
         }
 }

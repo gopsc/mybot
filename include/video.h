@@ -35,12 +35,21 @@
  */
 #define ONE_COL DISP_HEIGHT
 #define ONE_LINE_BITS DISP_WIDTH
-#define ONE_LINE (ONE_LINE_BITS / 8)
+#define ONE_LINE (int)(ONE_LINE_BITS / 8)
 #define FB_LEN_BYTE (ONE_LINE * ONE_COL)
 #define FB_LEN_BITS (ONE_LINE_BITS * ONE_COL)
 #define CHAR_HEIGHT 14 /* 字模高 */
 #define CHAR_WIDTH_CN CHAR_HEIGHT /* 汉字字模宽是英文的两倍 */
-#define CHAR_WIDTH_EN (CHAR_WIDTH_CN * 0.5) /* 字模宽 */
+#define CHAR_WIDTH_EN (int)(CHAR_WIDTH_CN * 0.5) /* 字模宽 */
+#define ONE_LINE_CHAR_EN   (int)(ONE_LINE_BITS / CHAR_WIDTH_EN)/* 每行几个字 */
+#define ONE_COL_CHAR   (int) (ONE_COL / CHAR_HEIGHT)/* 每列几个字 */
+#define JIPT_H (IPT_PLACE_H + 3* CHAR_HEIGHT)/* 直接输入区显示的位置 *//* 输入框的参数 */
+#define IPT_H          (5 * CHAR_HEIGHT) /* 一行分割符、
+                                         * 一行输入法输出、
+                                         * 一行输入法界面、
+                                         * 一行直接输入 
+                                         */
+#define IPT_PLACE_H     (ONE_COL - IPT_H)
 
 /* 初始化PIO和DMA */
 void    video_init(uint32_t *framebuffer);
