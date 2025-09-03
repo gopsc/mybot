@@ -424,7 +424,15 @@ static void init_console() {
     
     /* 打印测试信息 */
     wchar_t buf[100];
-    swprintf(buf, sizeof(buf), L"一行的比特数：%d\n英文字符的宽度：%d\n即时输入缓冲区的长度：%d\n", ONE_LINE_BITS, CHAR_WIDTH_EN, ONE_LINE_CHAR_EN);
+    swprintf(
+        buf, 
+        sizeof(buf), 
+        L"一行的比特数：%d\n英文字符的宽度：%d\n即时输入缓冲区的长度：%d\n", 
+        ONE_LINE_BITS, 
+        CHAR_WIDTH_EN, 
+        ONE_LINE_CHAR_EN
+    );
+
     printtovga(buf);
 }
 
@@ -476,31 +484,66 @@ static void     core1_main()
         wchar_t *p = jipt_buf;
         int jipt_x = -CHAR_WIDTH_EN;
         int flag = 0;
+        wchar_t *pym; /*  拼音映射 */
         /* 周期性处理 */
         while (true) {
+
+            /* 如果按键事件缓冲区不为空，则读出数据 */
             if (!kbd_queue_empty() && (k = kbd_queue_pop())) {
-            
-              /* FLAG：是否已经进行了拼音匹配
-               * 一旦有风吹草动就赋值为0。 */
-              flag = 0;
               
-              /* 匹配输入模式 */
-              if (k < 256 && is_letter(k)) {
-                if (jipt_top < ONE_LINE_CHAR_EN - 1) {
-                  *(p++) = (wchar_t)k;
-                  *p = L'\0';
-                  jipt_top++;
-                  printvgaat(p - 1, jipt_x+=CHAR_WIDTH_EN, JIPT_H); /* 操作后进行刷新 */
+              /* 匹配按下 */
+              if (k < 256 ) {
+                
+                /* 只接受字母，且缓冲区有空 */
+                if (is_letter(k) && jipt_top < ONE_LINE_CHAR_EN - 1) {
+
+                    /* FLAG：是否已经进行了拼音匹配
+                     * 一旦有新的键盘事件就赋值为0。 */
+                    flag = 0;
+
+                    /* 进入缓冲区 */
+                    *(p++) = (wchar_t)k;
+                    *p = L'\0';
+
+                    /* 栈顶指针自增 */
+                    jipt_top++;
+
+                    /* 横轴坐标自增 */
+                    jipt_x+=CHAR_WIDTH_EN;
+
+                    /* 打印新的字符 */
+                    printvgaat(p - 1, jipt_x, JIPT_H);
+
                 }
+
               }
               
               /* 匹配删减模式 */
               else if (k == L'\b' && jipt_top > 0) {
+
+                /* 放置终止符号 */
                 *(p--) = L'\0';
+
+                /* 栈顶指针自减 */
                 jipt_top--;
+
+                /* 清除屏幕字符图案 */
                 rectangle(jipt_x, JIPT_H, jipt_x + CHAR_WIDTH_EN - 1, JIPT_H + CHAR_HEIGHT - 1, 1, 1); /* 包含原点所以减一 */
+
+                /* 横轴坐标自减 */
                 jipt_x-=CHAR_WIDTH_EN;
               }
+
+              /* 匹配选择模式 */
+              // else if (is_digit(k) && wcscmp(L"", pym)) {
+              // ... 
+              //   jipt_top = 0;
+              //   jipt_buf[jipt_top] = L'\0';
+              //   flag =0;
+              //}
+
+              /* 匹配直接输入模式 */
+              // else if (is_digit(k)) {}
               
             }
             
@@ -508,8 +551,8 @@ static void     core1_main()
               flag = 1; /* 已经匹配 
                           可以利用flag进行字符串分段 */
               
-              wchar_t *tmp = py_ime(jipt_buf);
-              printvgaat(tmp, 0, PY_LELECT_H);
+              pym = py_ime(jipt_buf);
+              printvgaat(pym, 0, PY_LELECT_H);
             }
         }
 }
