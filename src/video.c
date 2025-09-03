@@ -520,10 +520,10 @@ unsigned char const *drawvect(int x, int y, unsigned char const *vect, int width
  * 20250901(qing): color参数是bool
  */
 void drawvfont(int x, int y, wchar_t z, int target_width, int target_height, int color) {
-    chss = (uint16_t *)zzhi;
+    //chss = (uint16_t *)zzhi;
     chss32 = (uint32_t *) zzhi32;
     vec = ttu;
-    zn = zzhinumber;
+    //zn = zzhinumber;
     zn32 = zzhinumber32;
     vennum = ttunumber;
 
