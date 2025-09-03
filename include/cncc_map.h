@@ -5,7 +5,7 @@
  * chinese char code
  *
  * 占用大量存储。最长的字串目前就是38。  */
-const wchar_t code_table[396][3][38]={{L"a",L"阿啊"},
+const wchar_t code_table[396][3][40]={{L"a",L"阿啊"},
 {L"ai",L"哎哀唉埃挨皑癌矮蔼艾爱隘碍"},
 {L"an",L"安氨鞍俺岸按案胺暗"},
 {L"ang",L"肮昂盎"},
