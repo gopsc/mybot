@@ -81,16 +81,20 @@ extern int cursor_button;
  */
 //static uint8_t umac_ram[RAM_SIZE];
 
-/* 用于传输视频的内存空间 */
+/* 用于传输视频的内存空间，
+ * 单位是8位，即每个变量8个像素 */
 static uint8_t video_ram[ONE_COL * ONE_LINE];
 ////////////////////////////////////////////////////////////////////////////////
 
+/* 初始化gpio */
 static void     io_init()
 {
         gpio_init(GPIO_LED_PIN);
-        gpio_set_dir(GPIO_LED_PIN, GPIO_OUT);
+        gpio_set_dir(GPIO_LED_PIN, GPIO_OUT);   /* 设置 GPIO 引脚的方向（输入或输出）*/
 }
 
+/* 周期性执行的led灯事件，每隔
+ * 一段时间切换一次状态 */
 static void     poll_led_etc()
 {
         static int led_on = 0;
@@ -105,9 +109,10 @@ static void     poll_led_etc()
         }
 }
 
-static int umac_cursor_x = 0;
-static int umac_cursor_y = 0;
-static int umac_cursor_button = 0;
+/* 这些是鼠标游标，我们暂时用不上 */
+//static int umac_cursor_x = 0;
+//static int umac_cursor_y = 0;
+//static int umac_cursor_button = 0;
 /*
  * umac的事件循环
  */
@@ -162,6 +167,8 @@ static int umac_cursor_button = 0;
 //}
 
 #if USE_SD
+
+/* 硬盘读取 */
 static int      disc_do_read(void *ctx, uint8_t *data, unsigned int offset, unsigned int len)
 {
         FIL *fp = (FIL *)ctx;
@@ -175,6 +182,7 @@ static int      disc_do_read(void *ctx, uint8_t *data, unsigned int offset, unsi
         return 0;
 }
 
+/* 硬盘写入 */
 static int      disc_do_write(void *ctx, uint8_t *data, unsigned int offset, unsigned int len)
 {
         FIL *fp = (FIL *)ctx;
@@ -188,7 +196,8 @@ static int      disc_do_write(void *ctx, uint8_t *data, unsigned int offset, uns
         return 0;
 }
 
-static FIL discfp;
+/* 硬盘文件描述符指针 */
+//static FIL discfp;
 #endif
 
 // 设置硬盘（TF卡）
@@ -271,26 +280,28 @@ static FIL discfp;
 /////////////////////////////////////////////////////////////////////
 /* 打印文字相关的内容 */
 
+
+
 /* 帧缓冲区打印用游标 */
-int fb_cursor_x = 0;
-int fb_cursor_y = 0;
+static int fb_cursor_x = 0;
+static int fb_cursor_y = 0;
 
 
 /* 判断宽字符是否为ASCII字符。用于判断
- * 字符是否需要更少缩进
- */
-int is_wchar_ascii(wchar_t wc) {
+ * 字符是否需要更少缩进 */
+static int is_wchar_ascii(wchar_t wc) {
   /* ASCII字符范围：0-127 */
   return (wc >= 0 && wc <= 0x7F);
 }
 
-/* 换行 */
-void change_line(int h, int *px, int *py) {
+/* 帧缓冲区坐标换行操作 */
+static void change_line(int h, int *px, int *py) {
   *px = 0;
   *py += h;
 }
 
-/* 屏幕向上滚动，返回滚动的幅度 */
+/* 屏幕向上滚动，返回滚动的幅度。这个函数
+ * 我不是很搞得懂，为什么要加上一个CHAR_HEIGHT */
 int lines_roll(int y, int ipt_h, int a) {
   int exh = y + ipt_h - ONE_COL; /* y轴游标超过了多少 */
   int h = exh + 1 * CHAR_HEIGHT; /* 还差多少能移够一个字符的空间 */
@@ -299,20 +310,17 @@ int lines_roll(int y, int ipt_h, int a) {
 }
 
 /* 打印到vga的某个位置，你需要保证每一行的高度是相等的。
- * 需要传入打印位置的指针。这个函数必须在绘制之前就判断
- * 是否会越界
+ * 1. 需要传入打印位置的指针。
  *
- * 应当传入要打印的字符大小
+ * 需要在调用之前判断是否越界
  *
- * 还需要从外部输入输入框的高度，以实现输入法例外
+ * 2. 应当传入要打印的字符大小
  *
+ * 3. 应当传入标准中文字符的大小
  *
- * 1.使用while确保移动到合适的范围内。
+ * 4. 应该传入横轴差距
  * 
- * 2.问题在于在非终端打印下亦可造成换行，建议
- * 拆分函数。可拆分之后定位打印如何实现？
- *
- * 颜色参数是布尔型
+ * 5. 传入颜色，颜色参数是布尔型
  */
 void print_vga(wchar_t wc, int *px, int *py, int target_w, int target_h, int dx, int color) {
     
@@ -332,7 +340,15 @@ static int get_dx(wchar_t wc) {
     return (is_wchar_ascii(wc)) ? CHAR_WIDTH_EN : CHAR_WIDTH_CN; 
 }
 
-/* 终端正常打印 */
+/* 终端打印基本函数。 需要从外部输入输入框的高度，以实现输入法例外
+ *
+ *
+ * 1.使用while确保移动到合适的范围内。
+ * 
+ * 2.问题在于在非终端打印下亦可造成换行，建议
+ * 拆分函数。可拆分之后定位打印如何实现？
+ *
+ */
 void _printtovga(wchar_t *wstr, int con_height) {
   while (*wstr != L'\0') {
     wchar_t wc = *(wstr++);
@@ -352,10 +368,9 @@ void _printtovga(wchar_t *wstr, int con_height) {
   }
 }
 
-/* 终端定位打印，暂时更换游标。也许
- * 这游标应该用访问器封装？
+/* 终端定位打印，暂时更换游标，线程不安全。
  *
- * 特别注意不要让终端换行
+ * 也许这游标应该用访问器封装？特别注意不要让终端换行
  */
 void printvgaat(wchar_t *wstr, int start_x, int start_y) {
     int old_x = fb_cursor_x;
@@ -367,7 +382,8 @@ void printvgaat(wchar_t *wstr, int start_x, int start_y) {
     fb_cursor_y  = old_y;
 }
 
-
+/* 打印到VGA的用户接口，默认
+ * 以标准输入框高度作为输入法例外  */
 void printtovga(wchar_t *wstr) {
   _printtovga(wstr, IPT_PLACE_H);
 }
@@ -376,13 +392,16 @@ void printtovga(wchar_t *wstr) {
 /////////////////////////////////////////////////////////////////////
 /* 控制台相关的内容 */
 
-/* 直接输入缓冲区，刚好能容纳一行英文内容 */
-wchar_t jipt_buf[(int)ONE_LINE_CHAR_EN] = {0};
-/* 记录直入缓冲的长度 */
-int jipt_top = 0;
 
-/* 初始化控制台 */
-void init_console() {
+/* 直接输入缓冲区，刚好能容纳一行英文内容 */
+static wchar_t jipt_buf[ONE_LINE_CHAR_EN] = {0};
+/* 记录直入缓冲的栈顶 */
+static int jipt_top = 0;
+
+/* 初始化控制台。 
+ *
+ * 初始化直入缓冲区、刷新屏幕，打印欢迎语和测试信息 */
+static void init_console() {
 
     /* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
     jipt_top = 0;
@@ -391,9 +410,10 @@ void init_console() {
     // 以深色填充屏幕
     clear(255);
         
-    /* 打印分割线，可以使用line()绘制 */
+    /* 打印输入法分割线，其实可以使用line()绘制 */
     printvgaat(L"- - - - - -", 0, IPT_PLACE_H);
-        
+
+    /* 打印欢迎语 */
     printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
     printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
     printtovga(L"我们的项目地址是：");
@@ -402,6 +422,7 @@ void init_console() {
     printtovga(L"————：qing，2025年8月26日\n");
     printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
     
+    /* 打印测试信息 */
     wchar_t buf[100];
     swprintf(buf, sizeof(buf), L"一行的比特数：%d\n英文字符的宽度：%d\n即时输入缓冲区的长度：%d\n", ONE_LINE_BITS, CHAR_WIDTH_EN, ONE_LINE_CHAR_EN);
     printtovga(buf);
