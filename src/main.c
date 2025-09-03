@@ -516,15 +516,16 @@ static void     core1_main()
                     /* 打印新的字符 */
                     printvgaat(p - 1, jipt_x, JIPT_H);
 
-                }
-
               }
               
               /* 匹配删减模式 */
               else if (k == L'\b' && jipt_top > 0) {
-
+              
+                /* 重新进行匹配 */
+                flag = 0;
+                
                 /* 放置终止符号 */
-                *(p--) = L'\0';
+                *(--p) = L'\0';
 
                 /* 栈顶指针自减 */
                 jipt_top--;
@@ -546,7 +547,7 @@ static void     core1_main()
 
               /* 匹配直接输入模式 */
               // else if (is_digit(k)) {}
-              
+              }
             }
             
             else if (!flag) {
@@ -554,6 +555,9 @@ static void     core1_main()
                           可以利用flag进行字符串分段 */
               
               pym = py_ime(jipt_buf);
+              
+              /* 清除屏幕拼音结果字符 */
+              rectangle(0, PY_LELECT_H, ONE_LINE_BITS - 1, PY_LELECT_H + CHAR_HEIGHT - 1, 1, 1); /* 包含原点所以减一 */
               printvgaat(pym, 0, PY_LELECT_H);
             }
         }
