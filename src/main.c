@@ -45,6 +45,7 @@
 #include "hw.h"
 #include "video.h"
 #include "kbd.h"
+#include "graph.h"
 #include "cncc.h"
 
 #include "bsp/rp2040/board.h"
