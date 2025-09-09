@@ -316,8 +316,13 @@ void clear(uint8_t a) {
   memset(video_framebuffer, a, FB_LEN_BYTE);
 }
 
-/* 每像素1比特的绘制点函数，有时我们
- * 需要绘制深色，有时是浅色 */
+/*
+ * 每像素1比特的绘制点函数，有时我们
+ * 需要绘制深色，有时是浅色 
+ *
+ *
+ * 考虑使用汇编语言书写
+ */
 void p1(int x, int y, int clr) {
   if (x  <0 || x>=ONE_LINE_BITS || y <0 || y >= ONE_COL)
     return; // 越界
@@ -329,9 +334,10 @@ void p1(int x, int y, int clr) {
 }
 
 
-/* 屏幕内容向上移动，并且填充空出来的部分
+/* 
+ * 屏幕内容向上移动，并且填充空出来的部分
  * 需要传入向上移动多少，以什么字节填充新的区域，
- * 以及例外区域
+ * 需要传入例外区域
  */
 void up1(size_t h, uint8_t a, uint8_t exh) {
   size_t length = ONE_LINE * h; /* 被上移覆盖的字节数 */
