@@ -315,12 +315,16 @@ static void change_line(int h, int *px, int *py) {
   *py += h;
 }
 
-/* 屏幕向上滚动，返回滚动的幅度。这个函数
- * 我不是很搞得懂，为什么要加上一个CHAR_HEIGHT */
+/*
+ *
+ * 屏幕向上滚动，返回滚动的幅度。这个函数
+ * 我不是很搞得懂，为什么要加上一个CHAR_HEIGHT
+ *
+ */
 int lines_roll(int y, int ipt_h, int a) {
   int exh = y + ipt_h - ONE_COL; /* y轴游标超过了多少 */
   int h = exh + 1 * CHAR_HEIGHT; /* 还差多少能移够一个字符的空间 */
-  up1(h, a, ipt_h);
+  up1(h, a, ipt_h);     /* 屏幕向上移动 */
   return h;
 }
 
@@ -370,13 +374,16 @@ static int get_dx(wchar_t wc) {
  *
  * 1.使用while确保移动到合适的范围内。
  * 
- * 2.问题在于在非终端打印下亦可造成换行，建议
- * 拆分函数。可拆分之后定位打印如何实现？
+ * 2.问题在于在非终端打印下亦可造成换行，建议拆分函数。可拆分之后定位打印如何实现？
  *
  */
 void _printtovga(wchar_t *wstr, int con_height) {
   while (*wstr != L'\0') {
+
+    /* 遍历宽字符 */
     wchar_t wc = *(wstr++);
+
+    /* 根据字符类型判断移动 */
     int dx = get_dx(wc);
     
     /* xx越界换行 */
@@ -389,7 +396,13 @@ void _printtovga(wchar_t *wstr, int con_height) {
       fb_cursor_y -= lines_roll(fb_cursor_y, IPT_H, 255);// 屏幕上移至1个字符高;
     }
   
-    print_vga(wc, &fb_cursor_x, &fb_cursor_y, CHAR_WIDTH_CN, CHAR_HEIGHT, dx, 0);
+    /* 打印至vga屏幕上面 */
+    print_vga(wc, 
+        &fb_cursor_x, &fb_cursor_y,
+        CHAR_WIDTH_CN, CHAR_HEIGHT,
+        dx, 0
+    );
+
   }
 }
 
@@ -398,17 +411,20 @@ void _printtovga(wchar_t *wstr, int con_height) {
  * 也许这游标应该用访问器封装？特别注意不要让终端换行
  */
 void printvgaat(wchar_t *wstr, int start_x, int start_y) {
-    int old_x = fb_cursor_x;
+    int old_x = fb_cursor_x; /* 记录游标 */
     int old_y = fb_cursor_y;
-    fb_cursor_x  = start_x;
+    fb_cursor_x  = start_x;  /* 替换游标 */
     fb_cursor_y  = start_y;
-    _printtovga(wstr, ONE_COL);
-    fb_cursor_x  = old_x;
+    _printtovga(wstr, ONE_COL); /* 打印字符（整个屏幕无例外） */
+    fb_cursor_x  = old_x;       /* 恢复游标 */
     fb_cursor_y  = old_y;
 }
 
-/* 打印到VGA的用户接口，默认
- * 以标准输入框高度作为输入法例外  */
+/*
+ *
+ * 打印到VGA的用户接口，默认以标准输入框高度作为输入法例外 
+ *
+ */
 void printtovga(wchar_t *wstr) {
   _printtovga(wstr, IPT_PLACE_H);
 }
@@ -461,8 +477,7 @@ static void welcome() {
 static testinfo() {
     wchar_t buf[100];
     swprintf(
-        buf, 
-        sizeof(buf), 
+        buf, sizeof(buf), 
         L"一行的比特数：%d\n英文字符的宽度：%d\n即时输入缓冲区的长度：%d\n", 
         ONE_LINE_BITS, 
         CHAR_WIDTH_EN, 
