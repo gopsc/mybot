@@ -610,6 +610,7 @@ int     main()
         // 一次性初始化所有可用的标准输入输出接口，包括
         // 1.USB虚拟串口。2.UART硬件串口。3.其他。
 	stdio_init_all();
+
         // (这是一个用户自定义的初始化函数)
         io_init();
 
@@ -623,14 +624,18 @@ int     main()
 
         /* This happens on core 0: */
 	while (true) {
+
                 //TinyUSB 库中用于 USB 主机模式（USB Host） 的核心任务处理函数。与
                 // tud_task()（用于 USB 设备模式）不同，tuh_task() 负责处理作为
                 // USB 主机时的所有 USB 事件（如设备插入 / 拔出、数据传输等）。
                 tuh_task();
+
                 // 用户自定义函数，处理HID设备
                 hid_app_task();
+
                 // 用户自定义函数，周期性处理led
                 poll_led_etc();
+
 	}
 
 	return 0;
