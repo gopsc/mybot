@@ -325,9 +325,9 @@ int lines_roll(int y, int ipt_h, int a) {
 }
 
 /* 打印到vga的某个位置，你需要保证每一行的高度是相等的。
- * 1. 需要传入打印位置的指针。
  *
- * 需要在调用之前判断是否越界
+ *
+ * 1. 需要传入打印位置的指针。（ 需要在调用之前判断是否越界）
  *
  * 2. 应当传入要打印的字符大小
  *
@@ -336,6 +336,9 @@ int lines_roll(int y, int ipt_h, int a) {
  * 4. 应该传入横轴差距
  * 
  * 5. 传入颜色，颜色参数是布尔型
+ *
+ *
+ * 20250909(qing): 应该加入对\t的解析，甚至\b等
  */
 void print_vga(wchar_t wc, int *px, int *py, int target_w, int target_h, int dx, int color) {
     
@@ -350,7 +353,9 @@ void print_vga(wchar_t wc, int *px, int *py, int target_w, int target_h, int dx,
     
 }
 
-/* x轴游标向后移动的量，英文比汉字窄 */
+/*
+ * x轴游标向后移动的量，英文比汉字窄
+ */
 static int get_dx(wchar_t wc) {
     return (is_wchar_ascii(wc)) ? CHAR_WIDTH_EN : CHAR_WIDTH_CN; 
 }
@@ -458,15 +463,20 @@ static testinfo() {
         CHAR_WIDTH_EN, 
         ONE_LINE_CHAR_EN
     );
-
     printtovga(buf);
 }
 
 /////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////
 
-/* 核1主函数
+/*
+ *
+ * 核1主函数
+ *
  * 视频、中断处理、DMA设置
+ *
+ * TF卡读取
+ *
  */
 static void     core1_main()
 {
@@ -477,12 +487,6 @@ static void     core1_main()
         printf("Core 1 started\n");
         // 硬盘初始化！
         //disc_setup(discs);
-
-        /* 初始化umac，在umac项目里。这里可能有
-         * umac的桌面
-         */
-        //umac_init(umac_ram, (void *)umac_rom, discs);
-
 
         /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
          * core 0's USB activity.
@@ -496,13 +500,11 @@ static void     core1_main()
          * 这个函数会以单缓冲区设置DMA，只需要在这里魔改
          * 即可
          */
-        //video_init((uint32_t *)(umac_ram + umac_get_fb_offset()));
         video_init((uint32_t *)video_ram);
         
-        //printf("Enjoyable Mac times now begin:\n\n");
-        printf("Bb2 now running.\n");
-
         init_console();
+
+        printf("Bb2 now running.\n");
 
 
         /* 打印欢迎语 */
@@ -596,9 +598,16 @@ static void     core1_main()
         }
 }
 
-// 项目主函数，入口
-// 初始化io，核1主函数
-// 初始化usb，维护usb与led
+/*
+ *
+ * 项目主函数，入口
+ *
+ * 初始化io，核1主函数
+ * usb，
+ *
+ * 维护usb与led
+ *
+ */
 int     main()
 {
         // 设置时钟频率，第二个实参
