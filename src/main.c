@@ -324,7 +324,9 @@ int lines_roll(int y, int ipt_h, int a) {
   return h;
 }
 
-/* 打印到vga的某个位置，你需要保证每一行的高度是相等的。
+/*
+ *
+ * 打印到vga的某个位置，你需要保证每一行的高度是相等的。
  *
  *
  * 1. 需要传入打印位置的指针。（ 需要在调用之前判断是否越界）
@@ -339,6 +341,7 @@ int lines_roll(int y, int ipt_h, int a) {
  *
  *
  * 20250909(qing): 应该加入对\t的解析，甚至\b等
+ *
  */
 void print_vga(wchar_t wc, int *px, int *py, int target_w, int target_h, int dx, int color) {
     
@@ -360,7 +363,9 @@ static int get_dx(wchar_t wc) {
     return (is_wchar_ascii(wc)) ? CHAR_WIDTH_EN : CHAR_WIDTH_CN; 
 }
 
-/* 终端打印基本函数。 需要从外部输入输入框的高度，以实现输入法例外
+/*
+ *
+ * 终端打印基本函数。 需要从外部输入输入框的高度，以实现输入法例外
  *
  *
  * 1.使用while确保移动到合适的范围内。
