@@ -75,22 +75,14 @@ extern int cursor_x;
 extern int cursor_y;
 extern int cursor_button;
 
-// Mac binary data:  disc and ROM images
-//static const uint8_t umac_disc[] = {
-//#include "umac-disc.h"
-//};
-//static const uint8_t umac_rom[] = {
-//#include "umac-rom.h"
-//};
 
-/* ？？？
- * 分配一段内存，该内存被传输给
- * umac_init() 与 video_init()
+/*
+ *
+ * 分配一段内存，该内存被传输给 video_init()
+ *
+ * 用于传输视频的内存空间，单位是8位，即每个变量8个像素
+ *
  */
-//static uint8_t umac_ram[RAM_SIZE];
-
-/* 用于传输视频的内存空间，
- * 单位是8位，即每个变量8个像素 */
 static uint8_t video_ram[ONE_COL * ONE_LINE];
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -289,17 +281,27 @@ static int      disc_do_write(void *ctx, uint8_t *data, unsigned int offset, uns
 /* 打印文字相关的内容 */
 
 
-
 /* 帧缓冲区打印用游标 */
 static int fb_cursor_x = 0;
 static int fb_cursor_y = 0;
 
-
-/* 判断宽字符是否为ASCII字符。用于判断
- * 字符是否需要更少缩进 */
+/* 
+ * 判断宽字符是否为ASCII字符。用于判断
+ * 字符是否需要更少缩进 
+ * ASCII字符范围：0-127
+ */
 static int is_wchar_ascii(wchar_t wc) {
-  /* ASCII字符范围：0-127 */
   return (wc >= 0 && wc <= 0x7F);
+}
+
+/* 判断宽字符是否为字母 */
+static int is_letter(wchar_t wc) {
+    return (wc >= L'a' && wc <= L'z') || (wc >= L'A' && wc <= L'Z');
+}
+
+/* 判断宽字符是否为数字字符 */
+static int is_digit(wchar_t wc) {
+    return wc >= L'0' && wc <= L'9';
 }
 
 /* 帧缓冲区坐标换行操作 */
@@ -454,9 +456,7 @@ static void init_console() {
 
 /////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////
-static int is_letter(wchar_t wc) {
-    return (wc >= L'a' && wc <= L'z') || (wc >= L'A' && wc <= L'Z');
-}
+
 /* 核1主函数
  * 视频、中断处理、DMA设置
  */
