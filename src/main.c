@@ -24,13 +24,19 @@
  * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
- */
-
-/* 提示，源代码经过qing的修改，仍然遵循
+ *
+ *
+ *
+ *
+ * 提示，源代码经过qing的修改，仍然遵循
  * MIT协议。
  *
  *
  * “无论经过怎样的阻挡，最终还是回到你的身边。”
+ *
+ *
+ * 现在该代码不再引导umac，而是启动一个终端。
+ *
  */
 #include <stdio.h>
 #include <unistd.h>
