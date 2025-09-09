@@ -285,6 +285,11 @@ static int      disc_do_write(void *ctx, uint8_t *data, unsigned int offset, uns
 static int fb_cursor_x = 0;
 static int fb_cursor_y = 0;
 
+
+////////////////////////////////
+////////////////////////////////
+/* 宽字符判断，建议使用标准库函数 */
+
 /* 
  * 判断宽字符是否为ASCII字符。用于判断
  * 字符是否需要更少缩进 
@@ -399,6 +404,27 @@ void printtovga(wchar_t *wstr) {
 }
 
 
+/* 初始化控制台。 
+ *
+ * 初始化直入缓冲区、刷新屏幕，打印欢迎语和测试信息
+ * 
+ * 我想将其移动到一个新的文件中
+ */
+static void init_console() {
+
+    /* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
+    jipt_top = 0;
+    jipt_buf[jipt_top] = L'\0';
+
+    // 以深色填充屏幕
+    clear(255);
+        
+    /* 打印输入法分割线，其实可以使用line()绘制 */
+    printvgaat(L"- - - - - -", 0, IPT_PLACE_H);
+
+}
+
+
 /////////////////////////////////////////////////////////////////////
 /* 控制台相关的内容 */
 
@@ -419,28 +445,10 @@ static void welcome() {
     printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
 }
 
-/* 初始化控制台。 
- *
- * 初始化直入缓冲区、刷新屏幕，打印欢迎语和测试信息
- * 
- * 我想将其移动到一个新的文件中
+/*
+ * 打印测试信息的函数，我觉得可以把其中的格式化打印独立出来
  */
-static void init_console() {
-
-    /* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
-    jipt_top = 0;
-    jipt_buf[jipt_top] = L'\0';
-
-    // 以深色填充屏幕
-    clear(255);
-        
-    /* 打印输入法分割线，其实可以使用line()绘制 */
-    printvgaat(L"- - - - - -", 0, IPT_PLACE_H);
-
-    /* 打印欢迎语 */
-    welcome();
-    
-    /* 打印测试信息 */
+static testinfo() {
     wchar_t buf[100];
     swprintf(
         buf, 
@@ -495,6 +503,14 @@ static void     core1_main()
         printf("Bb2 now running.\n");
 
         init_console();
+
+
+        /* 打印欢迎语 */
+        welcome();
+        
+        /* 打印测试信息 */
+        testinfo();
+
         
         uint16_t k;
         wchar_t *p = jipt_buf;          /* 指向即时输入缓冲文字区的指针 */
