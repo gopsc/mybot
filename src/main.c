@@ -29,6 +29,7 @@
 /* 提示，源代码经过qing的修改，仍然遵循
  * MIT协议。
  *
+ *
  * “无论经过怎样的阻挡，最终还是回到你的身边。”
  */
 #include <stdio.h>
@@ -399,9 +400,23 @@ static wchar_t jipt_buf[ONE_LINE_CHAR_EN] = {0};
 /* 记录直入缓冲的栈顶 */
 static int jipt_top = 0;
 
+/* 用于在VGA屏幕上打印欢迎语句 */
+static void welcome() {
+    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
+    printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
+    printtovga(L"我们的项目地址是：");
+    printtovga(L"https://gitcode.com/qingss0/pico-vga\n");
+    printtovga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
+    printtovga(L"————：qing，2025年8月26日\n");
+    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
+}
+
 /* 初始化控制台。 
  *
- * 初始化直入缓冲区、刷新屏幕，打印欢迎语和测试信息 */
+ * 初始化直入缓冲区、刷新屏幕，打印欢迎语和测试信息
+ * 
+ * 我想将其移动到一个新的文件中
+ */
 static void init_console() {
 
     /* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
@@ -415,13 +430,7 @@ static void init_console() {
     printvgaat(L"- - - - - -", 0, IPT_PLACE_H);
 
     /* 打印欢迎语 */
-    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
-    printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
-    printtovga(L"我们的项目地址是：");
-    printtovga(L"https://gitcode.com/qingss0/pico-vga\n");
-    printtovga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
-    printtovga(L"————：qing，2025年8月26日\n");
-    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
+    welcome();
     
     /* 打印测试信息 */
     wchar_t buf[100];
@@ -482,10 +491,11 @@ static void     core1_main()
         init_console();
         
         uint16_t k;
-        wchar_t *p = jipt_buf;
-        int jipt_x = -CHAR_WIDTH_EN;
-        int flag = 0;
-        wchar_t *pym; /*  拼音映射 */
+        wchar_t *p = jipt_buf;          /* 指向即时输入缓冲文字区的指针 */
+        int jipt_x = -CHAR_WIDTH_EN;    /* 即时输入缓冲区的游标 */
+        int flag = 0;   /* 已经进行了拼音映射否 */
+        wchar_t *pym;   /*  拼音映射结果 */
+
         /* 周期性处理 */
         while (true) {
 
