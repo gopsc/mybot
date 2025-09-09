@@ -285,6 +285,11 @@ static int      disc_do_write(void *ctx, uint8_t *data, unsigned int offset, uns
 static int fb_cursor_x = 0;
 static int fb_cursor_y = 0;
 
+/* 直接输入缓冲区，刚好能容纳一行英文内容 */
+static wchar_t jipt_buf[ONE_LINE_CHAR_EN] = {0};
+/* 记录直入缓冲的栈顶 */
+static int jipt_top = 0;
+
 
 ////////////////////////////////
 ////////////////////////////////
@@ -454,12 +459,6 @@ static void init_console() {
 /////////////////////////////////////////////////////////////////////
 /* 控制台相关的内容 */
 
-
-/* 直接输入缓冲区，刚好能容纳一行英文内容 */
-static wchar_t jipt_buf[ONE_LINE_CHAR_EN] = {0};
-/* 记录直入缓冲的栈顶 */
-static int jipt_top = 0;
-
 /* 用于在VGA屏幕上打印欢迎语句 */
 static void welcome() {
     printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
@@ -474,7 +473,7 @@ static void welcome() {
 /*
  * 打印测试信息的函数，我觉得可以把其中的格式化打印独立出来
  */
-static testinfo() {
+static void testinfo() {
     wchar_t buf[100];
     swprintf(
         buf, sizeof(buf), 

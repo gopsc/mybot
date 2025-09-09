@@ -136,6 +136,8 @@ if (TARGET tinyusb_device)
     src/hid.c
     src/try.c
     src/cncc.c
+    src/graph/basic.c
+    #src/graph/bezier.c
     src/mathh/lagrange.c
     src/mathh/fft1.c
     ${EXTRA_SD_SRC}
