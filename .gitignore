@@ -1,0 +1,56 @@
+#PRJ
+cmake-build-debug/
+build/
+.vscode/
+.arts/
+
+# SLOT
+TestSuits/
+
+#DATA
+*.bmp
+
+#python
+*.pyc
+
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+.lightly
+.c_bin
+.classes
+logs
+*.log
+node_modules
+dist
+dist-ssr
+*.local
