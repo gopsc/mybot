@@ -1,2 +1,0 @@
---language=c++
--std=c++20
