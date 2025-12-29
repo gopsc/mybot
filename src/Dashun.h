@@ -1,0 +1,14 @@
+#pragma once
+#include <vector>
+#include "nn/Matrix.hh"
+#include "nn/ILayer.hpp"
+#include "nn/ILearnable.hpp"
+#include "nn/ILayerFullyConnectted.hpp"
+#include "nn/ILayerConvolutional.hpp"
+#include "nn/NeuralNetwork.hpp"
+#include "nn/ConvLayer.hpp"
+#include "nn/PoolingLayer.hpp"
+#include "nn/FlattenLayer.hpp"
+#include "nn/NNBuilder.hpp"
+#include "nn/CNNBuilder.hpp"
+#include "nn/ImageLoader.hpp"
