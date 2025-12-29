@@ -1,6 +1,6 @@
 #pragma once
 #include <cmath>
-#include "Dashun.h"
+#include "../Dashun.h"
 
 /* FIXME: 设置为每层可调节的 */
 constexpr float LEAKY_RELU_ALPHA = 0.01;

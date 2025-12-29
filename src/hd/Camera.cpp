@@ -25,6 +25,7 @@ static int height = 0;
 
 /* 为了在获取单帧中使用 */
 struct v4l2_buffer buf;
+enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 
 
 #include <thread>
@@ -210,39 +211,179 @@ void Camera_setup() {
         throw std::runtime_error("VIDIOC_QUERYBUF failed: " + std::string(strerror(errno)));
     }
 
-    /* 内存映射（只做一次） */
-    buffer_info.length = buf.length;
-    buffer_info.start = mmap(NULL, buf.length,
-            PROT_READ | PROT_WRITE,
-            MAP_SHARED, fd, buf.m.offset);
-
-    if (buffer_info.start == MAP_FAILED) {
-        throw std::runtime_error("mmap failed: " + std::string(strerror(errno)));
-    }
-
     /* 将缓冲区加入队列 */
     if (ioctl(fd, VIDIOC_QBUF, &buf) < 0) {
-        munmap(buffer_info.start, buffer_info.length);
         throw std::runtime_error("VIDIOC_QBUF failed: " + std::string(strerror(errno)));
     }
 
     /* 开始采集 */
-    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(fd, VIDIOC_STREAMON, &buf.type) < 0) { /* start collection */
-        munmap(buffer_info.start, buffer_info.length);
         throw std::runtime_error("VIDIOC_STREAMON failed: " + std::string(strerror(errno)));
     }
 
 }
 
+void Camera_unsetup() {
+    /* 停止采集流 */
+    ioctl(fd, VIDIOC_STREAMOFF, &type);
+}
+
+
+std::vector<unsigned char> compress_to_jpeg(const CImg<unsigned char>& image, int quality = 75) {
+    std::cout << "compress_to_jpeg called with CImg: width=" << image.width() 
+              << ", height=" << image.height() 
+              << ", spectrum=" << image.spectrum()
+              << ", quality=" << quality << std::endl;
+    
+    // 检查图像的有效性
+    if (image.width() == 0 || image.height() == 0) {
+        std::cerr << "Error: Invalid image dimensions!" << std::endl;
+        return std::vector<unsigned char>();
+    }
+    
+    // 检查频谱（通道数）
+    int channels = image.spectrum();
+    std::cout << "Image has " << channels << " channel(s)" << std::endl;
+    
+    // CImg数据布局：默认是平面格式 [plane1, plane2, plane3]
+    // 但我们需要交错的RGB格式用于JPEG压缩
+    
+    unsigned char* buffer = nullptr;
+    unsigned long buffer_size = 0;
+    
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
+    jpeg_mem_dest(&cinfo, &buffer, &buffer_size);
+    
+    int width = image.width();
+    int height = image.height();
+    
+    cinfo.image_width = width;
+    cinfo.image_height = height;
+    cinfo.input_components = 3;  // 总是使用3通道RGB
+    cinfo.in_color_space = JCS_RGB;
+    
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, quality, TRUE);
+    
+    // 开始压缩
+    jpeg_start_compress(&cinfo, TRUE);
+    
+    JSAMPROW row_pointer[1];
+    std::vector<unsigned char> row_buffer(width * 3);  // 用于存储一行交错的RGB数据
+    
+    // 处理每一行
+    for (int y = 0; y < height; y++) {
+        // 将CImg的平面格式转换为交错的RGB格式
+        if (channels == 3) {
+            // RGB图像：CImg存储为平面格式 [R平面, G平面, B平面]
+            for (int x = 0; x < width; x++) {
+                row_buffer[x * 3] = image(x, y, 0, 0);     // R
+                row_buffer[x * 3 + 1] = image(x, y, 0, 1); // G
+                row_buffer[x * 3 + 2] = image(x, y, 0, 2); // B
+            }
+        }
+        else if (channels == 1) {
+            // 灰度图像：重复到三个通道
+            for (int x = 0; x < width; x++) {
+                unsigned char gray = image(x, y, 0, 0);
+                row_buffer[x * 3] = gray;     // R
+                row_buffer[x * 3 + 1] = gray; // G
+                row_buffer[x * 3 + 2] = gray; // B
+            }
+        }
+        else if (channels == 4) {
+            // RGBA图像：忽略Alpha通道
+            for (int x = 0; x < width; x++) {
+                row_buffer[x * 3] = image(x, y, 0, 0);     // R
+                row_buffer[x * 3 + 1] = image(x, y, 0, 1); // G
+                row_buffer[x * 3 + 2] = image(x, y, 0, 2); // B
+                // 忽略Alpha通道：image(x, y, 0, 3)
+            }
+        }
+        else {
+            // 其他通道数：使用前3个通道
+            std::cout << "Warning: Using first 3 channels of " << channels << "-channel image" << std::endl;
+            for (int x = 0; x < width; x++) {
+                for (int c = 0; c < 3 && c < channels; c++) {
+                    row_buffer[x * 3 + c] = image(x, y, 0, c);
+                }
+                // 如果通道数不足3，用0填充
+                for (int c = channels; c < 3; c++) {
+                    row_buffer[x * 3 + c] = 0;
+                }
+            }
+        }
+        
+        row_pointer[0] = row_buffer.data();
+        jpeg_write_scanlines(&cinfo, row_pointer, 1);
+        
+        // 显示进度
+        if (y % 100 == 0) {
+            std::cout << "Processing row " << y << "/" << height << std::endl;
+        }
+    }
+    
+    jpeg_finish_compress(&cinfo);
+    jpeg_destroy_compress(&cinfo);
+    
+    std::cout << "JPEG compression finished, buffer_size=" << buffer_size << std::endl;
+    
+    // 将JPEG数据复制到vector
+    std::vector<unsigned char> jpeg_data(buffer, buffer + buffer_size);
+    
+    // 释放libjpeg分配的内存
+    free(buffer);
+    
+    // 验证JPEG数据
+    if (jpeg_data.size() >= 2) {
+        bool has_soi = (jpeg_data[0] == 0xFF && jpeg_data[1] == 0xD8);
+        bool has_eoi = (jpeg_data.size() >= 2 && 
+                       jpeg_data[jpeg_data.size()-2] == 0xFF && 
+                       jpeg_data[jpeg_data.size()-1] == 0xD9);
+        
+        std::cout << "Generated JPEG: size=" << jpeg_data.size() 
+                  << " bytes, has SOI: " << has_soi 
+                  << ", has EOI: " << has_eoi << std::endl;
+        
+        if (!has_soi || !has_eoi) {
+            std::cerr << "Warning: Generated JPEG may be corrupted!" << std::endl;
+        }
+    }
+    
+    return jpeg_data;
+}
+
+
+
+
 static int Camera_main() {
 
+
+    std::cout << "Starting Camera_main function..." << std::endl;
+
     /* 初始化TCP服务器 */
+    std::cout << "Initializing TCP server..." << std::endl;
     Camera_TCPServer_init();
+
+    std::cout << "TCP server initialized successfully" << std::endl;
 
     /* the loop of data capture */
     bool flag = true;
+    std::cout << "Entering main loop..." << std::endl;
+
+    int loop_count = 0;
     while (flag) {
+        loop_count++;
+        if (loop_count % 100 == 0) {
+            std::cout << "Main loop iteration: " << loop_count << std::endl;
+            std::cout << "Camera running: " << camera_running.load() << std::endl;
+            std::cout << "Number of clients: " << client_sockets.size() << std::endl;
+        }
+
         
         /* 使用非阻塞 select 检查是否有数据可读 */
         fd_set fds;
@@ -274,7 +415,7 @@ static int Camera_main() {
         }
         
         struct timeval tv{};
-        tv.tv_sec  = 0;
+        tv.tv_sec  = 1;
         tv.tv_usec = 0;          // 非阻塞：立即返回
 
         int ret = select(max_fd + 1, &fds, NULL, NULL, &tv);
@@ -283,10 +424,10 @@ static int Camera_main() {
             break;
         }
         if (ret == 0) {
-            usleep(5000); // 无数据时延时5ms再循环
+            usleep(10000);
             continue;
         }
-        
+    
         // 处理新的TCP连接请求
         if (tcp_listen_fd >= 0 && FD_ISSET(tcp_listen_fd, &fds)) {
             struct sockaddr_in client_addr{};
@@ -337,56 +478,56 @@ static int Camera_main() {
 
         /* 如果没有客户端连接，跳过数据处理 */
         if (client_sockets.empty()) {
-            usleep(5000); // 无数据时延时5ms再循环
+            usleep(10000);
             continue;
         }
 
-        /* Dequeue to get data */
-        memset(&buf, 0, sizeof(buf));
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buf.memory = V4L2_MEMORY_MMAP;
-        
-        if (ioctl(fd, VIDIOC_DQBUF, &buf) < 0) {
-            perror("dequeue failed");
-            break;
-        }
+        try {
+            /* 从相机获取一帧图像，并且更新flag */
+            auto image = get_frame_from_camera(flag); 
+            
+            /* 压缩为JPEG格式 */
+<<<<<<< HEAD
+            auto compressed_jpeg_buffer = compress_to_jpeg(
+                image.data(), image.width(), image.height(), 75
+            );
 
-        //uint8_t *raw_rgb_buffer = (uint8_t*)buffer_info.start;  /* 获取数据指针*/
-        auto image = get_frame_from_camera(flag); /* 从相机获取一帧图像，并且更新flag */
-
-        unsigned long output_buf_size = 2 * 3 * WIDTH * HEIGHT; /* 压缩后的大小未知，可分配一个足够大的空间（例如原始RGB大小的2倍） */
-        JOCTET* compressed_jpeg_buffer = new JOCTET[output_buf_size];
-
-        unsigned long actual_compressed_size = output_buf_size; /* 会更新为实际大小 */
-        image.save_jpeg_buffer(compressed_jpeg_buffer, actual_compressed_size, 75); /* 质量75（1-100） */
-
-        /* 发送数据给所有客户端 */
-        for (int client_fd : client_sockets) {
-            if (send(client_fd, compressed_jpeg_buffer, actual_compressed_size, 0) < 0) {   
-                perror("send failed");
-                close(client_fd);
-                clients_to_remove.push_back(client_fd);
+            /* 发送数据给所有客户端 */
+            for (int client_fd : client_sockets) {
+                if (send(client_fd, compressed_jpeg_buffer.data(), compressed_jpeg_buffer.size(), 0) < 0) {   
+                    perror("send failed");
+                    close(client_fd);
+                    clients_to_remove.push_back(client_fd);
+                }
             }
-        }
+=======
+            auto compressed_jpeg_buffer = compress_to_jpeg(image, 20);
 
-        /* 清理内存 */
-        delete[] compressed_jpeg_buffer;
+	    /* 调试：检查JPEG数据是否包含SOI标记 */
+            bool has_soi = false;
+            if (compressed_jpeg_buffer.size() >= 2) {
+                has_soi = (compressed_jpeg_buffer[0] == 0xFF && compressed_jpeg_buffer[1] == 0xD8);
+            }
+            std::cout << "Generated JPEG: size=" << compressed_jpeg_buffer.size() << " bytes, has SOI: " << has_soi << std::endl;
 
-        if (ioctl(fd, VIDIOC_QBUF, &buf)<0){  /* join the queue again */
-            perror("requeue failed");
-            break;
+
+            /* 发送数据给所有客户端 */
+            for (int client_fd : client_sockets) {
+                if (send(client_fd, compressed_jpeg_buffer.data(), compressed_jpeg_buffer.size(), 0) < 0) {   
+                    perror("send failed");
+                    close(client_fd);
+                    clients_to_remove.push_back(client_fd);
+                }
+            }
+>>>>>>> 286ea51 (TEST(qing))
+        } catch (const std::exception& e) {
+            perror("Error processing frame");
+            continue;
         }
     }
 
     /* 关闭TCP服务器 */
-    Camera_TCPServer_init();
-
-    /* 停止采集流 */
-    ioctl(fd, VIDIOC_STREAMOFF, &type);
-
-    /* 取消内存映射 */
-    munmap(buffer_info.start, buffer_info.length);
-    
+    Camera_TCPServer_stop();
     
     return 0;
 }
@@ -508,30 +649,61 @@ bool save_YUYV_as_image(uint8_t* frameData, int width, int height,
     }
 }
 
+
 /*
  * Convert YUYV frame to CImg object and return it
  */
 CImg<unsigned char> YUYV_to_CImg(uint8_t* frameData, int width, int height) {
     // 创建CImg图像对象 (width, height, depth=1, spectrum=3 for RGB)
     CImg<unsigned char> img(width, height, 1, 3);
-    
-    // 转换为RGB并填充到CImg
+
+    // 遍历图像的每一行和每一列
     for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            uint8_t r, g, b;
-            YUYV_to_RGB(frameData, width, height, x, y, r, g, b);
-            
-            // CImg存储顺序是平面：首先所有R，然后所有G，最后所有B
-            // 或者使用(x, y, 0, channel)访问
-            img(x, y, 0, 0) = r;  // Red channel
-            img(x, y, 0, 1) = g;  // Green channel
-            img(x, y, 0, 2) = b;  // Blue channel
+        for (int x = 0; x < width; x += 2) {
+            // YUYV格式：每两个像素占用4个字节
+            int yuyv_index = (y * width + x) * 2;
+
+            // 提取YUV值
+            uint8_t Y0 = frameData[yuyv_index];
+            uint8_t U = frameData[yuyv_index + 1];
+            uint8_t Y1 = frameData[yuyv_index + 2];
+            uint8_t V = frameData[yuyv_index + 3];
+
+            // 转换第一个像素（x, y）
+            int R0 = Y0 + (V - 128) * 1.402;
+            int G0 = Y0 - (U - 128) * 0.34414 - (V - 128) * 0.71414;
+            int B0 = Y0 + (U - 128) * 1.772;
+
+            // 转换第二个像素（x+1, y）
+            int R1 = Y1 + (V - 128) * 1.402;
+            int G1 = Y1 - (U - 128) * 0.34414 - (V - 128) * 0.71414;
+            int B1 = Y1 + (U - 128) * 1.772;
+
+            // 限制范围到0-255
+            R0 = std::max(0, std::min(255, R0));
+            G0 = std::max(0, std::min(255, G0));
+            B0 = std::max(0, std::min(255, B0));
+
+            R1 = std::max(0, std::min(255, R1));
+            G1 = std::max(0, std::min(255, G1));
+            B1 = std::max(0, std::min(255, B1));
+
+            // 设置第一个像素值
+            img(x, y, 0, 0) = static_cast<uint8_t>(R0);
+            img(x, y, 0, 1) = static_cast<uint8_t>(G0);
+            img(x, y, 0, 2) = static_cast<uint8_t>(B0);
+
+            // 设置第二个像素值（如果在图像范围内）
+            if (x + 1 < width) {
+                img(x + 1, y, 0, 0) = static_cast<uint8_t>(R1);
+                img(x + 1, y, 0, 1) = static_cast<uint8_t>(G1);
+                img(x + 1, y, 0, 2) = static_cast<uint8_t>(B1);
+            }
         }
     }
-    
+
     return img;
 }
-
 
 /* 在线程安全的情况下取得一帧图像 */
 CImg<unsigned char> get_frame_from_camera(bool& flag) {
@@ -549,12 +721,22 @@ CImg<unsigned char> get_frame_from_camera(bool& flag) {
         throw std::runtime_error("dequeue failed");
     }
 
-    /* 获取数据指针*/
-    uint8_t *frameData = (uint8_t*)buffer_info.start;
+    /* 获取当前缓冲区的数据指针 */
+    uint8_t *frameData = static_cast<uint8_t*>(mmap(NULL, buf.length, 
+                                        PROT_READ | PROT_WRITE, MAP_SHARED, 
+                                        fd, buf.m.offset));
+    
+    if (frameData == MAP_FAILED) {
+        ioctl(fd, VIDIOC_QBUF, &buf);
+        throw std::runtime_error("mmap failed in get_frame_from_camera");
+    }
 
     /* process frameData */
-    std::cout << "Got length: " << buffer_info.length << std::endl;
+    std::cout << "Got length: " << buf.length << std::endl;
     auto img = YUYV_to_CImg(frameData, width, height);
+    
+    /* 解除内存映射 */
+    munmap(frameData, buf.length);
 
     if (ioctl(fd, VIDIOC_QBUF, &buf)<0){  /* join the queue again */
         perror("requeue failed");

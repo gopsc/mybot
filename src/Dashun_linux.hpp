@@ -43,7 +43,8 @@ void Camera_close();
 void Camera_check();
 void Camera_setVideoFormat();
 void Camera_reqBuf();
-void Camera_setup()
+void Camera_setup();
+void Camera_unsetup();
 void Camera_TCPServer_init();
 void Camera_TCPServer_stop();
 void Camera_run();

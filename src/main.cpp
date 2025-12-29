@@ -86,12 +86,6 @@ int main() {
     nn.add(layer4);
     nn.print_shape();
 
-    /*
-     * NOTE: 这里必须等待摄像头初始化完成
-     *
-     * FIXME: 在主函数中初始化摄像头
-     */
-    std::this_thread::sleep_for(std::chrono::seconds(1));
     bool flag = true;
     while (flag) {
 
@@ -139,5 +133,6 @@ int main() {
     }
 
     Camera_stop();  
+    Camera_unsetup();
     return 0;
 }
