@@ -1,1 +1,2 @@
 cimg-dev
+libcpp-httplib-dev

@@ -1,6 +1,7 @@
 
 #include <cmath>
 #include <fstream>
+#include <sstream>
 #include <iostream>
 #include <vector>
 #include <unistd.h>
@@ -57,6 +58,11 @@ public:
         empty_all();
         parse(file);
         file.close();
+    }
+    void fromStr(const std::string& script) {
+        std::stringstream ss(script);
+	empty_all();
+	parse(ss);
     }
     void play() {
         if (bot.empty() || matrix.empty())
