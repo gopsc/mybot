@@ -1,5 +1,8 @@
 /*
  * 该文件可以解析动作脚本（.bot）并且将角度映射到动作上 。
+ *
+ * NOTE:  通过HTTP协议接收动作脚本
+ * FIXME: 使用一个抽象层重构http服务器
  */
 
 #define HTTPLIB_COMPILE  // 无SSL需求，优先选这个；有SSL需求替换为 #define HTTPLIB_OPENSSL_SUPPORT
