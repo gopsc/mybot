@@ -1,5 +1,5 @@
 ```text
-If you can't speak Chinese, please copy this doc to chatgpt or deepseek.
+If you don't speak Chinese, please copy this doc to chatgpt or deepseek.
 ```
 
 # 什么是mybot项目？
