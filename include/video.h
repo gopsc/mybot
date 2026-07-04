@@ -31,8 +31,7 @@
 /* 我不知道为什么列宽、单行会是这些值，也不知道
  * 它会不会在数据改变后发生改变（很可能会变）
  *
- * 原来作者在下面有说明
- */
+ * 原来作者在下面有说明  */
 #define ONE_COL DISP_HEIGHT
 #define ONE_LINE_BITS DISP_WIDTH
 #define ONE_LINE (int)(ONE_LINE_BITS / 8)

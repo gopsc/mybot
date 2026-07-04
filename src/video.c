@@ -32,9 +32,7 @@
  * SOFTWARE.
  */
  
-/* 源代码已经被qing所修改，仍然
- * 遵循MIT开源许可（见项目根目录）
- */
+/* 源代码已经被qing所修改，仍然遵循MIT开源许可 */
 
 #include <stdio.h>
 #include <inttypes.h>

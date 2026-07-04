@@ -34,9 +34,8 @@
  *
  * “无论经过怎样的阻挡，最终还是回到你的身边。”
  *
- *
  * 现在该代码不再引导umac，而是启动一个宽字符中文终端。
- *
+ * 2025
  */
 #include <stdio.h>
 #include <unistd.h>
@@ -374,7 +373,7 @@ static int get_dx(wchar_t wc) {
 
 /*
  *
- * 终端打印基本函数。 需要从外部输入输入框的高度，以实现输入法例外
+ * 终端打印基本函数。 需要从外部输入输入框的高度，以实现输入器额外空间
  *
  *
  * 1.使用while确保移动到合适的范围内。
@@ -425,11 +424,7 @@ void printvgaat(wchar_t *wstr, int start_x, int start_y) {
     fb_cursor_y  = old_y;
 }
 
-/*
- *
- * 打印到VGA的用户接口，默认以标准输入框高度作为输入法例外 
- *
- */
+/*  打印到VGA的用户接口，默认以标准输入框高度作为输入法例外   */
 void printtovga(wchar_t *wstr) {
   _printtovga(wstr, IPT_PLACE_H);
 }
@@ -447,7 +442,7 @@ static void init_console() {
     jipt_top = 0;
     jipt_buf[jipt_top] = L'\0';
 
-    // 以深色填充屏幕
+    /* 以深色填充屏幕 */
     clear(255);
         
     /* 打印输入法分割线，其实可以使用line()绘制 */
@@ -474,13 +469,11 @@ static void welcome() {
  * 打印测试信息的函数，我觉得可以把其中的格式化打印独立出来
  */
 static void testinfo() {
-    wchar_t buf[100];
+    wchar_t buf[128];
     swprintf(
         buf, sizeof(buf), 
         L"一行的比特数：%d\n英文字符的宽度：%d\n即时输入缓冲区的长度：%d\n", 
-        ONE_LINE_BITS, 
-        CHAR_WIDTH_EN, 
-        ONE_LINE_CHAR_EN
+        ONE_LINE_BITS,  CHAR_WIDTH_EN,  ONE_LINE_CHAR_EN
     );
     printtovga(buf);
 }
@@ -497,14 +490,12 @@ static void testinfo() {
  * TF卡读取
  *
  */
-static void     core1_main()
+static void core1_main()
 {
-        // ？？？像是整数型
-        // 硬盘描述符！！
+        /* 硬盘描述符！  */
         //disc_descr_t discs[DISC_NUM_DRIVES] = {0};
 
-        printf("Core 1 started\n");
-        // 硬盘初始化！
+        /* 硬盘初始化！ */
         //disc_setup(discs);
 
         /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
@@ -516,14 +507,11 @@ static void     core1_main()
          * 初始化视频，应该在本项目里。这里可能
          * 有DMA和中断请求相关的配置
          *
-         * 这个函数会以单缓冲区设置DMA，只需要在这里魔改
-         * 即可
+         * 这个函数会以单缓冲区设置DMA，只需要在这里魔改即可
          */
         video_init((uint32_t *)video_ram);
         
         init_console();
-
-        printf("Bb2 now running.\n");
 
 
         /* 打印欢迎语 */
@@ -617,40 +605,31 @@ static void     core1_main()
         }
 }
 
-/*
- *
- * 项目主函数，入口
- *
- * 初始化io，核1主函数
- * usb，
- *
- * 维护usb与led
- *
- */
+/* 项目主函数入口， 初始化io、核1主函数  */
 int     main()
 {
-        // 设置时钟频率，第二个实参
-        // 表示当频率达不到要求时的行为，true
-        // 代表失败时进行断言终止，false
-        // 代表失败时保持当前状态并且返回false
+        /* 设置时钟频率，第二个实参
+         * 表示当频率达不到要求时的行为，true
+         * 代表失败时进行断言终止，false
+         * 代表失败时保持当前状态并且返回false  */
         set_sys_clock_khz(250*1000, true);
 
-        // 一次性初始化所有可用的标准输入输出接口，包括
-        // 1.USB虚拟串口。2.UART硬件串口。3.其他。
+        /* 一次性初始化所有可用的标准输入输出接口，包括
+         * 1.USB虚拟串口。2.UART硬件串口。3.其他。  */
 	stdio_init_all();
 
-        // (这是一个用户自定义的初始化函数)
+        /* (这是一个用户自定义的初始化函数) */
         io_init();
 
-        // 启动核1
+        /*  启动核1  */
         multicore_launch_core1(core1_main);
 
-	printf("Starting, init usb\n");
-        // TinyUSB 库提供的初始化函数，用于配置树莓派 Pico 的 
-        // USB 功能（如 USB 串口、HID 设备、MSC 存储设备等）
+        /* TinyUSB 库提供的初始化函数，用于配置树莓派 Pico 的 
+         * USB 功能（如 USB 串口、HID 设备、MSC 存储设备等） */
         tusb_init();
 
-        /* This happens on core 0: */
+        /* This happens on core 0:
+	 * 这些发生在核0： 维护usb与led  */
 	while (true) {
 
                 //TinyUSB 库中用于 USB 主机模式（USB Host） 的核心任务处理函数。与
