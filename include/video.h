@@ -51,24 +51,13 @@
                                          */
 #define IPT_PLACE_H     (ONE_COL - IPT_H)
 
-/* 初始化PIO和DMA */
-void    video_init(uint32_t *framebuffer);
-
-
-/* 绘制一个点（bpp=1） */
-void p1(int x, int y, int clr);
-/* 屏幕向上移动，并且填充空出来的部分白色
- * 需要传入移动的高度、填充的字节以及底部例外的高度
- */
-void up1(size_t h, uint8_t a, uint8_t exh);
-/* 以一个值覆盖所有字节 */
-void clear(uint8_t a);
-/* 绘制一条线 */
-void line(int x0, int y0, int x1, int y1, int color);
-/* 绘制矩形 */
-void rectangle(int x1, int y1, int x2, int y2, int filled, int color);
-/* 绘制文字，需要输入打印字符的长宽 */
-void drawvfont(int x, int y, wchar_t z, int target_width, int target_height, int color);
-/* 清空屏幕，需要传入每个字节的值 */
+void video_init(uint32_t *framebuffer);		/* 初始化PIO和DMA */
+void p1(int x, int y, int clr);			/* 绘制一个点（bpp=1） */
+void up1(size_t h, uint8_t a, uint8_t exh);	/* 屏幕向上移动，并且填充空出来的部分白色， 需要传入移动的高度、填充的字节以及底部例外的高度  */
+void clear(uint8_t a);				/* 以一个值覆盖所有字节 */
+void line(int x0, int y0, int x1, int y1, int color);	/* 绘制一条线 */
+void rectangle(int x1, int y1, int x2, int y2, int filled, int color);	/* 绘制矩形 */
+void drawvfont(int x, int y, wchar_t z, int target_width, int target_height, int color);	/* 绘制文字，需要输入打印字符的长宽 */
+/* TODO: 清空屏幕，需要传入每个字节的值，直接调用rectangle() */
 
 #endif
