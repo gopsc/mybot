@@ -521,64 +521,52 @@ static void core1_main()
         testinfo();
 
         
-        uint16_t k;
+        uint16_t k;			/* 存储每一次读到的键位本体 */
         wchar_t *p = jipt_buf;          /* 指向即时输入缓冲文字区的指针 */
         int jipt_x = -CHAR_WIDTH_EN;    /* 即时输入缓冲区的游标 */
-        int flag = 0;   /* 已经进行了拼音映射否 */
-        wchar_t *pym;   /*  拼音映射结果 */
+        int flag = 0;                   /* 已经进行了拼音映射否 */
+        wchar_t *pym;                   /*  拼音映射结果 */
 
         /* 周期性处理 */
         while (true) {
 
-            /* 如果按键事件缓冲区不为空，则读出数据 */
-            if (!kbd_queue_empty() && (k = kbd_queue_pop())) {
+	    /* 有输入事件就读取 */
+            if (!kbd_queue_empty() && (k = kbd_queue_pop())) {	
               
               /* 匹配按下 */
               if (k < 256 ) {
-                
-                /* 只接受字母，且缓冲区有空 */
-                if (is_letter(k) && jipt_top < ONE_LINE_CHAR_EN - 1) {
+                /* ---------------- */
+                if (is_letter(k)) {
+                  if (jipt_top < ONE_LINE_CHAR_EN - 1) {	/* 缓冲区有空才执行入栈 */
 
                     /* FLAG：是否已经进行了拼音匹配
                      * 一旦有新的键盘事件就赋值为0。 */
                     flag = 0;
-
-                    /* 字符进入缓冲区 */
-                    *(p++) = (wchar_t)k;
-
-                    /* 放置终止符号 */
-                    *p = L'\0';
-
-                    /* 栈顶指针自增 */
-                    jipt_top++;
-
-                    /* 横轴坐标自增 */
-                    jipt_x+=CHAR_WIDTH_EN;
-
-                    /* 打印新的字符 */
-                    printvgaat(p - 1, jipt_x, JIPT_H);
-
+                    *(p++) = (wchar_t)k;	/* 字符进入缓冲区 */
+                    *p = L'\0';	/* 放置终止符号 */
+                    jipt_top++;	/* 栈顶指针自增 */
+                    jipt_x += CHAR_WIDTH_EN;	/* 横轴坐标自增 */
+                    printvgaat(p - 1, jipt_x, JIPT_H);	/* 打印新的字符 */
+                 }
               }
-              
+              /* ---------------- */
               /* 匹配删减模式 */
-              else if (k == L'\b' && jipt_top > 0) {
-              
-                /* 重新进行匹配 */
-                flag = 0;
-                
-                /* 放置终止符号 */
-                *(--p) = L'\0';
-
-                /* 栈顶指针自减 */
-                jipt_top--;
-
-                /* 清除屏幕字符图案 */
-                rectangle(jipt_x, JIPT_H, jipt_x + CHAR_WIDTH_EN - 1, JIPT_H + CHAR_HEIGHT - 1, 1, 1); /* 包含原点所以减一 */
-
-                /* 横轴坐标自减 */
-                jipt_x-=CHAR_WIDTH_EN;
+              else if (k == L'\b') {
+		if (jipt_top > 0) {
+                  flag = 0;		/* 重新进行拼音匹配 */
+                  *(--p) = L'\0';	/* 放置终止符号 */
+                  jipt_top--;		/* 栈顶指针自减 */
+                						
+		  int jipt_px0 = jipt_x;			/* position x0 */
+		  int jipt_py0 = JIPT_H;			/* position y0 */
+		  int jipt_px1 = jipt_x + CHAR_WIDTH_EN - 1;	/* position x1 包含原点所以减一 */
+		  int jipt_py1 = JIPT_H + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
+                  rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
+                  jipt_x -= CHAR_WIDTH_EN;			/* 横轴坐标自减 */
+		}
               }
 
+              /* ---------------- */
               /* 匹配选择模式 */
               // else if (is_digit(k) && wcscmp(L"", pym)) {
               // ... 
@@ -592,15 +580,20 @@ static void core1_main()
               }
             }
             
-            else if (!flag) {
+	    if (!flag) {
+
               flag = 1; /* 已经匹配 
                           可以利用flag进行字符串分段 */
               
               pym = py_ime(jipt_buf);
               
-              /* 清除屏幕拼音结果字符 */
-              rectangle(0, PY_LELECT_H, ONE_LINE_BITS - 1, PY_LELECT_H + CHAR_HEIGHT - 1, 1, 1); /* 包含原点所以减一 */
+	      int jipt_px0 = 0;
+	      int jipt_py0 = PY_LELECT_H;
+	      int jipt_px1 = ONE_LINE_BITS - 1;
+	      int jipt_py1 = PY_LELECT_H; + CHAR_HEIGHT - 1;
+              rectangle(jipt_px0, jipt_py0, jipt_px1, jipt_py1, 1, 1);	/* 清除屏幕拼音结果字符 */
               printvgaat(pym, 0, PY_LELECT_H);
+
             }
         }
 }
@@ -632,15 +625,15 @@ int     main()
 	 * 这些发生在核0： 维护usb与led  */
 	while (true) {
 
-                //TinyUSB 库中用于 USB 主机模式（USB Host） 的核心任务处理函数。与
-                // tud_task()（用于 USB 设备模式）不同，tuh_task() 负责处理作为
-                // USB 主机时的所有 USB 事件（如设备插入 / 拔出、数据传输等）。
+                /* TinyUSB 库中用于 USB 主机模式（USB Host） 的核心任务处理函数。与
+                 * tud_task()（用于 USB 设备模式）不同，tuh_task() 负责处理作为
+                 * USB 主机时的所有 USB 事件（如设备插入 / 拔出、数据传输等）。  */
                 tuh_task();
 
-                // 用户自定义函数，处理HID设备
+                /*  用户自定义函数，处理HID设备  */
                 hid_app_task();
 
-                // 用户自定义函数，周期性处理led
+                /*  用户自定义函数，周期性处理led  */
                 poll_led_etc();
 
 	}
