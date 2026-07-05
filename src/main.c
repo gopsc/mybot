@@ -383,30 +383,16 @@ static int get_dx(wchar_t wc) {
  */
 void _printtovga(wchar_t *wstr, int con_height) {
   while (*wstr != L'\0') {
-
-    /* 遍历宽字符 */
-    wchar_t wc = *(wstr++);
-
-    /* 根据字符类型判断移动 */
-    int dx = get_dx(wc);
-    
-    /* xx越界换行 */
-    while (fb_cursor_x + dx >= ONE_LINE_BITS) { 
+    wchar_t wc = *(wstr++);					/* 遍历宽字符 */
+    int dx = get_dx(wc);					/* 根据字符类型判断移动 */
+    while (fb_cursor_x + dx >= ONE_LINE_BITS) {			/* xx越界换行 */
       change_line(CHAR_HEIGHT, &fb_cursor_x, &fb_cursor_y);
     }
-    
-    /* yy越界滚动 */
-    while (fb_cursor_y + CHAR_HEIGHT >= con_height) {
-      fb_cursor_y -= lines_roll(fb_cursor_y, IPT_H, 255);// 屏幕上移至1个字符高;
+    while (fb_cursor_y + CHAR_HEIGHT >= con_height) {		/* yy越界滚动 */
+      fb_cursor_y -= lines_roll(fb_cursor_y, IPT_H, 255);	/* 屏幕上移至1个字符高; */
     }
-  
     /* 打印至vga屏幕上面 */
-    print_vga(wc, 
-        &fb_cursor_x, &fb_cursor_y,
-        CHAR_WIDTH_CN, CHAR_HEIGHT,
-        dx, 0
-    );
-
+    print_vga(wc,  &fb_cursor_x, &fb_cursor_y, CHAR_WIDTH_CN, CHAR_HEIGHT, dx, 0);
   }
 }
 
@@ -437,17 +423,10 @@ void printtovga(wchar_t *wstr) {
  * 我想将其移动到一个新的文件中
  */
 static void init_console() {
-
-    /* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
-    jipt_top = 0;
+    jipt_top = 0;				/* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
     jipt_buf[jipt_top] = L'\0';
-
-    /* 以深色填充屏幕 */
-    clear(255);
-        
-    /* 打印输入法分割线，其实可以使用line()绘制 */
-    printvgaat(L"- - - - - -", 0, IPT_PLACE_H);
-
+    clear(255);					/* 以深色填充屏幕 */
+    printvgaat(L"- - - - - -", 0, IPT_PLACE_H);	/* 打印输入法分割线，其实可以使用line()绘制 */
 }
 
 
@@ -464,9 +443,7 @@ static void welcome() {
     printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
 }
 
-/*
- * 打印测试信息的函数，我觉得可以把其中的格式化打印独立出来
- */
+/* 打印测试信息的函数，我觉得可以把其中的格式化打印独立出来 */
 static void testinfo() {
     wchar_t buf[128];
     swprintf(
