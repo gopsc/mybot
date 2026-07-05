@@ -353,7 +353,7 @@ int lines_roll(int y, int ipt_h, int a) {
  */
 void print_vga(wchar_t wc, int *px, int *py, int target_w, int target_h, int dx, int color) {
     
-    if (wc == L'\n' || wc == L'\r') {
+    if (wc == L'\n' || wc == L'\r') {	/* TODO: 这两个字符有什么不同吗？ */
       change_line(target_h, px, py);
     }
     else {
@@ -456,7 +456,6 @@ static void init_console() {
 
 /* 用于在VGA屏幕上打印欢迎语句 */
 static void welcome() {
-    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
     printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
     printtovga(L"我们的项目地址是：");
     printtovga(L"https://gitcode.com/qingss0/pico-vga\n");
@@ -476,6 +475,7 @@ static void testinfo() {
         ONE_LINE_BITS,  CHAR_WIDTH_EN,  ONE_LINE_CHAR_EN
     );
     printtovga(buf);
+    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -582,10 +582,8 @@ static void core1_main()
             
 	    if (!flag) {
 
-              flag = 1; /* 已经匹配 
-                          可以利用flag进行字符串分段 */
-              
-              pym = py_ime(jipt_buf);
+              pym = py_ime(jipt_buf);	/* 进行拼音匹配 */
+              flag = 1;			/* 已经匹配  可以利用flag进行字符串分段 */
               
 	      int jipt_px0 = 0;
 	      int jipt_py0 = PY_LELECT_H;
