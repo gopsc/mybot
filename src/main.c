@@ -439,8 +439,7 @@ static void welcome() {
     printtovga(L"我们的项目地址是：");
     printtovga(L"https://gitcode.com/qingss0/pico-vga\n");
     printtovga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
-    printtovga(L"————：qing，2025年8月26日\n");
-    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
+    printtovga(L"————：qing，2025年8月26日\n\n");
 }
 
 /* 打印测试信息的函数，我觉得可以把其中的格式化打印独立出来 */
@@ -452,17 +451,20 @@ static void testinfo() {
         ONE_LINE_BITS,  CHAR_WIDTH_EN,  ONE_LINE_CHAR_EN
     );
     printtovga(buf);
-    printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
+    printtovga(L"\n");
 }
 
+#define SIZE_ONE_PAGE 6
 /* 终端事件循环 */
 static void loop_console() {
         
         uint16_t k;			/* 存储每一次读到的键位本体 */
         wchar_t *p = jipt_buf;          /* 指向即时输入缓冲文字区的指针 */
         int jipt_x = -CHAR_WIDTH_EN;    /* 即时输入缓冲区的游标 */
-        int flag = 0;                   /* 已经进行了拼音映射否 */
-        wchar_t *pym;                   /*  拼音映射结果 */
+        int flag_py = 0;                /* 已经进行了拼音映射否 */
+	int flag_pg = 0;		/* 当前的输入法页数 */
+	int flag_pge = 0;		/* 是否到达了最终页 */
+        wchar_t *pym;                   /* 拼音映射结果 */
 
         /* 周期性处理 */
         while (true) {
@@ -478,7 +480,8 @@ static void loop_console() {
 
                     /* FLAG：是否已经进行了拼音匹配
                      * 一旦有新的键盘事件就赋值为0。 */
-                    flag = 0;
+                    flag_py = 0;
+		    flag_pg = 0;
                     *(p++) = (wchar_t)k;	/* 字符进入缓冲区 */
                     *p = L'\0';	/* 放置终止符号 */
                     jipt_top++;	/* 栈顶指针自增 */
@@ -490,7 +493,8 @@ static void loop_console() {
               /* 匹配删减模式 */
               else if (k == L'\b') {
 		if (jipt_top > 0) {
-                  flag = 0;		/* 重新进行拼音匹配 */
+                  flag_py = 0;		/* 重新进行拼音匹配 */
+		  flag_pg = 0;
                   *(--p) = L'\0';	/* 放置终止符号 */
                   jipt_top--;		/* 栈顶指针自减 */
                 						
@@ -502,6 +506,20 @@ static void loop_console() {
                   jipt_x -= CHAR_WIDTH_EN;			/* 横轴坐标自减 */
 		}
               }
+              /* ---------------- */
+	      else if (k == L'=') {	/* + */
+	      	if (!flag_pge) {
+			flag_py = 0;
+			flag_pg++;
+		}
+	      }
+
+		else if  (k == L'-') {
+			if (flag_pg) {
+				flag_py= 0;
+				flag_pg--;
+			}
+		}
 
               /* ---------------- */
               /* 匹配选择模式 */
@@ -509,7 +527,7 @@ static void loop_console() {
               // ... 
               //   jipt_top = 0;
               //   jipt_buf[jipt_top] = L'\0';
-              //   flag =0;
+              //   flag_py =0;
               //}
 
               /* 匹配直接输入模式 */
@@ -517,18 +535,31 @@ static void loop_console() {
               }
             }
             
-	    if (!flag) {
+	    else if (!flag_py) {
 
               pym = py_ime(jipt_buf);	/* 进行拼音匹配 */
-              flag = 1;			/* 已经匹配  可以利用flag进行字符串分段 */
+              flag_py = 1;		/* 已经匹配  可以利用flag进行字符串分段 */
               
 	      int jipt_px0 = 0;
 	      int jipt_py0 = PY_LELECT_H;
 	      int jipt_px1 = ONE_LINE_BITS - 1;
-	      int jipt_py1 = PY_LELECT_H; + CHAR_HEIGHT - 1;
+	      int jipt_py1 = PY_LELECT_H + CHAR_HEIGHT - 1;
               rectangle(jipt_px0, jipt_py0, jipt_px1, jipt_py1, 1, 1);	/* 清除屏幕拼音结果字符 */
-              printvgaat(pym, 0, PY_LELECT_H);
 
+	      int jipt_po = 0;
+	      int start = flag_pg * SIZE_ONE_PAGE;
+	      int count = 0;
+	      size_t top = wcslen(pym);
+	      while (start + count < top && count < SIZE_ONE_PAGE) {
+		      wchar_t buf0[] = {L'0' + count + 1,   L'\0'}; printvgaat(buf0, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_EN;
+		      wchar_t buf1[] = {L'.',		    L'\0'}; printvgaat(buf1, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_EN;
+		      wchar_t buf2[] = {pym[start + count], L'\0'}; printvgaat(buf2, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_CN;
+														jipt_po += CHAR_WIDTH_EN;	/* 间隔 */
+		      count ++;
+	      }
+	      if(!(count + start < top))
+		      flag_pge = 1;
+	      else flag_pge = 0;
             }
         }
 
