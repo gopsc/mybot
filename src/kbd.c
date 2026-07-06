@@ -60,10 +60,9 @@ uint16_t        kbd_queue_pop()
         return v;
 }
 
-/* 无论如何，保留这一抽象层 */
+/* TODO: 无论如何，保留这一抽象层 */
 static const uint8_t hid_to_mac[256] = {
         [HID_KEY_NONE] = 0,
-        //[HID_KEY_A] = 255, // Hack for MKC_A,
         [HID_KEY_A] = 'a',
         [HID_KEY_B] = 'b',
         [HID_KEY_C] = 'c',
@@ -101,10 +100,12 @@ static const uint8_t hid_to_mac[256] = {
         [HID_KEY_9] = '9',
         [HID_KEY_0] = '0',
         [HID_KEY_ENTER] = '\r',
-        //[HID_KEY_ESCAPE] = MKC_Escape,
         [HID_KEY_BACKSPACE] = '\b',
         [HID_KEY_TAB] = '\t',
         [HID_KEY_SPACE] = ' ',
+        [HID_KEY_COMMA] = ',',
+        //[HID_KEY_A] = 255, // Hack for MKC_A,
+        //[HID_KEY_ESCAPE] = MKC_Escape,
         //[HID_KEY_MINUS] = MKC_Minus,
         //[HID_KEY_EQUAL] = MKC_Equal,
         //[HID_KEY_BRACKET_LEFT] = MKC_LeftBracket,
@@ -113,7 +114,6 @@ static const uint8_t hid_to_mac[256] = {
         //[HID_KEY_SEMICOLON] = MKC_SemiColon,
         //[HID_KEY_APOSTROPHE] = MKC_SingleQuote,
         //[HID_KEY_GRAVE] = MKC_Grave,
-        [HID_KEY_COMMA] = ',',
         //[HID_KEY_PERIOD] = MKC_Period,
         //[HID_KEY_SLASH] = MKC_Slash,
         //[HID_KEY_CAPS_LOCK] = MKC_CapsLock,

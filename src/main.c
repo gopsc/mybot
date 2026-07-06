@@ -455,48 +455,8 @@ static void testinfo() {
     printtovga(L"- - - - - - - - - - - - - - - - - - -\n");
 }
 
-/////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////
-
-/*
- *
- * 核1主函数
- *
- * 视频、中断处理、DMA设置
- *
- * TF卡读取
- *
- */
-static void core1_main()
-{
-        /* 硬盘描述符！  */
-        //disc_descr_t discs[DISC_NUM_DRIVES] = {0};
-
-        /* 硬盘初始化！ */
-        //disc_setup(discs);
-
-        /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
-         * core 0's USB activity.
-         *
-         * IRQs：中断请求
-         * 视频跑在核1，中断请求和DMA不受核0的usb活动影响
-         *
-         * 初始化视频，应该在本项目里。这里可能
-         * 有DMA和中断请求相关的配置
-         *
-         * 这个函数会以单缓冲区设置DMA，只需要在这里魔改即可
-         */
-        video_init((uint32_t *)video_ram);
-        
-        init_console();
-
-
-        /* 打印欢迎语 */
-        welcome();
-        
-        /* 打印测试信息 */
-        testinfo();
-
+/* 终端事件循环 */
+static void loop_console() {
         
         uint16_t k;			/* 存储每一次读到的键位本体 */
         wchar_t *p = jipt_buf;          /* 指向即时输入缓冲文字区的指针 */
@@ -571,6 +531,47 @@ static void core1_main()
 
             }
         }
+
+}
+/////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////
+
+/*
+ *
+ * 核1主函数
+ *
+ * 视频、中断处理、DMA设置
+ *
+ * TF卡读取
+ *
+ */
+static void core1_main()
+{
+        /* 硬盘描述符！  */
+        //disc_descr_t discs[DISC_NUM_DRIVES] = {0};
+
+        /* 硬盘初始化！ */
+        //disc_setup(discs);
+
+        /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
+         * core 0's USB activity.
+         *
+         * IRQs：中断请求
+         * 视频跑在核1，中断请求和DMA不受核0的usb活动影响
+         *
+         * 初始化视频，应该在本项目里。这里可能
+         * 有DMA和中断请求相关的配置
+         *
+         * 这个函数会以单缓冲区设置DMA，只需要在这里魔改即可
+         */
+        video_init((uint32_t *)video_ram);
+        
+        init_console();
+
+        welcome();
+        testinfo();
+
+	loop_console();
 }
 
 /* 项目主函数入口， 初始化io、核1主函数  */
