@@ -464,6 +464,7 @@ static void loop_console() {
         int flag_py = 0;                /* 已经进行了拼音映射否 */
 	int flag_pg = 0;		/* 当前的输入法页数 */
 	int flag_pge = 0;		/* 是否到达了最终页 */
+	int flag_pg_keep = 0;		/* 是否处于输入法激活状态 */
         wchar_t *pym;                   /* 拼音映射结果 */
 
         /* 周期性处理 */
@@ -482,9 +483,11 @@ static void loop_console() {
                      * 一旦有新的键盘事件就赋值为0。 */
                     flag_py = 0;
 		    flag_pg = 0;
-                    *(p++) = (wchar_t)k;	/* 字符进入缓冲区 */
-                    *p = L'\0';	/* 放置终止符号 */
-                    jipt_top++;	/* 栈顶指针自增 */
+		    flag_pge = 0;
+		    flag_pg_keep = 0;
+
+                    jipt_buf[jipt_top++] = (wchar_t)k;	/* 字符进入缓冲区 */
+                    jipt_buf[jipt_top] = L'\0';	/* 放置终止符号 */
                     jipt_x += CHAR_WIDTH_EN;	/* 横轴坐标自增 */
                     printvgaat(p - 1, jipt_x, JIPT_H);	/* 打印新的字符 */
                  }
@@ -495,6 +498,9 @@ static void loop_console() {
 		if (jipt_top > 0) {
                   flag_py = 0;		/* 重新进行拼音匹配 */
 		  flag_pg = 0;
+		  flag_pge = 0;
+		  flag_pg_keep = 0;
+
                   *(--p) = L'\0';	/* 放置终止符号 */
                   jipt_top--;		/* 栈顶指针自减 */
                 						
@@ -523,12 +529,26 @@ static void loop_console() {
 
               /* ---------------- */
               /* 匹配选择模式 */
-              // else if (is_digit(k) && wcscmp(L"", pym)) {
-              // ... 
-              //   jipt_top = 0;
-              //   jipt_buf[jipt_top] = L'\0';
-              //   flag_py =0;
-              //}
+               else if (is_digit(k) && flag_pg_keep) {
+
+		 int idx = flag_pg * SIZE_ONE_PAGE + k - L'0';
+		 wchar_t buf[] = {pym[idx], L'\0'};
+		 printtovga(buf);
+                 jipt_buf[0] = L'\0';
+		 jipt_top = 1;
+		 jipt_x = 0;
+
+		 int jipt_px0 = jipt_x;			/* position x0 */
+		 int jipt_py0 = JIPT_H;			/* position y0 */
+		 int jipt_px1 = ONE_LINE_BITS - 1;	/* position x1 包含原点所以减一 */
+		 int jipt_py1 = JIPT_H + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
+                 rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
+		 
+                 flag_py = 0;
+		 flag_pg = 0;
+		 flag_pge = 0;
+		 flag_pg_keep = 0;
+              }
 
               /* 匹配直接输入模式 */
               // else if (is_digit(k)) {}
@@ -556,6 +576,7 @@ static void loop_console() {
 		      wchar_t buf2[] = {pym[start + count], L'\0'}; printvgaat(buf2, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_CN;
 														jipt_po += CHAR_WIDTH_EN;	/* 间隔 */
 		      count ++;
+		      flag_pg_keep = 1;
 	      }
 	      if(!(count + start < top))
 		      flag_pge = 1;
