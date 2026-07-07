@@ -196,6 +196,7 @@ static void next() {
         src++;
         token = Equal;
       }
+      else {token = Assign;}
       return;
     }
     else if (token == L'!') { // 解析 '!='
@@ -237,7 +238,7 @@ static void next() {
         token == L'(' || token == L')' || token == L'{' || token == L'}' ||  token == L'[' || token == L']') {
         return;
     }
-    else if (token == L' ' || token == L'\t') {        }
+    else if (token == L' ' || token == L'\t') {        }	/* 跳过空格、制表符 */
     else {
         wprintf(L"unexpected token: %d\n", token);
     }
@@ -263,7 +264,7 @@ static void match(int tk) {
     }
     next(); /* 检查下一个标记 */
   }
-  else { /* 直接让程序死亡，似乎不妥 */
+  else { /* 直接让程序死亡，在单片机上似乎不妥 */
     wprintf(L"line %.*ls:expected token: %d\n", (int)(src - old_src), old_src,  tk);
     //exit(-1);
     clearThis(); /* 退出前先检查是否是堆内存类型，可能会出现意外情况 */
@@ -311,6 +312,12 @@ static double factor() {
       temp = ptr->pointer.list[index].value;
     }
     match(L']');
+  }
+  else if (token == FuncSym) {	/* 处理函数调用 */
+      temp = function();
+  }
+  else {
+      printf("Unknow token: %d.\n", token);
   }
   return temp;
 }
@@ -467,9 +474,12 @@ static double statement() {
             else skipStatments();
         }while (boolresult);
     }
+
+
+    /* ---- 给变量赋值 ---- */
     else if (token == Sym || token == ArraySym) {
         symbol* s = token_val.ptr;
-        clearThis();  
+        //clearThis();  	/* 不知为何需要注释了才能跑 */
         int tktype = token;
         int index;
         match(tktype);
@@ -477,13 +487,14 @@ static double statement() {
             match(L'[');
             index = expression();
             match(L']');
-            match(L'=');
+            match(Assign);
             if (index >= 0 && index < s->value) {
                 s->pointer.list[index].value = expression();
             }
+	    /* TODO: 越界异常 */
         }
         else {
-            match(L'=');
+            match(Assign);
             if (token == Str) { /* 在这里加入字符串拼接的表达式？ */
                 s->pointer.funcp = (wchar_t*)token_val.ptr;
                 s->type = Str;
@@ -596,8 +607,10 @@ static double function() {
     return return_val;
 }
 /*----------------------------------------------------------------*/
-
-int try()
+#include "fcntl.h"
+#include "unistd.h"
+#include "locale.h"
+int main(int argc, char **argv)
 {
     /* 将所有字段赋值为0 */
     memset(symtab, 0, sizeof(symtab));
@@ -614,9 +627,29 @@ int try()
     }
 
     src[0] = 0; // add EOF character
-    wcscpy(src, L"ab = 1;\nccd = \"123\"; \nwhile(ab < 10) {\nab = ab + 1;\nputs(ccd);\n}\n");
+    //wcscpy(src, L"ab = 1;\nccd = \"123\"; \nwhile(ab < 10) {\nab = ab + 1;\nputs(ccd);\n}\n");
+
+
+
+    setlocale(LC_ALL, "");
+    wchar_t wc;
+    i = 0;
+    FILE *file = fopen("t.try", "r");
+    if (!file) {
+        perror("fopen");
+        return 1;
+    }
+
+    while ((wc = fgetwc(file)) != WEOF) {
+        src[i++] = wc;
+    }
+
+
+    src[i] = 0; // add EOF character
+    fclose(file);
+
+
     next();
-    
     while (!setjmp(mainEnv) && token != 0) {
         statement();
     }
