@@ -68,7 +68,7 @@ static union tokenValue token_val;
 /*--------------- 函数声明 ---------------*/
 static double function();
 static double statement();
-static int boolOR();
+static int boolOR();	/* 用于辅助IF和WHILE词元 */
 static int boolAND();
 static int boolexp();
 static double expression();
@@ -77,6 +77,7 @@ static double term();
 static void match(int tk);
 static void next();
 /////
+static void clear();
 static void clearThis();	/* 20260707(qing): 增加一个clearThis()函数，用于释放变量 */
 /* -------------------  词法分析  -------------------*/
 
@@ -264,6 +265,13 @@ static void next() {
   }
 }
 
+static void clear() {
+	for (int i=0; i<symPointer; i++) {
+		token_val.ptr = &symtab[i];
+		clearThis();
+	}
+}
+
 /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
 static void clearThis() {      
   if (token_val.ptr->type == Str && token_val.ptr->pointer.funcp)
@@ -357,7 +365,6 @@ static double expression() {
 }
 
 
-
 static int boolexp() {
     if (token == L'(') {
         match(L'(');
@@ -432,6 +439,7 @@ static int boolOR() {
     return val;
 }
 
+
 static void skipStatments() {
     if(token == L'{')
         token = *src++;
@@ -444,7 +452,7 @@ static void skipStatments() {
     match(L'}');
 }
 
-
+/* 解析一个句子 */
 static double statement() {
     if (token == L'{') {
         match(L'{');
@@ -673,6 +681,7 @@ int main(int argc, char **argv)
         statement();
     }
 
+    clear();
     free(p_src);
     return 0;
 }
