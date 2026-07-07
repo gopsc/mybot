@@ -22,8 +22,8 @@
 #define MAXNAMESIZE 16        /* 变量/函数名称的长度 */
 #define RETURNFLAG DBL_MAX    /* 表明函数中已经出现return语句 */
 
-/* 该结构体表示存储在符号表中的一个符号 */
-typedef struct symStruct {
+
+typedef struct symStruct {	/* 该结构体表示存储在符号表中的一个符号 */
   int type;                   /* 符号的类型：Num, Char, Str, Array, Func */
   wchar_t name[MAXNAMESIZE];  /* 记录符号名称 */
   double value;               /* 记录符号的值，或者字符串或数组的长度 */
@@ -39,19 +39,16 @@ static int currentlevel = 0;   /* 当前嵌套层级 */
 
 static wchar_t *src, *old_src; /* 当前正处理的文本 */
 
-/* 解释器状态枚举
- *
- * 20250827(qing): 使用int直接接受匿名枚举我第一次见
- */
-enum {
+
+enum {				/* 解释器状态枚举 （使用int直接接受匿名枚举） */
   debug, run
 };
 static int compileState = run; /* 当前解释器状态 */
 
 static double return_val = 0;  /* 用于保存函数的返回值 */
 
-/* 标记和类别（运算符放最后并按优先级排序） */
-enum {
+
+enum {		/* 标记和类别（运算符放最后并按优先级排序） */
   Num = 128, Char, Str, Array, Func,
   Else, If, Return, While, Print, Puts, Read,
   Assign, OR, AND, Equal, Sym, FuncSym, ArraySym, Void,
@@ -77,7 +74,7 @@ static double term();
 static void match(int tk);
 static void next();
 /////
-static void clear();
+static void clear(int level);
 static void clearThis();	/* 20260707(qing): 增加一个clearThis()函数，用于释放变量 */
 /* -------------------  词法分析  -------------------*/
 
@@ -265,15 +262,18 @@ static void next() {
   }
 }
 
-static void clear() {
-	for (int i=0; i<symPointer; i++) {
+static void clear(int level) {
+	for (int i=symPointer-1; i>=0; i--) {
 		token_val.ptr = &symtab[i];
-		clearThis();
+		if ( token_val.ptr->levelNum >= level ) {
+			clearThis();
+		}
 	}
 }
 
 /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
-static void clearThis() {      
+static void clearThis() {
+  printf("Clear a sym: %s\n", token_val.ptr->name);
   if (token_val.ptr->type == Str && token_val.ptr->pointer.funcp)
     free(token_val.ptr->pointer.funcp);  
   else if (token_val.ptr->type == ArraySym && token_val.ptr->pointer.list)
@@ -681,7 +681,7 @@ int main(int argc, char **argv)
         statement();
     }
 
-    clear();
+    clear(0);
     free(p_src);
     return 0;
 }

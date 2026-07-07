@@ -13,7 +13,6 @@ func fun{
 # save the Fibonacci sequence of 1 to 15 in an array 
 array arr(15);	
 x = 0;
-puts("start");
 while(x<15){
 	arr[x] = fun(x) + 1000;
 	x = x + 1;
