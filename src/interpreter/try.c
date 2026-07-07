@@ -268,12 +268,13 @@ static void clear(int level) {
 		if ( token_val.ptr->levelNum >= level ) {
 			clearThis();
 		}
+		else { break; }
 	}
 }
 
 /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
 static void clearThis() {
-  printf("Clear a sym: %s\n", token_val.ptr->name);
+  printf("Clear a Symbol: %s\n", token_val.ptr->name);
   if (token_val.ptr->type == Str && token_val.ptr->pointer.funcp)
     free(token_val.ptr->pointer.funcp);  
   else if (token_val.ptr->type == ArraySym && token_val.ptr->pointer.list)
@@ -661,7 +662,7 @@ int main(int argc, char **argv)
     setlocale(LC_ALL, "");
     wchar_t wc;
     i = 0;
-    FILE *file = fopen("t.try", "r");
+    FILE *file = fopen(argv[1], "r");
     if (!file) {
         perror("fopen");
         return 1;

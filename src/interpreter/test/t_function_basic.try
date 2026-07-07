@@ -1,0 +1,6 @@
+func f_test{ 
+	return(0);
+};
+
+r = f_test();
+print(r);
