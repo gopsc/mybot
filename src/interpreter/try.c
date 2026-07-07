@@ -64,10 +64,6 @@ union tokenValue {
 } ;
 
 static union tokenValue token_val;
-/* ---------------- 跳转 ---------------- */
-
-/* 保存跳转状态的全局变量 */
-jmp_buf mainEnv;
 
 /*--------------- 函数声明 ---------------*/
 static double function();
@@ -81,36 +77,36 @@ static double term();
 static void match(int tk);
 static void next();
 /////
-static void clearThis();
+static void clearThis();	/* 20260707(qing): 增加一个clearThis()函数，用于释放变量 */
 /* -------------------  词法分析  -------------------*/
 
 /* 输入字符串的下一个标记 */
 static void next() {
   wchar_t *last_pos;
-  while(token = *src) {
+  while(token = *src) {	/* 逐字扫描 */
     ++src;
-    if (token == L'\n') {           /* 新的一行 */
-      if (compileState == debug)    /* 如果在调试模式，打印当前程序行 */
-        wprintf(L"%.*ls", (int)(src-old_src), old_src);
+    if (token == L'\n') {	/* 记录新行的起点 */
+      //if (compileState == debug) 
+      //  wprintf(L"%.*ls", (int)(src-old_src), old_src);
       old_src = src;
     }
-    else if (token == L'#') {       /* 跳过注释 */
+    else if (token == L'#') {	/* 跳过注释 */
       while(*src != 0 && *src != L'\n') {
         src++;
       }
     }
-    /* 20250827(qing): 修改以适应中文标记 */
+    /* ---- 检查到标识符 ---- */
     else if ((token >= L'a' && token <= L'z') || (token >= L'A' && token <= L'Z') || (token == L'_') || (token > 0x7F)) {
-      last_pos = src -1; /* 程序标识符 */
+      last_pos = src -1;	/* 程序标识符 */
       wchar_t nameBuffer[MAXNAMESIZE];
-      nameBuffer[0] = token;
+      nameBuffer[0] = token;	/* 扫描标识符 */
       while ((*src >= L'a' && *src <= L'z') || (*src >= L'A' && *src <= L'Z') || (*src >= L'0' && *src <= L'9') || (*src == L'_') || (*src > 0x7f)) {
         nameBuffer[src-last_pos] = *src;
         src++;
       }
-      nameBuffer[src-last_pos] = 0;   /* 获取标识符名 */
+      nameBuffer[src-last_pos] = 0;	/* 获取标识符名 */
       int i;
-      for (i=symPointer-1; i>=0; --i) { /* 在符号表中搜索符号 */
+      for (i=symPointer-1; i>=0; --i) {	/* 在符号表中搜索符号 */
         if (wcscmp(nameBuffer, symtab[i].name) == 0) {  /* 如果找到符号：根据符号类型返回标记 */
         
           if (symtab[i].type == Num || symtab[i].type == Char) {
@@ -134,10 +130,10 @@ static void next() {
               token = Sym;
               token_val.ptr = &symtab[i];
             }
-            // ？？？
-            else {
+            else {	// ？？？
               token = symtab[i].type;
-              token_val.ptr = NULL; /* 以防万一，为当前记号存储器赋个值！因为Array记号可能到这里来，它会在检查失败后检查释放 */
+              token_val.ptr = NULL; /* 以防万一，为当前记号存储器赋个值！
+				     * 因为Array记号可能到这里来，它会在检查失败后检查释放 */
             }
           }
           
@@ -167,20 +163,24 @@ static void next() {
       token = Num;
       return;
     }
-    else if (token == L'\'') {  /* 解析字符 */
+
+    /* 字符 */
+    else if (token == L'\'') {  
       token_val.val = *src++;
       token = Char;
       src++;
       return;
     }
-    else if (token == L'"') { /* 解析字符串 */
+
+    /* 字符串 */
+    else if (token == L'"') { 
       last_pos = src;
       int numCount = 0;
       while (*src != 0 && *src != token) {
         src ++;
         numCount ++;
       }
-      if (*src) { /* 解析出字符串就会创建动态内存，那么可能会有风险！ */
+      if (*src) { /* TODO: 解析出字符串就会创建动态内存，那么可能会有风险！ */
         *src = 0;
         token_val.ptr = malloc(sizeof(wchar_t) * (numCount + 1));
         *(wchar_t*)token_val.ptr = L'0';
@@ -191,7 +191,9 @@ static void next() {
       token = Str;
       return;
     }
-    else if (token == L'=') { // 解析 '==' 和 '='
+
+    /* == 和 = */
+    else if (token == L'=') { 
       if (*src == L'=') {
         src++;
         token = Equal;
@@ -199,46 +201,63 @@ static void next() {
       else {token = Assign;}
       return;
     }
-    else if (token == L'!') { // 解析 '!='
+
+    /* != */
+    else if (token == L'!') {
       if (*src == L'=') {
         src++;
         token = Nequal;
       }
       return;
     }
-    else if (token == L'<') { // 解析 '<=' 或 '<'
+
+    /* <= 或 < */
+    else if (token == L'<') {
       if (*src == L'=') {
         src ++;
         token = LessEqual;
       }
       return;
     }
-    else if (token == L'>') { // 解析 '>=' 或 '>'
+
+    /* >= 或 > */
+    else if (token == L'>') {
       if (*src == L'=') {
         src++;
         token = GreatEqual;
       }
       return;
     }
-    else if (token == L'|') { // '||'
+
+    /* || */
+    else if (token == L'|') {
       if (*src == L'|') {
         src++;
         token = OR;
       }
       return;
     }
-    else if (token == L'&') { // '&&'
+
+
+    /* && */
+    else if (token == L'&') {
       if ( *src == L'&') {
         src++;
         token=AND;
       }
       return;
     }
+
+    /* 保持以在别处解析 */
     else if ( token == L'*' || token == L'/'  || token == L';' || token == L',' || token == L'+' || token == L'-' ||
         token == L'(' || token == L')' || token == L'{' || token == L'}' ||  token == L'[' || token == L']') {
         return;
     }
-    else if (token == L' ' || token == L'\t') {        }	/* 跳过空格、制表符 */
+
+    /* 空格、制表符 */
+    else if (token == L' ' || token == L'\t') {       }
+
+    /* 不认识 */
     else {
         wprintf(L"unexpected token: %d\n", token);
     }
@@ -266,9 +285,8 @@ static void match(int tk) {
   }
   else { /* 直接让程序死亡，在单片机上似乎不妥 */
     wprintf(L"line %.*ls:expected token: %d\n", (int)(src - old_src), old_src,  tk);
-    //exit(-1);
-    clearThis(); /* 退出前先检查是否是堆内存类型，可能会出现意外情况 */
-    longjmp(mainEnv, 1);
+    exit(-1);
+    //clearThis(); 
   }
 }
 
@@ -479,7 +497,7 @@ static double statement() {
     /* ---- 给变量赋值 ---- */
     else if (token == Sym || token == ArraySym) {
         symbol* s = token_val.ptr;
-        //clearThis();  	/* 不知为何需要注释了才能跑 */
+        //clearThis(); 	/* 不知为何需要注释了才能跑 */
         int tktype = token;
         int index;
         match(tktype);
@@ -495,7 +513,7 @@ static double statement() {
         }
         else {
             match(Assign);
-            if (token == Str) { /* 在这里加入字符串拼接的表达式？ */
+            if (token == Str) { 
                 s->pointer.funcp = (wchar_t*)token_val.ptr;
                 s->type = Str;
                 match(Str);
@@ -515,7 +533,7 @@ static double statement() {
     else if (token == Array) {
         match(Array);
         symbol* s = token_val.ptr;
-        clearThis();
+        //clearThis();
         match(Sym);
         match(L'(');
         int length = (int)expression();
@@ -530,7 +548,7 @@ static double statement() {
     else if (token == Func) {
         match(Func);
         symbol* s = token_val.ptr;
-        clearThis();
+        //clearThis();
         s->type = FuncSym;
         match(Sym);
         s->pointer.funcp = src;
@@ -615,13 +633,14 @@ int main(int argc, char **argv)
     /* 将所有字段赋值为0 */
     memset(symtab, 0, sizeof(symtab));
     
-    int i;
+    int i;		/* 用于阅读定位 */
+    wchar_t *p_src;	/* 用于定位释放点 */
     src = L"array func else if return while print puts read";
     for (i = Array; i <= Read; ++i) {
         next();
         symtab[symPointer -1].type = i;
     }
-    if (!(src = old_src = (wchar_t*)malloc(POOLSIZE))) {
+    if (!(src = old_src = p_src = (wchar_t*)malloc(POOLSIZE))) {
         wprintf(L"could not malloc(%d) for source area\n", POOLSIZE);
         return -1;
     }
@@ -645,15 +664,16 @@ int main(int argc, char **argv)
     }
 
 
-    src[i] = 0; // add EOF character
+    src[i] = L'\0'; // add EOF character
     fclose(file);
 
 
     next();
-    while (!setjmp(mainEnv) && token != 0) {
+    while (token != L'\0') {
         statement();
     }
 
+    free(p_src);
     return 0;
 }
 
