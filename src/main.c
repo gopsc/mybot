@@ -426,7 +426,7 @@ static void init_console() {
     jipt_top = 0;				/* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
     jipt_buf[jipt_top] = L'\0';
     clear(255);					/* 以深色填充屏幕 */
-    printvgaat(L"- - - - - -", 0, IPT_PLACE_H);	/* 打印输入法分割线，其实可以使用line()绘制 */
+    printvgaat(L"----------------", 0, IPT_PLACE_H);	/* 打印输入法分割线，其实可以使用line()绘制 */
 }
 
 
@@ -435,11 +435,30 @@ static void init_console() {
 
 /* 用于在VGA屏幕上打印欢迎语句 */
 static void welcome() {
-    printtovga(L"你现在看到的是我的个人终端项目，本项目基于MIT协议并且完全免费。\n");
-    printtovga(L"我们的项目地址是：");
+    printtovga(L"我们的项目地址是：\n");
     printtovga(L"https://gitcode.com/qingss0/pico-vga\n");
-    printtovga(L"有任何问题非常欢迎提交issue，我们会尽快解答。\n");
     printtovga(L"————：qing，2025年8月26日\n\n");
+}
+
+/* 打印出键盘信息 */
+static void kbdinfo() {
+    printtovga(L"+--------第一层---------+\n");
+    printtovga(L"| 0 | 1 | 2 | 3 | 4 | 5 |\n");
+    printtovga(L"| 6 | 7 | 8 | 9 | A | B |\n");
+    printtovga(L"| C | D | E | F | G | H |\n");
+    printtovga(L"| I | J | K | L | M | N |\n");
+    printtovga(L"| O | P | Q | R | S | T |\n");
+    printtovga(L"| U | V | W | X | Y |   |\n");
+    printtovga(L"+-----------------------+\n");
+
+    printtovga(L"+--------第二层-----000000----------------------+\n");
+    printtovga(L"| ESC     | +       | - | * | -     | enter     |\n");
+    printtovga(L"| TAB     | Z       | . | = | R     | backsapce |\n");
+    printtovga(L"| CTRL    | [       | ] | D | V     | space     |\n");
+    printtovga(L"| SHIFT   | Z       | X | C | V     | B         |\n");
+    printtovga(L"| ALT     | Y       | P | O | return| U         |\n");
+    printtovga(L"| BT_CLR 0| BT_SEL 0|   |   |       | U         |\n");
+    printtovga(L"+-----------------------------------------------+\n");
 }
 
 /* 打印测试信息的函数，我觉得可以把其中的格式化打印独立出来 */
@@ -450,6 +469,7 @@ static void testinfo() {
         L"一行的比特数：%d\n英文字符的宽度：%d\n即时输入缓冲区的长度：%d\n", 
         ONE_LINE_BITS,  CHAR_WIDTH_EN,  ONE_LINE_CHAR_EN
     );
+    printtovga(L"----------------\n");
     printtovga(buf);
     printtovga(L"\n");
 }
@@ -550,11 +570,8 @@ static void loop_console() {
 		 flag_pg_keep = 0;
               }
 
-              /* 匹配直接输入模式 */
-              // else if (is_digit(k)) {}
               }
             }
-            
 	    else if (!flag_py) {
 
               pym = py_ime(jipt_buf);	/* 进行拼音匹配 */
@@ -620,7 +637,8 @@ static void core1_main()
         
         init_console();
 
-        welcome();
+	welcome();
+        kbdinfo();
         testinfo();
 
 	loop_console();
