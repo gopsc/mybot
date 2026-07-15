@@ -461,18 +461,6 @@ static void kbdinfo() {
     printtovga(L"+-----------------------------------------------+\n");
 }
 
-/* 打印测试信息的函数，我觉得可以把其中的格式化打印独立出来 */
-static void testinfo() {
-    wchar_t buf[128];
-    swprintf(
-        buf, sizeof(buf), 
-        L"一行的比特数：%d\n英文字符的宽度：%d\n即时输入缓冲区的长度：%d\n", 
-        ONE_LINE_BITS,  CHAR_WIDTH_EN,  ONE_LINE_CHAR_EN
-    );
-    printtovga(L"----------------\n");
-    printtovga(buf);
-    printtovga(L"\n");
-}
 
 #define SIZE_ONE_PAGE 6
 /* 终端事件循环 */
@@ -480,11 +468,12 @@ static void loop_console() {
         
         uint16_t k;			/* 存储每一次读到的键位本体 */
         wchar_t *p = jipt_buf;          /* 指向即时输入缓冲文字区的指针 */
-        int jipt_x = -CHAR_WIDTH_EN;    /* 即时输入缓冲区的游标 */
+        int jipt_x = 0;    /* 即时输入缓冲区的游标 */
         int flag_py = 0;                /* 已经进行了拼音映射否 */
 	int flag_pg = 0;		/* 当前的输入法页数 */
 	int flag_pge = 0;		/* 是否到达了最终页 */
 	int flag_pg_keep = 0;		/* 是否处于输入法激活状态 */
+	int flag_pg_cnt = 0;
         wchar_t *pym;                   /* 拼音映射结果 */
 
         /* 周期性处理 */
@@ -505,21 +494,22 @@ static void loop_console() {
 		    flag_pg = 0;
 		    flag_pge = 0;
 		    flag_pg_keep = 0;
+		    flag_pg_cnt = 0;
 
                     jipt_buf[jipt_top++] = (wchar_t)k;	/* 字符进入缓冲区 */
                     jipt_buf[jipt_top] = L'\0';	/* 放置终止符号 */
+                    printvgaat(p++, jipt_x, JIPT_H );	/* 打印新的字符 */
                     jipt_x += CHAR_WIDTH_EN;	/* 横轴坐标自增 */
-                    printvgaat(p - 1, jipt_x, JIPT_H);	/* 打印新的字符 */
                  }
               }
               /* ---------------- */
               /* 匹配删减模式 */
-              else if (k == L'\b') {
-		if (jipt_top > 0) {
+              else if (k == L'\b' && jipt_top > 0) {
                   flag_py = 0;		/* 重新进行拼音匹配 */
 		  flag_pg = 0;
 		  flag_pge = 0;
-		  flag_pg_keep = 0;
+		  flag_pg_keep = 0; 
+		    flag_pg_cnt = 0;
 
                   *(--p) = L'\0';	/* 放置终止符号 */
                   jipt_top--;		/* 栈顶指针自减 */
@@ -530,7 +520,6 @@ static void loop_console() {
 		  int jipt_py1 = JIPT_H + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
                   rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
                   jipt_x -= CHAR_WIDTH_EN;			/* 横轴坐标自减 */
-		}
               }
               /* ---------------- */
 	      else if (k == L'=') {	/* + */
@@ -550,13 +539,15 @@ static void loop_console() {
               /* ---------------- */
               /* 匹配选择模式 */
                else if (is_digit(k) && flag_pg_keep) {
-
-		 int idx = flag_pg * SIZE_ONE_PAGE + k - L'0';
+		int num = k - L'0' - 1;
+		if (num < SIZE_ONE_PAGE && num < flag_pg_cnt) {	/* 等于0时选择不了字 */
+		 int idx = flag_pg * SIZE_ONE_PAGE + num;
 		 wchar_t buf[] = {pym[idx], L'\0'};
 		 printtovga(buf);
                  jipt_buf[0] = L'\0';
-		 jipt_top = 1;
+		 jipt_top = 0;
 		 jipt_x = 0;
+		 p = jipt_buf;
 
 		 int jipt_px0 = jipt_x;			/* position x0 */
 		 int jipt_py0 = JIPT_H;			/* position y0 */
@@ -568,14 +559,15 @@ static void loop_console() {
 		 flag_pg = 0;
 		 flag_pge = 0;
 		 flag_pg_keep = 0;
-              }
-
+		}
+		}
               }
             }
 	    else if (!flag_py) {
 
               pym = py_ime(jipt_buf);	/* 进行拼音匹配 */
               flag_py = 1;		/* 已经匹配  可以利用flag进行字符串分段 */
+	      flag_pg_cnt = 0;
               
 	      int jipt_px0 = 0;
 	      int jipt_py0 = PY_LELECT_H;
@@ -585,19 +577,19 @@ static void loop_console() {
 
 	      int jipt_po = 0;
 	      int start = flag_pg * SIZE_ONE_PAGE;
-	      int count = 0;
 	      size_t top = wcslen(pym);
-	      while (start + count < top && count < SIZE_ONE_PAGE) {
-		      wchar_t buf0[] = {L'0' + count + 1,   L'\0'}; printvgaat(buf0, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_EN;
-		      wchar_t buf1[] = {L'.',		    L'\0'}; printvgaat(buf1, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_EN;
-		      wchar_t buf2[] = {pym[start + count], L'\0'}; printvgaat(buf2, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_CN;
-														jipt_po += CHAR_WIDTH_EN;	/* 间隔 */
-		      count ++;
+	      while (start + flag_pg_cnt < top && flag_pg_cnt < SIZE_ONE_PAGE) {
+		      wchar_t buf0[] = {L'0' + flag_pg_cnt + 1,   L'\0'}; printvgaat(buf0, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_EN;
+		      wchar_t buf1[] = {L'.',			  L'\0'}; printvgaat(buf1, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_EN;
+		      wchar_t buf2[] = {pym[start + flag_pg_cnt], L'\0'}; printvgaat(buf2, jipt_po, PY_LELECT_H);	jipt_po += CHAR_WIDTH_CN;
+															jipt_po += CHAR_WIDTH_EN;	/* 间隔 */
 		      flag_pg_keep = 1;
+		      flag_pg_cnt++;
 	      }
-	      if(!(count + start < top))
+	      if(!(flag_pg_cnt + start < top))
 		      flag_pge = 1;
-	      else flag_pge = 0;
+	      else
+		      flag_pge = 0;
             }
         }
 
@@ -639,7 +631,6 @@ static void core1_main()
 
 	welcome();
         kbdinfo();
-        testinfo();
 
 	loop_console();
 }

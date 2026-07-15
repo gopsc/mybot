@@ -42,14 +42,13 @@
 #define CHAR_WIDTH_EN (int)(CHAR_WIDTH_CN * 0.5) /* 字模宽 */
 #define ONE_LINE_CHAR_EN   (int)(ONE_LINE_BITS / CHAR_WIDTH_EN)/* 每行几个字 */
 #define ONE_COL_CHAR   (int) (ONE_COL / CHAR_HEIGHT)/* 每列几个字 */
+#define IPT_PLACE_H     (ONE_COL - IPT_H)
 #define PY_LELECT_H (IPT_PLACE_H + 1 * CHAR_HEIGHT)
-#define JIPT_H (IPT_PLACE_H + 3* CHAR_HEIGHT)/* 直接输入区显示的位置 *//* 输入框的参数 */
-#define IPT_H          (5 * CHAR_HEIGHT) /* 一行分割符、
-                                         * 一行输入法输出、
+#define JIPT_H (IPT_PLACE_H + 2 * CHAR_HEIGHT)/* 直接输入区显示的位置 */
+#define IPT_H          (4 * CHAR_HEIGHT) /* 一行分割符、
                                          * 一行输入法界面、
                                          * 一行直接输入 
                                          */
-#define IPT_PLACE_H     (ONE_COL - IPT_H)
 
 void video_init(uint32_t *framebuffer);		/* 初始化PIO和DMA */
 void p1(int x, int y, int clr);			/* 绘制一个点（bpp=1） */
