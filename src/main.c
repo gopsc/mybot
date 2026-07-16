@@ -462,6 +462,21 @@ static void kbdinfo() {
 }
 
 
+/* 即时输入缓冲区是空的 */
+int jipt_is_empty() {
+	return jipt_top == 0;
+}
+
+/* 即时输入缓冲区没满 */
+int jipt_is_full() {
+	return jipt_top == ONE_LINE_CHAR_EN - 1;
+}
+
+
+int is_ascii(char c) {
+	return c < 256;
+}
+
 #define SIZE_ONE_PAGE 6
 /* 终端事件循环 */
 static void loop_console() {
@@ -482,11 +497,7 @@ static void loop_console() {
 	    /* 有输入事件就读取 */
             if (!kbd_queue_empty() && (k = kbd_queue_pop())) {	
               
-              /* 匹配按下 */
-              if (k < 256 ) {
-                /* ---------------- */
-                if (is_letter(k)) {
-                  if (jipt_top < ONE_LINE_CHAR_EN - 1) {	/* 缓冲区有空才执行入栈 */
+                if (is_ascii(k) && is_letter(k) && !jipt_is_full()) {	/* 缓冲区有空才执行入栈 */
 
                     /* FLAG：是否已经进行了拼音匹配
                      * 一旦有新的键盘事件就赋值为0。 */
@@ -500,11 +511,10 @@ static void loop_console() {
                     jipt_buf[jipt_top] = L'\0';	/* 放置终止符号 */
                     printvgaat(p++, jipt_x, JIPT_H );	/* 打印新的字符 */
                     jipt_x += CHAR_WIDTH_EN;	/* 横轴坐标自增 */
-                 }
               }
               /* ---------------- */
               /* 匹配删减模式 */
-              else if (k == L'\b' && jipt_top > 0) {
+              else if (is_ascii(k) && k == L'\b' && !jipt_is_empty()) {
                   flag_py = 0;		/* 重新进行拼音匹配 */
 		  flag_pg = 0;
 		  flag_pge = 0;
@@ -522,23 +532,19 @@ static void loop_console() {
                   jipt_x -= CHAR_WIDTH_EN;			/* 横轴坐标自减 */
               }
               /* ---------------- */
-	      else if (k == L'=') {	/* + */
-	      	if (!flag_pge) {
+	      else if (is_ascii(k) && k == L'=' && !flag_pge) {	/* + */
 			flag_py = 0;
 			flag_pg++;
-		}
 	      }
 
-		else if  (k == L'-') {
-			if (flag_pg) {
-				flag_py= 0;
-				flag_pg--;
-			}
+		else if  (k == L'-' && flag_pg) {
+			flag_py= 0;
+			flag_pg--;
 		}
 
               /* ---------------- */
               /* 匹配选择模式 */
-               else if (is_digit(k) && flag_pg_keep) {
+               else if (is_ascii(k) && is_digit(k) && flag_pg_keep) {
 		int num = k - L'0' - 1;
 		if (num < SIZE_ONE_PAGE && num < flag_pg_cnt) {	/* 等于0时选择不了字 */
 		 int idx = flag_pg * SIZE_ONE_PAGE + num;
@@ -561,7 +567,6 @@ static void loop_console() {
 		 flag_pg_keep = 0;
 		}
 		}
-              }
             }
 	    else if (!flag_py) {
 
