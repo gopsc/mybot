@@ -216,12 +216,47 @@ void kbdinfo() {
 
 #define SIZE_ONE_PAGE 6
 static int flag_py = 0;                /* 已经进行了拼音映射否 */
-static int flag_pg = 0;		/* 当前的输入法页数 */
+static int flag_pg = 0;			/* 当前的输入法页数 */
 static int flag_pge = 0;		/* 是否到达了最终页 */
 static int flag_pg_keep = 0;		/* 是否处于输入法激活状态 */
 static int flag_pg_cnt = 0;		/* 输入法页最大值计数 */
 static int jipt_x = -CHAR_WIDTH_EN;    /* 即时输入缓冲区的游标 */
 static wchar_t *p = jipt_buf;          /* 指向即时输入缓冲文字区的指针 */
+
+static void _clear_method_box() {
+	flag_py = 0;
+	flag_pg = 0;
+	flag_pge = 0;
+	flag_pg_keep = 0;
+	flag_pg_cnt = 0;
+}
+
+/* 清除整个直入区域 */
+static void _clear_method_all() {
+	int jipt_px0 = jipt_x;			/* position x0 */
+	int jipt_py0 = JIPT_H;			/* position y0 */
+	int jipt_px1 = ONE_LINE_BITS - 1;	/* position x1 包含原点所以减一 */
+	int jipt_py1 = JIPT_H + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
+	rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
+}
+
+/* 清除直入区域的最后一个字符 */
+static void _clear_method_last() {
+	int jipt_px0 = jipt_x;			/* position x0 */
+	int jipt_py0 = JIPT_H;			/* position y0 */
+	int jipt_px1 = jipt_x + CHAR_WIDTH_EN - 1;	/* position x1 包含原点所以减一 */
+	int jipt_py1 = JIPT_H + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
+	rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
+}
+
+/* 清除直入区的待选汉字 */
+static void _clear_method_pym() {
+	int jipt_px0 = 0;
+	int jipt_py0 = PY_LELECT_H;
+	int jipt_px1 = ONE_LINE_BITS - 1;
+	int jipt_py1 = PY_LELECT_H + CHAR_HEIGHT - 1;
+	rectangle(jipt_px0, jipt_py0, jipt_px1, jipt_py1, 1, 1);
+}
 
 /* 终端事件循环 */
 void loop_console() {
@@ -236,14 +271,7 @@ void loop_console() {
             if (!kbd_queue_empty() && (k = kbd_queue_pop())) {	
               
                 if (is_ascii(k) && is_letter(k) && !jipt_is_full()) {	/* 缓冲区有空才执行入栈 */
-
-                    /* FLAG：是否已经进行了拼音匹配
-                     * 一旦有新的键盘事件就赋值为0。 */
-                    flag_py = 0;
-		    flag_pg = 0;
-		    flag_pge = 0;
-		    flag_pg_keep = 0;
-		    flag_pg_cnt = 0;
+			_clear_method_box();
 
                     jipt_buf[jipt_top++] = (wchar_t)k;	/* 字符进入缓冲区 */
                     jipt_buf[jipt_top] = L'\0';	/* 放置终止符号 */
@@ -253,21 +281,12 @@ void loop_console() {
               /* ---------------- */
               /* 匹配删减模式 */
               else if (is_ascii(k) && k == L'\b' && !jipt_is_empty()) {
-                  flag_py = 0;		/* 重新进行拼音匹配 */
-		  flag_pg = 0;
-		  flag_pge = 0;
-		  flag_pg_keep = 0; 
-		  flag_pg_cnt = 0;
+
+			_clear_method_box();
 
                   *(--p) = L'\0';	/* 放置终止符号 */
                   jipt_top--;		/* 栈顶指针自减 */
-                						
-		  int jipt_px0 = jipt_x;			/* position x0 */
-		  int jipt_py0 = JIPT_H;			/* position y0 */
-		  int jipt_px1 = jipt_x + CHAR_WIDTH_EN - 1;	/* position x1 包含原点所以减一 */
-		  int jipt_py1 = JIPT_H + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
-                  rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
-
+		  _clear_method_last();
                   jipt_x -= CHAR_WIDTH_EN;			/* 横轴坐标自减 */
               }
 
@@ -282,20 +301,11 @@ void loop_console() {
 			jipt_buf[0] = '\0';
 			jipt_top = 0;
 			p = jipt_buf;
-			jipt_x = 0;
+			jipt_x = -CHAR_WIDTH_EN;
 
-		flag_py = 0;		/* 重新进行拼音匹配 */
-		  flag_pg = 0;
-		  flag_pge = 0;
-		  flag_pg_keep = 0; 
-		  flag_pg_cnt = 0;
+			_clear_method_box();
+			_clear_method_all();
 
-		  /* 清除整个直入区域 */
-		 int jipt_px0 = jipt_x;			/* position x0 */
-		 int jipt_py0 = JIPT_H;			/* position y0 */
-		 int jipt_px1 = ONE_LINE_BITS - 1;	/* position x1 包含原点所以减一 */
-		 int jipt_py1 = JIPT_H + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
-                 rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
 		}
 
               /* ---------------- */
@@ -322,17 +332,8 @@ void loop_console() {
 		 jipt_x = 0;
 		 p = jipt_buf;
 
-		 /* 清除整个直入区域 */
-		 int jipt_px0 = jipt_x;			/* position x0 */
-		 int jipt_py0 = JIPT_H;			/* position y0 */
-		 int jipt_px1 = ONE_LINE_BITS - 1;	/* position x1 包含原点所以减一 */
-		 int jipt_py1 = JIPT_H + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
-                 rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
-		 
-                 flag_py = 0;
-		 flag_pg = 0;
-		 flag_pge = 0;
-		 flag_pg_keep = 0;
+		 	_clear_method_all();
+			_clear_method_box();
 		}
 		}
             }
@@ -342,11 +343,7 @@ void loop_console() {
               flag_py = 1;		/* 已经匹配  可以利用flag进行字符串分段 */
 	      flag_pg_cnt = 0;
               
-	      int jipt_px0 = 0;
-	      int jipt_py0 = PY_LELECT_H;
-	      int jipt_px1 = ONE_LINE_BITS - 1;
-	      int jipt_py1 = PY_LELECT_H + CHAR_HEIGHT - 1;
-              rectangle(jipt_px0, jipt_py0, jipt_px1, jipt_py1, 1, 1);	/* 清除屏幕拼音结果字符 */
+	      _clear_method_pym();
 
 	      int jipt_po = 0;
 	      int start = flag_pg * SIZE_ONE_PAGE;
