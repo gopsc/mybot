@@ -314,7 +314,8 @@ static void core1_main()
 
 	welcome();
         kbdinfo();
-
+	printtovga(L"\n");
+	print_cursor();
 	loop_console();
 }
 

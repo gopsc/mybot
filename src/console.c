@@ -10,11 +10,7 @@ static int fb_cursor_y = 0;
 
 static int jipt_top = 0;
 /* 直入缓冲区，能容纳一行英文内容 */
-static wchar_t jipt_buf[ONE_LINE_CHAR_EN] = {0};
-
-/////////////////////////////////////////////////////////////////////
-/////////////////////////////////////////////////////////////////////
-/* 打印文字相关的内容 */
+static wchar_t jipt_buf[ONE_LINE_CHAR_EN];
 
 
 
@@ -166,6 +162,20 @@ void printtovga(wchar_t *wstr) {
 }
 
 
+/* 打印光标 */
+void print_cursor() {
+	printvgaat(L"_", fb_cursor_x, fb_cursor_y);
+}
+
+/* 清除光标 */
+void clear_cursor() {
+	int jipt_px0 = fb_cursor_x;	/* position x0 */
+	int jipt_py0 = fb_cursor_y;	/* position y0 */
+	int jipt_px1 = fb_cursor_x + CHAR_WIDTH_EN - 1;	/* position x1 包含原点所以减一 */
+	int jipt_py1 = fb_cursor_y + CHAR_HEIGHT - 1;	/* position y1 包含原点所以减一 */
+	rectangle(jipt_px0, jipt_py0, jipt_px1,  jipt_py1, 1, 1);	/* 清除屏幕字符图案 */
+}
+
 
 
 /* 初始化控制台。 
@@ -175,10 +185,15 @@ void printtovga(wchar_t *wstr) {
  * 我想将其移动到一个新的文件中
  */
 void init_console() {
-    jipt_top = 0;				/* 初始化缓冲区，直接把长度记为0，然后在该位置赋值终止符即可 */
-    jipt_buf[jipt_top] = L'\0';
-    clear(255);					/* 以深色填充屏幕 */
-    printvgaat(L"----------------", 0, IPT_PLACE_H);	/* 打印输入法分割线，其实可以使用line()绘制 */
+
+	/* 初始化缓冲区 */
+	jipt_top = 0;
+	jipt_buf[0] = L'\0';
+
+	clear(255);		/* 以深色填充屏幕 */
+
+	/* 打印输入法分割线，其实可以使用line()绘制 */
+	printvgaat(L"----------------", 0, IPT_PLACE_H);	
 }
 
 
@@ -214,7 +229,6 @@ void kbdinfo() {
 }
 
 
-#define SIZE_ONE_PAGE 6
 static int flag_py = 0;                /* 已经进行了拼音映射否 */
 static int flag_pg = 0;			/* 当前的输入法页数 */
 static int flag_pge = 0;		/* 是否到达了最终页 */
@@ -258,6 +272,14 @@ static void _clear_method_pym() {
 	rectangle(jipt_px0, jipt_py0, jipt_px1, jipt_py1, 1, 1);
 }
 
+static void _clear_jipt_buf() {
+	jipt_buf[0] = '\0';
+	jipt_top = 0;
+	p = jipt_buf;
+	jipt_x = -CHAR_WIDTH_EN;
+}
+
+
 /* 终端事件循环 */
 void loop_console() {
         
@@ -292,17 +314,17 @@ void loop_console() {
 
 		/* 直入缓冲区空的，输入回车 */
 		else if (is_ascii(k) && k == L'\r' && jipt_top == 0) {
+			clear_cursor();
 			printtovga(L"\n");
+			print_cursor();
 		}
 
 		/* 直入缓冲区不为空，输出直入缓冲区 */
 		else if (is_ascii(k) && k == L'\r' && jipt_top > 0) {
+			clear_cursor();
 			printtovga(jipt_buf);
-			jipt_buf[0] = '\0';
-			jipt_top = 0;
-			p = jipt_buf;
-			jipt_x = -CHAR_WIDTH_EN;
-
+			print_cursor();
+			_clear_jipt_buf();
 			_clear_method_box();
 			_clear_method_all();
 
@@ -326,12 +348,10 @@ void loop_console() {
 		if (num < SIZE_ONE_PAGE && num < flag_pg_cnt) {	/* 等于0时选择不了字 */
 		 int idx = flag_pg * SIZE_ONE_PAGE + num;
 		 wchar_t buf[] = {pym[idx], L'\0'};
-		 printtovga(buf);
-                 jipt_buf[0] = L'\0';
-		 jipt_top = 0;
-		 jipt_x = 0;
-		 p = jipt_buf;
-
+		 	clear_cursor();
+			printtovga(buf);
+			print_cursor();
+			_clear_jipt_buf();
 		 	_clear_method_all();
 			_clear_method_box();
 		}
