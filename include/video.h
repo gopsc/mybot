@@ -26,6 +26,7 @@
 #ifndef VIDEO_H
 #define VIDEO_H
 
+#include <stddef.h>
 #include <inttypes.h>
 
 /* 我不知道为什么列宽、单行会是这些值，也不知道

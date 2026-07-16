@@ -135,6 +135,7 @@ if (TARGET tinyusb_device)
     src/kbd.c
     src/hid.c
     src/cncc.c
+    src/console.c
     src/graph/basic.c
     #src/graph/bezier.c
     src/mathh/lagrange.c
