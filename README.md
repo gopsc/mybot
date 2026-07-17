@@ -1,5 +1,5 @@
 # bb2-pico
-大家好，我们这个项目fork了github上的一个pico-mac项目。
+大家好，我们这个项目fork了github上的一个pico-umac项目。
 
 我们注释掉了他的所有的界面逻辑，准备自行开发一个使用宽字符的文字终端
 
