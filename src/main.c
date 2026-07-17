@@ -28,13 +28,13 @@
  *
  *
  *
- * 提示，源代码经过qing的修改，仍然遵循
- * MIT协议。
+ * 提示，源代码经过qing的修改，仍然遵循MIT协议。
  *
  *
  * “无论经过怎样的阻挡，最终还是回到你的身边。”
  *
  * 现在该代码不再引导umac，而是启动一个宽字符中文终端。
+ *
  * 2025
  */
 #include <stdio.h>
@@ -93,8 +93,7 @@ static void     io_init()
         gpio_set_dir(GPIO_LED_PIN, GPIO_OUT);   /* 设置 GPIO 引脚的方向（输入或输出）*/
 }
 
-/* 周期性执行的led灯事件，每隔
- * 一段时间切换一次状态 */
+/* 周期性执行的led灯事件，每隔一段时间切换一次状态 */
 static void     poll_led_etc()
 {
         static int led_on = 0;
