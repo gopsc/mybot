@@ -16,12 +16,12 @@ wchar_t * py_ime(const wchar_t *strInput_py_str)
 //    for(i=0;i<cInputStrLength;i++) 
 //        *(strInput_py_str+i)|=0x20;             /*将字母串转为小写*/ 
  
-    if(*strInput_py_str==L'i') return(L"");        /*错误拼音输入*/ 
-    if(*strInput_py_str==L'u') return(L""); 
-    if(*strInput_py_str==L'v') return(L""); 
+    //if(*strInput_py_str==L'i') return(L"");        /*错误拼音输入*/ 
+    //if(*strInput_py_str==L'u') return(L""); 
+    //if(*strInput_py_str==L'v') return(L""); 
  
     cpHZ=0;        /*查首字母索引*/ 
-    cpHZedge=396;  /*设置指针界限*/ 
+    cpHZedge=399;  /*设置指针界限*/ 
     while(cpHZ<cpHZedge)                         /*索引表不超界*/ 
     {
         if(0==wcscmp(strInput_py_str,code_table[cpHZ][0]))

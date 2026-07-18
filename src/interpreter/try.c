@@ -16,9 +16,9 @@
 #include <string.h>
 #include <wchar.h>
 #include <wctype.h>
-#include <setjmp.h>
-#define POOLSIZE (16 * 1024)  /* 任意大小 */
-#define SYMTABSIZE (1 * 1024) /* ！符号表栈的大小 */
+#include "console.h"
+#define POOLSIZE (1 * 128)  /* 任意大小 */
+#define SYMTABSIZE (1 * 128) /* ！符号表栈的大小 */
 #define MAXNAMESIZE 16        /* 变量/函数名称的长度 */
 #define RETURNFLAG DBL_MAX    /* 表明函数中已经出现return语句 */
 
@@ -38,6 +38,8 @@ static int symPointer = 0;     /* 符号表栈指针 */
 static int currentlevel = 0;   /* 当前嵌套层级 */
 
 static wchar_t *src, *old_src; /* 当前正处理的文本 */
+static wchar_t *p_src;		/* 用于定位释放点 */
+static int top_src = 0;
 
 
 enum {				/* 解释器状态枚举 （使用int直接接受匿名枚举） */
@@ -76,6 +78,7 @@ static void next();
 /////
 static void clear(int level);
 static void clearThis();	/* 20260707(qing): 增加一个clearThis()函数，用于释放变量 */
+static void __exit();
 /* -------------------  词法分析  -------------------*/
 
 /* 输入字符串的下一个标记 */
@@ -257,7 +260,8 @@ static void next() {
 
     /* 不认识 */
     else {
-        wprintf(L"unexpected token: %d\n", token);
+        //wprintf(L"unexpected token: %d\n", token);
+	printtovga(L"unexpected token\n");
     }
   }
 }
@@ -274,7 +278,7 @@ static void clear(int level) {
 
 /* 20250827(QING): 在这里检测pointer联合字段是否为空，不为空就表明有值先释放 */
 static void clearThis() {
-  printf("Clear a Symbol: %s\n", token_val.ptr->name);
+  //printf("Clear a Symbol: %s\n", token_val.ptr->name);
   if (token_val.ptr->type == Str && token_val.ptr->pointer.funcp)
     free(token_val.ptr->pointer.funcp);  
   else if (token_val.ptr->type == ArraySym && token_val.ptr->pointer.list)
@@ -285,16 +289,20 @@ static void clearThis() {
 static void match(int tk) {
   if (token == tk) {
     if (compileState==debug) {
-      if (iswprint(tk)) /* 该字符是否能够打印 */
-        wprintf(L"match: %lc\n", tk);
-      else
-        wprintf(L"match: %d\n", tk);
+      if (iswprint(tk)) { /* 该字符是否能够打印 */
+        //wprintf(L"match: %lc\n", tk);
+      }
+      else {
+        //wprintf(L"match: %d\n", tk);
+	;
+      }
     }
     next(); /* 检查下一个标记 */
   }
   else { /* 直接让程序死亡，在单片机上似乎不妥 */
-    wprintf(L"line %.*ls:expected token: %d\n", (int)(src - old_src), old_src,  tk);
-    exit(-1);
+    //wprintf(L"line %.*ls:expected token: %d\n", (int)(src - old_src), old_src,  tk);
+    printtovga(L"unexpected token\n");
+    __exit(-1);
     //clearThis(); 
   }
 }
@@ -344,7 +352,8 @@ static double factor() {
       temp = function();
   }
   else {
-      printf("Unknow token: %d.\n", token);
+      //printf("Unknow token: %d.\n", token);
+      printtovga(L"Unknow token\n");
   }
   return temp;
 }
@@ -581,15 +590,19 @@ static double statement() {
         switch (func) {
         case Print: 
             temp = expression();
-            wprintf(L"%lf\n", temp);
+	    wchar_t buf[16];
+            swprintf(buf, 16, L"%lf\n", temp);
+	    printtovga(buf);
             break;
         case Puts: 
             /* 这一句切换不过来 */
-            wprintf(L"%ls\n", (wchar_t*)token_val.ptr);
+            //wprintf(L"%ls\n", (wchar_t*)token_val.ptr);
+	    printtovga((wchar_t*)token_val.ptr);
             match(Str);
             break;
-        case Read: /* 单片机上怎么弄？ */
-            wscanf(L"%lf", &token_val.ptr->value);
+        case Read: /* 单片机上等下支持 */
+            //wscanf(L"%lf", &token_val.ptr->value);
+	    token_val.ptr->value = -1;
             token_val.ptr->type = Num;
             match(Sym);
         }
@@ -634,31 +647,73 @@ static double function() {
     return return_val;
 }
 /*----------------------------------------------------------------*/
+int init_tryc() {
+
+	/* 将所有字段赋值为0 */
+	memset(symtab, 0, sizeof(symtab));
+
+	int i;		/* 用于阅读定位 */
+	src = L"数组 函数 否则 如果 返回 条件循环 打印 输出 扫描";
+	for (i = Array; i <= Read; ++i) {
+		next();
+		symtab[symPointer -1].type = i;
+	}
+
+	if (!(src = old_src = p_src = (wchar_t*)malloc(POOLSIZE))) {
+		//wprintf(L"could not malloc(%d) for source area\n", POOLSIZE);
+		printtovga(L"could not malloc for source aream\n");
+		return -1;
+	}
+
+	top_src = 0;
+	src[0] = L'\0'; // add EOF character
+}
+
+void free_tryc() {
+
+	free(p_src);
+}
+
+int enqueue_tryc(wchar_t wc) {
+
+	if (top_src >= POOLSIZE - 1) {
+		return -1;
+	}
+	src[top_src] = wc;
+	src[++top_src] = L'\0';
+	return 0;
+}
+
+void eval_tryc() {
+
+	if (*src == L'\0') return;
+
+	next();
+	while (token != L'\0') {
+		statement();
+	}
+	src = p_src;
+
+	top_src = 0;
+	src[0]= L'\0';
+
+}
+
+void __exit() {
+	while (1);
+}
+
+#ifdef _DEBUG
 #include "fcntl.h"
 #include "unistd.h"
 #include "locale.h"
 int main(int argc, char **argv)
 {
-    /* 将所有字段赋值为0 */
-    memset(symtab, 0, sizeof(symtab));
     
-    int i;		/* 用于阅读定位 */
-    wchar_t *p_src;	/* 用于定位释放点 */
-    src = L"array func else if return while print puts read";
-    for (i = Array; i <= Read; ++i) {
-        next();
-        symtab[symPointer -1].type = i;
-    }
-    if (!(src = old_src = p_src = (wchar_t*)malloc(POOLSIZE))) {
-        wprintf(L"could not malloc(%d) for source area\n", POOLSIZE);
-        return -1;
-    }
-
-    src[0] = 0; // add EOF character
-    //wcscpy(src, L"ab = 1;\nccd = \"123\"; \nwhile(ab < 10) {\nab = ab + 1;\nputs(ccd);\n}\n");
+	init_tryc();
 
 
-
+    int i;
     setlocale(LC_ALL, "");
     wchar_t wc;
     i = 0;
@@ -676,14 +731,11 @@ int main(int argc, char **argv)
     src[i] = L'\0'; // add EOF character
     fclose(file);
 
-
-    next();
-    while (token != L'\0') {
-        statement();
-    }
+    eval_tryc();
 
     clear(0);
-    free(p_src);
+    free_tryc();
+
     return 0;
 }
-
+#endif

@@ -54,6 +54,7 @@
 #include "graph.h"
 #include "cncc.h"
 #include "console.h"
+#include "try.h"
 
 #include "bsp/rp2040/board.h"
 #include "tusb.h"
@@ -309,6 +310,7 @@ static void core1_main()
          */
         video_init((uint32_t *)video_ram);
         
+	init_tryc();
         init_console();
 
 	welcome();

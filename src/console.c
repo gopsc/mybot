@@ -2,7 +2,8 @@
 #include "kbd.h"
 #include "cncc.h"
 #include "console.h"
-#include "wchar.h"
+#include "try.h"
+#include <wchar.h>
 
 /* 帧缓冲区打印点游标 */
 static int fb_cursor_x = 0;
@@ -273,10 +274,30 @@ static void _clear_method_pym() {
 }
 
 static void _clear_jipt_buf() {
+
 	jipt_buf[0] = '\0';
 	jipt_top = 0;
 	p = jipt_buf;
 	jipt_x = -CHAR_WIDTH_EN;
+}
+
+static void _outputto(wchar_t wc) {
+
+	if (wc == L'\n') {
+
+		clear_cursor();
+		printtovga(L"\n");
+		eval_tryc();
+		print_cursor();
+	}
+
+	else if (!enqueue_tryc(wc)) {
+
+		wchar_t buf[] = {wc, L'\0'};
+		clear_cursor();
+		printtovga(buf);
+		print_cursor();
+	}
 }
 
 
@@ -291,6 +312,10 @@ void loop_console() {
 
 	    /* 有输入事件就读取 */
             if (!kbd_queue_empty() && (k = kbd_queue_pop())) {	
+
+		    //wchar_t buf[16];
+		    //swprintf(buf, 16, L"%d\n", k);
+		    //printtovga(buf);
               
                 if (is_ascii(k) && is_letter(k) && !jipt_is_full()) {	/* 缓冲区有空才执行入栈 */
 			_clear_method_box();
@@ -314,16 +339,14 @@ void loop_console() {
 
 		/* 直入缓冲区空的，输入回车 */
 		else if (is_ascii(k) && k == L'\r' && jipt_top == 0) {
-			clear_cursor();
-			printtovga(L"\n");
-			print_cursor();
+			_outputto(L'\n');
 		}
 
 		/* 直入缓冲区不为空，输出直入缓冲区 */
 		else if (is_ascii(k) && k == L'\r' && jipt_top > 0) {
-			clear_cursor();
-			printtovga(jipt_buf);
-			print_cursor();
+			for (wchar_t *p = jipt_buf; *p != L'\0'; ++p) {
+				_outputto(*p);
+			}
 			_clear_jipt_buf();
 			_clear_method_box();
 			_clear_method_all();
@@ -331,14 +354,30 @@ void loop_console() {
 		}
 
               /* ---------------- */
-	      else if (is_ascii(k) && k == L'=' && !flag_pge) {	/* + */
+	      else if (is_ascii(k) && k == L'=' && !flag_pge && jipt_top > 0) {	/* + */
 			flag_py = 0;
 			flag_pg++;
 	      }
 
-		else if  (k == L'-' && flag_pg) {
+		else if (k == L'=' && jipt_top == 0) {
+			_outputto(k);
+		}
+
+		else if  (k == L'-' && flag_pg && jipt_top > 0) {
 			flag_py= 0;
 			flag_pg--;
+		}
+
+		else if (k == L'-' && jipt_top == 0) {
+			_outputto(k);
+		}
+
+		else if (k == L';' && jipt_top == 0) {
+			_outputto(k);
+		}
+
+		else if (k == L' ' && jipt_top == 0) {
+			_outputto(k);
 		}
 
               /* ---------------- */
@@ -346,11 +385,8 @@ void loop_console() {
                else if (is_ascii(k) && is_digit(k) && flag_pg_keep) {
 		int num = k - L'0' - 1;
 		if (num < SIZE_ONE_PAGE && num < flag_pg_cnt) {	/* 等于0时选择不了字 */
-		 int idx = flag_pg * SIZE_ONE_PAGE + num;
-		 wchar_t buf[] = {pym[idx], L'\0'};
-		 	clear_cursor();
-			printtovga(buf);
-			print_cursor();
+			int idx = flag_pg * SIZE_ONE_PAGE + num;
+			_outputto(pym[idx]);
 			_clear_jipt_buf();
 		 	_clear_method_all();
 			_clear_method_box();

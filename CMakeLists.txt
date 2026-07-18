@@ -140,7 +140,7 @@ if (TARGET tinyusb_device)
     #src/graph/bezier.c
     src/mathh/lagrange.c
     src/mathh/fft1.c
-    #src/interpreter/try.c
+    src/interpreter/try.c
     ${EXTRA_SD_SRC}
 
     ${UMAC_SOURCES}
