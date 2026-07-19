@@ -653,7 +653,7 @@ int init_tryc() {
 	memset(symtab, 0, sizeof(symtab));
 
 	int i;		/* 用于阅读定位 */
-	src = L"数组 函数 否则 如果 返回 条件循环 打印 输出 扫描";
+	src = L"array func else if return while print puts read";
 	for (i = Array; i <= Read; ++i) {
 		next();
 		symtab[symPointer -1].type = i;
