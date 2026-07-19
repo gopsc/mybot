@@ -368,9 +368,6 @@ void loop_console() {
 			flag_pg--;
 		}
 
-		else if (k == L'-' && jipt_top == 0) {
-			_outputto(k);
-		}
 
 		else if (k == L';' && jipt_top == 0) {
 			_outputto(k);
@@ -380,9 +377,30 @@ void loop_console() {
 			_outputto(k);
 		}
 
+		else if (k == L'+' && jipt_top == 0) {
+			_outputto(k);
+		}
+
+		else if (k == L'-' && jipt_top == 0) {
+			_outputto(k);
+		}
+
+		else if (k == L'*' && jipt_top == 0) {
+			_outputto(k);
+		}
+
+		else if (k == L'/' && jipt_top == 0) {
+			_outputto(k);
+		}
+
+
               /* ---------------- */
               /* 匹配选择模式 */
-               else if (is_ascii(k) && is_digit(k) && flag_pg_keep) {
+		else if (is_ascii(k) && is_digit(k) && jipt_top == 0) {
+			_outputto(k);
+		}
+
+               else if (is_ascii(k) && is_digit(k) && jipt_top > 0 && flag_pg_keep) {
 		int num = k - L'0' - 1;
 		if (num < SIZE_ONE_PAGE && num < flag_pg_cnt) {	/* 等于0时选择不了字 */
 			int idx = flag_pg * SIZE_ONE_PAGE + num;
