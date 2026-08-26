@@ -1010,6 +1010,9 @@ class RobotStruct {
 			/* -------- 执行一行 -------- */
 			let keys = set.getFields().keys()
 			for (name_dev in keys) {
+				if (!M.contains(name_dev)) {
+					throw IllegalArgumentException("Action 引用了未声明的硬件变量: ${name_dev}")
+				}
 				let hv = M[name_dev]
 				let params: JsonValue = set.get(name_dev).getOrThrow()
 				let _: JsonValue = hv.play(params)
