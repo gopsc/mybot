@@ -18,6 +18,11 @@ import ctype4cj.*
 import spi4cj.*
 import lua4cj.*
 
+/* ---- 直接绑定liblua的浮点推栈接口 ----
+ * lua4cj 仅封装了 lua_pushinteger，矩阵动作中的小数参数
+ * （JsonFloat）此前会被静默丢弃，故在此补充声明。 */
+foreign func lua_pushnumber(L: lua_State, n: C_Double): Unit
+
 /*
  * ---------------- 硬件变量基类 ----------------
  *  接收3个lambda表达式，在回调函数中定义行为（）
@@ -519,6 +524,13 @@ class MtVars_Lua <: MatrixVars_Hardware {
 					let sk = LibC.mallocCString(k)
 					let sv = Int64(v)
 					Lua_pushinteger(L, sv)
+					Lua_setfield(L, -2, sk)
+					LibC.free(sk)
+				}
+				else if (val is JsonFloat) {
+					let v = val.asFloat().getValue()
+					let sk = LibC.mallocCString(k)
+					lua_pushnumber(L, v)
 					Lua_setfield(L, -2, sk)
 					LibC.free(sk)
 				}
