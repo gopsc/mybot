@@ -1,134 +1,104 @@
 # bot4cj
 
-bot4cj是基于仓颉和 Linux I2C 接口的机器人硬件脚本解析器。
+bot4cj 是基于仓颉编程语言和 Linux I2C 接口的机器人硬件脚本解析器。
 
-## 依赖库
-libc、libpthread、liblua-5.4
+机器人种类繁多，软件往往彼此独立、难以复用。本项目尝试使用一种通用的表格式脚本来描述机器人的硬件构成与动作序列：硬件以矩阵对象声明，动作以行列式表格描述，解析器负责解析脚本并将其逐行下发到硬件。宿主机通常为树莓派。
 
-You may need this
+## 特性
 
-``` bash
-sudo ln -s /usr/lib/aarch64-linux-gnu/liblua5.4.so /usr/lib/aarch64-linux-gnu/liblua.so
-sudo ln -s /usr/lib/x86_64-linux-gnu/liblua5.4.so /usr/lib/x86_64-linux-gnu/liblua.so
+- 以 `.mt` 矩阵脚本声明硬件与动作，无需修改代码即可调整机器人配置
+- 内置 I2C、PCA9685（PWM 舵机驱动）、MPU6050（姿态传感器）、Servo、Speaker 等硬件变量类型
+- 通过 Lua 脚本扩展自定义硬件驱动，内置 SPI、I2C、延时等注册函数
+- 依赖 `nn4cj` 提供神经网络接口，为动作生成与微调预留能力
+
+## 硬件支持
+
+| 硬件 | 类型 | 说明 |
+| --- | --- | --- |
+| PCA9685 | PWM 控制板 | 经 Lua 驱动加载，16 路 PWM 输出，常用于舵机控制 |
+| MPU6050 | 姿态传感器 | 内置驱动，后台线程持续采样 |
+| Servo | 舵机 | 支持最大/最小角度限制、漂移修正、方向翻转 |
+| Speaker | 扬声器 | 当前版本仅负责时序延时，发声功能停用中 |
+| ADS1115 / ADS1256 | ADC 模块 | 经 SPI 接口由 Lua 模块驱动 |
+
+详见 [docs/hardware.md](docs/hardware.md)。
+
+## 项目结构
+
+```text
+bot4cj/
+├── src/
+│   ├── main.cj          # 入口，命令行参数处理
+│   ├── r.cj             # 机器人结构与硬件变量实现
+│   ├── P.cj             # 矩阵脚本词法解析器
+│   ├── hd/              # 硬件驱动层（I2C、PCA9685、MPU6050 等）
+│   ├── math/            # 数值算法（卡尔曼滤波）
+│   └── cpp/             # 原生扩展源码（FFT、滤波、音频）
+├── modules/             # Lua 硬件驱动脚本
+├── scripts/             # 动作脚本示例（.mt 为现行格式，.bot 为旧版）
+├── test/                # C/Lua 测试程序
+├── cjpm.toml            # 构建配置
+├── _set.sh              # 更新依赖并构建
+└── _run.sh              # 运行脚本
 ```
 
-## 项目介绍
-想要得到一个机器人软件通常比一个普通的软件更为困难，这是因为这个世界上的机器人五花八门，所以它们的软件往往都是独特的，所以我想写一种用于描述机器人硬件的通用的脚本。
+## 环境依赖
 
-`bot4cj` 基于仓颉编程语言和 Linux I2C 接口，提供了便捷的硬件控制能力，支持pca9685、mpu6050，我通常使用树莓派作为宿主机。
+- 仓颉 SDK 1.1.3 或更高版本，含包管理工具 cjpm
+- Linux（glibc），目标架构 aarch64 或 x86_64；Windows 因缺少 glibc 暂不支持
+- liblua 5.4 动态库，构建时以 `-l lua` 链接
 
-## 解析器
+仓颉标准库扩展 stdx 需通过环境变量 `CANGJIE_STDX_PATH` 指定。完整的构建步骤见 [docs/build.md](docs/build.md)。
 
-树莓派通过I2C接口连接pca9685后使用如下方法使用：
+## 快速开始
+
+在仓库根目录执行：
 
 ```bash
-cat ss/test.mt | cjpm run	# 蜘蛛机器人脚本
+./_set.sh                                # 更新依赖并构建
+cat scripts/std.mt | ./_run.sh           # 解析并执行标准动作脚本
 ```
 
-## 动作脚本
+或直接使用 cjpm：
 
-项目中包含的动作脚本在ss文件夹下面，这些动作脚本的适配机器人型号如下
-
-```textplain
-# PCA9685
-1号舵机(s1)		=>	左下水平关节
-2号舵机(s2)		=>	左下垂直关节
-3号舵机(s3)	 	=>	右下水平关节
-4号舵机(s4)		=>	右下垂直关节
-5号舵机(s5)		=>	右上水平关节
-6号舵机(s6)		=>	右上垂直关节
-7号舵机(s7)		=>	左上水平关节
-8号舵机(s8)		=>	左上垂直关节
-9号舵机(s9)		=>	云台1
-10号舵机(s10) 	=>	云台2
-扬声器(spk)		=>  仅负责延时
+```bash
+cjpm update && cjpm build
+cat scripts/jump.mt | cjpm run
 ```
 
-适用的机器人建模文件[仓库链接](https://github.com/gopsc/Dashun)
+程序从标准输入读取动作脚本，逐行执行 `@Action` 矩阵中的内容。脚本语法详见 [docs/script-syntax.md](docs/script-syntax.md)。
 
-### 机器人脚本语法（.mt）
+### 命令行参数
 
-**.bot文件是旧版动作脚本**
+| 参数 | 说明 |
+| --- | --- |
+| `--help` | 打印帮助信息 |
+| `--test=<key>` | 运行内置测试分支，取值 `nn1`、`matrix_o`、`matrix_2` |
+| `-i <path>` | 指定输入的神经网络模型路径（配合 nn4cj，重构中） |
+| `-o <path>` | 指定神经网络模型的输出路径（重构中） |
 
-机器人脚本是行列式表格，每列之间以一个或多个空格、制表符分隔，每行以分号（;）结尾。
+## 相关仓库
 
-每个矩阵对象以@name 行开头，@ 行结束。
+以下依赖均以独立仓库维护，可在 cjpm.toml 中切换 Git 引用以跟踪开发进度：
 
+| 仓库 | 说明 |
+| --- | --- |
+| [ctype4cj](https://gitcode.com/qingss0/ctype4cj) | ARM64 架构下 C 变量类型的仓颉抽象层 |
+| [pthread4cj](https://gitcode.com/qingss0/pthread4cj) | pthread 线程与互斥锁封装 |
+| [spi4cj](https://gitcode.com/qingss0/spi4cj) | SPI 应用层驱动 |
+| [lua4cj](https://gitcode.com/qingss0/lua4cj) | Lua 5.4 C API 的仓颉绑定 |
+| [nn4cj](https://gitcode.com/qingss0/nn4cj) | 神经网络模块 |
 
-示例：
+动作脚本适用的机器人建模文件见 [Dashun](https://github.com/gopsc/Dashun) 仓库。
 
-```mt
+## 文档
 
-# 在 @Action 矩阵中，硬件变量的参数可以使用别名
-@Alias
-name      alias;
-   A      angle;
-   F  frequency;
-@
+- [脚本语法规范](docs/script-syntax.md)
+- [硬件支持与驱动](docs/hardware.md)
+- [构建与部署指南](docs/build.md)
+- [变更日志](CHANGELOG.md)
+- [参与贡献](CONTRIBUTING.md)
 
+## 许可证
 
-# 定义I2C硬件
-@I2C
- name        path;
-i2c-0  /dev/i2c-0;
-i2c-1  /dev/i2c-1;
-@
-
-
-# 定义pca9685硬件
-@PCA9685
-     name    I2C   path;
-pca9685-0  i2c-1   0x40;
-@
-
-
-# 定义mpu6050硬件
-@MPU6050
-     name    I2C   path;
-mpu6050-0  i2c-1   0x69;
-mpu6050-1  i2c-1   0x68;
-#mpu6050-2  i2c-0   0x68;
-#mpu6050-3  i2c-0   0x69;
-@
-
-# 定义扬声器硬件
-@Speaker
-name  channels  sample_rate  volumn  max_f  min_f;
- spk         2        48000     0.6   5000      -;
-@
-
-# 定义舵机硬件
-@Servo
- name   max  min  offset  controller  channel;
-  s1    90     -       -   pca9685-0        0;	# rb0
-  s2   180     -       -           -        1;	# rb1 
-  s3   -90     -       -           -        2;	# lb0
-  s4  -180     -       -           -        3;	# lb1
-  s5    90     -       -           -        4;	# lf0
-  s6   180     -       -           -        5;	# lf1
-  s7   -90     -       -           -        6;	# rf0
-  s8  -180     -       -           -        7;	# rf1
-  s9   180     -       -           -        8;	# cam0
- s10   180     -       -           -        9;	# cam1
-@
-
-# 行动矩阵为硬件变量输入参数
-@Action
-s1.A  s2.A  s3.A  s4.A  s5.A  s6.A  s7.A  s8.A  s9.A  s10.A  spk.F  spk.delay;	# column name
-  45     -    45     -    45     -    45     -    90     90     10        200;	# stand
-  90     -     -     -     -     -     -     -     -      -      -         20;	# left-behind
-
-  45     -     -     -     -     -     -     -     -      -      0        500;	# stand
-   -     -    90     -     -     -    45     -     -      -      -         20;	# right-behind
-
-   -     -    45     -     -     -     -     -     -      -    200        500;	# stand
-   -     -     -     -    90     -     -     -     -      -      0         20;	# right-front
-
-   -     -     -     -    45     -     -     -     -      -      -        500;	# stand
-   -     -     -     -     -     -    90     -     -      -      -         20;	# left-front
-
-   -     -     -     -     -     -    45     -     -      -      -        500;	# stand
-   -     -     -     -     -     -     -     -     -      -      -         20;	# stand
-@
-
-```
+本项目基于 [MIT License](LICENSE) 发布。
