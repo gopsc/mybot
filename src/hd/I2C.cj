@@ -132,7 +132,7 @@ func I2cLock_create(fd: Int32): Unit {
 		if (MAIN_LOCK.isNull()) {
 			MAIN_LOCK = _mutex_create()
 			LOCKS = LibC.malloc<I2C_Lock>(count: LOCKS_SIZE)
-			for (i in 0..20) {
+			for (i in 0..LOCKS_SIZE) {
 				let tmp = I2C_Lock()
 				(LOCKS+i).write(tmp)
 			}
@@ -317,7 +317,7 @@ private class I2cClosedFailed <: I2cExcept {
 /* -------- I2C设置地址失败 -------- */
 private class I2cSetAddressFailed <: I2cExcept {
 	public I2cSetAddressFailed(dev: String) {
-		super(dev, "failed to open i2c device")  }
+		super(dev, "failed to set i2c address")  }
 }
 
 /* -------- I2C写从机I2C失败 -------- */

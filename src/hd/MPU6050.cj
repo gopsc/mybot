@@ -12,7 +12,7 @@ import pthread4cj.*
 import bot4cj.math.*
     
 const ADDR_0:           UInt8 = 0x68  /* 默认地址 */
-const ADDR_1:           UInt8 = 0x68  /* 地址2 */
+const ADDR_1:           UInt8 = 0x69  /* 地址2（AD0接高电平） */
 const PWR_MGMT_1:       UInt8 = 0x6B  /* 电源管理寄存器1 */
 const PWR_NOSLEEP:      UInt8 = 0x00  /* 电源管理 - 非睡眠模式 */
 const GYRO_CONF_REG:    UInt8 = 0x1B  /* 陀螺仪配置寄存器 */
@@ -66,12 +66,12 @@ func mpu6050_setup(i2c_fd: Int32, addr: UInt8) {
 
 @C
 /* -------- 读取 16 位传感器数据（带符号）--------
- * FIXME: 是否能够正确处理符号位 */
+ * INFO(20260826): 高低字节先掩码拼接为无符号16位，再截断为Int16按补码解释 */
 func read16BitReg(i2c_fd: Int32, high: UInt8, low: UInt8): Int16 {
 	unsafe {
-		let hh: Int16 = Int16(readI2cReg(i2c_fd, high))
-		let ll: Int16 = Int16(readI2cReg(i2c_fd, low))
-		return (hh << 8) | ll
+		let h: Int32 = Int32(readI2cReg(i2c_fd, high)) & 0xFF
+		let l: Int32 = Int32(readI2cReg(i2c_fd, low)) & 0xFF
+		return Int16((h << 8) | l)
 	}
 }
 
