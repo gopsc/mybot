@@ -458,7 +458,6 @@ class MtVars_Lua <: MatrixVars_Hardware {
 
 			if (status == LUA_OK) {
 				var status = Lua_pcallk(L, 0, LUA_MULTRET, 0, 0, CPointer<Unit>())
-				println("lua build status: ${status}")
 				if (status == LUA_OK) {
 					return true
 				}
@@ -537,7 +536,6 @@ class MtVars_Lua <: MatrixVars_Hardware {
 			}
 
 			var status = Lua_pcallk(L, 1, LUA_MULTRET, 0, 0, CPointer<Unit>())
-			println("lua status: ${status}")
 			if (status == LUA_OK) {
 				if (Lua_type(L, -1) == LUA_TTABLE) {
 					/* ---- 栈顶是表  压入 nil 作为遍历的起始键 ---- */
@@ -549,7 +547,6 @@ class MtVars_Lua <: MatrixVars_Hardware {
 						if (key.isEmpty() || val.isEmpty()) {
 							throw NoneValueException("Lua_tostring()")
 						}
-						println("${key}: ${val}")
 						ret.put(key.toString(), JsonString(val.toString()))
 						Lua_pop(L, 1)
 					}
