@@ -122,7 +122,6 @@ func mpu6050_main(args: CPointer<Unit>): CPointer<Unit> {
 
 	while(true) {
 
-		println("I am running. i2c_fd: ${param.i2c_fd}, addr: ${param.addr}")
 		//unsafe { _mutex_lock(mutex) }
 
 		/* -------- 获取传感器数据 -------- */
@@ -143,13 +142,8 @@ func mpu6050_main(args: CPointer<Unit>): CPointer<Unit> {
 		let roll = atan2(filtered_accel_y, filtered_accel_z) * RAD_TO_DEG
 		let pitch = atan(-filtered_accel_x / sqrt(filtered_accel_y * filtered_accel_y + filtered_accel_z * filtered_accel_z)) * RAD_TO_DEG
 
-		let roll1 = atan(filtered_accel_y / sqrt(filtered_accel_x * filtered_accel_x + filtered_accel_z * filtered_accel_z)) * RAD_TO_DEG
-		let pitch1 = atan2(-filtered_accel_x, filtered_accel_z) * RAD_TO_DEG
-
 		print("roll: ${roll}\t")
 		println("pitch: ${pitch}")
-		print("roll1: ${roll1}\t")
-		println("pitch1: ${pitch1}")
 
 		//unsafe { _mutex_unlock(mutex) }
 		sleep(Duration.millisecond * 10)

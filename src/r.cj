@@ -990,7 +990,7 @@ class RobotStruct {
 	{
 		for (item in ll) {
 			var target  = item.getName()
-			target = target.trimAscii() // ???
+			target = target.trimAscii()
 			if (name == target) {
 				return item  }
 		}
