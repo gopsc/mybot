@@ -931,6 +931,16 @@ class RobotStruct {
 				}
 			}
 
+			/* ---- 【特殊的】MPU6050绑定硬件
+			 * ---- */
+			else if (MtName == "MPU6050_BIND") {
+				let idxName = matrix.indexOfCol(0, "name")
+				for (i in 1..matrix.size) {
+					let name = matrix[i, idxName]
+					M[name] = MtVars_MPU6050_BIND.Factory(matrix, i, M)
+				}
+			}
+
 			/* ---- [特殊的] Action矩阵
 			 * ---- */
 			else if (MtName == "Action") {
