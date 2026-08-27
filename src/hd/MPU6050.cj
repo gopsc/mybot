@@ -12,7 +12,7 @@ import pthread4cj.*
 import bot4cj.math.*
     
 const ADDR_0:           UInt8 = 0x68  /* 默认地址 */
-const ADDR_1:           UInt8 = 0x68  /* 地址2 */
+const ADDR_1:           UInt8 = 0x69  /* 地址2（AD0接高电平） */
 const PWR_MGMT_1:       UInt8 = 0x6B  /* 电源管理寄存器1 */
 const PWR_NOSLEEP:      UInt8 = 0x00  /* 电源管理 - 非睡眠模式 */
 const GYRO_CONF_REG:    UInt8 = 0x1B  /* 陀螺仪配置寄存器 */
@@ -66,12 +66,12 @@ func mpu6050_setup(i2c_fd: Int32, addr: UInt8) {
 
 @C
 /* -------- 读取 16 位传感器数据（带符号）--------
- * FIXME: 是否能够正确处理符号位 */
+ * INFO(20260826): 高低字节先掩码拼接为无符号16位，再截断为Int16按补码解释 */
 func read16BitReg(i2c_fd: Int32, high: UInt8, low: UInt8): Int16 {
 	unsafe {
-		let hh: Int16 = Int16(readI2cReg(i2c_fd, high))
-		let ll: Int16 = Int16(readI2cReg(i2c_fd, low))
-		return (hh << 8) | ll
+		let h: Int32 = Int32(readI2cReg(i2c_fd, high)) & 0xFF
+		let l: Int32 = Int32(readI2cReg(i2c_fd, low)) & 0xFF
+		return Int16((h << 8) | l)
 	}
 }
 
@@ -122,7 +122,6 @@ func mpu6050_main(args: CPointer<Unit>): CPointer<Unit> {
 
 	while(true) {
 
-		println("I am running. i2c_fd: ${param.i2c_fd}, addr: ${param.addr}")
 		//unsafe { _mutex_lock(mutex) }
 
 		/* -------- 获取传感器数据 -------- */
@@ -143,13 +142,8 @@ func mpu6050_main(args: CPointer<Unit>): CPointer<Unit> {
 		let roll = atan2(filtered_accel_y, filtered_accel_z) * RAD_TO_DEG
 		let pitch = atan(-filtered_accel_x / sqrt(filtered_accel_y * filtered_accel_y + filtered_accel_z * filtered_accel_z)) * RAD_TO_DEG
 
-		let roll1 = atan(filtered_accel_y / sqrt(filtered_accel_x * filtered_accel_x + filtered_accel_z * filtered_accel_z)) * RAD_TO_DEG
-		let pitch1 = atan2(-filtered_accel_x, filtered_accel_z) * RAD_TO_DEG
-
 		print("roll: ${roll}\t")
 		println("pitch: ${pitch}")
-		print("roll1: ${roll1}\t")
-		println("pitch1: ${pitch1}")
 
 		//unsafe { _mutex_unlock(mutex) }
 		sleep(Duration.millisecond * 10)

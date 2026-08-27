@@ -22,12 +22,12 @@ sudo ln -s /usr/lib/x86_64-linux-gnu/liblua5.4.so /usr/lib/x86_64-linux-gnu/libl
 树莓派通过I2C接口连接pca9685后使用如下方法使用：
 
 ```bash
-cat ss/test.mt | cjpm run	# 蜘蛛机器人脚本
+cat scripts/std.mt | cjpm run	# 蜘蛛机器人脚本
 ```
 
 ## 动作脚本
 
-项目中包含的动作脚本在ss文件夹下面，这些动作脚本的适配机器人型号如下
+项目中包含的动作脚本在scripts文件夹下面，这些动作脚本的适配机器人型号如下
 
 ```textplain
 # PCA9685
