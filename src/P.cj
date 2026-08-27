@@ -119,8 +119,7 @@ class MatrixObject {
  *  即持有HashMap<String, ArrayList<ArrayList<String>>>
  *
  *  INFO(20260826-qing): MatrixParser解析出有效字符后会添加到
- *  	所持有MatrixObject的缓冲区，并在分隔符处进行提交
- */
+ *  	所持有MatrixObject的缓冲区，并在分隔符处进行提交 */
 class MatrixParser {
 
 	/* ---- 静态判断Option<Rune>是否有值 ----

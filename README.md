@@ -36,7 +36,6 @@ bot4cj/
 │   └── cpp/             # 原生扩展源码（FFT、滤波、音频）
 ├── modules/             # Lua 硬件驱动脚本
 ├── scripts/             # 动作脚本示例（.mt 为现行格式，.bot 为旧版）
-├── test/                # C/Lua 测试程序
 ├── cjpm.toml            # 构建配置
 ├── _set.sh              # 更新依赖并构建
 └── _run.sh              # 运行脚本

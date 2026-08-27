@@ -55,8 +55,6 @@ cjpm build
 
 默认构建当前主机架构的目标。cjpm 会依据 cjpm.toml 中 `[target.*]` 段自动选择对应的 stdx 路径；在树莓派上构建即为 aarch64 目标，在 x86_64 主机上则为 x86_64 目标。
 
-关于根目录下的 `Makefile`：该文件为早期原生库（I2C、矩阵运算等）的遗留构建脚本，其中引用的部分源文件已拆分至独立的依赖仓库，当前构建流程不依赖它。新版本请以 cjpm 为准。`compile.ps1` 为更早的 Windows 实验脚本，同样不再维护。
-
 ## 运行
 
 程序从标准输入读取动作脚本：
@@ -74,8 +72,6 @@ export cjStackSize=64MB
 export cjHeapSize=64MB
 exec cjpm run --run-args="$@"
 ```
-
-Windows 侧的 `run.ps1` 仅转发参数给 cjpm，作用相同。
 
 无硬件环境下可先验证解析流程：将脚本中的硬件声明注释后执行，观察解析输出；`--test=matrix_o`、`--test=matrix_2` 分支可在工作目录完成脚本的序列化往返验证（输入取自 `scripts/std.mt`）。
 
