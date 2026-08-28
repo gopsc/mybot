@@ -800,7 +800,7 @@ class MtVars_Speaker <: MatrixVars_Hardware {
 		let max_f = parseMt<Float32>(SpeakerDefs, i, idxMax_f)
 		let min_f = parseMt<Float32>(SpeakerDefs, i, idxMin_f)
 
-		println("Create a Speaker: ${name}, channels: ${channels}, sample_rate: ${sample_rate}, volume: $(volume), max_f: ${max_f}, min_f: ${min_f}")		
+		println("Create a Speaker: ${name}, channels: ${channels}, sample_rate: ${sample_rate}, volume: ${volume}, max_f: ${max_f}, min_f: ${min_f}")		
 		let spk = Spk(channels: channels, sample_rate: sample_rate)
 		let mtvar_spk = MtVars_Speaker(things: {json =>		// {"frequency": 1000.0, "delay": 400}
 			let json_obj = json.asObject()

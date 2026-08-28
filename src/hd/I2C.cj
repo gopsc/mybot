@@ -18,7 +18,7 @@ const I2C_SLAVE = 0x0703u64	/* -------- at least on arm64 -------- */
 public func openI2cDev(path: CString): Int32 {
 	unsafe {
 		let fd =  libc_open(path, O_RDWR)
-		if (fd > 0) { 
+		if (fd >= 0) { 
 			I2cLock_create(fd)	/* -------- 为I2C设备创建锁 -------- */
 			return  fd
 		}
@@ -131,6 +131,7 @@ func I2cLock_create(fd: Int32): Unit {
 		/* -------- 初始化主要的锁 -------- */
 		if (MAIN_LOCK.isNull()) {
 			MAIN_LOCK = _mutex_create()
+			_mutex_init(MAIN_LOCK)	/* -------- 主锁必须先初始化再使用 -------- */
 			LOCKS = LibC.malloc<I2C_Lock>(count: LOCKS_SIZE)
 			for (i in 0..LOCKS_SIZE) {
 				let tmp = I2C_Lock()
@@ -193,6 +194,7 @@ func I2cLock_destroy(fd: Int32): Unit {
 		/* -------- 如果锁具里已经没有I2C锁， 就释放整个锁具 --------  */
 		if (!flag_any) {
 			LibC.free(LOCKS)
+			_mutex_destroy(MAIN_LOCK)	/* -------- 与 _mutex_init 成对 -------- */
 			_mutex_free(MAIN_LOCK)
 			MAIN_LOCK = CPointer<UInt8>()
 		}
@@ -202,7 +204,7 @@ func I2cLock_destroy(fd: Int32): Unit {
 			return  }
 
 
-		throw NoneValueException("i2c lock nor found")
+		throw NoneValueException("i2c lock not found")
 	}
 }
 
@@ -229,7 +231,7 @@ func I2cLock_lock(fd: Int32): Unit {
 
 		_mutex_unlock(MAIN_LOCK)
 		if (flag) { return } 
-		throw NoneValueException("i2c lock nor found")
+		throw NoneValueException("i2c lock not found")
 	}
 }
 
@@ -254,7 +256,7 @@ func I2cLock_unlock(fd: Int32): Unit {
 		}
 		_mutex_unlock(MAIN_LOCK)
 		if (flag) {return}
-		throw NoneValueException("i2c lock nor found")
+		throw NoneValueException("i2c lock not found")
 	}
 }
 
