@@ -18,6 +18,11 @@ import ctype4cj.*
 import spi4cj.*
 import lua4cj.*
 
+/* ---- 直接绑定liblua的浮点推栈接口 ----
+ * lua4cj 仅封装了 lua_pushinteger，矩阵动作中的小数参数
+ * （JsonFloat）此前会被静默丢弃，故在此补充声明。 */
+foreign func lua_pushnumber(L: lua_State, n: C_Double): Unit
+
 /*
  * ---------------- 硬件变量基类 ----------------
  *  接收3个lambda表达式，在回调函数中定义行为（）
@@ -453,7 +458,6 @@ class MtVars_Lua <: MatrixVars_Hardware {
 
 			if (status == LUA_OK) {
 				var status = Lua_pcallk(L, 0, LUA_MULTRET, 0, 0, CPointer<Unit>())
-				println("lua build status: ${status}")
 				if (status == LUA_OK) {
 					return true
 				}
@@ -522,10 +526,16 @@ class MtVars_Lua <: MatrixVars_Hardware {
 					Lua_setfield(L, -2, sk)
 					LibC.free(sk)
 				}
+				else if (val is JsonFloat) {
+					let v = val.asFloat().getValue()
+					let sk = LibC.mallocCString(k)
+					lua_pushnumber(L, v)
+					Lua_setfield(L, -2, sk)
+					LibC.free(sk)
+				}
 			}
 
 			var status = Lua_pcallk(L, 1, LUA_MULTRET, 0, 0, CPointer<Unit>())
-			println("lua status: ${status}")
 			if (status == LUA_OK) {
 				if (Lua_type(L, -1) == LUA_TTABLE) {
 					/* ---- 栈顶是表  压入 nil 作为遍历的起始键 ---- */
@@ -537,7 +547,6 @@ class MtVars_Lua <: MatrixVars_Hardware {
 						if (key.isEmpty() || val.isEmpty()) {
 							throw NoneValueException("Lua_tostring()")
 						}
-						println("${key}: ${val}")
 						ret.put(key.toString(), JsonString(val.toString()))
 						Lua_pop(L, 1)
 					}
@@ -990,7 +999,7 @@ class RobotStruct {
 	{
 		for (item in ll) {
 			var target  = item.getName()
-			target = target.trimAscii() // ???
+			target = target.trimAscii()
 			if (name == target) {
 				return item  }
 		}
@@ -1010,6 +1019,9 @@ class RobotStruct {
 			/* -------- 执行一行 -------- */
 			let keys = set.getFields().keys()
 			for (name_dev in keys) {
+				if (!M.contains(name_dev)) {
+					throw IllegalArgumentException("Action 引用了未声明的硬件变量: ${name_dev}")
+				}
 				let hv = M[name_dev]
 				let params: JsonValue = set.get(name_dev).getOrThrow()
 				let _: JsonValue = hv.play(params)

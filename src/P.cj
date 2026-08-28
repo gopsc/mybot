@@ -97,7 +97,7 @@ class MatrixObject {
 	/* -------- 提交行 -------- */
 	public func submitLine(count: Int64) {
 		if (grp.size == 0) { return }
-		if (!values.size == 0 && !grp.size == values[values.size - 1].size)
+		if (values.size != 0 && grp.size != values[values.size - 1].size)
 			{ throw DoesNotSync(count) }
 		values.add(grp)
 		grp = ArrayList<String>()
@@ -154,7 +154,6 @@ class MatrixParser {
 		while (!flag && hasValue(so)) {
 			try {
 				let s = so.getOrThrow()
-				print(s)		/* debug */
 				count = _next(s, count)	/* 进行解析解析 */
 				so  = input.read()	/* 为下一次循环提供条件 */
 			}
@@ -207,9 +206,9 @@ class MatrixParser {
 			nl = true
 			nm = false
 		}
-		else if (!nl && !nm && (c == r' ' || c == r'\t' || c == r"\n")) {	/* 添加命名项 */
+		else if (!nl && !nm && (c == r' ' || c == r'\t' || c == r'\n')) {	/* 添加命名项 */
 			obj.submitItem()
-			if (c ==  r"\n") { count += 1 }
+			if (c ==  r'\n') { count += 1 }
 		}
 		else if (!nl && c == r';') {	/* 普通行结束 */
 			obj.submitItem()
