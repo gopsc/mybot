@@ -983,6 +983,14 @@ class RobotStruct {
 	private let C = LinkedList<MatrixObject>()
 	private let M = HashMap<String, MatrixVars_Hardware>() 
 
+	/* -------- 安全添加硬件变量（检查重复键） -------- */
+	private func addHardwareVar(name: String, hw: MatrixVars_Hardware) {
+		if (M.containsKey(name)) {
+			throw IllegalArgumentException("Duplicate hardware variable name: '${name}'")
+		}
+		M[name] = hw
+	}
+
 	/*
 	 *  使用矩阵脚本驱动机器人
 	 * 
@@ -1072,7 +1080,7 @@ class RobotStruct {
 				let idxName =  matrix.indexOfCol(0, "name")
 				for (i in 1..matrix.size) {
 					let name =  matrix[i, idxName]
-					M[name] = MtVars_Alias.Factory(matrix, i, M)
+					addHardwareVar(name, MtVars_Alias.Factory(matrix, i, M))
 				}
 			}
 
@@ -1082,7 +1090,7 @@ class RobotStruct {
 				let idxName = matrix.indexOfCol(0, "name")
 				for (i in 1..matrix.size) {
 					let name = matrix[i, idxName]
-					M[name] = MtVars_Servo.Factory(matrix, i, M)
+					addHardwareVar(name, MtVars_Servo.Factory(matrix, i, M))
 				}
 			}
 
@@ -1097,7 +1105,7 @@ class RobotStruct {
 				let idxName = matrix.indexOfCol(0, "name")
 				for (i in 1..matrix.size) {
 					let name = matrix[i, idxName]
-					M[name] = MtVars_Speaker.Factory(matrix, i, M)
+					addHardwareVar(name, MtVars_Speaker.Factory(matrix, i, M))
 				}
 			}
 
@@ -1108,10 +1116,10 @@ class RobotStruct {
 					let name = matrix[i, idxName]
 					/* ---- fixme: 这里的脚本路径是写死的，随后我们需要设计一个机制，从环境变量中查找
 					 * ---- TODO: 从家目录查找 */
-					M[name] = MtVars_Lua.Factory("./modules/${MtName}.lua", {=>
+					addHardwareVar(name, MtVars_Lua.Factory("./modules/${MtName}.lua", {=>
 							println(123)
 							this._getMetadata(matrix, i)
-					})
+					}))
 				}
 		}
 		}
