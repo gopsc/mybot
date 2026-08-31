@@ -59,7 +59,7 @@ class MatrixObject {
 		}
 
 		/* ---- 没找到 ---- */
-		throw IllegalArgumentException("The key does not found.")
+		throw IllegalArgumentException("Key '${key}' not found in row ${row}.")
 	}
 
 	/*  -----  储存对象 ----- */

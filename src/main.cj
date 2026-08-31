@@ -121,23 +121,25 @@ func run_test(key: String) {
 
 	/* -------- 测试反序列化矩阵，并且序列化输出 -------- */
 	else if (key == "matrix_o") {
-		let file = File("ss/test.mt", OpenMode.Read)
+		let scriptPath = std.env.getEnv("BOT4CJ_SCRIPT_PATH").getOr("scripts")
+		let file = File("${scriptPath}/std.mt", OpenMode.Read)
 		let robot = RobotStruct(file)
 		file.close()
-		let outf = File("ss/output.mt", OpenMode.Write)
+		let outf = File("${scriptPath}/output.mt", OpenMode.Write)
 		robot.save(outf)
 		outf.close()
 	}
 
 	/* -------- 解析反序列化之前输出的矩阵 -------- */
 	else if (key == "matrix_2") {
-		let file = File("ss/output.mt", OpenMode.Read)
+		let scriptPath = std.env.getEnv("BOT4CJ_SCRIPT_PATH").getOr("scripts")
+		let file = File("${scriptPath}/output.mt", OpenMode.Read)
 		let robot = RobotStruct(file)
 		file.close()
 		robot.active()
 		robot.run()
 		robot.deactive()
-		let outf = File("ss/output_1.mt", OpenMode.Write)
+		let outf = File("${scriptPath}/output_1.mt", OpenMode.Write)
 		robot.save(outf)
 		outf.close()
 	}
