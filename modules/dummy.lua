@@ -28,9 +28,7 @@ function build(data)
 		}
 	end
 
-	print("-------- Lua builder func get a table --------")
-	print_table(data)
-	print("----------------------------------------------")
+	dbg_table("-------- Lua builder func get a table --------", data)
 
 	call_count = 0		-- 重置内部状态
 
@@ -52,9 +50,7 @@ function destroy(data)
 		}
 	end
 
-	print("-------- Lua ender func get a table --------")
-	print_table(data)
-	print("--------------------------------------------")
+	dbg_table("-------- Lua ender func get a table --------", data)
 
 	print(string.format("Dummy served %d call(s) in its meaningless life", call_count))
 
@@ -75,9 +71,7 @@ function call(data)
 		}
 	end
 
-	print("-------- Lua caller func get a table --------")
-	print_table(data)
-	print("---------------------------------------------")
+	dbg_table("-------- Lua caller func get a table --------", data)
 
 	call_count = call_count + 1
 

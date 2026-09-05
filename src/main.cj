@@ -114,7 +114,7 @@ func print_help()
 {
 	println("这是一个机器人动作脚本解析器。")
 	println("使用--robot选项指定结构脚本，然后使用管道输入动作脚本，示例：")
-	println("cat scripts/std.mt | ./bot --robot=./robots/spider.mt")
+	println("cat scripts/std.mt | ./bot --robot=./robots/spider1.sql")
 }
 
 /* -------- 集成多种常规测试、临时测试 -------- */

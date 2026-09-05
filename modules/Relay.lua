@@ -19,9 +19,7 @@ function build(data)
 		}
 	end
 
-	print("-------- Relay builder func get a table --------")
-	print_table(data)
-	print("----------------------------------------------")
+	dbg_table("-------- Relay builder func get a table --------", data)
 
 	return {  result = "OK"  }
 
@@ -56,9 +54,7 @@ function call(data)
 		}
 	end
 
-	print("-------- Relay caller func get a table --------")
-	print_table(data)
-	print("---------------------------------------------")
+	dbg_table("-------- Relay caller func get a table --------", data)
 
 	-----------------------------------------------------
 	local delay = tonumber(data.test)

@@ -120,6 +120,16 @@ INSERT INTO Monitor (name, src) VALUES ('mon0', 'kf0');  -- 消费滤波值
 引用链 `imu0 → kf0 → mon0` 全靠既有引用机制自动串联（播放 mon0 会递归播放 kf0、imu0）。也可直接在 @Action 里以 `kf0.in`/`ef0.in` 列喂待滤值（无需 src）。注意：滤波变量每被 play 一次推进一拍，多消费者引用同一滤波器会重复推进。
 
 
+## 环境变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `BOT4CJ_MODULE_PATH` | 驱动模块目录（默认 `./modules`），框架加载 `<矩阵名>.lua` 与驱动 dofile `lib/` 均按其解析 |
+| `BOT4CJ_VERBOSE` | 设置后恢复框架与驱动层的逐次调用调试输出（参数/结果转储）；缺省静默，错误信息始终打印 |
+
+安全说明：框架加载 Lua 驱动后会中和 `os.execute` / `io.popen`（shell）、`os.exit`（进程退出）、`io.open` / `io.lines` / `os.remove` / `os.rename`（任意文件读写）；`os.getenv`、`dofile`、`require`（HAL 依赖 ffi）保留。
+
+
 ## 解析器
 
 树莓派通过I2C接口连接pca9685后使用如下方法使用：

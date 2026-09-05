@@ -109,9 +109,7 @@ function build(data)
     end
 
     if DEBUG then
-        print("-------- BME280 builder func get a table --------")
-        print_table(data)
-        print("-------------------------------------------------")
+        dbg_table("-------- BME280 builder func get a table --------", data)
     end
 
     local fd = tonumber(data.fd)

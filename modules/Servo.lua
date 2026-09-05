@@ -31,9 +31,7 @@ function build(data)
 		}
 	end
 
-	print("-------- Servo builder func get a table --------")
-	print_table(data)
-	print("------------------------------------------------")
+	dbg_table("-------- Servo builder func get a table --------", data)
 
 	return {  result = "OK"  }
 
@@ -69,9 +67,7 @@ function call(data)
 		}
 	end
 
-	print("-------- Servo caller func get a table --------")
-	print_table(data)
-	print("----------------------------------------------")
+	dbg_table("-------- Servo caller func get a table --------", data)
 
 	-----------------------------------------------------
 	local angle = tonumber(data.angle)

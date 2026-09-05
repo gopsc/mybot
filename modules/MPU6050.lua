@@ -44,9 +44,7 @@ function build(data)
 			message = "Invalid Arguments Type: table"
 		}
 	end
-	print("-------- Lua builder func get a table --------")
-	print_table(data)
-	print("----------------------------------------------")
+	dbg_table("-------- Lua builder func get a table --------", data)
 
 
 	-----------------------------------------------------
@@ -95,9 +93,7 @@ function destroy(data)
 		}
 	end
 
-	print("-------- Lua ender func get a table --------")
-	print_table(data)
-	print("--------------------------------------------")
+	dbg_table("-------- Lua ender func get a table --------", data)
 
 	-----------------------------------------------------
 	local fd = data.fd
@@ -141,9 +137,7 @@ function call(data)
 		}
 	end
 
-	print("-------- Lua caller func get a table --------")
-	print_table(data)
-	print("---------------------------------------------")
+	dbg_table("-------- Lua caller func get a table --------", data)
 
 	-----------------------------------------------------
 	local fd = data.fd

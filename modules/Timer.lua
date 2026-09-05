@@ -24,9 +24,7 @@ function build(data)
 		}
 	end
 
-	print("-------- Lua builder func get a table --------")
-	print_table(data)
-	print("----------------------------------------------")
+	dbg_table("-------- Lua builder func get a table --------", data)
 
 	return {  result = "OK"  }	-- 返回成功信号
 
@@ -43,9 +41,7 @@ function destroy(data)
 		}
 	end
 
-	print("-------- Lua ender func get a table --------")
-	print_table(data)
-	print("--------------------------------------------")
+	dbg_table("-------- Lua ender func get a table --------", data)
 
 	return {  result = "OK"  }	-- 返回成功信号
 
@@ -64,9 +60,7 @@ function call(data)
 		}
 	end
 
-	print("-------- Lua caller func get a table --------")
-	print_table(data)
-	print("---------------------------------------------")
+	dbg_table("-------- Lua caller func get a table --------", data)
 
 	-----------------------------------------------------
 	local delay = data.delay

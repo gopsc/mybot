@@ -85,9 +85,7 @@ function build(data)
     end
 
     if DEBUG then
-        print("-------- ADS1256 builder func get a table --------")
-        print_table(data)
-        print("--------------------------------------------------")
+        dbg_table("-------- ADS1256 builder func get a table --------", data)
     end
 
     local fd = data.fd
@@ -166,9 +164,7 @@ function call(data)
     end
 
     if DEBUG then
-        print("-------- ADS1256 caller func get a table --------")
-        print_table(data)
-        print("-------------------------------------------------")
+        dbg_table("-------- ADS1256 caller func get a table --------", data)
     end
 
     local fd = data.fd

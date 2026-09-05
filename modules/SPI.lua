@@ -25,9 +25,7 @@ function build(data)
 		}
 	end
 
-	print("-------- SPI.Lua builder func get a table --------")
-	print_table(data)
-	print("--------------------------------------------------")
+	dbg_table("-------- SPI.Lua builder func get a table --------", data)
 	local path = data.path
 
 	-- 检查文件句柄参数是否存在
@@ -118,10 +116,8 @@ function destroy(data)
 		}
 	end
 
-	print("-------- SPI.Lua ender func get a table --------")
-	print_table(data)
+	dbg_table("-------- SPI.Lua ender func get a table --------", data)
 	print(string.format("now fd: %i", fd))
-	print("------------------------------------------------")
 
 	spi_close(fd)
 	fd = -1
@@ -146,9 +142,7 @@ function call(data)
 		}
 	end
 
-	print("-------- SPI.Lua caller func get a table --------")
-	print_table(data)
-	print("-------------------------------------------------")
+	dbg_table("-------- SPI.Lua caller func get a table --------", data)
 
 	return {
 		fd = fd,

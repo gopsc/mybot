@@ -21,9 +21,7 @@ function build(data)
 			message = "Invalid Arguments: table"
 		}
 	end
-	print("-------- I2C.Lua builder func get a table --------")
-	print_table(data)
-	print("--------------------------------------------------")
+	dbg_table("-------- I2C.Lua builder func get a table --------", data)
 
 	local path = data.path
 	if path == nil then	-- 检查文件句柄参数是否存在
