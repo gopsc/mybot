@@ -16,6 +16,47 @@ sudo apt update && sudo apt install libluajit-5.1-dev
 ```
 
 
+## 5 分钟上手
+
+### 1. 构建
+
+```bash
+export CANGJIE_STDX_PATH=/path/to/cangjie-stdx   # cjpm.toml 按目标架构读取
+bash _set.sh        # 等价于 cjpm update + cjpm build
+```
+
+### 2. 无硬件跑通第一条链路（Relay → Timer）
+
+`relay-test` 不接任何硬件：Relay 把 `test` 参数转成 `delay`，经 controller 机制转发给
+Timer 延时 200ms，用来验证安装是否成功：
+
+```bash
+cat scripts/relay-test.mt | bash _run.sh --robot=robots/relay-test.sql
+```
+
+看到 `Relay: test=200 note=hello-relay -> delay=200` 且正常退出，即链路跑通。
+想看每一步的参数/结果转储：
+
+```bash
+export BOT4CJ_VERBOSE=1
+cat scripts/relay-test.mt | bash _run.sh --robot=robots/relay-test.sql
+```
+
+### 3. 接第一块 PCA9685
+
+- 接线：树莓派 i2c-1（SDA1/SCL1）→ PCA9685，地址 0x40
+- 参照 `robots/spider1.sql` 写自己的结构脚本：I2C 表 → PCA9685 表 → Servo 表
+  （Servo 的 controller 列指向 `pca9685-0`，channel 对应接线通道）
+- 跑站立动作：
+
+```bash
+cat scripts/std.mt | bash _run.sh --robot=robots/spider1.sql
+```
+
+脚本语法细节见下文「机器人结构语法」「动作脚本」两节；报错信息会指出是哪张表、
+哪一行、哪一列的问题，按提示修正即可。
+
+
 ## 项目介绍
 机器人软件通常被称为“专用软件”，想要得到一个机器人软件通常比一个普通的软件更为困难，这是因为这个世界上的机器人五花八门，所以它们的软件往往都是独特的，所以我想写一种用于描述机器人硬件和动作的通用的脚本。
 
