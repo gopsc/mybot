@@ -29,9 +29,7 @@ function build(data)
 		}
 	end
 
-	print("-------- Lua builder func get a table --------")
-	print_table(data)
-	print("----------------------------------------------")
+	dbg_table("-------- Lua builder func get a table --------", data)
 
 
 	-----------------------------------------------------
@@ -90,9 +88,7 @@ function destroy(data)
 		}
 	end
 
-	print("-------- Lua ender func get a table --------")
-	print_table(data)
-	print("--------------------------------------------")
+	dbg_table("-------- Lua ender func get a table --------", data)
 
 	-----------------------------------------------------
 	local fd = data.fd
@@ -138,9 +134,7 @@ function call(data)
 		}
 	end
 
-	print("-------- Lua caller func get a table --------")
-	print_table(data)
-	print("---------------------------------------------")
+	dbg_table("-------- Lua caller func get a table --------", data)
 
 
 	-----------------------------------------------------
@@ -178,6 +172,15 @@ function call(data)
 		}
 	end
 	channel = math.floor(channel)	-- 寄存器地址需要整数通道号
+
+	-- PCA9685 只有 16 路输出：越界的 channel 会写出 0x06+4*channel 之外的
+	-- 寄存器（如 -1 落到 MODE 区），污染同总线器件配置甚至击穿脉宽，显式拒绝
+	if channel < 0 or channel > 15 then
+		return {
+			result = "ERR",
+			message = "Invalid Argument: channel (out of range 0-15)"
+		}
+	end
 
 	local angle = data.angle
 
