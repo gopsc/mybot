@@ -722,10 +722,10 @@ class RobotStruct {
 	 * （HashMap 遍历序未定义，而 I2C→PCA9685 等 fd 依赖要求声明序） */
 	private let hwSeq = ArrayList<MatrixVars_Hardware>() 
 
-	/* -------- 安全添加硬件变量（检查重复键） -------- */
-	private func addHardwareVar(name: String, hw: MatrixVars_Hardware) {
+	/* -------- 安全添加硬件变量（检查重复键；source 用于报错时指明声明来源） -------- */
+	private func addHardwareVar(name: String, hw: MatrixVars_Hardware, source!: String = "") {
 		if (let Some(_) <- M.get(name)) {
-			throw IllegalArgumentException("Duplicate hardware variable name: '${name}'")
+			throw IllegalArgumentException("Duplicate hardware variable name: '${name}'${source}")
 		}
 		M[name] = hw
 		hwSeq.add(hw)
@@ -754,7 +754,7 @@ class RobotStruct {
 				M[name] = aliasVar
 			}
 			else {
-				addHardwareVar(name, aliasVar)
+				addHardwareVar(name, aliasVar, source: " (in @Alias matrix)")
 			}
 		}
 	}
@@ -873,7 +873,9 @@ class RobotStruct {
 
 							println("{${ev.targetTabName}}")
 
+							var rowNo = 0
 							for (row in ev.tableRows) {
+								rowNo += 1
 								/* ---- INSERT 值列与表头逐列匹配；缺列/重复列/未知列
 								 * ---- 会使矩阵单元静默错位（动作打到错误舵机），显式报错 ---- */
 								for (i in 0..item.col) {
@@ -882,7 +884,7 @@ class RobotStruct {
 										if (col.columnName == item[0, i]) {
 											matched += 1
 											if (matched > 1) {
-												throw IllegalArgumentException("INSERT INTO ${ev.targetTabName}: duplicate column '${col.columnName}'")
+												throw IllegalArgumentException("INSERT INTO ${ev.targetTabName} row ${rowNo}: duplicate column '${col.columnName}'")
 											}
 											for (ch in col.value) {
 												item.addRune(Rune(ch))
@@ -891,7 +893,7 @@ class RobotStruct {
 										}
 									}
 									if (matched == 0) {
-										throw IllegalArgumentException("INSERT INTO ${ev.targetTabName}: column '${item[0, i]}' is missing in an INSERT row")
+										throw IllegalArgumentException("INSERT INTO ${ev.targetTabName} row ${rowNo}: column '${item[0, i]}' is missing")
 									}
 								}
 								for (col in row) {
@@ -900,7 +902,7 @@ class RobotStruct {
 										if (col.columnName == item[0, i]) { known = true; break }
 									}
 									if (!known) {
-										throw IllegalArgumentException("INSERT INTO ${ev.targetTabName}: unknown column '${col.columnName}'")
+										throw IllegalArgumentException("INSERT INTO ${ev.targetTabName} row ${rowNo}: unknown column '${col.columnName}'")
 									}
 								}
 								item.submitLine(0)
@@ -943,7 +945,7 @@ class RobotStruct {
 				let idxName = matrix.indexOfCol(0, "name")
 				for (i in 1..matrix.size) {
 					let name = matrix[i, idxName]
-					addHardwareVar(name, MtVars_Daemon.Factory(matrix, i, M, daemonHolders))
+					addHardwareVar(name, MtVars_Daemon.Factory(matrix, i, M, daemonHolders), source: " (in table '${MtName}')")
 				}
 			}
 
@@ -972,7 +974,7 @@ class RobotStruct {
 							let ctrlOptHV = M.get(ctrlName)
 							if (ctrlOptHV.isNone()) {
 								throw IllegalArgumentException(
-									"Hardware variable '${name}' declares controller '${ctrlName}', but it is not defined yet. The controller must be defined before the matrix that references it.")
+									"Hardware variable '${name}' declares controller '${ctrlName}' in table '${MtName}', but it is not defined yet. The controller must be defined before the matrix that references it.")
 							}
 							ctrlOpt = ctrlOptHV.getOrThrow()
 						}
@@ -982,7 +984,7 @@ class RobotStruct {
 					let skipCol = idxCtrl	/* lambda 不得捕获可变变量 */
 					addHardwareVar(name, MtVars_Lua.Factory(scriptPath, {=>
 							this._getMetadata(matrix, i, skipCol: skipCol)
-					}, controller: ctrlOpt))
+					}, controller: ctrlOpt), source: " (in table '${MtName}')")
 				}
 		}
 		}
@@ -1017,7 +1019,7 @@ class RobotStruct {
 			let name_HV = ActionDefs[0, j]
 			let arr = name_HV.split(".")
 			if (arr.size != 2) {
-				throw IllegalArgumentException("Action column is not valid")  }
+				throw IllegalArgumentException("Action column '${name_HV}' is not valid (expect <device>.<param>)")  }
 			let name_dev = arr[0]
 			if (!order.contains(name_dev)) {
 				order.add(name_dev)  }
@@ -1033,7 +1035,7 @@ class RobotStruct {
 			for (name_dev in order) {
 				let hvOpt = M.get(name_dev)
 				if (hvOpt.isNone()) {
-					throw IllegalArgumentException("Hardware variable '${name_dev}' is used in @Action but not defined in hardware declaration section.")
+					throw IllegalArgumentException("Hardware variable '${name_dev}' is used in @Action (row ${i}) but not defined in hardware declaration section.")
 				}
 				let hv = hvOpt.getOrThrow()
 				let paramsOpt = set.get(name_dev)
@@ -1054,7 +1056,7 @@ class RobotStruct {
 		let name_HV = ActionDefs[0, j]	/* 获取硬件变量名 FIXME:  该名称不得使用占位符 且不重复 */
 		let arr = name_HV.split(".")
 		if (arr.size != 2) {
-			throw IllegalArgumentException("Action column is not valid")  }
+			throw IllegalArgumentException("Action column '${name_HV}' is not valid (expect <device>.<param>)")  }
 		let name_dev = arr[0]
 		var name_param = arr[1]
 

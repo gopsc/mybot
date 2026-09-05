@@ -75,13 +75,35 @@ main(args: Array<String>): Int64 {
 
 	/*
 	 *  缺省行为：从标准输入获取动作脚本
-	 * 
+	 *
 	 *  TODO(20260519-qing): 进行脚本引入（相对路径也可，从**环境变量**的路径中搜寻也可）
 	 */
 	else if (options.contains("robot")) {
 
-		let fstream  = File(options["robot"], OpenMode.Read)
-		let robot = RobotStruct(fstream)
+		let rpath = options["robot"]
+
+		/* ---- 友好报错：结构脚本打不开/解析失败时给人话提示，不裸栈回溯 ---- */
+		var fstreamOpt: Option<File> = None
+		try {
+			fstreamOpt = Option<File>.Some(File(rpath, OpenMode.Read))
+		} catch (e: Exception) {
+			println("无法打开结构脚本 '${rpath}': ${e.message}")
+			println("请确认 --robot 指向存在的结构脚本，示例：cat scripts/std.mt | ./bot --robot=robots/spider1.sql")
+			return 1
+		}
+		let fstream = fstreamOpt.getOrThrow()
+
+		var robotOpt: Option<RobotStruct> = None
+		try {
+			robotOpt = Option<RobotStruct>.Some(RobotStruct(fstream))
+		} catch (e: Exception) {
+			println("结构脚本解析失败 '${rpath}': ${e.message}")
+			println("无硬件自检链路：cat scripts/relay-test.mt | ./bot --robot=robots/relay-test.sql")
+			return 1
+		}
+		let robot = robotOpt.getOrThrow()
+		fstream.close()
+
 		try {
 			robot.active()
 
