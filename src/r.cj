@@ -18,6 +18,66 @@ import luajit4cj.*
 import mt2.*
 import SQL4cj.*
 
+/* ---- Lua 类型常量（luajit4cj 未导出，按 lua.h 取值；LUA_TTABLE=5 已由其提供）---- */
+let LUA_TNUMBER: C_Int = 3		/* 数字（lua_tolstring 会将其原地转为字符串） */
+let LUA_TSTRING: C_Int = 4		/* 字符串 */
+
+/* ---- 调试转储开关：设置环境变量 BOT4CJ_VERBOSE 时，输出每次硬件调用的参数/结果转储 ----
+ *  缺省静默，解决 call_lua/build_lua 每次调用刷屏（issue #5 清单 P3）；
+ *  错误信息不经本函数，始终打印 */
+func dumpLog(msg: String): Unit {
+	if (Process.current.getEnv("BOT4CJ_VERBOSE").isSome()) {  println(msg)  }
+}
+
+/* ---- 读取 Lua 栈顶错误对象为字符串 ----
+ *  lua_tolstring 对非 string/number 的值返回空指针，直接 toString() 是空指针解引用；
+ *  先判型，非字符串对象返回类型说明（issue #5 清单 H5） */
+func luaErrorString(L: lua_State): String {
+	let t = unsafe { Lua_type(L, -1) }
+	if (t == LUA_TSTRING) {
+		let s = unsafe { Lua_tostring(L, -1) }
+		return s.toString()
+	}
+	return "<non-string error object, Lua type ${t}>"
+}
+
+/* ---- 收紧 Lua 沙箱（issue #9 M1 可落地部分）----
+ *  保留 os.getenv（模块路径）/ os.time|clock / dofile / require（HAL 的 ffi 依赖），
+ *  中和可直接破坏宿主的入口：shell 执行（os.execute / io.popen）、进程退出（os.exit）、
+ *  任意文件读写（io.open / io.lines / os.remove / os.rename）。
+ *  各全局缺表时跳过对应组，不中断启动。 */
+func sandbox_lua(L: lua_State): Unit {
+	unsafe {
+		let osKeys = ["execute", "exit", "remove", "rename"]
+		let kos = LibC.mallocCString("os")
+		Lua_getglobal(L, kos)
+		if (Lua_type(L, -1) == LUA_TTABLE) {
+			for (name in osKeys) {
+				let kn = LibC.mallocCString(name)
+				Lua_pushnil(L)
+				Lua_setfield(L, -1, kn)
+				LibC.free(kn)
+			}
+		}
+		Lua_pop(L, 1)
+		LibC.free(kos)
+
+		let ioKeys = ["popen", "open", "lines"]
+		let kio = LibC.mallocCString("io")
+		Lua_getglobal(L, kio)
+		if (Lua_type(L, -1) == LUA_TTABLE) {
+			for (name in ioKeys) {
+				let kn = LibC.mallocCString(name)
+				Lua_pushnil(L)
+				Lua_setfield(L, -1, kn)
+				LibC.free(kn)
+			}
+		}
+		Lua_pop(L, 1)
+		LibC.free(kio)
+	}
+}
+
 /*
  * ---------------- 硬件变量基类 ----------------
  *  接收3个lambda表达式，在回调函数中定义行为（）
@@ -192,12 +252,12 @@ class MtVars_Lua <: MatrixVars_Hardware {
 					let val = fields.get(k).getOrThrow()
 					obj.put(k, val)
 				}
-				println("Lua scripts call parameters: ${obj.toString()}")
+				dumpLog("Lua scripts call parameters: ${obj.toString()}")
 
 				/* 调用Lua解释器 */
 				let res = call_lua(L, obj)
 
-				println("Lua script call result: ${res.toString()}")
+				dumpLog("Lua script call result: ${res.toString()}")
 
 				/* ---- controller 转发：元数据 ∪ 自己Lua的返回表 ---- */
 				if (let Some(ctrl) <- controller) {
@@ -207,10 +267,10 @@ class MtVars_Lua <: MatrixVars_Hardware {
 					for (k in retFields.keys()) {
 						payload.put(k, retFields.get(k).getOrThrow())
 					}
-					println("Forward to controller: ${payload.toString()}")
+					dumpLog("Forward to controller: ${payload.toString()}")
 
 					let ctrl_res = ctrl.play(payload)
-					println("Controller result: ${ctrl_res.toString()}")
+					dumpLog("Controller result: ${ctrl_res.toString()}")
 					return ctrl_res
 				}
 
@@ -235,12 +295,12 @@ class MtVars_Lua <: MatrixVars_Hardware {
 
 				/* 插入模式指令 （告知lua脚本这是在构建） */
 				obj.put("mode", JsonString("build"))
-				println("Lua scripts build parameters: ${obj.toString()}")
+				dumpLog("Lua scripts build parameters: ${obj.toString()}")
 
 				/* 开始构建 */
 				let res = call_lua(L, obj)
 
-				println("Lua script build result: ${res.toString()}")
+				dumpLog("Lua script build result: ${res.toString()}")
 			},
 
 			/*
@@ -257,11 +317,11 @@ class MtVars_Lua <: MatrixVars_Hardware {
 
 				/*  插入模式指令  */
 				obj.put("mode", JsonString("destroy"))
-				println("Lua scripts destroy parameters: ${obj.toString()}")
+				dumpLog("Lua scripts destroy parameters: ${obj.toString()}")
 
 				let res = call_lua(L, obj)
 
-				println("Lua script destroy result: ${res.toString()}")
+				dumpLog("Lua script destroy result: ${res.toString()}")
 				/* ---- 在这里写就Lua状态机的解构 ---- */
 				destroy_lua(L)
 
@@ -288,6 +348,7 @@ class MtVars_Lua <: MatrixVars_Hardware {
 
 			/*  加载Lua标准库（os/io等，HAL.lua 依赖；不再注册硬件cfunc）  */
 			Lua_loadlib(L)
+			sandbox_lua(L)	/* 中和 os.execute/io.popen 等宿主入口（issue #9 M1） */
 
 			/* -------- 设置Lua状态机 -------- */
 			var status =  Lua_loadfilex(L, filename_c, CPointer<C_Char>())
@@ -295,15 +356,13 @@ class MtVars_Lua <: MatrixVars_Hardware {
 
 			if (status == LUA_OK) {
 				var status = Lua_pcall(L, 0, LUA_MULTRET, 0)
-				println("lua build status: ${status}")
+				dumpLog("lua build status: ${status}")
 				if (status == LUA_OK) { return true  }
 			}
 
-			/* -------- 从栈顶获取错误信息 -------- */
-			let error_msg = Lua_tostring(L, -1);
-			println(error_msg.toString());
-
-
+			/* -------- 从栈顶获取错误信息（判型防空指针，见 luaErrorString） -------- */
+			println(luaErrorString(L))
+			Lua_settop(L, 0)	/* 恢复栈，错误对象不滞留（issue #5 清单 H5） */
 
 			return false
 		}
@@ -372,28 +431,44 @@ class MtVars_Lua <: MatrixVars_Hardware {
 			}
 
 			var status = Lua_pcall(L, 1, LUA_MULTRET, 0)
-			println("lua status: ${status}")
+			dumpLog("lua status: ${status}")
 			if (status == LUA_OK) {
 				if (Lua_type(L, -1) == LUA_TTABLE) {
 					/* ---- 栈顶是表  压入 nil 作为遍历的起始键 ---- */
 					Lua_pushnil(L)
 					while(Lua_next(L, -2) != 0) {
-						/* ---- 此时栈：[表, 键, 值]  检查键值是否为空指针 */
+						/* ---- 此时栈：[表, 键, 值] ----
+						 * Lua 手册警告：遍历期间对【键】调 lua_tolstring 会原地改写键值，
+						 * 数字键将扰乱后续 lua_next；故键只接受 string，其余类型跳过。
+						 * 值支持 string/number，不再因非法类型 throw 而跳过栈恢复 ---- */
+						let keyType = Lua_type(L, -2)
+						let valType = Lua_type(L, -1)
+						if (keyType != LUA_TSTRING || (valType != LUA_TSTRING && valType != LUA_TNUMBER)) {
+							dumpLog("Lua return field skipped: key type ${keyType}, value type ${valType}")
+							Lua_pop(L, 1)	/* 弹出值，保留键供下一次 Lua_next */
+							continue
+						}
 						let key = Lua_tostring(L, -2)
 						let val = Lua_tostring(L, -1)
-						if (key.isEmpty() || val.isEmpty()) {
-							throw NoneValueException("Lua_tostring()")
+						if (valType == LUA_TNUMBER) {
+							/* number 保真为 JsonFloat（此前一律字符串化，见 issue #10 类型失真项）；
+							 * nan/inf 等不可解析时退回 JsonString */
+							try {
+								ret.put(key.toString(), JsonFloat(Float64.parse(val.toString())))
+							} catch (e: Exception) {
+								ret.put(key.toString(), JsonString(val.toString()))
+							}
 						}
-						println("${key}: ${val}")
-						ret.put(key.toString(), JsonString(val.toString()))
+						else {
+							ret.put(key.toString(), JsonString(val.toString()))
+						}
 						Lua_pop(L, 1)
 					}
 				}
 			}
 
 			else if (status != LUA_OK) {
-				let err  = Lua_tostring(L, -1)
-				if (!err.isEmpty()) { println("Lua 错误详情: ${err.toString()}") }
+				println("Lua 错误详情: ${luaErrorString(L)}")
 			}
 
 			/* -------- 恢复Lua状态机 -------- */
@@ -475,6 +550,7 @@ public func daemon_body(slot: CPointer<UInt8>, chunk: CString, config: CString, 
 		let L = Lua_init()
 		if (Lua_check(L) == LUA_ERR) { return -1i64 }
 		Lua_loadlib(L)
+		sandbox_lua(L)	/* 中和 os.execute/io.popen 等宿主入口（issue #9 M1） */
 
 		/* 注入共享槽地址（整数）与配置串（"k=v;k=v"）为 Lua 全局 */
 		Lua_pushinteger(L, Int64(slot.toUIntNative()))
@@ -485,15 +561,13 @@ public func daemon_body(slot: CPointer<UInt8>, chunk: CString, config: CString, 
 		/* 跑 chunk 一次：完成 setup（开总线/配置传感器/附着槽）并定义全局 daemon_tick */
 		let st = Lua_loadfilex(L, chunk, CPointer<C_Char>())
 		if (st != LUA_OK) {
-			let err = Lua_tostring(L, -1)
-			println("[daemon] chunk load error: ${err.toString()}")
+			println("[daemon] chunk load error: ${luaErrorString(L)}")
 			Lua_free(L)
 			return -1i64
 		}
 		var pcs = Lua_pcall(L, 0, LUA_MULTRET, 0)
 		if (pcs != LUA_OK) {
-			let err = Lua_tostring(L, -1)
-			println("[daemon] chunk setup error: ${err.toString()}")
+			println("[daemon] chunk setup error: ${luaErrorString(L)}")
 			Lua_free(L)
 			return -1i64
 		}
@@ -507,8 +581,7 @@ public func daemon_body(slot: CPointer<UInt8>, chunk: CString, config: CString, 
 			Lua_getglobal(L, tickName)
 			pcs = Lua_pcall(L, 0, LUA_MULTRET, 0)
 			if (pcs != LUA_OK) {
-				let err = Lua_tostring(L, -1)
-				println("[daemon] tick error: ${err.toString()}")
+				println("[daemon] tick error: ${luaErrorString(L)}")
 			}
 			Lua_settop(L, 0)
 			sleep(Duration.millisecond * interval_ms)
@@ -595,7 +668,7 @@ class MtVars_Daemon <: MatrixVars_Hardware {
 					ret.put("count", JsonInt(count))
 					ret.put("nvals", JsonInt(nvals))
 					ret.put("values", arr)
-					println("Daemon '${name}' play: count=${count} nvals=${nvals}")
+					dumpLog("Daemon '${name}' play: count=${count} nvals=${nvals}")
 				}
 				return ret
 			},
@@ -801,14 +874,33 @@ class RobotStruct {
 							println("{${ev.targetTabName}}")
 
 							for (row in ev.tableRows) {
+								/* ---- INSERT 值列与表头逐列匹配；缺列/重复列/未知列
+								 * ---- 会使矩阵单元静默错位（动作打到错误舵机），显式报错 ---- */
 								for (i in 0..item.col) {
+									var matched = 0
 									for (col in row) {
 										if (col.columnName == item[0, i]) {
+											matched += 1
+											if (matched > 1) {
+												throw IllegalArgumentException("INSERT INTO ${ev.targetTabName}: duplicate column '${col.columnName}'")
+											}
 											for (ch in col.value) {
 												item.addRune(Rune(ch))
 											}
 											item.submitItem()
 										}
+									}
+									if (matched == 0) {
+										throw IllegalArgumentException("INSERT INTO ${ev.targetTabName}: column '${item[0, i]}' is missing in an INSERT row")
+									}
+								}
+								for (col in row) {
+									var known = false
+									for (i in 0..item.col) {
+										if (col.columnName == item[0, i]) { known = true; break }
+									}
+									if (!known) {
+										throw IllegalArgumentException("INSERT INTO ${ev.targetTabName}: unknown column '${col.columnName}'")
 									}
 								}
 								item.submitLine(0)
