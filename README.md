@@ -25,6 +25,8 @@ export CANGJIE_STDX_PATH=/path/to/cangjie-stdx   # cjpm.toml 按目标架构读�
 bash _set.sh        # 等价于 cjpm update + cjpm build
 ```
 
+可选自检：`bash test/run_all.sh` 一键跑全部 Lua 离线测试（需 `luajit`，桩替身不触硬件；真机 i2c 用例自动跳过）。
+
 ### 2. 无硬件跑通第一条链路（Relay → Timer）
 
 `relay-test` 不接任何硬件：Relay 把 `test` 参数转成 `delay`，经 controller 机制转发给
@@ -82,7 +84,7 @@ I2C/SPI 总线操作由 `modules/lib/HAL.lua` 实现（issue #14：不再依赖�
 - `modules/lib/` 收纳非驱动的库模块：`HAL.lua`（总线抽象）与 `kalman.lua`
   （一维卡尔曼滤波器，自 src/math/kalman.cj 移植，返回表风格，供驱动 dofile 后 `Kalman.new(Q,R)` / `kf:filter(dat)` 使用）
 - 不依赖 HAL 的模块（Servo/dummy/Relay/kalman 等）仍可用 `luajit`/`lua5.4` 独立调试；
-  总线驱动需 `luajit`（单测见 `test/test_hal_ffi.lua`、`test/test_kalman.lua`）
+  总线驱动需 `luajit`（单测见 `test/test_hal_ffi.lua`、`test/test_kalman.lua`；一键跑全部离线测试：`bash test/run_all.sh`）
 
 SPI 传输延时（delay_usecs）无 per-fd 持久化 ioctl，由传输函数的可选 `delay_us` 尾参逐次携带
 （配置写在 @SPI 矩阵的 delay 列，SPI.lua 的 `call()` 随 fd 返回，经元数据引用流入设备驱动，参考 ADS1256.lua）。
