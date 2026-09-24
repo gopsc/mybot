@@ -1408,13 +1408,14 @@ TH_TEST(agenttools_run_command_does_not_inherit_high_numbered_fds) {
 	AgentToolRegistry tools = makeAgentTools(ctx);
 
 	int dev = ::open("/dev/null", O_RDONLY);
-	TH_CHECK(dev > 2);
 	int hi = ::fcntl(dev, F_DUPFD, 4200);	/* ≥4096：旧退化路径封顶之外 */
 	::close(dev);
 	/* AG-24（第三轮审计）：这里原来是裸 `return;` —— :639 的 TH_CHECK 已经计过数，
 	 * 于是 AG-5 的「零断言即失败」防线不会触发，本用例在 soft limit 偏低的机器上
-	 * 报 [PASS]，而它真正的判据（高编号 fd 不泄漏）一次都没跑。必须显式表态。 */
+	 * 报 [PASS]，而它真正的判据（高编号 fd 不泄漏）一次都没跑。必须显式表态。
+	 * 环境判据前置：不允许构造 ≥4200 的 fd 时先 SKIP，再执行真正断言。 */
 	if (hi < 0) { TH_SKIP("RLIMIT_NOFILE 过低，无法构造 ≥4200 的 fd"); }
+	TH_CHECK(hi > 2);
 	const std::string cmd = "test -e /proc/self/fd/" + std::to_string(hi)
 		+ " && echo LEAKED || echo CLEAN";
 	std::string out = execText(tools, "run_command",

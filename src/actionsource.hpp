@@ -42,6 +42,16 @@ struct CliOptions {
 	std::string tcpTotalTimeout;
 	std::optional<std::string> input;
 
+	/* ---- Web SSH（--webshell-port，#24 feat/web-ssh MVP）----
+	 * 浏览器终端服务：xterm.js → WebSocket(/ws/term) → forkpty → 交互 shell。
+	 * 独立于 --tcp（那是动作输入源；这是终端服务）。缺省不启用：给
+	 * --webshell-port 才监听；--webshell-token 不给 = 空口令（仅本机调试，
+	 * 监听 127.0.0.1 时使用；非回环监听必须给 token，见 main 校验）。 */
+	bool webshell = false;
+	std::string webshellPort;
+	std::string webshellHost = "127.0.0.1";
+	std::string webshellToken;
+
 	/* --daemon-grace-ms：RobotStruct::deactivate 二段屏障的宽限上限（原写死
 	 * kMaxGraceMs=30000，2026-09-22 F-2 参数化）。全局选项（不限 --agent/
 	 * --tcp/--input 任一模式——任何声明了 @Daemon 的结构脚本都可能触发弃管

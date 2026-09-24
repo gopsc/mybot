@@ -526,6 +526,9 @@ constexpr NonAgentPrefix kNonAgentPrefixes[] = {
 	{"utils", "util 通用助手"},
 	{"utf8", "UTF-8 判据与消毒"},
 	{"vars", "结构期 @Vars 语义"},
+	{"webterm", "Web SSH PTY 会话原语（网络/终端层，非 agent 面）"},
+	{"webshell", "Web SSH 连接编排（网络/终端层，非 agent 面）"},
+	{"ws", "RFC 6455 WebSocket 协议原语（网络层，非 agent 面）"},
 };
 
 } // namespace

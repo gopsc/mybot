@@ -110,6 +110,9 @@ set(MYBOT_CORE_SOURCES
   src/agentpolicy.cpp
   src/mcpbackend.cpp
   src/promptpack.cpp
+  src/wsproto.cpp
+  src/webterm.cpp
+  src/webshell.cpp
 )
 
 # 两个目标的公共配置：零告警基线 + 头文件路径，一处声明一致套用，
@@ -138,6 +141,7 @@ target_link_libraries(mybot_common INTERFACE
   pthread
   dl
   m
+  util
 )
 
 add_executable(mybot
@@ -193,6 +197,9 @@ add_executable(mybot_tests
   test/cpp/test_promptpack.cpp
   test/cpp/test_sessionfile.cpp
   test/cpp/test_mcpbackend.cpp
+  test/cpp/test_wsproto.cpp
+  test/cpp/test_webterm.cpp
+  test/cpp/test_webshell.cpp
   src/mtmerge_core.cpp
   ${MYBOT_CORE_SOURCES}
 )
@@ -340,7 +347,8 @@ set(MYBOT_CPP_TEST_REGISTERED
   test_actionsource test_agentaudit test_agentdriver test_agentpolicy test_agentproto test_agenttools test_sessionfile test_mcpbackend
   test_cliargs test_daemon_concurrency test_daemon test_expr test_hardware test_json
   test_jsonparse test_llmconfig test_luaend test_luavar test_matrix test_mtinclude
-  test_mtmerge test_promptpack test_robot test_sqlparse test_util)
+  test_mtmerge test_promptpack test_robot test_sqlparse test_util
+  test_webshell test_webterm test_wsproto)
 set(_missing_registered)
 foreach(_t IN LISTS MYBOT_CPP_TEST_SRCS)
   get_filename_component(_n "${_t}" NAME_WE)

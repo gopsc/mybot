@@ -421,11 +421,15 @@ TH_TEST(cliargs_help_option_set_matches_docs) {
 	 * （2026-09-23，发现 2 的 A 步）再加一项——--read-var（read_variables 的可读
 	 * 清单，可重复，配置文件不能开）（33）。会话持久化（2026-09-23，批次 1）
 	 * 再加两项——--session-file（会话文件，写入可进配置文件）与 --resume（恢复，
-	 * 路径只认命令行）（35）。计数断言
+	 * 路径只认命令行）（35）。Web SSH（2026-09-24）再加三项——--webshell-port /
+	 * --webshell-host / --webshell-token（38）。计数断言
 	 * 是「帮助 ↔ docs 双向一致」守卫的一部分：随选项增删同步更新。 */
-	TH_CHECK(defs.size() == 35);
+	TH_CHECK(defs.size() == 38);
 	TH_CHECK(defs.count("--session-file") == 1);
 	TH_CHECK(defs.count("--resume") == 1);
+	TH_CHECK(defs.count("--webshell-port") == 1);
+	TH_CHECK(defs.count("--webshell-host") == 1);
+	TH_CHECK(defs.count("--webshell-token") == 1);
 	TH_CHECK(defs.count("--help") == 1);
 	TH_CHECK(defs.count("--audit-log") == 1);
 	TH_CHECK(defs.count("--agent-policy") == 1);

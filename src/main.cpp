@@ -10,8 +10,12 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <sys/random.h>
+#endif
 
 #include "actionsource.hpp"
+#include "webshell.hpp"
 #include "agentmode.hpp"
 #include "mcpbackend.hpp"
 #include "agent_subprocess.hpp"
@@ -38,9 +42,17 @@ void setupCancelSentinel() {
 	 * （mkstemp 风格）+ O_EXCL|O_NOFOLLOW 防御符号链接/竞争。
 	 * 随机后缀用 arc4random_uniform(100000) 避免碰撞（单个 /tmp 下极少超百个进程）。*/
 	unsigned int suffix = 0;
-#if defined(__linux__) || defined(__APPLE__)
-	// Linux/macOS 都有 arc4random_uniform
+#if defined(__APPLE__)
+	// macOS 有 arc4random_uniform
 	suffix = ::arc4random_uniform(100000);
+#elif defined(__linux__)
+	// Linux glibc 无 arc4random_uniform；用 getrandom(2)（crypto 级，失败回落 pid）
+	unsigned int v = 0;
+	if (::getrandom(&v, sizeof v, 0) == static_cast<ssize_t>(sizeof v)) {
+		suffix = v % 100000;
+	} else {
+		suffix = static_cast<unsigned int>(::getpid() % 100000);
+	}
 #else
 	// 回落：用 pid 低 5 位（不理想但胜于完全可预测）
 	suffix = static_cast<unsigned int>(::getpid() % 100000);
@@ -341,6 +353,19 @@ int main(int argc, char** argv) {
 		return 2;	/* 具体错误 validateOptions 已打印 */
 	case Preflight::Proceed:
 		break;
+	}
+
+	/* ---- Web SSH 独立服务（--webshell-port，#24 feat/web-ssh MVP）----
+	 * 不依赖结构脚本/动作输入源：纯粹远程终端（浏览器 → WS → forkpty → shell）。
+	 * 端口/跨机 token 校验已在 cliargs::validateOptions 收口（配置错误不碰真机）。
+	 * 与机器人模式互斥：同给即拒，避免「终端里又起一台机器人」的歧义。 */
+	if (options.webshell) {
+		if (options.robot || options.agent || options.mcpBackend) {
+			std::cerr << "参数错误：--webshell-port 与 --robot/--agent/--mcp-backend 互斥"
+				"（Web SSH 是独立终端服务，不加载机器人结构脚本）" << std::endl;
+			return 2;
+		}
+		return webshell::run(options.webshellHost, options.webshellPort, options.webshellToken);
 	}
 
 	/* ---- 结构脚本 + 动作输入源分支 ---- */
