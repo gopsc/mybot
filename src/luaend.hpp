@@ -48,7 +48,7 @@ lua_State* openSandboxedState();
 /* Lua↔Json 转换的嵌套深度上限（C-9 防线）。
  * 这是**语义**上限而非栈预算：8MB 栈容得下上万层，但「返回值嵌套 8 层以上」
  * 不可能是传感器读数——实测全部驱动的 build/call/destroy 返回都是一层扁平表
- * （result/message/v0..vN/count 全是标量），仓库里最深的结构是 nn.lua 的
+ * （result/message/v0..vN/count 全是标量），仓库里最深的结构是数组式返回的
  * W[层][神经元] 约 3 层。取 8 留一倍余量，超过即判定为自引用/畸形结构。
  * 一个上限同时挡住两种栈溢出：环（t.self=t，永不终止）与无环超深。 */
 constexpr int kMaxLuaNesting = 8;

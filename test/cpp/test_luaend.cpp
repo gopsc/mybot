@@ -227,7 +227,7 @@ TH_TEST(flat_sensor_results_still_round_trip) {
 	TH_CHECK(s.top() == 0);
 }
 
-/* 数组式返回（nn.lua 的 W[层] 这类）是合法结构，不得被深度上限误杀 */
+/* 数组式返回（W[层][神经元] 这类）是合法结构，不得被深度上限误杀 */
 TH_TEST(nested_arrays_survive_the_conversion) {
 	State s;
 	s.chunk("function call(data) return { result = \"OK\", w = { {1, 2}, {3, 4} } } end\n");
