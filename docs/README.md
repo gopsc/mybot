@@ -21,6 +21,7 @@
   含驱动契约（入口函数集 / 返回值 / 校验顺序 / destroy）、`SINGLE_CONSUMER` 名单与收敛豁免清单——
   **计数口径与推导写在 drivers.md 开头**，权威清单是 `ls modules/*.lua`
 - [已知限制与常见问题](faq.md)——平台/运行时边界与排障问答
+- [Web SSH 语义契约](webssh.md)——wsproto / webterm / webshell 行为不变式（#24，供 Rust 重写对照）
 
 ## 机制深入
 
