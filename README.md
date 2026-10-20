@@ -226,7 +226,7 @@ pymybot run --robot robots/<任务>.sql --input scripts/<任务>.mt \
 - **跨平台 HAL**：UART 走 pyserial，I2C/SPI 走 pyftdi（MPSSE），Camera 走 OpenCV；Linux 可选 smbus2/spidev
 - **无硬件验证**：内置虚拟总线（`virtbus`）、寄存器映射模型、串口 `loop://` 回环，支持 NACK / 超时 / 短读等故障注入
 - **后台采样**：Daemon 表基于 Python 线程和独立 Lua 状态做周期采样，支持单设备、多设备同总线和聚合
-- **按需驱动**：不预置具体芯片驱动，只提供 I2C / SPI / UART / Camera 基础资源和公共工具库，由使用者按数据手册编写
+- **预置芯片驱动**：自带 45 个真实器件驱动（自 C++/Rust 版迁移，I2C/SPI/UART 三族），多数内嵌虚拟器件模型，无硬件即可端到端验证；未迁移的 GPIO / PWM / Speaker / Sim 及 V4L2 Camera 见下文说明
 
 ### 目录结构
 
@@ -241,10 +241,22 @@ modules/                  Lua 基础资源与公共库
   lib/bus_contract.lua                    总线参数与引用契约
   lib/sensor_daemon*.lua sensor_aggregate.lua  采样 chunk
   lib/virtbus.lua lib/virtbus/regmap.lua  虚拟总线与寄存器模型
+  <芯片驱动>.lua                          45 个真实器件驱动（见下）
 robots/                   SQL 结构文件（示例：relay-test.sql）
 scripts/                  MT 动作脚本（示例：relay-test.mt）
-tests/                    pytest 测试
+tests/                    pytest 测试（fixtures/virt/ 为逐驱动无硬件端到端夹具）
 ```
+
+#### 预置芯片驱动（45 个，自 C++/Rust 版 mybot 迁移）
+
+| 总线 | 数量 | 驱动 |
+| --- | --- | --- |
+| I2C | 36 | ADS1015、ADS1115、ADXL345、AMG8833、APDS9900、AS3935、AS7262、BH1745、BH1750、BME280、BME688、BMI270、BMM150、CHT8305、EMC2101、INA219、INA226、INA3221、LCD1206、LPS22HB、LSM6DSV、LTC2944、MAX17043、MAX17048、MAX30102、MCP3421、MCP4725、MLX90393、MPU6050、MS5611、PCA9685、PCF8574、SGP30、SHT3X、VL53L0X、VL53L4CD |
+| SPI | 4 | AD9833、ADS1256、MT6826S、TPL0501 |
+| UART | 3 | MHZ19、SCSCL、SDS011 |
+| 控制器链 | 2 | Servo（经 controller 引用舵机控制板）、H03ARR（电机驱动） |
+
+其中 43 个内嵌 `<驱动>_VIRT` 虚拟器件模型：结构脚本声明 `proto='virt'` 即可在无硬件下跑真实驱动的 build/call/destroy 全链路，`tests/fixtures/virt/` 为其中 40 个提供逐驱动端到端夹具（SQL + 动作脚本，与 C++ 版测试同源）。依赖原生 GPIO/PWM/ALSA/V4L2 或仿真器后端的 GPIO、PWM、Speaker、Sim 及旧版 Camera 驱动未迁移——可移植 HAL 不提供这些后端，相关调用会响亮报错而非静默降级。
 
 ### 安装
 
