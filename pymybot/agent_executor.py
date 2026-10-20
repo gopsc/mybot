@@ -30,6 +30,7 @@ from .sql import parse_sql
 MAX_LIST = 1000
 MAX_TEXT = 64 * 1024
 MAX_IMAGE_BASE64 = 2 * 1024 * 1024
+MAX_IMAGES = 16
 _UNKNOWN = "Execution outcome is unknown; do not retry. Executor is faulted; operator inspection is required."
 _NOT_EXECUTED = "Request was not executed. Check operator configuration and tool arguments."
 _TOOLS = {
@@ -272,6 +273,36 @@ def _image(value):
     return strip(value), {"data": data, "media_type": media_type}
 
 
+def _lift_images(outputs):
+    """Move base64 image payloads out of action results into binary attachments.
+
+    An image left inline in a receipt would be cut mid-string by _bounded and burn
+    the whole tool-result budget, so the model would see base64 fragments rather
+    than a picture. Each lifted result keeps an index correlating it with the
+    attachment, and payloads past MAX_IMAGES are marked instead of dropped.
+    """
+    images, omitted = [], 0
+
+    def visit(value):
+        nonlocal omitted
+        if isinstance(value, dict):
+            if not isinstance(value.get("b64", value.get("base64")), str):
+                return {key: visit(item) for key, item in value.items()}
+            if len(images) >= MAX_IMAGES:
+                omitted += 1
+                rest = {key: visit(item) for key, item in value.items()
+                        if key not in {"b64", "base64"}}
+                return {**rest, "image_omitted": f"more than {MAX_IMAGES} images in one action"}
+            data, image = _image(value)
+            images.append(image)
+            return {**data, "image_index": len(images) - 1}
+        if isinstance(value, list):
+            return [visit(item) for item in value]
+        return value
+
+    return visit(outputs), images, omitted
+
+
 class RobotExecutor:
     """Own one Robot on one worker; use from a single asyncio event loop.
 
@@ -283,7 +314,7 @@ class RobotExecutor:
     """
 
     def __init__(self, robot_path, *, module_paths=None, camera_src_root=None,
-                 scripts_dir, allow_hardware=False, read_vars=(), camera_var=None,
+                 scripts_dir, allow_hardware=False, read_vars=(), camera_vars=(),
                  stop_event=None, robot_factory=Robot):
         self._robot_path = Path(robot_path).absolute()
         self._scripts_dir = Path(scripts_dir).absolute()
@@ -291,7 +322,7 @@ class RobotExecutor:
         self._camera_src_root = camera_src_root
         self._allow_hardware = allow_hardware is True
         self._read_vars = frozenset(read_vars)
-        self._camera_var = camera_var
+        self._camera_vars = frozenset(camera_vars)
         self._stop = stop_event if stop_event is not None else threading.Event()
         self._factory = robot_factory
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="robot-owner")
@@ -474,7 +505,7 @@ class RobotExecutor:
                     raise PermissionError("Variable kind is not readable by this tool")
         elif name == "capture_image":
             variable = arguments["name"]
-            if (variable != self._camera_var or variable not in self._rows
+            if (variable not in self._camera_vars or variable not in self._rows
                     or self._rows[variable][0].name != "Camera"):
                 raise PermissionError("Camera is not allowed")
 
@@ -520,6 +551,7 @@ class RobotExecutor:
             self._arguments(name, arguments)
             self._load(deadline)
             image = None
+            images = None
             if name == "list_hardware":
                 data = self._hardware()
             elif name == "list_action_scripts":
@@ -541,9 +573,12 @@ class RobotExecutor:
                 self._check(deadline)
                 if name == "run_action_script":
                     self._scripts.check()
-                    data = {"outputs": self._robot.run(script, base_dir=str(base),
-                                                       vars=arguments.get("vars", {}),
-                                                       timeout=self._remaining(deadline))}
+                    outputs, images, omitted = _lift_images(self._robot.run(
+                        script, base_dir=str(base), vars=arguments.get("vars", {}),
+                        timeout=self._remaining(deadline)))
+                    data = {"outputs": outputs}
+                    if omitted:
+                        data["images_omitted"] = omitted
                 elif name == "read_variables":
                     data = self._read(arguments["names"], deadline)
                 else:
@@ -554,6 +589,8 @@ class RobotExecutor:
             self._check(deadline)
             if image is not None:
                 result["image"] = image
+            if images:
+                result["images"] = images
         except BaseException as exc:
             if executed:
                 self._interrupted = self._stop.is_set()

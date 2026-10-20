@@ -14,7 +14,7 @@ import zlib
 import pytest
 
 import pymybot.agent_executor as executor_module
-from pymybot.agent_executor import MAX_IMAGE_BASE64, MAX_TEXT, RobotExecutor
+from pymybot.agent_executor import MAX_IMAGE_BASE64, MAX_IMAGES, MAX_TEXT, RobotExecutor
 from pymybot.errors import BudgetExceeded
 from pymybot.hardware import Budget, Registry
 from pymybot.hal import HALManager
@@ -112,7 +112,7 @@ def setup(tmp_path):
             self.state = "Inactive"
 
     def factory(**kwargs):
-        defaults = dict(scripts_dir=scripts, allow_hardware=False, read_vars=("sensor",), camera_var="camera",
+        defaults = dict(scripts_dir=scripts, allow_hardware=False, read_vars=("sensor",), camera_vars=("camera",),
                         robot_factory=FakeRobot)
         defaults.update(kwargs)
         return RobotExecutor(robot_path, **defaults)
@@ -215,7 +215,7 @@ def test_read_kind_and_whitelist_preflight(setup, variable):
 
 def test_read_not_whitelisted_and_camera_wrong_declaration(setup):
     async def scenario():
-        ex = setup.factory(read_vars=(), camera_var="sensor")
+        ex = setup.factory(read_vars=(), camera_vars=("sensor",))
         try:
             rejected(await ex.call("read_variables", {"names": ["sensor"]}))
             rejected(await ex.call("capture_image", {"name": "sensor"}))
@@ -690,6 +690,56 @@ def test_invalid_images_fault_after_capture(setup, change):
     asyncio.run(scenario())
 
 
+def test_action_script_images_are_lifted_to_binary(setup):
+    setup.options.run = lambda _: [{"result": "OK", "value": 1}, dict(setup.options.image)]
+    async def scenario():
+        ex = setup.factory()
+        try:
+            result = await ex.call("run_action_script", {"script": "action.mt"})
+            assert result["ok"] and result["executed"] and result["state"] == "completed"
+            assert result["images"] == [{"data": png_bytes(), "media_type": "image/png"}]
+            outputs = result["data"]["outputs"]
+            assert outputs[0] == {"result": "OK", "value": 1}
+            assert outputs[1]["image_index"] == 0
+            assert "b64" not in outputs[1] and "base64" not in outputs[1]
+            encoded = base64.b64encode(png_bytes()).decode()
+            assert encoded not in dumps(result["data"]) and encoded not in dumps(ex.records)
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+def test_action_script_image_cap_is_reported_not_dropped(setup):
+    setup.options.run = lambda _: [dict(setup.options.image) for _ in range(MAX_IMAGES + 2)]
+    async def scenario():
+        ex = setup.factory()
+        try:
+            result = await ex.call("run_action_script", {"script": "action.mt"})
+            assert result["ok"] and len(result["images"]) == MAX_IMAGES
+            assert result["data"]["images_omitted"] == 2
+            outputs = result["data"]["outputs"]
+            assert [item["image_index"] for item in outputs[:MAX_IMAGES]] == list(range(MAX_IMAGES))
+            assert all("image_omitted" in item for item in outputs[MAX_IMAGES:])
+            assert not any("b64" in item or "base64" in item for item in outputs)
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+def test_multiple_cameras_can_be_allowlisted(setup):
+    async def scenario():
+        ex = setup.factory(camera_vars=("camera", "other_camera"))
+        try:
+            for name in ("camera", "other_camera"):
+                result = await ex.call("capture_image", {"name": name})
+                assert result["ok"] and result["image"] == {"data": png_bytes(), "media_type": "image/png"}
+            rejected(await ex.call("capture_image", {"name": "sensor"}))
+            assert not ex.faulted
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
 def test_text_and_list_output_bounds(setup):
     setup.options.query = lambda: '"\\\n中文' * MAX_TEXT
     setup.options.run = lambda _: [{"result": "OK"}] * 1001
@@ -750,7 +800,7 @@ def test_real_camera_file_source_and_jpeg(tmp_path):
                           "INSERT INTO Camera(name,src) VALUES('cam','image.jpg');", encoding="utf-8")
     async def scenario():
         ex = RobotExecutor(robot_path, scripts_dir=tmp_path, camera_src_root=tmp_path,
-                           camera_var="cam", allow_hardware=False)
+                           camera_vars=("cam",), allow_hardware=False)
         try:
             result = await ex.call("capture_image", {"name": "cam"})
             assert result["ok"]

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from pymybot import cli
+from pymybot.errors import ScriptError
 
 
 @pytest.fixture
@@ -91,6 +92,23 @@ def test_default_and_explicit_agent_routing(files, capsys, monkeypatch, prefix):
     assert code == 0 and result["mode"] == "agent" and result["output"] == "offline mock"
     assert called[0].read_var == ["dev"] and called[0].allow_hardware is False
     assert called[0].allow_actions is False
+
+
+def test_repeated_camera_var_collects_every_name(files, capsys, monkeypatch):
+    called = []
+    async def run_cli_agent(args, stop):
+        called.append(args)
+        return {"mode": "agent", "output": "offline mock", "tool_events": []}
+    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
+    code, _, _ = invoke(capsys, "--robot", files[0], "--task", "看", "--model", "openai:test",
+                        "--camera-var", "front", "--camera-var", "rear")
+    assert code == 0 and called[0].camera_var == ["front", "rear"]
+
+
+def test_camera_var_names_are_validated(files):
+    with pytest.raises(ScriptError):
+        cli.parse_args(["--robot", str(files[0]), "--task", "t", "--model", "openai:test",
+                        "--camera-var", "bad name"])
 
 
 def test_flag_like_task_text_not_removed(files):

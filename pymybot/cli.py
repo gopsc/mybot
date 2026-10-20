@@ -121,7 +121,7 @@ def parser():
             command.add_argument("--api-key-env", help="environment variable holding the API key (never the key itself)")
             command.add_argument("--scripts-dir", help="trusted root of existing .mt scripts available to the agent")
             command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
-            command.add_argument("--camera-var", metavar="NAME", help="allow image capture from this declared Camera variable")
+            command.add_argument("--camera-var", action="append", default=[], metavar="NAME", help="allow image capture from this declared Camera variable; repeatable")
             command.add_argument("--allow-actions", action="store_true",
                                  help="preapprove agent scripts/reads/capture for this session; does NOT imply --allow-hardware")
             command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
@@ -154,7 +154,7 @@ def parse_args(argv=None):
         checked_text(args.task, 16 * 1024)
         if not args.task.strip():
             raise UsageError("--task must not be empty")
-    for name in [*args.read_var, *([args.camera_var] if args.camera_var else [])]:
+    for name in [*args.read_var, *args.camera_var]:
         safe_ident(name)
     args.scripts_dir = args.scripts_dir or default_scripts_dir()
     return args

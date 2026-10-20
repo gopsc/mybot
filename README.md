@@ -59,10 +59,10 @@ export DEEPSEEK_API_KEY="sk-..."
 
 - `list_hardware`：列出声明的硬件及元数据
 - `list_action_scripts`：列出可用 `.mt` 动作脚本
-- `query_sql`：查询结构文件（`SHOW TABLES` 或 `SELECT * FROM 表`）
-- `run_action_script`：执行动作脚本
+- `query_sql`：查询结构文件（`SHOW TABLES;` 或 `SELECT * FROM 表;`）
+- `run_action_script`：执行动作脚本；脚本内捕获的图片以二进制附件返回，回执用 `image_index` 标注对应关系，单次动作最多附带 16 张，超出部分在回执中标记为 `image_omitted`
 
-通过重复 `--read-var NAME` 开放指定变量读取，通过 `--camera-var NAME` 开放 Camera 变量的图片输入。
+通过重复 `--read-var NAME` 开放指定变量读取，通过重复 `--camera-var NAME` 开放一个或多个 Camera 变量的图片输入。
 
 脚本仅能来自 `--scripts-dir`（默认内置 scripts），只能选择已存在的相对 `.mt` 路径，不能创建脚本、执行 shell、写文件或热更新 SQL。文件图片仍需 `--camera-src-dir`，来源由 Camera 的结构配置决定。
 
@@ -144,10 +144,12 @@ python -m venv .venv
 | `check --robot SQL [--input MT]` | 否 | 静态检查 SQL、模块存在性、引用及 MT/Include 语法 |
 | `hardware --robot SQL` | 否 | 列出声明的硬件及元数据 |
 | `scripts [--scripts-dir DIR]` | 否 | 列出 `.mt` 脚本 |
-| `query --robot SQL --sql "..."` | 否 | `SHOW TABLES` 或 `SELECT * FROM 表 [WHERE ...]` |
+| `query --robot SQL --sql "..."` | 否 | `SHOW TABLES;` 或 `SELECT * FROM 表 [WHERE ...];` |
 | `run --robot SQL --input MT` | 是 | 激活、执行动作、清理 |
 | `sample --robot SQL --name VAR` | 是 | 激活并读取命名变量，支持 `--count` / `--interval-ms` |
 | `apply-sql --robot SQL --sql "..."` | 是 | 对临时激活的会话应用受限 SQL，不改磁盘文件 |
+
+`--sql` 采用严格语法：每条语句都必须以 `;` 结尾，单条语句也不例外，否则报 `SQL: unexpected end of script`。
 
 通用选项：`--module-path DIR`（可重复，显式指定时须同时包含 `modules`）、`--camera-src-dir DIR`、`--timeout SECONDS`、`--var NAME=VALUE`、`--allow-hardware`。
 

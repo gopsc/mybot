@@ -147,8 +147,37 @@ def test_images_are_binary_content_not_base64_text():
         return ModelResponse(parts=[TextPart("image received")])
 
     async def scenario():
-        session = AgentSession(executor, FunctionModel(respond), AgentConfig(allow_actions=True), camera_var="camera")
+        session = AgentSession(executor, FunctionModel(respond), AgentConfig(allow_actions=True), camera_vars=("camera",))
         assert (await session.ask("look"))["output"] == "image received"
+    asyncio.run(scenario())
+
+
+def test_action_script_images_reach_the_model_as_binary():
+    executor = FakeExecutor()
+
+    async def run_script(name, arguments, *, timeout):
+        return {"ok": True, "executed": True, "state": "completed",
+                "data": {"outputs": [{"result": "OK", "image_index": 0}]},
+                "images": [{"data": b"frame-bytes", "media_type": "image/jpeg"}]}
+    executor.call = run_script
+    calls = 0
+
+    async def respond(messages, info):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return ModelResponse(parts=[ToolCallPart("run_action_script", {"script": "shoot.mt"})])
+        receipts = [p for m in messages for p in m.parts if isinstance(p, ToolReturnPart)]
+        assert receipts[-1].content["data"]["outputs"][0]["image_index"] == 0
+        assert "images" not in receipts[-1].content
+        prompts = [p.content for m in messages for p in m.parts if isinstance(p, UserPromptPart)]
+        assert any(getattr(item, "data", None) == b"frame-bytes"
+                   for prompt in prompts if isinstance(prompt, list) for item in prompt)
+        return ModelResponse(parts=[TextPart("frame received")])
+
+    async def scenario():
+        session = AgentSession(executor, FunctionModel(respond), AgentConfig(allow_actions=True))
+        assert (await session.ask("拍一张"))["output"] == "frame received"
     asyncio.run(scenario())
 
 

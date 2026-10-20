@@ -118,7 +118,14 @@ def create_model(config):
     return OpenAIChatModel(name, provider=adapter), client
 
 
-def make_agent(model, *, read_vars=(), camera_var=None):
+def _attachments(images):
+    """Images travel as binary content, never as base64 text inside the receipt."""
+    if not images:
+        return None
+    return [BinaryContent(data=item["data"], media_type=item["media_type"]) for item in images]
+
+
+def make_agent(model, *, read_vars=(), camera_vars=()):
     async def list_hardware(ctx: RunContext[AgentSession]) -> dict:
         """List declared robot hardware without activating devices."""
         return await ctx.deps.dispatch("list_hardware", {})
@@ -131,9 +138,10 @@ def make_agent(model, *, read_vars=(), camera_var=None):
         """Read structure tables using SELECT * or SHOW TABLES; never mutate SQL."""
         return await ctx.deps.dispatch("query_sql", {"sql": sql})
 
-    async def run_action_script(ctx: RunContext[AgentSession], script: str, vars: dict[str, str] | None = None) -> dict:
-        """Execute an existing relative .mt script after host approval. Never retry unknown results."""
-        return await ctx.deps.dispatch("run_action_script", {"script": script, "vars": vars or {}})
+    async def run_action_script(ctx: RunContext[AgentSession], script: str, vars: dict[str, str] | None = None) -> ToolReturn:
+        """Execute an existing relative .mt script after host approval. Images it captures are attached; image_index in the receipt identifies each one. Never retry unknown results."""
+        result = await ctx.deps.dispatch("run_action_script", {"script": script, "vars": vars or {}})
+        return ToolReturn(return_value=result, content=_attachments(result.pop("images", None)))
 
     async def read_variables(ctx: RunContext[AgentSession], names: list[str]) -> dict:
         """Read only operator-allowlisted variables. Activation/reading may write to devices."""
@@ -143,13 +151,12 @@ def make_agent(model, *, read_vars=(), camera_var=None):
         """Capture the operator-selected camera and attach the image, after host approval."""
         result = await ctx.deps.dispatch("capture_image", {"name": name})
         image = result.pop("image", None)
-        content = [BinaryContent(data=image["data"], media_type=image["media_type"])] if image else None
-        return ToolReturn(return_value=result, content=content)
+        return ToolReturn(return_value=result, content=_attachments([image] if image else None))
 
     functions = [list_hardware, list_action_scripts, query_sql, run_action_script]
     if read_vars:
         functions.append(read_variables)
-    if camera_var:
+    if camera_vars:
         functions.append(capture_image)
     async def before_model_request(ctx, request_context):
         ctx.deps._check()
@@ -166,11 +173,11 @@ def make_agent(model, *, read_vars=(), camera_var=None):
 
 
 class AgentSession:
-    def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(), camera_var=None):
+    def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(), camera_vars=()):
         self.executor = executor
         self.config = config or AgentConfig()
         self.confirm = confirm
-        self.agent = make_agent(model, read_vars=read_vars, camera_var=camera_var)
+        self.agent = make_agent(model, read_vars=read_vars, camera_vars=camera_vars)
         self.context = None
         self.turns = []
         self.events = []
@@ -348,13 +355,13 @@ async def run_cli_agent(args, stop):
         model, client = create_model(config)
         executor = RobotExecutor(args.robot, module_paths=args.module_path, camera_src_root=args.camera_src_dir,
                                  scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
-                                 read_vars=args.read_var, camera_var=args.camera_var, stop_event=stop)
+                                 read_vars=args.read_var, camera_vars=args.camera_var, stop_event=stop)
 
         async def confirm(name, arguments):
             return await confirm_console(name, arguments, stop)
 
         session = AgentSession(executor, model, config, confirm=confirm,
-                               read_vars=args.read_var, camera_var=args.camera_var)
+                               read_vars=args.read_var, camera_vars=args.camera_var)
         result = await _conversation(session, args, stop)
     except BaseException as exc:
         failure = exc
