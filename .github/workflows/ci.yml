@@ -1,0 +1,83 @@
+# pymybot CI：pytest 全量回归 + README 快速开始自检。
+#
+# 与 .gitlab-ci.yml 的关系：两者判据一致（Python 3.11/3.12/3.13 矩阵 + 快速开始自检），
+# 本文件是同一套守门在 GitHub Actions 上的落地件。托管方若同时识别两者，回归会跑两遍，
+# 属于预期重复，不是冲突；只保留一处时，删掉另一处即可。
+#
+# 相对 GitLab 版本的增量：新增 windows 作业。GitLab 托管方不提供 Windows runner，
+# 此前 Windows 上的行为只能靠本地手跑；GitHub 提供 windows-latest，于是补上。
+#
+# 版本矩阵的判据：
+# - 3.11 是 pyproject 里 requires-python 的下界，3.13 是当前最新，3.12 取中。
+#   任一版本红 ⇒ `requires-python = ">=3.11"` 的声明与实际不符。
+# - lupa（LuaJIT）、opencv-python-headless 在 Linux/Windows 均有 wheel，pyftdi/pyserial
+#   为纯 Python，故直接用标准 runner 即可，不需要 gcc / luajit-dev。
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: pytest / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: 全量回归
+        run: python -m pytest -q
+
+  # Windows 上的守门对象是文档记录过的两处平台差异，二者都只在 Windows 生效，
+  # Linux 矩阵覆盖不到：
+  #   docs/windows-faulthandler-luajit.md —— LuaJIT SEH 错误被 faulthandler 误判为崩溃；
+  #   同文档「后续：输出流固定 UTF-8」—— stdout/stderr 固定 UTF-8，不随本地代码页变化。
+  # 相关测试（含 test_faulthandler_cannot_break_json_on_lua_errors）在非 Windows 上
+  # 断言天然成立，真正验证它们跑在哪个平台，所以这条作业不能省。
+  # Python 版本取 3.12：与上述文档的验证环境一致。
+  windows:
+    name: pytest / Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: 全量回归
+        run: python -m pytest -q
+
+  # README「快速开始」的两条命令：文档里的承诺由 CI 验证，而不是靠人工记得跑。
+  # 这两条命令不激活驱动、只走 Timer/Relay 纯软件模块，可在无硬件环境执行。
+  quickstart:
+    name: README 快速开始自检
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+      - name: check
+        run: python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
+      - name: run
+        run: python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10
