@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from pydantic_ai import Agent, BinaryContent, RunContext, Tool, ToolReturn
 from pydantic_ai.capabilities import Caching
 from pydantic_ai.capabilities.hooks import Hooks
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent,
                                   ModelMessagesTypeAdapter, PartDeltaEvent, PartStartEvent,
                                   TextPart, TextPartDelta)
@@ -116,21 +117,58 @@ def create_model(config):
     key = os.environ.get(key_env, "")
     if not key.strip():
         raise AgentConfigurationError(f"Missing API key environment variable: {key_env}")
+    # SDKs append "/path" to the base, so extra trailing slashes become "//" that servers may not route.
+    custom_url = config.base_url.rstrip("/") if config.base_url else None
+    # Self-hosted servers and their proxies may drop idle keep-alive connections without notice, and
+    # with retries disabled the next request then fails with RemoteProtocolError; reconnect instead.
+    no_keepalive = None
+    if custom_url:
+        import httpx
+        no_keepalive = httpx.Limits(max_connections=100, max_keepalive_connections=0)
     if provider == "anthropic":
-        from anthropic import AsyncAnthropic
+        from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
         from pydantic_ai.models.anthropic import AnthropicModel
         from pydantic_ai.providers.anthropic import AnthropicProvider
-        client = AsyncAnthropic(api_key=key, base_url=config.base_url or "https://api.anthropic.com", max_retries=0,
-                                timeout=min(30, config.timeout))
+        http = {"http_client": DefaultAsyncHttpxClient(limits=no_keepalive)} if no_keepalive else {}
+        client = AsyncAnthropic(api_key=key, base_url=custom_url or "https://api.anthropic.com", max_retries=0,
+                                timeout=min(30, config.timeout), **http)
         return AnthropicModel(name, provider=AnthropicProvider(anthropic_client=client)), client
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, DefaultAsyncHttpxClient
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider
     from pydantic_ai.providers.deepseek import DeepSeekProvider
-    base_url = config.base_url or ("https://api.deepseek.com" if provider == "deepseek" else "https://api.openai.com/v1")
-    client = AsyncOpenAI(api_key=key, base_url=base_url, max_retries=0, timeout=min(30, config.timeout))
+    base_url = custom_url or ("https://api.deepseek.com" if provider == "deepseek" else "https://api.openai.com/v1")
+    http = {"http_client": DefaultAsyncHttpxClient(limits=no_keepalive)} if no_keepalive else {}
+    client = AsyncOpenAI(api_key=key, base_url=base_url, max_retries=0, timeout=min(30, config.timeout), **http)
     adapter = DeepSeekProvider(openai_client=client) if provider == "deepseek" else OpenAIProvider(openai_client=client)
-    return OpenAIChatModel(name, provider=adapter), client
+    # Instructions and per-run robot context are separate system messages; chat templates such as
+    # llama-server's often raise "System message must be at the beginning" unless they are merged.
+    return OpenAIChatModel(name, provider=adapter,
+                           profile={"openai_chat_supports_multiple_system_messages": False}), client
+
+
+def request_endpoint(client):
+    """SDK base URLs always end in "/"; name the full request URL so that slash is not mistaken for a bug."""
+    base = getattr(client, "base_url", None)
+    if base is None:
+        return None
+    route = "v1/messages" if type(client).__module__.startswith("anthropic") else "chat/completions"
+    return f"POST {base}{route}"
+
+
+def describe_failure(exc, endpoint=None):
+    """Name the exception, HTTP status and endpoint; provider bodies may echo secrets and stay hidden."""
+    where = f" from {endpoint}" if endpoint else ""
+    if isinstance(exc, ModelHTTPError):
+        return f"ModelHTTPError: HTTP {exc.status_code}{where}"
+    if isinstance(exc, ModelAPIError):
+        # Class names only: SDK wrappers hide whether the transport timed out, was refused or was dropped.
+        chain, cause = [], exc.__cause__ or exc.__context__
+        while cause is not None and len(chain) < 5:
+            chain.append(type(cause).__name__)
+            cause = cause.__cause__ or cause.__context__
+        return f"{type(exc).__name__}{f' ({' <- '.join(chain)})' if chain else ''}{where}"
+    return type(exc).__name__
 
 
 def _attachments(images):
@@ -563,7 +601,7 @@ async def run_cli_agent(args, stop):
     # client exception. Preserve the original reason if cleanup also failed.
     if failure is not None:
         if not isinstance(failure, (AgentError, AgentInterrupted, KeyboardInterrupt, asyncio.CancelledError)):
-            failure = AgentError(f"Agent failed ({type(failure).__name__}); check configuration or tool receipts. "
+            failure = AgentError(f"Agent failed ({describe_failure(failure, request_endpoint(client))}); check configuration or tool receipts. "
                                  "Already dispatched actions are not rolled back or automatically retried")
         failure.tool_events = session.events if session is not None else []
         failure.cleanup_errors = cleanup_errors

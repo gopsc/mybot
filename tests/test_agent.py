@@ -675,6 +675,8 @@ def test_cli_real_sdk_model_loop_and_virtual_robot(tmp_path, monkeypatch, capsys
     monkeypatch.setattr(Robot, "run", run)
     def respond(body, count):
         assert body["model"] == "test" and body["parallel_tool_calls"] is False
+        roles = [m["role"] for m in body["messages"]]
+        assert roles[0] == "system" and roles.count("system") == 1  # Strict chat templates reject more.
         if count == 1:
             assert any(t["function"]["name"] == "run_action_script" for t in body["tools"])
             return completion({"role": "assistant", "content": None, "tool_calls": [
@@ -698,6 +700,44 @@ def test_cli_real_sdk_model_loop_and_virtual_robot(tmp_path, monkeypatch, capsys
     else:
         assert code == 0 and payload["output"] == "虚拟动作完成" and len(requests) == 2
         assert payload["tool_events"][-1]["state"] == "completed"
+
+
+def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monkeypatch, capsys):
+    """Self-hosted servers may silently drop idle connections; a reused one fails with retries off."""
+    from pymybot import cli
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", True)  # Only the loopback fake below.
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-fake-key")
+    path = tmp_path / "robot.sql"
+    path.write_text("CREATE TABLE dummy(name String);", encoding="utf-8")
+    ports = []
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"  # Offer keep-alive.
+        def log_message(self, *args):
+            pass
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            ports.append(self.client_address[1])
+            message = ({"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function",
+                        "function": {"name": "list_hardware", "arguments": "{}"}}]}
+                       if len(ports) == 1 else {"role": "assistant", "content": "done"})
+            raw = sse_body(completion(message, tool=len(ports) == 1)[1])
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
+    thread.start()
+    try:
+        code = cli.main(["--robot", str(path), "--task", "列出硬件", "--model", "openai-chat:test",
+                         "--base-url", f"http://127.0.0.1:{server.server_port}/v1"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert code == 0 and json.loads(capsys.readouterr().out)["output"] == "done"
+    assert len(ports) == 2 and ports[0] != ports[1]
 
 
 def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
@@ -823,3 +863,39 @@ def test_provider_clients_disable_automatic_retries(monkeypatch, provider, key):
         finally:
             await client.close()
     asyncio.run(scenario())
+
+
+def test_failure_names_endpoint_and_status_but_not_body():
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+    describe = agent_module.describe_failure
+    text = describe(ModelHTTPError(500, "m", {"error": "SECRET"}), "http://127.0.0.1:8080/v1/")
+    assert text == "ModelHTTPError: HTTP 500 from http://127.0.0.1:8080/v1/"
+    try:
+        raise ModelAPIError("m", "down") from ConnectionRefusedError()
+    except ModelAPIError as exc:
+        assert describe(exc, "https://h/v1/") == "ModelAPIError (ConnectionRefusedError) from https://h/v1/"
+    wrapped = OSError("SECRET")
+    wrapped.__cause__ = ConnectionResetError("SECRET")
+    try:
+        raise ModelAPIError("m", "down") from wrapped
+    except ModelAPIError as exc:
+        assert describe(exc) == "ModelAPIError (OSError <- ConnectionResetError)"
+    assert describe(RuntimeError("SECRET")) == "RuntimeError"
+
+
+@pytest.mark.parametrize("provider", ["openai-chat", "anthropic"])
+def test_base_url_trailing_slashes_do_not_double_the_request_path(monkeypatch, provider):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-fake-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "offline-fake-key")
+    _, client = create_model(AgentConfig(model=f"{provider}:m", base_url="http://127.0.0.1:8080/v1//"))
+    assert str(client.base_url) == "http://127.0.0.1:8080/v1/"
+
+
+@pytest.mark.parametrize("provider,url", [("openai-chat", "http://127.0.0.1:8080/v1/chat/completions"),
+                                          ("anthropic", "http://127.0.0.1:8080/v1/v1/messages")])
+def test_failure_endpoint_is_the_request_url(monkeypatch, provider, url):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-fake-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "offline-fake-key")
+    _, client = create_model(AgentConfig(model=f"{provider}:m", base_url="http://127.0.0.1:8080/v1/"))
+    assert agent_module.request_endpoint(client) == f"POST {url}"
+    assert agent_module.request_endpoint(object()) is None
