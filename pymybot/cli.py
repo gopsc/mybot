@@ -120,6 +120,9 @@ def parser():
             command.add_argument("--base-url", help="provider endpoint; defaults to MYBOT_BASE_URL")
             command.add_argument("--api-key-env", help="environment variable holding the API key (never the key itself)")
             command.add_argument("--scripts-dir", help="trusted root of existing .mt scripts available to the agent")
+            command.add_argument("--skills-dir", metavar="DIR",
+                                 help="trusted root of operator skill directories (SKILL.md + markdown references);"
+                                      " default: packaged assets/skills, else source skills")
             command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
             command.add_argument("--camera-var", action="append", default=[], metavar="NAME", help="allow image capture from this declared Camera variable; repeatable")
             command.add_argument("--allow-actions", action="store_true",

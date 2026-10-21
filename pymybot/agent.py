@@ -23,6 +23,7 @@ from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent
 from pydantic_ai.usage import UsageLimits
 
 from .agent_executor import RobotExecutor
+from .agent_skills import SkillsLibrary, default_skills_root
 from .errors import AgentInterrupted
 from .security import checked_text, dumps
 
@@ -127,7 +128,7 @@ def _attachments(images):
     return [BinaryContent(data=item["data"], media_type=item["media_type"]) for item in images]
 
 
-def make_agent(model, *, read_vars=(), camera_vars=()):
+def make_agent(model, *, read_vars=(), camera_vars=(), skills=None):
     async def list_hardware(ctx: RunContext[AgentSession]) -> dict:
         """List declared robot hardware without activating devices."""
         return await ctx.deps.dispatch("list_hardware", {})
@@ -155,11 +156,28 @@ def make_agent(model, *, read_vars=(), camera_vars=()):
         image = result.pop("image", None)
         return ToolReturn(return_value=result, content=_attachments([image] if image else None))
 
+    async def list_skills(ctx: RunContext[AgentSession]) -> dict:
+        """List operator-provided reference skills and their markdown files."""
+        return await ctx.deps.dispatch("list_skills", {})
+
+    async def read_skill(ctx: RunContext[AgentSession], name: str, file: str = "SKILL.md") -> dict:
+        """Read one markdown file from an operator-provided reference skill."""
+        return await ctx.deps.dispatch("read_skill", {"name": name, "file": file})
+
     functions = [list_hardware, list_action_scripts, query_sql, run_action_script]
     if read_vars:
         functions.append(read_variables)
     if camera_vars:
         functions.append(capture_image)
+    instructions = SYSTEM_PROMPT
+    if skills is not None and skills.enabled:
+        functions.extend((list_skills, read_skill))
+        index = skills.index()["skills"]
+        lines = ["", "Operator-provided reference skills (trusted, curated documentation):"]
+        lines.extend(f"- {skill['name']}: {skill['description']}" for skill in index)
+        lines.append("Consult them with read_skill(name, file) before writing or diagnosing")
+        lines.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
+        instructions = SYSTEM_PROMPT + "\n".join(lines) + "\n"
     async def before_model_request(ctx, request_context):
         ctx.deps._check()
         return request_context
@@ -168,7 +186,7 @@ def make_agent(model, *, read_vars=(), camera_vars=()):
     # parallel_tool_calls setting; RobotExecutor is the final serialization gate.
     # Instructions are regenerated each run, unlike a first-turn system message
     # that would disappear when its complete turn is pruned from history.
-    return Agent(model, deps_type=AgentSession, instructions=SYSTEM_PROMPT, retries=0,
+    return Agent(model, deps_type=AgentSession, instructions=instructions, retries=0,
                  tools=[Tool(fn, sequential=True, max_retries=0) for fn in functions],
                  model_settings={"parallel_tool_calls": False, "max_tokens": 4096},
                  capabilities=[Caching(), Hooks(before_model_request=before_model_request)], name="mybot")
@@ -204,12 +222,12 @@ def _stream_event_dict(event):
 
 class AgentSession:
     def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(), camera_vars=(),
-                 on_event=None):
+                 on_event=None, skills=None):
         self.executor = executor
         self.config = config or AgentConfig()
         self.confirm = confirm
         self.on_event = on_event
-        self.agent = make_agent(model, read_vars=read_vars, camera_vars=camera_vars)
+        self.agent = make_agent(model, read_vars=read_vars, camera_vars=camera_vars, skills=skills)
         self.context = None
         self.turns = []
         self.events = []
@@ -457,9 +475,12 @@ async def run_cli_agent(args, stop):
                              request_limit=args.max_requests, tool_calls_limit=args.max_tool_calls,
                              allow_actions=args.allow_actions)
         model, client = create_model(config)
+        skills = SkillsLibrary(args.skills_dir or default_skills_root(),
+                               required=args.skills_dir is not None)
         executor = RobotExecutor(args.robot, module_paths=args.module_path, camera_src_root=args.camera_src_dir,
                                  scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
-                                 read_vars=args.read_var, camera_vars=args.camera_var, stop_event=stop)
+                                 read_vars=args.read_var, camera_vars=args.camera_var, stop_event=stop,
+                                 skills=skills)
 
         async def confirm(name, arguments):
             return await confirm_console(name, arguments, stop)
@@ -467,7 +488,7 @@ async def run_cli_agent(args, stop):
         renderer = StreamRenderer()
         session = AgentSession(executor, model, config, confirm=confirm,
                                read_vars=args.read_var, camera_vars=args.camera_var,
-                               on_event=renderer)
+                               on_event=renderer, skills=skills)
         result = await _conversation(session, args, stop, renderer)
     except BaseException as exc:
         failure = exc

@@ -18,6 +18,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
+from .agent_skills import SkillsLibrary
 from .errors import BudgetExceeded
 from .hal import HALManager
 from .hardware import Budget, ensure_ok, safe_ident
@@ -40,6 +41,8 @@ _TOOLS = {
     "run_action_script": ({"script"}, {"script", "vars"}),
     "read_variables": ({"names"}, {"names"}),
     "capture_image": ({"name"}, {"name"}),
+    "list_skills": (set(), set()),
+    "read_skill": ({"name"}, {"name", "file"}),
 }
 
 
@@ -315,9 +318,10 @@ class RobotExecutor:
 
     def __init__(self, robot_path, *, module_paths=None, camera_src_root=None,
                  scripts_dir, allow_hardware=False, read_vars=(), camera_vars=(),
-                 stop_event=None, robot_factory=Robot):
+                 stop_event=None, robot_factory=Robot, skills=None):
         self._robot_path = Path(robot_path).absolute()
         self._scripts_dir = Path(scripts_dir).absolute()
+        self._skills = skills if isinstance(skills, SkillsLibrary) else None
         self._module_paths = module_paths
         self._camera_src_root = camera_src_root
         self._allow_hardware = allow_hardware is True
@@ -493,6 +497,10 @@ class RobotExecutor:
                 raise SecurityError("Duplicate variables")
         elif name == "capture_image":
             safe_ident(arguments["name"])
+        elif name == "read_skill":
+            checked_text(arguments["name"])
+            if "file" in arguments:
+                checked_text(arguments["file"])
 
     def _preflight_io(self, name, arguments):
         # Host approval belongs to AgentSession. This flag is passed to Robot,
@@ -558,6 +566,16 @@ class RobotExecutor:
                 data = self._scripts.listing(lambda: self._check(deadline))
             elif name == "query_sql":
                 data = {"output": self._robot.query_sql(arguments["sql"])}
+            elif name == "list_skills":
+                if self._skills is None or not self._skills.enabled:
+                    raise SecurityError("Skills are not configured")
+                data = self._skills.index()
+            elif name == "read_skill":
+                if self._skills is None or not self._skills.enabled:
+                    raise SecurityError("Skills are not configured")
+                file = arguments.get("file", "SKILL.md")
+                data = {"name": arguments["name"], "file": file,
+                        "content": self._skills.read(arguments["name"], file)}
             else:
                 self._preflight_io(name, arguments)
                 if name == "run_action_script":

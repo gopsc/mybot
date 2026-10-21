@@ -64,6 +64,11 @@ export DEEPSEEK_API_KEY="sk-..."
 
 通过重复 `--read-var NAME` 开放指定变量读取，通过重复 `--camera-var NAME` 开放一个或多个 Camera 变量的图片输入。
 
+**参考技能**：`skills/` 目录下的每个技能是一个目录（`SKILL.md` + 可选 markdown 参考资料），
+属操作者信任内容。存在技能时，智能体获得 `list_skills` / `read_skill(name, file)` 两个只读工具，
+技能名与摘要进入系统提示词，正文按需查阅（如内置的 `pymybot-scripting` 三层脚本开发参考）。
+`--skills-dir DIR` 显式指定信任根（不存在即报错）；缺省依次取打包资产 `assets/skills` 或源码 `skills/`。
+
 脚本仅能来自 `--scripts-dir`（默认内置 scripts），只能选择已存在的相对 `.mt` 路径，不能创建脚本、执行 shell、写文件或热更新 SQL。文件图片仍需 `--camera-src-dir`，来源由 Camera 的结构配置决定。
 
 ### 安全机制
@@ -250,6 +255,7 @@ modules/                  Lua 基础资源与公共库
   <芯片驱动>.lua                          45 个真实器件驱动（见下）
 robots/                   SQL 结构文件（示例：relay-test.sql）
 scripts/                  MT 动作脚本（示例：relay-test.mt）
+skills/                   智能体参考技能（SKILL.md + references；示例：pymybot-scripting）
 tests/                    pytest 测试（fixtures/virt/ 为逐驱动无硬件端到端夹具）
 ```
 

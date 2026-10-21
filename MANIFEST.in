@@ -3,4 +3,5 @@ include LICENSE
 recursive-include modules *.lua
 recursive-include robots *.sql
 recursive-include scripts *.mt
+recursive-include skills *.md
 recursive-include tests *.py
