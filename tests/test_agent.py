@@ -790,6 +790,14 @@ def test_explicit_model_required(model):
         create_model(AgentConfig(model=model))
 
 
+def test_model_rejection_message_lists_every_accepted_provider():
+    with pytest.raises(AgentConfigurationError) as exc:
+        create_model(AgentConfig(model="unknown:x"))
+    message = str(exc.value)
+    for provider in agent_module.PROVIDERS:
+        assert f"{provider}:MODEL" in message
+
+
 def test_missing_key_does_not_echo_other_secrets(monkeypatch):
     monkeypatch.setenv("UNRELATED_TOKEN", "secret-must-not-appear")
     with pytest.raises(AgentConfigurationError, match="OPENAI_API_KEY") as exc:
@@ -804,8 +812,7 @@ def test_endpoint_rejects_credentials_and_remote_plaintext(base_url):
     assert "password" not in str(exc.value) and "secret" not in str(exc.value)
 
 
-@pytest.mark.parametrize("provider,key", [("openai", "OPENAI_API_KEY"), ("deepseek", "DEEPSEEK_API_KEY"),
-                                          ("anthropic", "ANTHROPIC_API_KEY")])
+@pytest.mark.parametrize("provider,key", sorted(agent_module.PROVIDER_KEY_ENV.items()))
 def test_provider_clients_disable_automatic_retries(monkeypatch, provider, key):
     monkeypatch.setenv(key, "offline-test-key")
     async def scenario():
