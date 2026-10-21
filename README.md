@@ -276,7 +276,7 @@ modules/                  Lua 基础资源与公共库
   lib/sensor_daemon*.lua sensor_aggregate.lua  采样 chunk
   lib/virtbus.lua lib/virtbus/regmap.lua  虚拟总线与寄存器模型
   <芯片驱动>.lua                          45 个真实器件驱动（见下）
-robots/                   SQL 结构文件（示例：relay-test.sql）
+robots/                   SQL 结构文件（示例：relay-test.sql、camx.sql）
 scripts/                  MT 动作脚本（示例：relay-test.mt）
 skills/                   智能体参考技能（SKILL.md + references；示例：pymybot-scripting）
 docs/                     补充文档（如 Windows faulthandler 说明）
