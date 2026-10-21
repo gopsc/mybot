@@ -126,6 +126,8 @@ class Workspace:
             _text(arguments["command"], MAX_COMMAND_BYTES, "command", nonempty=True, no_nul=True)
             if not arguments["command"].strip():
                 raise SecurityError("command must not be blank")
+            if os.name == "nt" and ("\n" in arguments["command"] or "\r" in arguments["command"]):
+                raise SecurityError("cmd.exe runs a single line; join commands with && instead of newlines")
             _relative(arguments.get("cwd", "."), directory=True)
         else:
             _relative(arguments.get("path", "."), directory=name == "list_files")
@@ -380,9 +382,16 @@ class Workspace:
 
     @staticmethod
     def _shell(command, cwd, fd, guard, check, started):
-        interpreter = "/bin/sh" if os.name != "nt" else str(_windows_system_directory() / "cmd.exe")
-        argv = [interpreter, "-c", command] if os.name != "nt" else [interpreter, "/d", "/s", "/c", command]
-        options = {"start_new_session": True} if os.name != "nt" else {}
+        if os.name != "nt":
+            interpreter = "/bin/sh"
+            argv = [interpreter, "-c", command]
+            options = {"start_new_session": True}
+        else:
+            interpreter = str(_windows_system_directory() / "cmd.exe")
+            # Popen(list) would re-quote with CRT backslash escapes that cmd.exe
+            # does not understand; /s strips exactly these outer quotes instead.
+            argv = f'"{interpreter}" /d /s /c "{command}"'
+            options = {}
         # Linux procfs provides descriptor-pinned cwd without preexec_fn (unsafe
         # in the executor's multithreaded process). Other platforms use checks.
         if fd is not None and Path("/proc/self/fd").is_dir():

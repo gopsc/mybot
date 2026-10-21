@@ -75,7 +75,7 @@ export DEEPSEEK_API_KEY="sk-..."
 
 - `--workspace-dir DIR`：开放 `list_files(path=".")`、`read_file(path, offset=1, limit=200)`、`write_file(path, content, overwrite=False)`、`edit_file(path, old_string, new_string, replace_all=False)`。
 - 文件路径必须相对工作目录，拒绝路径穿越、符号链接和非普通文件；UTF-8 文本最大 1 MiB。列目录不递归，读取按行分页；创建文件需要父目录已存在，覆盖需显式 `overwrite=True`，精确编辑默认要求唯一匹配。文件读取内容可能发送给模型，请选择不含凭据的目录。
-- `--enable-shell`：在已指定工作目录时开放 `shell(command, cwd=".")`，支持平台 shell 语法，返回退出码、标准输出、标准错误及截断标记；非零退出码表示失败但不代表未执行。
+- `--enable-shell`：在已指定工作目录时开放 `shell(command, cwd=".")`，支持平台 shell 语法（POSIX 为 `/bin/sh -c`，Windows 为 `cmd.exe /c`，后者只接受单行命令），返回退出码、标准输出、标准错误及截断标记；非零退出码表示失败但不代表未执行。
 - 文件创建/编辑和 shell 执行分别请求确认；`--allow-file-writes`、`--allow-shell` 分别预授权，`--allow-actions` 不授权这两类操作。非交互模式未预授权时拒绝调用。
 
 ```sh

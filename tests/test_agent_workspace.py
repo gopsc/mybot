@@ -325,6 +325,7 @@ def test_root_replacement(workspace, tmp_path, replacement):
     assert not starts and not (old / "file").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows refuses to rename a directory holding an open file")
 def test_parent_replaced_during_staging(workspace, tmp_path, monkeypatch):
     parent = tmp_path / "dir"
     parent.mkdir()
@@ -455,6 +456,19 @@ def test_shell_pipeline_cwd_environment_and_stdin(tmp_path, monkeypatch):
     assert result["stdout"].strip() == "HELLO" and result["exit_code"] == 0
     result = invoke(workspace, "shell", {"command": python_command("import os; print(os.getcwd())")})
     assert result["stdout"].strip() == str(tmp_path)
+
+
+def test_shell_multiline_command_is_platform_dependent(tmp_path):
+    workspace = Workspace(tmp_path, enable_shell=True)
+    command = python_command("print('a', end='')") + "\n" + python_command("print('b', end='')")
+    starts = []
+    if os.name == "nt":
+        with pytest.raises(ValueError, match="single line"):
+            invoke(workspace, "shell", {"command": command}, starts=starts)
+        assert not starts
+    else:
+        result = invoke(workspace, "shell", {"command": command}, starts=starts)
+        assert result["stdout"] == "ab" and result["exit_code"] == 0
 
 
 def test_shell_nonzero_and_bounded_output(tmp_path):
@@ -611,7 +625,7 @@ def test_read_budget_checked_between_chunks(workspace, tmp_path, monkeypatch):
 def test_cancel_shell_with_continuous_output(tmp_path):
     workspace = Workspace(tmp_path, enable_shell=True)
     starts = []
-    command = python_command("import os\nwhile True:\n os.write(1,b'x'*65536)\n os.write(2,b'y'*65536)")
+    command = python_command("import os; [(os.write(1,b'x'*65536), os.write(2,b'y'*65536)) for _ in iter(int, 1)]")
     with pytest.raises(Interrupted):
         invoke(workspace, "shell", {"command": command}, check=deadline(0.25), starts=starts)
     assert starts == [True]
