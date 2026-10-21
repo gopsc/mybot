@@ -15,7 +15,7 @@ pymybot 提供两种独立的使用方式，可按需选择或组合：
 
 ## 机器人智能体
 
-智能体模式使用 PydanticAI 将自然语言任务转换为机器人操作。支持 openai / anthropic / deepseek 三种模型提供商，密钥只经环境变量传入。
+智能体模式使用 PydanticAI 将自然语言任务转换为机器人操作。支持 openai / openai-chat / anthropic / deepseek 四种模型提供商，密钥只经环境变量传入。
 
 ### 快速开始
 
@@ -29,9 +29,10 @@ python -m venv .venv
 **2. 配置模型与密钥**
 
 ```sh
-# 选择模型（三选一）
+# 选择模型（四选一）
 export MYBOT_MODEL="deepseek:deepseek-chat"
 # export MYBOT_MODEL="openai:gpt-4o"
+# export MYBOT_MODEL="openai-chat:gpt-4o"
 # export MYBOT_MODEL="anthropic:claude-sonnet-4-5"
 
 # 对应厂商的 API Key
@@ -51,7 +52,7 @@ export DEEPSEEK_API_KEY="sk-..."
 .venv/bin/python -m pymybot --robot robots/relay-test.sql
 ```
 
-不带子命令的 `--robot` 入口默认进智能体模式，也可显式写 `agent` 子命令。
+不带子命令的 `--robot` 入口默认进智能体模式，也可显式写 `agent` 子命令。`--no-agent` 可让 agent 入口绕过模型直接执行脚本（需配合 `--input`）。
 
 ### 工具集与能力
 
@@ -75,7 +76,8 @@ export DEEPSEEK_API_KEY="sk-..."
 
 - `--workspace-dir DIR`：开放 `list_files(path=".")`、`read_file(path, offset=1, limit=200)`、`write_file(path, content, overwrite=False)`、`edit_file(path, old_string, new_string, replace_all=False)`。
 - 文件路径必须相对工作目录，拒绝路径穿越、符号链接和非普通文件；UTF-8 文本最大 1 MiB。列目录不递归，读取按行分页；创建文件需要父目录已存在，覆盖需显式 `overwrite=True`，精确编辑默认要求唯一匹配。文件读取内容可能发送给模型，请选择不含凭据的目录。
-- `--enable-shell`：在已指定工作目录时开放 `shell(command, cwd=".")`，支持平台 shell 语法（POSIX 为 `/bin/sh -c`，Windows 为 `cmd.exe /c`，后者只接受单行命令），返回退出码、标准输出、标准错误及截断标记；非零退出码表示失败但不代表未执行。
+- `--enable-shell`：在已指定工作目录时开放 `shell(command, cwd=".")`，支持平台 shell 语法（POSIX 为 `/bin/sh -c`，Windows 为 `cmd.exe /c`，后者只接受单行命令），返回退出码、标准输出、标准错误、截断标记及使用的解释器路径；非零退出码表示失败但不代表未执行。
+- `--allow-shell`：预授权宿主 shell 命令（需先 `--enable-shell`），跳过每次执行的确认提示；命令继承宿主用户权限和环境，请谨慎使用。
 - 文件创建/编辑和 shell 执行分别请求确认；`--allow-file-writes`、`--allow-shell` 分别预授权，`--allow-actions` 不授权这两类操作。非交互模式未预授权时拒绝调用。
 
 ```sh
@@ -277,6 +279,7 @@ modules/                  Lua 基础资源与公共库
 robots/                   SQL 结构文件（示例：relay-test.sql）
 scripts/                  MT 动作脚本（示例：relay-test.mt）
 skills/                   智能体参考技能（SKILL.md + references；示例：pymybot-scripting）
+docs/                     补充文档（如 Windows faulthandler 说明）
 tests/                    pytest 测试（fixtures/virt/ 为逐驱动无硬件端到端夹具）
 ```
 
