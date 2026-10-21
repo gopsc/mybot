@@ -931,11 +931,12 @@ def test_real_relay_action_and_read(tmp_path):
 
 
 def test_real_camera_file_source_and_jpeg(tmp_path):
-    import cv2
-    import numpy as np
-    ok, encoded = cv2.imencode(".jpg", np.zeros((2, 3, 3), dtype=np.uint8))
-    assert ok
-    (tmp_path / "image.jpg").write_bytes(encoded.tobytes())
+    import io
+    from PIL import Image
+    buffer = io.BytesIO()
+    Image.new("RGB", (3, 2)).save(buffer, "JPEG")
+    encoded = buffer.getvalue()
+    (tmp_path / "image.jpg").write_bytes(encoded)
     robot_path = tmp_path / "camera.sql"
     robot_path.write_text("CREATE TABLE Camera(name String,src String); "
                           "INSERT INTO Camera(name,src) VALUES('cam','image.jpg');", encoding="utf-8")
@@ -945,7 +946,7 @@ def test_real_camera_file_source_and_jpeg(tmp_path):
         try:
             result = await ex.call("capture_image", {"name": "cam"})
             assert result["ok"]
-            assert result["image"] == {"data": encoded.tobytes(), "media_type": "image/jpeg"}
+            assert result["image"] == {"data": encoded, "media_type": "image/jpeg"}
             assert result["data"]["width"] == 3 and "b64" not in result["data"]
         finally:
             await ex.close()

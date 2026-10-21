@@ -10,8 +10,9 @@
 # 版本矩阵的判据：
 # - 3.11 是 pyproject 里 requires-python 的下界，3.13 是当前最新，3.12 取中。
 #   任一版本红 ⇒ `requires-python = ">=3.11"` 的声明与实际不符。
-# - lupa（LuaJIT）、opencv-python-headless 在 Linux/Windows 均有 wheel，pyftdi/pyserial
+# - lupa（LuaJIT）、pillow 在 Linux/Windows 均有 wheel，pyftdi/pyserial
 #   为纯 Python，故直接用标准 runner 即可，不需要 gcc / luajit-dev。
+#   摄像头采集依赖 av（`.[camera]` 可选）不在 CI 安装，测试用假模块覆盖。
 
 name: CI
 

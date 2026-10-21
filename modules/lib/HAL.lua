@@ -6,7 +6,7 @@ local ffi = require("ffi")
 local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
 local bus = dofile(mpath.resolve("lib/bus_contract.lua"))
 local HAL = {
-    backend = "python", backend_name = "pyserial/pyftdi/opencv",
+    backend = "python", backend_name = "pyserial/pyftdi/pyav",
     platform = { name = "portable", gpio_prefix = false, pwm_sysfs_root = false },
     PWM_SYSFS_ROOT = false, i2c_addr = {}, uart_baud = {}, uart_orig = {}, pwm_state = {},
     UART_READ_MAX_MS = bus.UART_READ_MAX_MS,

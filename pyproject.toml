@@ -14,11 +14,12 @@ dependencies = [
   "sqlparse>=0.5.3,<0.6",
   "pyserial>=3.5,<4",
   "pyftdi>=0.55,<1",
-  "opencv-python-headless>=4.10,<5",
+  "pillow>=11,<14",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
+camera = ["av>=19,<20"]
 agent = ["pydantic-ai-slim[openai,anthropic]==2.57.0"]
 linux = ["smbus2>=0.5; sys_platform == 'linux'", "spidev>=3.6; sys_platform == 'linux'"]
 

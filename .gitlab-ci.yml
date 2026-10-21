@@ -9,8 +9,9 @@
 # 版本矩阵的判据：
 # - 3.11 是 pyproject 里 requires-python 的下界，3.13 是当前最新，3.12 取中。
 #   任一版本红 ⇒ `requires-python = ">=3.11"` 的声明与实际不符。
-# - lupa（LuaJIT）、opencv-python-headless 均有 manylinux wheel，pyftdi/pyserial 为纯
+# - lupa（LuaJIT）、pillow 均有 manylinux wheel，pyftdi/pyserial 为纯
 #   Python，故 python:slim 镜像即可，不需要 gcc / luajit-dev，job 时长可控。
+#   摄像头采集依赖 av（`.[camera]` 可选）不在 CI 安装，测试用假模块覆盖。
 #
 # Windows 未纳入矩阵：托管方默认不提供 Windows runner。`tests/conftest.py` 的
 # `usable_symlink()` 已把「平台表达不了软链」的情况收敛成 skip，因此 Windows 自建

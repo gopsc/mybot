@@ -149,7 +149,7 @@ python -m venv .venv
 **2. 验证安装**
 
 ```sh
-.venv/bin/python -c "from lupa.luajit21 import LuaRuntime; import sqlparse, serial, pyftdi, cv2"
+.venv/bin/python -c "from lupa.luajit21 import LuaRuntime; import sqlparse, serial, pyftdi, PIL"
 .venv/bin/python -m pytest
 ```
 
@@ -257,7 +257,7 @@ pymybot run --robot robots/<任务>.sql --input scripts/<任务>.mt \
 - **双模式入口**：智能体模式（PydanticAI）与控制器模式（直接 CLI）独立可选
 - **三层脚本**：`modules/*.lua` 驱动、`robots/*.sql` 结构、`scripts/*.mt` 动作，一一对应
 - **默认安全**：静态命令不激活驱动；`run` / `sample` / `apply-sql` 默认只允许虚拟总线、串口回环或图片文件，必须显式 `--allow-hardware` 才打开物理设备
-- **跨平台 HAL**：UART 走 pyserial，I2C/SPI 走 pyftdi（MPSSE），Camera 走 OpenCV；Linux 可选 smbus2/spidev
+- **跨平台 HAL**：UART 走 pyserial，I2C/SPI 走 pyftdi（MPSSE），Camera 采集走 PyAV（可选）、图片编解码走 Pillow；Linux 可选 smbus2/spidev
 - **无硬件验证**：内置虚拟总线（`virtbus`）、寄存器映射模型、串口 `loop://` 回环，支持 NACK / 超时 / 短读等故障注入
 - **后台采样**：Daemon 表基于 Python 线程和独立 Lua 状态做周期采样，支持单设备、多设备同总线和聚合
 - **预置芯片驱动**：自带 45 个真实器件驱动（自 C++/Rust 版迁移，I2C/SPI/UART 三族），多数内嵌虚拟器件模型，无硬件即可端到端验证；未迁移的 GPIO / PWM / Speaker / Sim 及 V4L2 Camera 见下文说明
@@ -306,14 +306,14 @@ python -m venv .venv
 .venv\Scripts\pip install -e ".[test]"
 ```
 
-Linux 上需要原生 `/dev/i2c-*` / `/dev/spidev*` 时追加 `.[linux]`。安装后可用 `pymybot` 命令或 `python -m pymybot`。
+Linux 上需要原生 `/dev/i2c-*` / `/dev/spidev*` 时追加 `.[linux]`；需要从物理摄像头采集时追加 `.[camera]`（PyAV，自带 FFmpeg，约 30 MB）。只用文件图片源不需要它。安装后可用 `pymybot` 命令或 `python -m pymybot`。
 
 启用智能体时，在虚拟环境内安装 `python -m pip install -e ".[agent,test]"`。仅直接执行可继续使用基础安装，不需要 PydanticAI、模型 API Key 或模型网络请求。智能体依赖锁定为已验证接口版本；缺少依赖时明确报错，不静默降级。
 
 验证依赖：
 
 ```sh
-.venv/bin/python -c "from lupa.luajit21 import LuaRuntime; import sqlparse, serial, pyftdi, cv2"
+.venv/bin/python -c "from lupa.luajit21 import LuaRuntime; import sqlparse, serial, pyftdi, PIL"
 .venv/bin/python -m pytest
 ```
 
@@ -322,7 +322,7 @@ Linux 上需要原生 `/dev/i2c-*` / `/dev/spidev*` 时追加 `.[linux]`。安�
 - UART：pyserial；Windows 使用确认过的 `COMn`，`loop://` 为无硬件回环
 - I2C/SPI：pyftdi；需要支持 MPSSE 的 FTDI 适配器和 libusb 驱动，地址形如 `ftdi://ftdi:232h/1`，SPI 可带 `?cs=0`
 - `/dev/i2c-*`、`/dev/spidev*`：仅 Linux，依赖可选 smbus2/spidev
-- Camera：OpenCV；文件输入必须指定 `--camera-src-dir`
+- Camera：物理设备经 PyAV（`.[camera]`）采集，Windows 走 DirectShow（设备序号按枚举顺序映射）、Linux 走 V4L2（序号或 `/dev/videoN`）、macOS 走 AVFoundation（需 macOS 14+，固定 30 fps）；`width`/`height` 必须是摄像头支持的模式，否则打开失败而不是静默改用其他分辨率；文件输入由 Pillow 完整解码校验，必须指定 `--camera-src-dir`
 - 不提供 GPIO/PWM/Speaker 原生后端；相应外设通过受支持总线编写协议实现
 - Lua 指令预算和可取消等待不能中断阻塞的原生库调用；进程退出不等于执行器物理急停
 - Windows：LuaJIT 以 SEH 异常（`0xE24C4A02`）抛出每个 Lua 错误，CPython faulthandler 会误判为崩溃并可能导致进程段错误，因此 CLI 在 Windows 上会关闭 `-X faulthandler` / `PYTHONFAULTHANDLER`（stderr 提示一行），测试套件同样在 Windows 上关闭 pytest 的 faulthandler

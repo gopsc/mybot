@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import importlib
+import io
 import math
 import os
 from pathlib import Path
@@ -20,6 +21,9 @@ import time
 from typing import Callable
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 import zlib
+
+# PyAV's log level and capture are process-global.
+_AV_LOG_LOCK = threading.Lock()
 
 
 class _Resource:
@@ -40,6 +44,8 @@ class HALManager:
 
     MAX_IMAGE_BYTES = 16 * 1024 * 1024
     MAX_IMAGE_PIXELS = 32 * 1024 * 1024
+    CAMERA_TIMEOUT = 10.0
+    CAMERA_FORMATS = {"win32": "dshow", "linux": "v4l2", "darwin": "avfoundation"}
     UART_MAX_BYTES = 512
     UART_MAX_MS = 60000
     BAUDS = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
@@ -376,8 +382,8 @@ class HALManager:
         device = self._camera_device(device)
         width, height = self._size(width, height)
         with self._lock:
-            # Do not import cv2 or probe devices during robot activation.
-            return self._register(_Resource("camera", None, "cv2", None,
+            # Do not import av or probe devices during robot activation.
+            return self._register(_Resource("camera", None, "av", None,
                                            device=device, width=width, height=height))
 
     @classmethod
@@ -446,11 +452,15 @@ class HALManager:
         if not 0 < len(data) <= self.MAX_IMAGE_BYTES:
             raise ValueError("image exceeds byte ceiling or is empty")
         fmt, size = self._image_header(data)
-        cv2 = importlib.import_module("cv2")
-        np = importlib.import_module("numpy")
-        frame = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if frame is None or tuple(frame.shape[:2]) != (size[1], size[0]):
-            raise ValueError("invalid image data (decode failed)")
+        image = importlib.import_module("PIL.Image")
+        try:
+            with image.open(io.BytesIO(data), formats=[fmt.upper()]) as decoded:
+                decoded.load()
+                decoded_size = decoded.size
+        except (OSError, SyntaxError, ValueError) as exc:
+            raise ValueError(f"invalid image data (decode failed: {exc})") from exc
+        if decoded_size != size:
+            raise ValueError("invalid image data (dimension mismatch)")
         return fmt, size
 
     def _file_capture(self, src):
@@ -490,6 +500,69 @@ class HALManager:
         return dict(result="OK", source=source, format=fmt, mime="image/" + fmt,
                     bytes=len(data), b64=b64, base64=b64, width=size[0], height=size[1], **extra)
 
+    @staticmethod
+    def _dshow_video_devices(av):
+        """Return DirectShow video devices' unique alternative names in index order."""
+        logging = importlib.import_module("av.logging")
+        with _AV_LOG_LOCK:
+            level = logging.get_level()
+            logging.set_level(logging.INFO)
+            try:
+                with logging.Capture(local=False) as logs:
+                    try:
+                        av.open("dummy", format="dshow", options={"list_devices": "true"}).close()
+                    except av.FFmpegError:
+                        pass  # list_devices prints the list, then always fails to open
+            finally:
+                logging.set_level(level)
+        text = "".join(message for _, _, message in logs)
+        return [alt for kind, alt in re.findall(
+            r'^"[^"\n]*" \(([^)\n]*)\)\s*\n\s*Alternative name "([^"\n]+)"', text, re.M)
+            if "video" in kind]
+
+    def _camera_input(self, av, device):
+        fmt = self.CAMERA_FORMATS.get(sys.platform)
+        if fmt is None:
+            raise ValueError(f"camera capture is not supported on {sys.platform}")
+        if isinstance(device, str):
+            return device, fmt
+        if fmt == "v4l2":
+            return f"/dev/video{device}", fmt
+        if fmt == "avfoundation":
+            return f"{device}:none", fmt
+        names = self._dshow_video_devices(av)
+        if device >= len(names):
+            raise IOError(f"camera unavailable: {device} ({len(names)} video devices found)")
+        return "video=" + names[device], fmt
+
+    def _latest_frame(self, container):
+        """Decode the newest frame, discarding the backlog queued since the last capture.
+
+        FFmpeg devices (dshow especially) queue seconds of frames while idle. A read
+        that has to wait on the camera proves the backlog is drained.
+        """
+        stream = container.streams.video[0]
+        rate = stream.average_rate or stream.guessed_rate
+        live_wait = 0.5 / float(rate) if rate else 0.005
+        deadline = time.monotonic() + self.CAMERA_TIMEOUT
+        packets = container.demux(stream)
+        pending = []
+        while True:
+            started = time.monotonic()
+            packet = next(packets, None)
+            if packet is None or packet.size == 0:
+                raise IOError("camera stream ended")
+            if packet.is_keyframe:
+                pending.clear()
+            pending.append(packet)
+            if time.monotonic() - started >= live_wait or started >= deadline:
+                break
+        # Decode from the last keyframe so inter-frame codecs keep their references.
+        frames = [frame for packet in pending for frame in packet.decode()]
+        if not frames:
+            raise IOError("camera capture failed")
+        return frames[-1]
+
     def _camera_capture(self, handle, options=None):
         # Empty Lua tables can arrive as [] or {} depending on host conversion.
         options = {} if options is None or options == [] else options
@@ -507,36 +580,39 @@ class HALManager:
             width, height = self._size(options.get("width", r.state["width"]), options.get("height", r.state["height"]))
             device = self._camera_device(options.get("path", options.get("device", r.state["device"])))
             desired = dict(device=device, width=width, height=height)
-            cv2 = importlib.import_module("cv2")
+            av = importlib.import_module("av")
             try:
                 if r.device is not None and r.state != desired:
-                    r.device.release()
+                    r.device.close()
                     r.device = None
                 if r.device is None:
-                    r.device = cv2.VideoCapture(device)
-                    if not r.device.isOpened():
-                        raise IOError(f"camera unavailable: {device}")
-                    r.device.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-                    r.device.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    file, fmt = self._camera_input(av, device)
+                    # Unlike OpenCV, FFmpeg devices reject sizes the camera does not offer.
+                    device_options = {"video_size": f"{width}x{height}"}
+                    if fmt == "avfoundation":
+                        # avfoundation defaults to 29.97 fps, which most webcams reject.
+                        device_options["framerate"] = "30"
+                    try:
+                        r.device = av.open(file, format=fmt, options=device_options,
+                                           timeout=self.CAMERA_TIMEOUT)
+                    except av.FFmpegError as exc:
+                        raise IOError(f"camera unavailable: {device} ({exc})") from exc
                     r.state = desired
-                ok, frame = r.device.read()
-                if not ok or frame is None:
-                    raise IOError("camera capture failed")
-                size = self._size(frame.shape[1], frame.shape[0])
+                frame = self._latest_frame(r.device)
+                size = self._size(frame.width, frame.height)
                 quality = self._integer(options.get("quality", 90), 1, 100)
-                ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
-                if not ok or encoded is None:
-                    raise IOError("JPEG encoding failed")
-                data = encoded.tobytes()
+                encoded = io.BytesIO()
+                frame.to_image().save(encoded, "JPEG", quality=quality)
+                data = encoded.getvalue()
                 if len(data) > self.MAX_IMAGE_BYTES:
                     raise ValueError("image exceeds byte ceiling")
                 fmt, encoded_size = self._image_header(data)
                 if fmt != "jpeg" or size != encoded_size:
                     raise ValueError("invalid JPEG encoder output")
-                return self._image_result(data, "jpeg", size, "opencv")
+                return self._image_result(data, "jpeg", size, "pyav")
             except Exception:
                 if r.device is not None:
-                    r.device.release()
+                    r.device.close()
                     r.device = None
                 raise
 
@@ -555,8 +631,6 @@ class HALManager:
                 if r.device is not None:
                     if r.backend == "ftdi":
                         r.device.terminate()
-                    elif r.kind == "camera":
-                        r.device.release()
                     else:
                         r.device.close()
                     r.device = None

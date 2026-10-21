@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import importlib
+import io
 from pathlib import Path
 import struct
 import sys
@@ -227,7 +228,7 @@ def test_linux_legacy_backends_are_library_wrappers(manager, monkeypatch):
 def test_missing_libraries_fail_lazily(manager, monkeypatch):
     original = importlib.import_module
     def unavailable(name):
-        if name in {"cv2", "serial", "pyftdi.i2c", "pyftdi.spi"}:
+        if name in {"av", "serial", "pyftdi.i2c", "pyftdi.spi"}:
             raise ImportError("optional library missing")
         return original(name)
     monkeypatch.setattr(importlib, "import_module", unavailable)
@@ -326,86 +327,173 @@ def png_bytes(width=2, height=1):
 
 
 def mock_jpeg():
-    # Container fixture for the fake encoder; actual decoding is tested with real cv2.
+    # Container fixture for the fake encoder; actual decoding is tested with real Pillow.
     return (b"\xff\xd8\xff\xc0\x00\x0b\x08\x00\x01\x00\x02\x01\x01\x11\x00"
             b"\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00\x12\xff\xd9")
 
 
+# Verbatim FFmpeg 8 dshow list_devices output, including an audio name with parentheses.
+DSHOW_DEVICES = (
+    '"Integrated Webcam_FHD" (video)\n'
+    '  Alternative name "@device_pnp_\\\\?\\usb#vid_3277&pid_0004#cam0\\global"\n'
+    '"Microphone (Intel\u00ae Smart Sound)" (audio)\n'
+    '  Alternative name "@device_cm_{33D9A762}\\wave_{29D8FB9C}"\n'
+    '"USB Camera" (video)\n'
+    '  Alternative name "@device_pnp_\\\\?\\usb#vid_0c45&pid_6366#cam1\\global"\n'
+)
+
+
 @pytest.fixture
-def cv2_fake(monkeypatch):
-    captures = []
-    frame = SimpleNamespace(shape=(1, 2, 3))
+def av_fake(monkeypatch):
+    containers = []
+
+    class FFmpegError(Exception):
+        pass
+
+    class Image:
+        def save(self, stream, fmt, quality):
+            assert fmt == "JPEG" and 1 <= quality <= 100
+            if module.encode_fail:
+                raise OSError("encoder failed")
+            stream.write(mock_jpeg())
+
+    class Frame:
+        width, height = 2, 1
+
+        def __init__(self, live):
+            self.live = live
+
+        def to_image(self):
+            assert self.live, "captured a queued backlog frame"
+            return Image()
+
+    class Packet:
+        size, is_keyframe = 100, True
+
+        def __init__(self, live):
+            self.live = live
+
+        def decode(self):
+            return [Frame(self.live)]
+
+    class Container:
+        def __init__(self, file, fmt, options, timeout):
+            self.file, self.format, self.options, self.timeout = file, fmt, options, timeout
+            self.closed = 0
+            self.read_ok = True
+            self.backlog = 3
+            self.streams = SimpleNamespace(video=[SimpleNamespace(average_rate=1000, guessed_rate=None)])
+            containers.append(self)
+
+        def demux(self, stream):
+            assert stream is self.streams.video[0]
+            while self.read_ok:
+                if self.backlog:
+                    self.backlog -= 1
+                    yield Packet(False)
+                else:
+                    time.sleep(.002)  # waiting on the camera: a 1000 fps stream's live frame
+                    yield Packet(True)
+
+        def close(self):
+            self.closed += 1
+
+    def open_(file, format=None, options=None, timeout=None):
+        if options.get("list_devices"):
+            assert module.logging.level == module.logging.INFO and module.logging.capturing
+            module.logging.captured.append((32, "dshow", DSHOW_DEVICES))
+            raise FFmpegError("Immediate exit requested")
+        if module.open_fail:
+            raise FFmpegError("I/O error")
+        return Container(file, format, options, timeout)
 
     class Capture:
-        def __init__(self, device):
-            self.device, self.settings = device, []
-            self.released = 0
-            self.available = True
-            self.read_ok = True
-            captures.append(self)
+        def __init__(self, local=True):
+            assert local is False
 
-        def isOpened(self):
-            return self.available
+        def __enter__(self):
+            logging.captured, logging.capturing = [], True
+            return logging.captured
 
-        def set(self, key, value):
-            self.settings.append((key, value))
-            return True
+        def __exit__(self, *exc):
+            logging.capturing = False
 
-        def read(self):
-            return self.read_ok, frame
-
-        def release(self):
-            self.released += 1
-
-    module = SimpleNamespace(VideoCapture=Capture, CAP_PROP_FRAME_WIDTH=3,
-                             CAP_PROP_FRAME_HEIGHT=4, IMWRITE_JPEG_QUALITY=1,
-                             IMREAD_COLOR=1, captures=captures)
-    module.imencode = lambda extension, image, options: (True, SimpleNamespace(tobytes=mock_jpeg))
-    module.imdecode = lambda data, flags: frame
-    monkeypatch.setitem(sys.modules, "cv2", module)
-    monkeypatch.setitem(sys.modules, "numpy", SimpleNamespace(frombuffer=lambda data, dtype: data, uint8=int))
+    logging = SimpleNamespace(INFO=32, level=None, capturing=False, captured=[], Capture=Capture)
+    logging.get_level = lambda: logging.level
+    logging.set_level = lambda level: setattr(logging, "level", level)
+    module = SimpleNamespace(open=open_, FFmpegError=FFmpegError, logging=logging,
+                             containers=containers, open_fail=False, encode_fail=False)
+    monkeypatch.setitem(sys.modules, "av", module)
+    monkeypatch.setitem(sys.modules, "av.logging", logging)
     return module
 
 
-def test_camera_lazy_capture_fields_reconfigure_close(manager, cv2_fake):
+def test_camera_lazy_capture_fields_reconfigure_close(manager, av_fake):
     h = manager.call("camera_open", 0, 640, 480)
-    assert h >= 0 and not cv2_fake.captures
+    assert h >= 0 and not av_fake.containers
     shot = manager.call("camera_capture", h, {})
     assert shot["result"] == "OK", shot
     assert shot["format"] == "jpeg" and shot["mime"] == "image/jpeg"
-    assert shot["b64"] == shot["base64"]
+    assert shot["source"] == "pyav" and shot["b64"] == shot["base64"]
     assert base64.b64decode(shot["b64"]) == mock_jpeg()
     assert (shot["width"], shot["height"], shot["bytes"]) == (2, 1, len(mock_jpeg()))
+    assert av_fake.containers[0].options["video_size"] == "640x480"
+    av_fake.containers[0].backlog = 50  # frames the device queued while idle
+    assert manager.call("camera_capture", h, {})["result"] == "OK", manager.call("last_error")
+    assert len(av_fake.containers) == 1 and av_fake.containers[0].backlog == 0
     assert manager.call("camera_capture", h, {"device": 1})["result"] == "OK"
-    assert len(cv2_fake.captures) == 2 and cv2_fake.captures[0].released == 1
+    assert len(av_fake.containers) == 2 and av_fake.containers[0].closed == 1
     assert manager.call("close_handle", h) == 0
-    assert cv2_fake.captures[1].released == 1
+    assert av_fake.containers[1].closed == 1
     assert manager.call("camera_capture", h, {})["result"] == "ERR"
 
 
-def test_camera_capture_failures_release_and_retry(manager, cv2_fake):
+@pytest.mark.parametrize("platform, device, file, fmt", [
+    ("linux", 0, "/dev/video0", "v4l2"),
+    ("linux", "/dev/video2", "/dev/video2", "v4l2"),
+    ("darwin", 1, "1:none", "avfoundation"),
+    ("win32", 0, "video=@device_pnp_\\\\?\\usb#vid_3277&pid_0004#cam0\\global", "dshow"),
+    ("win32", 1, "video=@device_pnp_\\\\?\\usb#vid_0c45&pid_6366#cam1\\global", "dshow"),
+])
+def test_camera_platform_device_inputs(manager, av_fake, monkeypatch, platform, device, file, fmt):
+    monkeypatch.setattr(sys, "platform", platform)
+    h = manager.call("camera_open", device, 320, 240)
+    assert manager.call("camera_capture", h, {})["result"] == "OK", manager.call("last_error")
+    container = av_fake.containers[-1]
+    assert (container.file, container.format) == (file, fmt)
+    assert container.options["video_size"] == "320x240"
+    assert ("framerate" in container.options) == (fmt == "avfoundation")
+    assert av_fake.logging.level is None
+
+
+def test_camera_platform_failures(manager, av_fake, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    h = manager.call("camera_open", 2)
+    response = manager.call("camera_capture", h, {})
+    assert response["result"] == "ERR" and "2 video devices found" in response["message"]
+    monkeypatch.setattr(sys, "platform", "freebsd14")
+    response = manager.call("camera_capture", h, {})
+    assert response["result"] == "ERR" and "not supported on freebsd14" in response["message"]
+    assert not av_fake.containers
+
+
+def test_camera_capture_failures_release_and_retry(manager, av_fake):
     h = manager.call("camera_open", 0, 640, 480)
-    original = cv2_fake.VideoCapture
-
-    def unavailable(device):
-        cap = original(device)
-        cap.available = False
-        return cap
-
-    cv2_fake.VideoCapture = unavailable
-    assert manager.call("camera_capture", h, {})["result"] == "ERR"
-    assert cv2_fake.captures[0].released == 1
-    cv2_fake.VideoCapture = original
+    av_fake.open_fail = True
+    response = manager.call("camera_capture", h, {})
+    assert response["result"] == "ERR" and "camera unavailable" in response["message"]
+    assert not av_fake.containers
+    av_fake.open_fail = False
     assert manager.call("camera_capture", h, {})["result"] == "OK"
-    cv2_fake.captures[-1].read_ok = False
+    av_fake.containers[-1].read_ok = False
     assert manager.call("camera_capture", h, {})["result"] == "ERR"
-    assert cv2_fake.captures[-1].released == 1
-    cv2_fake.imencode = lambda *args: (False, None)
-    assert manager.call("camera_capture", h, {})["result"] == "ERR"
-    assert cv2_fake.captures[-1].released == 1
+    assert av_fake.containers[-1].closed == 1
+    av_fake.encode_fail = True
+    assert "encoder failed" in manager.call("camera_capture", h, {})["message"]
+    assert len(av_fake.containers) == 2 and av_fake.containers[-1].closed == 1
 
 
-def test_camera_source_sandbox_validation_and_ceiling(tmp_path, cv2_fake):
+def test_camera_source_sandbox_validation_and_ceiling(tmp_path, av_fake):
     root = tmp_path / "allowed"
     root.mkdir()
     (root / "photo.png").write_bytes(png_bytes())
@@ -416,7 +504,7 @@ def test_camera_source_sandbox_validation_and_ceiling(tmp_path, cv2_fake):
     try:
         shot = with_manager.call("camera_capture", h, {"src": "photo.png"})
         assert shot["result"] == "OK" and shot["mime"] == "image/png"
-        assert not cv2_fake.captures
+        assert not av_fake.containers
         for src in ["../outside.png", str(outside), "missing.png"]:
             assert with_manager.call("camera_capture", h, {"src": src})["result"] == "ERR"
         (root / "bad.png").write_bytes(png_bytes()[:-2])
@@ -436,7 +524,7 @@ def test_camera_source_sandbox_validation_and_ceiling(tmp_path, cv2_fake):
         denied.close()
 
 
-def test_camera_source_symlink_escape(tmp_path, cv2_fake):
+def test_camera_source_symlink_escape(tmp_path, av_fake):
     root = tmp_path / "root"
     root.mkdir()
     outside = tmp_path / "image.png"
@@ -453,32 +541,42 @@ def test_camera_source_symlink_escape(tmp_path, cv2_fake):
         m.close()
 
 
-def test_camera_validation_and_no_silent_simulator_fallback(manager, cv2_fake, monkeypatch):
+def test_camera_validation_and_no_silent_simulator_fallback(manager, av_fake, monkeypatch):
     assert manager.call("camera_open", "https://untrusted/video", 1, 1) == -1
     assert manager.call("camera_open", 0, 0, 1) == -1
     h = manager.call("camera_open")
     assert manager.call("camera_capture", h, {"width": 10})["result"] == "ERR"
     monkeypatch.setenv("MYBOT_SIM_CAPTURE_SOCK", "/missing/socket")
     assert "not supported" in manager.call("camera_capture", h, {})["message"]
-    assert not cv2_fake.captures
+    assert not av_fake.containers
 
 
-def test_real_cv2_image_validation(tmp_path):
-    cv2 = pytest.importorskip("cv2")
-    np = pytest.importorskip("numpy")
+def test_real_pillow_image_validation(tmp_path):
+    from PIL import Image
     m = HALManager(tmp_path)
     h = m.call("camera_open")
     try:
-        for extension in [".png", ".jpg"]:
-            ok, encoded = cv2.imencode(extension, np.zeros((8, 12, 3), dtype=np.uint8))
-            assert ok
+        for extension, fmt in [(".png", "PNG"), (".jpg", "JPEG")]:
+            buffer = io.BytesIO()
+            Image.new("RGB", (12, 8)).save(buffer, fmt)
+            encoded = buffer.getvalue()
             file = tmp_path / ("image" + extension)
-            file.write_bytes(encoded.tobytes())
+            file.write_bytes(encoded)
             shot = m.call("camera_capture", h, {"src": str(file)})
             assert shot["result"] == "OK", shot
             assert (shot["width"], shot["height"]) == (12, 8)
-            file.write_bytes(encoded.tobytes()[:-8])
+            file.write_bytes(encoded[:-8])
             assert m.call("camera_capture", h, {"src": str(file)})["result"] == "ERR"
+        # Valid PNG framing and CRCs around a corrupt deflate stream: only a real decode catches it.
+        good = png_bytes(4, 4)
+        pos = good.index(b"IDAT") - 4
+        n = struct.unpack_from(">I", good, pos)[0]
+        garbage = b"IDAT\x78\x9c" + b"\xff" * (n - 2)
+        bad = (good[:pos] + struct.pack(">I", n) + garbage
+               + struct.pack(">I", zlib.crc32(garbage)) + good[pos + 12 + n:])
+        (tmp_path / "corrupt.png").write_bytes(bad)
+        response = m.call("camera_capture", h, {"src": "corrupt.png"})
+        assert response["result"] == "ERR" and "decode failed" in response["message"]
     finally:
         m.close()
 
@@ -524,10 +622,10 @@ def lua_runtime(manager, monkeypatch):
     return lua
 
 
-def test_host_runtime_camera_bridge(manager, cv2_fake):
+def test_host_runtime_camera_bridge(manager, av_fake):
     pytest.importorskip("lupa.luajit21")
     from pymybot.runtime import LuaState
-    # cv2_fake is installed: this opt-in exercises dispatch, never real hardware.
+    # av_fake is installed: this opt-in exercises dispatch, never real hardware.
     state = LuaState([MODULES], manager, threading.Event(), allow_hardware=True)
     try:
         state.load(MODULES / "Camera.lua")
@@ -696,7 +794,7 @@ def test_lua_hal_speaker_open_is_unsupported(manager, monkeypatch):
     assert not manager._handles
 
 
-def test_lua_existing_bus_modules_and_camera(manager, ftdi, serial_fake, cv2_fake, monkeypatch):
+def test_lua_existing_bus_modules_and_camera(manager, ftdi, serial_fake, av_fake, monkeypatch):
     for module, data in [("I2C", dict(path=I2C_URL)),
                          ("SPI", dict(path=SPI_URL, spi_mode=0, bits=8, speed=1000000, delay=0)),
                          ("UART", dict(path="COM9", baud=9600)),

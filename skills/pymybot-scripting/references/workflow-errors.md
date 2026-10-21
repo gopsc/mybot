@@ -38,7 +38,8 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 - I2C/SPI 真机：pyftdi 需要 MPSSE 型 FTDI 适配器（`ftdi://ftdi:232h/1`，SPI 可带 `?cs=0`）；
   Linux 原生 `/dev/i2c-*` / `/dev/spidev*` 需装 `.[linux]`。
 - UART：Windows 用 `COMn`；`loop://` 回环不需要硬件。
-- Camera：OpenCV；文件输入必须 `--camera-src-dir`。
+- Camera：真机采集用 PyAV（需装 `.[camera]`），分辨率必须是摄像头支持的模式，否则打开失败；
+  文件输入用 Pillow 校验，必须 `--camera-src-dir`。
 - Windows：CLI 自动关闭 faulthandler（LuaJIT SEH 与 CPython 冲突，详见
   `docs/windows-faulthandler-luajit.md`）；stdout/stderr 固定 UTF-8。
 - Lua 指令预算与可取消等待**不能中断阻塞的原生库调用**；进程退出不是物理急停。

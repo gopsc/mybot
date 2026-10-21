@@ -1,4 +1,4 @@
--- Camera lifecycle shim. Python cv2 owns devices, encoding and source validation.
+-- Camera lifecycle shim. Python (PyAV capture, Pillow codecs) owns devices, encoding and source validation.
 local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
 local HAL = dofile(mpath.resolve("lib/HAL.lua"))
 local handle, defaults = nil, {}
