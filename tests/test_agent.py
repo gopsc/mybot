@@ -763,6 +763,27 @@ def test_provider_error_is_sanitized_and_not_retried(tmp_path, monkeypatch, caps
     assert json.loads(captured.out)["ok"] is False
 
 
+def test_unusable_skills_root_fails_as_configuration_before_any_request(tmp_path, monkeypatch, capsys):
+    from pymybot import cli
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", True)
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-fake-key")
+    path = tmp_path / "robot.sql"
+    path.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
+
+    def forbid(*_):
+        pytest.fail("skills root must be validated before a model request is sent")
+
+    with fake_openai(forbid) as (url, requests):
+        code = cli.main(["--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
+                         "--skills-dir", str(tmp_path / "absent"),
+                         "--model", "openai:test", "--base-url", url])
+    captured = capsys.readouterr()
+    assert requests == []
+    assert code == 1
+    assert json.loads(captured.out)["error"]["type"] == "AgentConfigurationError"
+    assert "Skills root does not exist" in captured.err
+
+
 @pytest.mark.parametrize("model", ["", "gpt-example", "unknown:x", "openai:"])
 def test_explicit_model_required(model):
     with pytest.raises(AgentConfigurationError):

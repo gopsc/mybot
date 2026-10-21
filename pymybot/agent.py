@@ -25,7 +25,7 @@ from pydantic_ai.usage import UsageLimits
 from .agent_executor import RobotExecutor
 from .agent_skills import SkillsLibrary, default_skills_root
 from .errors import AgentInterrupted
-from .security import checked_text, dumps
+from .security import SecurityError, checked_text, dumps
 
 MAX_TEXT = 64 * 1024
 MAX_PROMPT = 16 * 1024
@@ -524,8 +524,12 @@ async def run_cli_agent(args, stop):
                              allow_actions=args.allow_actions, allow_shell=args.allow_shell,
                              allow_file_writes=args.allow_file_writes)
         model, client = create_model(config)
-        skills = SkillsLibrary(args.skills_dir or default_skills_root(),
-                               required=args.skills_dir is not None)
+        try:
+            skills = SkillsLibrary(args.skills_dir or default_skills_root(),
+                                   required=args.skills_dir is not None)
+        except SecurityError as exc:
+            raise AgentConfigurationError(
+                f"Cannot load skills configuration: {exc}; no model request was sent") from None
         executor = RobotExecutor(args.robot, module_paths=args.module_path, camera_src_root=args.camera_src_dir,
                                  scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
                                  read_vars=args.read_var, camera_vars=args.camera_var, stop_event=stop,
