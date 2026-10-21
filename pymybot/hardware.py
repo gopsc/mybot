@@ -23,12 +23,14 @@ def safe_ident(name: str) -> str:
 
 
 class Budget:
-    def __init__(self, stop_event=None, timeout=None):
+    def __init__(self, stop_event=None, timeout=None, cancel=None):
         self.stop_event = stop_event if stop_event is not None else threading.Event()
+        # Per-request cancellation; unlike stop_event it does not stop daemons.
+        self.cancel = cancel
         self.deadline = time.monotonic() + timeout if timeout and timeout > 0 else None
 
     def check(self):
-        if self.stop_event.is_set():
+        if self.stop_event.is_set() or (self.cancel is not None and self.cancel.is_set()):
             raise BudgetExceeded("Stop requested; halting hardware dispatch")
         if self.deadline is not None and time.monotonic() >= self.deadline:
             raise BudgetExceeded("Action script execution timed out")

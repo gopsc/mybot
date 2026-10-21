@@ -85,12 +85,17 @@ def parser():
         "sample": "Activate and read a named variable; activation itself may write to devices",
         "apply-sql": "Apply SQL to a temporarily active robot; does not write the structure file",
         "agent": "PydanticAI task or interactive session (the default when only --robot is given)",
+        "serve": "Long-lived stdio JSON-RPC 2.0 server for IDE frontends (one JSON object per line)",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
-        command.add_argument("--no-agent", action="store_true", help="bypass the model; agent entry requires --input MT")
+        command.add_argument("--no-agent", action="store_true",
+                             help="disable agent.* methods" if name == "serve"
+                             else "bypass the model; agent entry requires --input MT")
         if name == "scripts":
             command.add_argument("--scripts-dir", help="default: packaged assets/scripts, else source scripts")
+            continue
+        if name == "serve":
             continue
         command.add_argument("--robot", required=True, metavar="FILE", help="structure SQL file (at most 8 MiB)")
         command.add_argument("--module-path", action="append", metavar="DIR", help="trusted Lua module root; repeatable")
@@ -142,7 +147,7 @@ def parser():
 
 def parse_args(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql", "agent"}
+    commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql", "agent", "serve"}
     if len(arguments) > 1 and arguments[0] == "--no-agent" and arguments[1] in commands:
         arguments[:2] = [arguments[1], "--no-agent"]
     if arguments and arguments[0] not in commands | {"--help", "-h"}:
@@ -236,6 +241,9 @@ def sample(robot, args, stop):
 def execute(args, stop):
     if args.command == "scripts":
         return list_scripts(args.scripts_dir or default_scripts_dir())
+    if args.command == "serve":
+        from .serve import run_server
+        return run_server(stop, enable_agent=not args.no_agent)
     if args.command == "agent":
         try:
             from .agent import run_cli_agent
@@ -323,7 +331,7 @@ def main(argv=None):
     args = None
     try:
         args = parse_args(argv)
-        if args.command in {"run", "sample", "apply-sql", "agent"} and threading.current_thread() is threading.main_thread():
+        if args.command in {"run", "sample", "apply-sql", "agent", "serve"} and threading.current_thread() is threading.main_thread():
             for sig in (signal.SIGINT, signal.SIGTERM):
                 handlers[sig] = signal.signal(sig, lambda *_: stop.set())
         # Python prints and Lua diagnostics must not contaminate the JSON channel.

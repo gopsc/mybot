@@ -180,12 +180,33 @@ python -m venv .venv
 | `run --robot SQL --input MT` | 是 | 激活、执行动作、清理 |
 | `sample --robot SQL --name VAR` | 是 | 激活并读取命名变量，支持 `--count` / `--interval-ms` |
 | `apply-sql --robot SQL --sql "..."` | 是 | 对临时激活的会话应用受限 SQL，不改磁盘文件 |
+| `serve [--no-agent]` | 按需 | 长驻 stdio JSON-RPC 2.0 服务，供 IDE 前端保持会话（见下文） |
 
 `--sql` 采用严格语法：每条语句都必须以 `;` 结尾，单条语句也不例外，否则报 `SQL: unexpected end of script`。
 
 通用选项：`--module-path DIR`（可重复，显式指定时须同时包含 `modules`）、`--camera-src-dir DIR`、`--timeout SECONDS`、`--var NAME=VALUE`、`--allow-hardware`。
 
 退出码：0 成功，1 运行错误，2 用法错误，130 被中断。
+
+### serve 协议
+
+`python -m pymybot serve` 在 stdin/stdout 上逐行交换 JSON-RPC 2.0 消息（每行一个对象），诊断信息走 stderr；进程退出前 stdout 末尾还会有一行普通 CLI 结果，客户端忽略不含 `jsonrpc` 的行即可。stdin 关闭或收到 `shutdown` 时取消进行中的请求并清理驱动。
+
+| 方法 | 参数 | 说明 |
+| --- | --- | --- |
+| `initialize` | — | 返回 `protocol`、`version`、`agent`（是否可用）、`status` |
+| `session.status` | — | `state`（`Active`/`Inactive`）、`robot`、`busy` 等 |
+| `session.activate` | `robot`，可选 `modulePaths`、`cameraSrcDir`、`allowHardware` | 加载并激活，会话保持到 `session.deactivate` |
+| `session.deactivate` | — | 取消进行中的操作并清理驱动 |
+| `run` | `input`，可选 `vars`、`timeout` | 在活动会话中执行动作脚本，返回 `outputs` |
+| `apply-sql` | `sql` | 对活动会话应用受限 SQL，改动保留到会话结束 |
+| `sample` | `name`，可选 `count`、`intervalMs`、`timeout` | 每个样本推送 `sample` 通知 `{id, index, value, t}` |
+| `agent.ask` | `task`、`robot`、`scriptsDir`，以及与 `agent` 子命令对应的可选项 | 配置不变时为多轮对话；流式事件以 `agent.event` 通知推送 |
+| `agent.reset` | — | 关闭当前对话并释放硬件 |
+| `cancel` | `id` | 取消指定请求（可作通知），被取消的请求返回错误码 `-32800` |
+| `shutdown` | — | 清理后退出 |
+
+同一时刻只执行一个硬件操作，忙时返回 `-32001`；活动会话与智能体对话互斥，状态不符返回 `-32002`。取消单个请求不会停止 Daemon 采样线程。智能体需要批准工具调用时，服务端向客户端发起 `confirm` 请求（`{tool, arguments}`），客户端回复 `{"approved": true}` 才执行；请求失效时服务端发送 `cancel` 通知。
 
 ### 三层脚本模型
 

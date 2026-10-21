@@ -281,12 +281,12 @@ class Robot:
         else:
             self.tables[table] = Matrix(table, [["name"], [name]])
 
-    def run(self, script_text, *, base_dir=".", vars=None, timeout=180):
+    def run(self, script_text, *, base_dir=".", vars=None, timeout=180, cancel=None):
         with self._lock:
             if self.state != "Active":
                 raise ScriptError("Robot is not active")
             matrices = expand_includes(parse_matrices(check_script(script_text)), Path(base_dir))
-            budget = Budget(self.stop_event, timeout)
+            budget = Budget(self.stop_event, timeout, cancel)
             with self.registry.session():
                 declared = set()
                 for matrix in matrices:
@@ -390,7 +390,7 @@ class Robot:
     def _refresh_flow_refs(self):
         self.registry.flow_refs = {target.name for var in self.registry.values() if var.kind == "lua" for target in var.controllers + var.triggers}
 
-    def apply_sql(self, sql):
+    def apply_sql(self, sql, *, cancel=None):
         with self._lock:
             if self.state != "Active":
                 raise ScriptError("Hot SQL requires an active robot")
@@ -422,11 +422,11 @@ class Robot:
                 self._assemble(new_rows, added)
                 for name in self.registry:
                     if name not in before:
-                        Budget(self.stop_event).check()
+                        Budget(self.stop_event, cancel=cancel).check()
                         self.registry.require(name).build()
                 action = candidate.get("Action")
                 if action and len(action.rows) > 1:
-                    budget = Budget(self.stop_event, 180)
+                    budget = Budget(self.stop_event, 180, cancel)
                     lua_vars = [var for var in self.registry.values() if var.kind == "lua"]
                     for var in lua_vars:
                         var.budget = budget
