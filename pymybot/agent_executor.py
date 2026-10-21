@@ -19,6 +19,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
 from .agent_skills import SkillsLibrary
+from .agent_workspace import WORKSPACE_TOOLS, Workspace
 from .errors import BudgetExceeded
 from .hal import HALManager
 from .hardware import Budget, ensure_ok, safe_ident
@@ -43,6 +44,7 @@ _TOOLS = {
     "capture_image": ({"name"}, {"name"}),
     "list_skills": (set(), set()),
     "read_skill": ({"name"}, {"name", "file"}),
+    **WORKSPACE_TOOLS,
 }
 
 
@@ -318,7 +320,12 @@ class RobotExecutor:
 
     def __init__(self, robot_path, *, module_paths=None, camera_src_root=None,
                  scripts_dir, allow_hardware=False, read_vars=(), camera_vars=(),
-                 stop_event=None, robot_factory=Robot, skills=None):
+                 stop_event=None, robot_factory=Robot, skills=None, workspace_dir=None, enable_shell=False):
+        if enable_shell and workspace_dir is None:
+            raise ValueError("Shell tools require a workspace directory")
+        self._workspace_dir = Path(workspace_dir).absolute() if workspace_dir is not None else None
+        self._enable_shell = enable_shell is True
+        self._workspace = None
         self._robot_path = Path(robot_path).absolute()
         self._scripts_dir = Path(scripts_dir).absolute()
         self._skills = skills if isinstance(skills, SkillsLibrary) else None
@@ -421,6 +428,8 @@ class RobotExecutor:
         if self._ready:
             return
         scripts = _Scripts(self._scripts_dir)
+        if self._workspace_dir is not None and self._workspace is None:
+            self._workspace = Workspace(self._workspace_dir, enable_shell=self._enable_shell)
         sql = _read_stable(self._robot_path, lambda: _no_links(self._robot_path))
         self._check(deadline)
         # Keep even a partially validated robot available for owner-thread close.
@@ -456,9 +465,13 @@ class RobotExecutor:
             self._load(None)
             hardware = self._hardware()
             scripts = self._scripts.listing(lambda: self._check(None))
-            return _bounded({"robot": self._robot_path.stem, "hardware": hardware["hardware"],
-                             "scripts": scripts["scripts"],
-                             "truncated": hardware["truncated"] or scripts["truncated"]})
+            context = {"robot": self._robot_path.stem, "hardware": hardware["hardware"],
+                       "scripts": scripts["scripts"],
+                       "truncated": hardware["truncated"] or scripts["truncated"]}
+            if self._workspace is not None:
+                context["workspace"] = {"root": str(self._workspace.path), "shell_enabled": self._enable_shell,
+                                        "shell_sandboxed": False}
+            return _bounded(context)
         except Exception as exc:
             return self._failure(exc)
 
@@ -475,7 +488,9 @@ class RobotExecutor:
         if not required <= arguments.keys() or not arguments.keys() <= allowed:
             raise SecurityError("Wrong tool arguments")
         checked_text(dumps(arguments))
-        if name == "query_sql":
+        if name in WORKSPACE_TOOLS:
+            Workspace.validate(name, arguments)
+        elif name == "query_sql":
             checked_text(arguments["sql"])
             if any(s.kind not in {"SHOW", "SELECT"} for s in parse_sql(arguments["sql"])):
                 raise SecurityError("Only read-only SQL is allowed")
@@ -552,6 +567,11 @@ class RobotExecutor:
 
     def _call(self, name, arguments, deadline):
         executed = False
+
+        def started():
+            nonlocal executed
+            executed = True
+
         try:
             self._check(deadline)
             if self._faulted:
@@ -576,6 +596,10 @@ class RobotExecutor:
                 file = arguments.get("file", "SKILL.md")
                 data = {"name": arguments["name"], "file": file,
                         "content": self._skills.read(arguments["name"], file)}
+            elif name in WORKSPACE_TOOLS:
+                if self._workspace is None:
+                    raise SecurityError("Workspace tools are not configured")
+                data = self._workspace.call(name, arguments, lambda: self._check(deadline), started)
             else:
                 self._preflight_io(name, arguments)
                 if name == "run_action_script":
@@ -603,7 +627,8 @@ class RobotExecutor:
                     value = self._read([arguments["name"]], deadline)[arguments["name"]]
                     data, image = _image(value)
             self._check(deadline)
-            result = _bounded({"ok": True, "executed": executed, "state": "completed", "data": data})
+            ok = data["exit_code"] == 0 if name == "shell" else True
+            result = _bounded({"ok": ok, "executed": executed, "state": "completed", "data": data})
             self._check(deadline)
             if image is not None:
                 result["image"] = image
@@ -619,6 +644,8 @@ class RobotExecutor:
                 except BaseException:
                     pass  # close will retry cleanup, never the action.
             result = self._failure(exc, executed)
+            if isinstance(name, str) and name in WORKSPACE_TOOLS and not executed and isinstance(exc, SecurityError):
+                result["error"]["message"] = str(exc)
         return self._record(name, result)
 
     async def call(self, name, arguments: dict, *, timeout: float = 180) -> dict:

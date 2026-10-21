@@ -103,7 +103,8 @@ def test_real_tool_loop_and_receipts():
             await session.close()
     asyncio.run(scenario())
     assert executor.closed and len(executor.calls) == 1
-    assert all(t.name not in {"read_variables", "capture_image", "run_command", "apply_sql"}
+    assert all(t.name not in {"read_variables", "capture_image", "run_command", "apply_sql",
+                             "shell", "list_files", "read_file", "write_file", "edit_file"}
                for t in seen[0][1].function_tools)
 
 
@@ -202,6 +203,83 @@ def test_io_approval_is_host_owned(allow, confirm_result, expected):
     assert len(executor.calls) == expected
     if allow:
         assert confirmations == []
+
+
+@pytest.mark.parametrize("tool,arguments,permission", [
+    ("shell", {"command": "exit 0"}, "allow_shell"),
+    ("write_file", {"path": "a.txt", "content": "new"}, "allow_file_writes"),
+    ("edit_file", {"path": "a.txt", "old_string": "old", "new_string": "new"}, "allow_file_writes"),
+])
+@pytest.mark.parametrize("mode,expected", [("none", False), ("deny", False), ("confirm", True),
+                                          ("actions", False), ("other", False), ("preapprove", True)])
+def test_workspace_approvals_are_independent(tool, arguments, permission, mode, expected):
+    executor = FakeExecutor()
+    flags = {}
+    if mode == "actions":
+        flags["allow_actions"] = True
+    elif mode == "preapprove":
+        flags[permission] = True
+    elif mode == "other":
+        flags["allow_file_writes" if permission == "allow_shell" else "allow_shell"] = True
+    confirmations = []
+
+    async def confirm(name, args):
+        confirmations.append((name, args))
+        return mode == "confirm"
+
+    async def scenario():
+        model = scripted_model([ToolCallPart(tool, arguments)], [TextPart("done")])
+        session = AgentSession(executor, model, AgentConfig(**flags), workspace=True, enable_shell=True,
+                               confirm=confirm if mode in {"confirm", "deny"} else None)
+        try:
+            await session.ask("test")
+            assert session.events[0]["executed"] is expected
+            assert len(executor.calls) == int(expected)
+            if mode in {"confirm", "deny"}:
+                assert confirmations[0][0] == tool
+            else:
+                assert not confirmations
+        finally:
+            await session.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("workspace,enable_shell", [(False, False), (True, False), (True, True)])
+def test_workspace_tool_registration(workspace, enable_shell):
+    async def respond(messages, info):
+        names = {tool.name for tool in info.function_tools}
+        assert ({"list_files", "read_file", "write_file", "edit_file"} <= names) is workspace
+        assert ("shell" in names) is enable_shell
+        return ModelResponse(parts=[TextPart("done")])
+
+    async def scenario():
+        session = AgentSession(FakeExecutor(), FunctionModel(respond), workspace=workspace,
+                               enable_shell=enable_shell)
+        try:
+            await session.ask("test")
+        finally:
+            await session.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("tool,arguments", [("list_files", {}), ("read_file", {"path": "a.txt"})])
+def test_workspace_reads_do_not_require_action_approval(tool, arguments):
+    executor = FakeExecutor()
+
+    async def scenario():
+        session = AgentSession(executor, scripted_model([ToolCallPart(tool, arguments)], [TextPart("done")]),
+                               workspace=True)
+        try:
+            await session.ask("read")
+            assert len(executor.calls) == 1
+        finally:
+            await session.close()
+    asyncio.run(scenario())
+
+
+def test_shell_registration_requires_workspace():
+    with pytest.raises(AgentConfigurationError, match="workspace"):
+        agent_module.make_agent(scripted_model([TextPart("unused")]), enable_shell=True)
 
 
 @pytest.mark.parametrize("args", [{"script": 123}, {"script": "action.mt", "unexpected": True}])
@@ -412,6 +490,19 @@ def test_console_approval_never_hides_arguments(monkeypatch, capsys, long):
         assert approved and repr(agent_module.dumps(arguments)) in output.err
 
 
+@pytest.mark.parametrize("name,args,warning", [
+    ("shell", {"command": "exit 0"}, "NOT sandboxed"),
+    ("write_file", {"path": "note.txt", "content": "text"}, "changes workspace files"),
+    ("edit_file", {"path": "note.txt", "old_string": "a", "new_string": "b"}, "changes workspace files"),
+])
+def test_workspace_console_approval_displays_scope(monkeypatch, capsys, name, args, warning):
+    monkeypatch.setattr(sys, "stdin", FakeTTY("y\n"))
+    assert asyncio.run(confirm_console(name, args, threading.Event()))
+    output = capsys.readouterr()
+    assert warning in output.err
+    assert repr(agent_module.dumps(args)) in output.err
+
+
 def install_cli_fakes(monkeypatch, executor, model, client):
     def factory(*args, stop_event, **kwargs):
         executor.stop_event = stop_event
@@ -607,6 +698,54 @@ def test_cli_real_sdk_model_loop_and_virtual_robot(tmp_path, monkeypatch, capsys
     else:
         assert code == 0 and payload["output"] == "虚拟动作完成" and len(requests) == 2
         assert payload["tool_events"][-1]["state"] == "completed"
+
+
+def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
+    from pymybot import cli
+    from pymybot.robot import Robot
+
+    robot = tmp_path / "robot.sql"
+    robot.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
+    calls = iter([
+        ToolCallPart("write_file", {"path": "note.txt", "content": "before\n"}),
+        ToolCallPart("edit_file", {"path": "note.txt", "old_string": "before", "new_string": "after"}),
+        ToolCallPart("read_file", {"path": "note.txt"}),
+        ToolCallPart("shell", {"command": "echo shell-ok"}),
+        TextPart("completed"),
+    ])
+    receipts = []
+
+    async def respond(messages, info):
+        returns = [part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)]
+        if returns:
+            receipts.append(returns[-1].content)
+            assert receipts[-1]["ok"], receipts[-1]
+        return ModelResponse(parts=[next(calls)])
+
+    async def stream(messages, info):
+        response = await respond(messages, info)
+        for part in response.parts:
+            if isinstance(part, TextPart):
+                yield part.content
+            else:
+                yield {0: DeltaToolCall(name=part.tool_name, json_args=json.dumps(part.args),
+                                        tool_call_id=part.tool_call_id)}
+
+    def forbidden_activation(*args, **kwargs):
+        pytest.fail("Workspace tools must not activate hardware")
+    monkeypatch.setattr(Robot, "active", forbidden_activation)
+    monkeypatch.setattr(agent_module, "create_model", lambda _: (FunctionModel(respond, stream_function=stream), None))
+    code = cli.main(["--robot", str(robot), "--scripts-dir", str(tmp_path),
+                     "--workspace-dir", str(tmp_path), "--enable-shell", "--allow-shell",
+                     "--allow-file-writes", "--task", "write, edit, read and run shell"])
+    captured = capsys.readouterr()
+    assert code == 0 and len(captured.out.splitlines()) == 1, captured.out + captured.err
+    assert json.loads(captured.out)["output"] == "completed"
+    assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "after\n"
+    assert receipts[2]["data"]["content"] == "after\n"
+    assert receipts[3]["data"]["exit_code"] == 0
+    assert "shell-ok" in receipts[3]["data"]["stdout"]
+    assert "NOT sandboxed" in captured.err
 
 
 def test_provider_error_is_sanitized_and_not_retried(tmp_path, monkeypatch, capsys):

@@ -157,6 +157,147 @@ def test_static_context_and_single_owner(setup):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("tool,args", [
+    ("list_files", {}), ("read_file", {"path": "action.mt"}),
+    ("write_file", {"path": "created.txt", "content": "test"}),
+    ("edit_file", {"path": "action.mt", "old_string": "1", "new_string": "2"}),
+    ("shell", {"command": "exit 0"}),
+])
+def test_workspace_capability_is_enforced_in_executor(setup, tool, args):
+    async def scenario():
+        ex = setup.factory()
+        try:
+            rejected(await ex.call(tool, args))
+            assert not ex.faulted
+            assert not any(name == "active" for name, _ in setup.trace)
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+def test_workspace_tools_do_not_activate_robot(setup):
+    async def scenario():
+        ex = setup.factory(workspace_dir=setup.scripts)
+        try:
+            context = await ex.start()
+            assert context["workspace"]["root"] == str(setup.scripts)
+            assert context["workspace"]["shell_enabled"] is False
+            assert (await ex.call("list_files", {}))["ok"]
+            created = await ex.call("write_file", {"path": "note.txt", "content": "旧内容\n"})
+            assert created["ok"] and created["executed"] and created["state"] == "completed"
+            edited = await ex.call("edit_file", {"path": "note.txt", "old_string": "旧", "new_string": "新"})
+            assert edited["ok"] and edited["executed"]
+            result = await ex.call("read_file", {"path": "note.txt"})
+            assert result["ok"] and not result["executed"]
+            assert result["data"]["content"] == "新内容\n"
+            rejected(await ex.call("write_file", {"path": "note.txt", "content": "overwrite"}))
+            rejected(await ex.call("shell", {"command": "exit 0"}))
+            assert not ex.faulted
+            assert not any(name == "active" for name, _ in setup.trace)
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+def test_agent_created_action_is_available_to_robot_tool(setup):
+    async def scenario():
+        ex = setup.factory(workspace_dir=setup.scripts)
+        try:
+            assert (await ex.call("write_file", {"path": "created.mt", "content": ACTION}))["ok"]
+            assert "created.mt" in (await ex.call("list_action_scripts", {}))["data"]["scripts"]
+            result = await ex.call("run_action_script", {"script": "created.mt"})
+            assert result["ok"] and result["executed"]
+            assert setup.made[0].allow_hardware is False
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_shell_exit_status_is_completed_not_unknown(setup, exit_code):
+    async def scenario():
+        ex = setup.factory(workspace_dir=setup.scripts, enable_shell=True)
+        try:
+            result = await ex.call("shell", {"command": f"exit {exit_code}"})
+            assert result["ok"] is (exit_code == 0)
+            assert result["executed"] and result["state"] == "completed"
+            assert result["data"]["exit_code"] == exit_code
+            assert not ex.faulted
+            assert (await ex.call("list_files", {}))["ok"]
+            assert not any(name == "active" for name, _ in setup.trace)
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("byte", [0, 1, 255])
+def test_shell_large_escaped_output_preserves_exit_status(setup, byte):
+    import shlex
+    command = [sys.executable, "-c",
+               f"import os; os.write(1,bytes([{byte}])*200000); os.write(2,bytes([{byte}])*200000); raise SystemExit(7)"]
+    command = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
+
+    async def scenario():
+        ex = setup.factory(workspace_dir=setup.scripts, enable_shell=True)
+        try:
+            result = await ex.call("shell", {"command": command})
+            assert not result["ok"] and result["state"] == "completed"
+            assert result["data"]["exit_code"] == 7
+            assert result["data"]["stdout"] and result["data"]["stderr"]
+            assert result["data"]["truncated"]
+            assert len(dumps(result).encode("utf-8")) <= MAX_TEXT
+            assert not ex.faulted
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+def test_shell_interruption_latches_unknown_receipt(setup, monkeypatch):
+    began = threading.Event()
+    original = executor_module.Workspace.call
+
+    def observed(workspace, name, arguments, check, started):
+        def mark_started():
+            started()
+            began.set()
+        return original(workspace, name, arguments, check, mark_started)
+    monkeypatch.setattr(executor_module.Workspace, "call", observed)
+    command = subprocess.list2cmdline([sys.executable, "-c", "import time; time.sleep(30)"])
+    if os.name != "nt":
+        import shlex
+        command = shlex.join([sys.executable, "-c", "import time; time.sleep(30)"])
+
+    async def scenario():
+        ex = setup.factory(workspace_dir=setup.scripts, enable_shell=True)
+        try:
+            task = asyncio.create_task(ex.call("shell", {"command": command}, timeout=10))
+            assert await asyncio.to_thread(began.wait, 5)
+            ex.cancel()
+            unknown(await asyncio.wait_for(task, 5), "BudgetExceeded")
+            assert ex.faulted and ex.interrupted
+            rejected(await ex.call("list_files", {}))
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+def test_workspace_side_effect_failure_latches_executor(setup, monkeypatch):
+    def broken(workspace, name, arguments, check, started):
+        started()
+        raise OSError("SECRET filesystem failure")
+    monkeypatch.setattr(executor_module.Workspace, "call", broken)
+
+    async def scenario():
+        ex = setup.factory(workspace_dir=setup.scripts)
+        try:
+            unknown(await ex.call("write_file", {"path": "a", "content": "x"}), "OSError")
+            assert ex.faulted
+            rejected(await ex.call("list_hardware", {}))
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
 def test_read_budget_restored_and_activation_once(setup):
     async def scenario():
         ex = setup.factory()

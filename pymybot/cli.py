@@ -127,6 +127,14 @@ def parser():
             command.add_argument("--camera-var", action="append", default=[], metavar="NAME", help="allow image capture from this declared Camera variable; repeatable")
             command.add_argument("--allow-actions", action="store_true",
                                  help="preapprove agent scripts/reads/capture for this session; does NOT imply --allow-hardware")
+            command.add_argument("--workspace-dir", metavar="DIR",
+                                 help="enable file tools in this existing directory; file contents may be sent to the model")
+            command.add_argument("--enable-shell", action="store_true",
+                                 help="enable host shell execution (requires --workspace-dir); NOT sandboxed or limited by --allow-hardware")
+            command.add_argument("--allow-shell", action="store_true",
+                                 help="preapprove shell commands; requires --enable-shell; grants host-user permissions")
+            command.add_argument("--allow-file-writes", action="store_true",
+                                 help="preapprove workspace file creation/edits; requires --workspace-dir")
             command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
             command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
     return p
@@ -143,12 +151,18 @@ def parse_args(argv=None):
     if args.command != "agent":
         return args  # Existing subcommands always bypass the model.
     if args.no_agent:
-        if args.task is not None or args.model or args.base_url or args.api_key_env or args.allow_actions or args.read_var or args.camera_var:
+        if (args.task is not None or args.model or args.base_url or args.api_key_env
+                or args.allow_actions or args.read_var or args.camera_var or args.workspace_dir
+                or args.enable_shell or args.allow_shell or args.allow_file_writes):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
         if not args.input:
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
         args.command = "run"
         return args
+    if (args.enable_shell or args.allow_file_writes) and not args.workspace_dir:
+        raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir")
+    if args.allow_shell and not args.enable_shell:
+        raise UsageError("--allow-shell requires --enable-shell")
     if args.input or args.var:
         raise UsageError("--input/--var require --no-agent or the run command; use --task for an agent")
     if args.task is None and not sys.stdin.isatty():

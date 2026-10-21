@@ -69,16 +69,37 @@ export DEEPSEEK_API_KEY="sk-..."
 技能名与摘要进入系统提示词，正文按需查阅（如内置的 `pymybot-scripting` 三层脚本开发参考）。
 `--skills-dir DIR` 显式指定信任根（不存在即报错）；缺省依次取打包资产 `assets/skills` 或源码 `skills/`。
 
-脚本仅能来自 `--scripts-dir`（默认内置 scripts），只能选择已存在的相对 `.mt` 路径，不能创建脚本、执行 shell、写文件或热更新 SQL。文件图片仍需 `--camera-src-dir`，来源由 Camera 的结构配置决定。
+`run_action_script` 仅执行 `--scripts-dir`（默认内置 scripts）下已有的相对 `.mt` 路径。默认不开启文件和 shell 工具，也不能热更新 SQL。文件图片仍需 `--camera-src-dir`，来源由 Camera 的结构配置决定。
+
+**文件与 shell 工具（显式启用）**：
+
+- `--workspace-dir DIR`：开放 `list_files(path=".")`、`read_file(path, offset=1, limit=200)`、`write_file(path, content, overwrite=False)`、`edit_file(path, old_string, new_string, replace_all=False)`。
+- 文件路径必须相对工作目录，拒绝路径穿越、符号链接和非普通文件；UTF-8 文本最大 1 MiB。列目录不递归，读取按行分页；创建文件需要父目录已存在，覆盖需显式 `overwrite=True`，精确编辑默认要求唯一匹配。文件读取内容可能发送给模型，请选择不含凭据的目录。
+- `--enable-shell`：在已指定工作目录时开放 `shell(command, cwd=".")`，支持平台 shell 语法，返回退出码、标准输出、标准错误及截断标记；非零退出码表示失败但不代表未执行。
+- 文件创建/编辑和 shell 执行分别请求确认；`--allow-file-writes`、`--allow-shell` 分别预授权，`--allow-actions` 不授权这两类操作。非交互模式未预授权时拒绝调用。
+
+```sh
+# 交互使用文件和 shell 工具，每次写入/执行都确认
+.venv/bin/python -m pymybot --robot robots/relay-test.sql \
+  --workspace-dir . --enable-shell
+
+# 非交互只读文件任务，不启用 shell 或预授权写入
+.venv/bin/python -m pymybot --robot robots/relay-test.sql \
+  --workspace-dir . --task "读取并解释 scripts 目录中的动作脚本"
+```
+
+**Shell 不是沙箱**：工作目录只决定初始 cwd，不能阻止命令访问目录外文件、网络、环境变量或物理设备，`--allow-hardware` 也不能约束 shell。命令继承宿主用户权限和环境；只在可信环境启用，不支持后台任务。超时/取消会终止进程并尝试清理子进程，但不是操作系统隔离，也不撤销已发生的副作用。文件写入若修改脚本、驱动或技能，会影响后续执行的信任边界；修改 SQL 文件不会重载当前 Robot，需重启会话。
 
 ### 安全机制
 
-**两道独立安全开关**：
+**独立安全开关**：
 
 | 开关 | 作用 | 默认 |
 | --- | --- | --- |
-| `--allow-actions` | 预授权脚本执行/读取/拍照（非交互模式必需） | 否 |
-| `--allow-hardware` | 开放物理设备访问（独立于 actions） | 否 |
+| `--allow-actions` | 预授权脚本执行/变量读取/拍照 | 否 |
+| `--allow-hardware` | 开放 Robot/HAL 的物理设备访问（不能限制 shell） | 否 |
+| `--allow-file-writes` | 预授权工作目录文件创建/编辑 | 否 |
+| `--allow-shell` | 预授权宿主 shell 命令 | 否 |
 
 脚本执行、读取和拍照都会请求确认，因为激活和读取也可能写硬件。非交互任务不能弹出确认，默认拒绝这些调用；操作者可显式 `--allow-actions` 预先授权该会话中的这些工具。
 

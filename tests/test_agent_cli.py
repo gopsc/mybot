@@ -116,6 +116,32 @@ def test_flag_like_task_text_not_removed(files):
     assert args.command == "agent" and args.task == "--no-agent"
 
 
+@pytest.mark.parametrize("extra,message", [
+    (["--enable-shell"], "require --workspace-dir"),
+    (["--allow-shell"], "requires --enable-shell"),
+    (["--allow-file-writes"], "require --workspace-dir"),
+    (["--workspace-dir", ".", "--allow-shell"], "requires --enable-shell"),
+    (["--no-agent", "--input", "a.mt", "--workspace-dir", "."], "--no-agent cannot"),
+    (["--no-agent", "--input", "a.mt", "--enable-shell"], "--no-agent cannot"),
+    (["--no-agent", "--input", "a.mt", "--allow-shell"], "--no-agent cannot"),
+    (["--no-agent", "--input", "a.mt", "--allow-file-writes"], "--no-agent cannot"),
+])
+def test_workspace_options_require_explicit_capabilities(files, no_agent_import, extra, message):
+    task = [] if "--no-agent" in extra else ["--task", "test"]
+    with pytest.raises(cli.UsageError, match=message):
+        cli.parse_args(["--robot", str(files[0]), *task, *extra])
+
+
+def test_workspace_options_do_not_grant_other_permissions(files):
+    args = cli.parse_args(["--robot", str(files[0]), "--task", "test", "--workspace-dir", ".",
+                           "--enable-shell", "--allow-shell", "--allow-file-writes"])
+    assert args.workspace_dir == "." and args.enable_shell and args.allow_shell and args.allow_file_writes
+    assert not args.allow_actions and not args.allow_hardware
+    defaults = cli.parse_args(["--robot", str(files[0]), "--task", "test", "--allow-actions"])
+    assert defaults.workspace_dir is None and not defaults.enable_shell
+    assert not defaults.allow_shell and not defaults.allow_file_writes
+
+
 def test_agent_interrupt_has_exit_130(files, capsys, monkeypatch):
     async def run_cli_agent(args, stop):
         raise KeyboardInterrupt
