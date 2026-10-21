@@ -16,7 +16,7 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai import models
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 from pydantic_ai.exceptions import UsageLimitExceeded
 
 import pymybot.agent as agent_module
@@ -59,7 +59,23 @@ def scripted_model(*parts):
 
     async def respond(messages, info):
         return ModelResponse(parts=next(responses))
-    return FunctionModel(respond)
+
+    async def stream(messages, info):
+        # Each request runs exactly one of respond/stream, so both share the iterator.
+        # Items are bare parts or lists of parts; respond wraps them in a ModelResponse.
+        item = next(responses)
+        for part in (item if isinstance(item, list) else [item]):
+            if isinstance(part, TextPart):
+                text = part.content
+                middle = len(text) // 2
+                for piece in (text[:middle], text[middle:]):
+                    if piece:
+                        yield piece
+            else:
+                json_args = part.args if isinstance(part.args, str) else json.dumps(part.args)
+                yield {0: DeltaToolCall(name=part.tool_name, json_args=json_args,
+                                        tool_call_id=part.tool_call_id)}
+    return FunctionModel(respond, stream_function=stream)
 
 
 def test_real_tool_loop_and_receipts():
@@ -89,6 +105,81 @@ def test_real_tool_loop_and_receipts():
     assert executor.closed and len(executor.calls) == 1
     assert all(t.name not in {"read_variables", "capture_image", "run_command", "apply_sql"}
                for t in seen[0][1].function_tools)
+
+
+def test_stream_events_order_and_content():
+    executor = FakeExecutor()
+    model = scripted_model([ToolCallPart("list_hardware", {})], [TextPart("流水输出")])
+    events = []
+
+    async def scenario():
+        session = AgentSession(executor, model, on_event=events.append)
+        try:
+            result = await session.ask("list")
+            assert result["output"] == "流水输出"
+            assert session.events == [{"tool": "list_hardware", "ok": True, "executed": False,
+                                       "state": "completed"}]
+        finally:
+            await session.close()
+    asyncio.run(scenario())
+    assert events == [
+        {"type": "tool_call", "tool": "list_hardware", "arguments": {}},
+        {"type": "tool_result", "tool": "list_hardware", "ok": True, "executed": False, "state": "completed"},
+        {"type": "text_delta", "text": "流水"},
+        {"type": "text_delta", "text": "输出"},
+    ]
+
+
+def test_streaming_is_opt_in_and_non_streamed_models_still_work():
+    executor = FakeExecutor()
+
+    async def respond(messages, info):
+        return ModelResponse(parts=[TextPart("ok")])
+
+    async def scenario():
+        session = AgentSession(executor, FunctionModel(respond))  # No stream_function, no on_event.
+        try:
+            assert (await session.ask("hi"))["output"] == "ok"
+        finally:
+            await session.close()
+    asyncio.run(scenario())
+
+
+def test_streaming_timeout_is_enforced_between_deltas():
+    executor = FakeExecutor()
+
+    async def respond(messages, info):
+        return ModelResponse(parts=[TextPart("slow")])
+
+    async def stream(messages, info):
+        yield "sl"
+        await asyncio.sleep(10)
+        yield "ow"  # pragma: no cover - the watchdog must fire first
+
+    async def scenario():
+        session = AgentSession(executor, FunctionModel(respond, stream_function=stream),
+                               AgentConfig(timeout=0.05), on_event=lambda event: None)
+        try:
+            with pytest.raises(AgentBudgetExceeded):
+                await session.ask("slow")
+        finally:
+            await session.close()
+    asyncio.run(scenario())
+
+
+def test_stream_renderer_neutralizes_and_truncates_tool_arguments():
+    buffer = io.StringIO()
+    renderer = agent_module.StreamRenderer(stream=buffer)
+    renderer({"type": "text_delta", "text": "部分回复"})
+    renderer({"type": "tool_call", "tool": "run_action_script",
+              "arguments": {"script": "a\x1b[2Jb.mt"}})
+    renderer({"type": "tool_call", "tool": "query_sql", "arguments": {"sql": "x" * 300}})
+    renderer({"type": "tool_result", "tool": "query_sql", "ok": True, "state": "completed"})
+    streamed = renderer.end_turn()
+    output = buffer.getvalue()
+    assert streamed and "\x1b" not in output and "部分回复\n" in output
+    assert "→ run_action_script(" in output and "⇦ query_sql completed" in output
+    assert all(len(line) <= 140 for line in output.splitlines())
 
 
 @pytest.mark.parametrize("allow,confirm_result,expected", [(False, None, 0), (False, False, 0),
@@ -381,6 +472,23 @@ def test_interactive_cli_confirms_and_emits_only_final_json(monkeypatch, capsys)
     assert len(executor.calls) == 1 and executor.closed and closed == [True]
 
 
+def test_interactive_cli_streams_to_stderr_and_does_not_reprint(monkeypatch, capsys):
+    from pymybot import cli
+    executor = FakeExecutor()
+    model = scripted_model([ToolCallPart("list_hardware", {})], [TextPart("AAAA BBBB")])
+    install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=lambda: asyncio.sleep(0)))
+    monkeypatch.setattr(sys, "stdin", FakeTTY("list\n/exit\n"))
+    code = cli.main(["--robot", "unused.sql"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert code == 0 and len(captured.out.splitlines()) == 1
+    assert payload["turns"] == 1 and payload["output"] == "AAAA BBBB"
+    # Tool progress and text deltas stream live on stderr; adjacent pieces join
+    # into the full text exactly once (a reprint after streaming would double it).
+    assert "→ list_hardware(" in captured.err and "⇦ list_hardware completed" in captured.err
+    assert captured.err.count("AAAA BBBB") == 1
+
+
 @contextmanager
 def fake_openai(respond):
     """Explicit local fake of Chat Completions, including actual SDK serialization."""
@@ -392,9 +500,14 @@ def fake_openai(respond):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             requests.append(body)
             status, payload = respond(body, len(requests))
-            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
+            if status == 200 and body.get("stream"):
+                raw = sse_body(payload)
+                self.send_response(status)
+                self.send_header("Content-Type", "text/event-stream")
+            else:
+                raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
@@ -407,6 +520,35 @@ def fake_openai(respond):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def _chunk(model, delta, finish_reason=None):
+    return {"id": "offline-stream", "object": "chat.completion.chunk", "created": 1, "model": model,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]}
+
+
+def sse_body(payload):
+    """Serialize a Chat Completions payload as the SSE chunk stream the SDK expects."""
+    choice = payload["choices"][0]
+    message = choice["message"]
+    chunks = [_chunk(payload["model"], {"role": "assistant"})]
+    if message.get("tool_calls"):
+        chunks.append(_chunk(payload["model"], {"tool_calls": [
+            {"index": 0, "id": call["id"], "type": "function",
+             "function": {"name": call["function"]["name"], "arguments": call["function"]["arguments"]}}
+            for call in message["tool_calls"]]}))
+    else:
+        content = message.get("content") or ""
+        middle = max(1, len(content) // 2)
+        for piece in (content[:middle], content[middle:]):
+            if piece:
+                chunks.append(_chunk(payload["model"], {"content": piece}))
+    chunks.append(_chunk(payload["model"], {}, choice["finish_reason"]))
+    final = _chunk(payload["model"], {})
+    final["choices"] = []
+    final["usage"] = payload.get("usage")
+    chunks.append(final)
+    return "".join(f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks).encode("utf-8") + b"data: [DONE]\n\n"
 
 
 def completion(message, *, tool=False):
