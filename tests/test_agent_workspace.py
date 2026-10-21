@@ -124,7 +124,7 @@ def test_empty_and_default_read_limits(workspace, tmp_path):
     (tmp_path / "file").write_text("", encoding="utf-8")
     result = invoke(workspace, "read_file", {"path": "file"})
     assert result["content"] == "" and result["total_lines"] == 0
-    (tmp_path / "file").write_text("a\n" * 250, encoding="utf-8")
+    (tmp_path / "file").write_bytes(b"a\n" * 250)
     result = invoke(workspace, "read_file", {"path": "file"})
     assert result["content"] == "a\n" * 200 and result["truncated"]
 
@@ -172,17 +172,17 @@ def test_hardlinks_never_written_through(workspace, tmp_path, tool):
 
 def test_precise_edit_and_preflight(workspace, tmp_path):
     file = tmp_path / "file"
-    file.write_text("one one\n中文", encoding="utf-8")
+    file.write_bytes("one one\n中文".encode("utf-8"))
     starts = []
     for old in ("absent", "one"):
         with pytest.raises(ValueError):
             invoke(workspace, "edit_file", {"path": "file", "old_string": old, "new_string": "two"}, starts=starts)
-    assert not starts and file.read_text() == "one one\n中文"
+    assert not starts and file.read_bytes() == "one one\n中文".encode("utf-8")
     result = invoke(workspace, "edit_file", {"path": "file", "old_string": "one", "new_string": "two",
                                           "replace_all": True}, starts=starts)
     assert result["replacements"] == 2 and starts == [True]
     invoke(workspace, "edit_file", {"path": "file", "old_string": "\n中文", "new_string": ""})
-    assert file.read_text() == "two two"
+    assert file.read_bytes() == b"two two"
 
 
 def test_edit_final_size_preflight(workspace, tmp_path):
