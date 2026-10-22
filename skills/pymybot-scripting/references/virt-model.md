@@ -15,6 +15,8 @@
   ` [drv_common] *** VIRTUAL HARDWARE -- NO REAL DEVICE *** (...)`。
 - 守护路径（sensor_daemon）与挂载分派共用 `virtbus.attach_model`；同进程混跑
   真机 + 虚拟时按 fd 路由。
+- HTTP 总线**没有** virtbus/virt 模型：无硬件验证走本地回环假服务器
+  （`tests/test_qsont.py` 的 ThreadingHTTPServer 即范本），proto 列与 HTTP 无关。
 
 ## 2. 编写约定（以 `CHT8305_VIRT` 为范本）
 

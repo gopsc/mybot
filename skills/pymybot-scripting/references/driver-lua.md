@@ -33,7 +33,7 @@ local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"
                  :match("[^:]+") .. "/lib/mpath.lua"))
 dofile(mpath.resolve("lib/drv_common.lua"))
 
-require_driver("i2c", {                -- 总线三选一："i2c" / "spi" / "uart"
+require_driver("i2c", {                -- 总线四选一："i2c" / "spi" / "uart" / "http"
     name = "CHT8305",                  -- 驱动名（日志与错误定位用）
     -- i2c_addr_default = 0x69,        -- 可选：硬件固定地址器件可省略 address 列
 
@@ -59,9 +59,10 @@ require_driver("i2c", {                -- 总线三选一："i2c" / "spi" / "uar
 ```
 
 框架包装层统一做了：`arg_table` 参数校验 + `proto=virt` 前置 + 总线校验
-（i2c：fd/address 存在性 + `i2c_set_addr`；spi：fd；uart：fd ≥ 0），
+（i2c：fd/address 存在性 + `i2c_set_addr`；spi：fd；uart/http：fd ≥ 0），
 然后以 `ctx` 调用用户函数。用户函数内可直接使用 HAL 全局与驱动文件里的 local
-（闭包链保留）。
+（闭包链保留）。http 总线的 `fd` 来自 `HTTP` 列的 `$会话` 引用
+（范本 `modules/Qsont.lua`）。
 
 ## 3. 传统写法：全局函数
 
@@ -125,6 +126,14 @@ SPI（pyftdi / Linux spidev；详见 `modules/lib/hal/spi.lua`）：
 | `spi_write(fd, val [, delay_us])` / `spi_read(fd [, delay_us])` | 单字节 |
 | `spi_write3` / `spi_write_multi(fd, data [, delay])` / `spi_read_multi(fd, n)` / `spi_xfer_full(fd, data)` | 多字节与全双工 |
 
+HTTP（标准库 urllib；`modules/HTTP.lua` 是总线范本、`modules/Qsont.lua` 是驱动范本）：
+
+| 函数 | 说明 |
+| --- | --- |
+| `http_open(base, timeout_ms)` | 只校验不建连：base 须为无凭据/无 query/无 fragment 的 `http(s)://` URL（`bus.http_url_ok`），超时上限 `HTTP_TIMEOUT_MAX_MS`；fd ≥0 成功 |
+| `http_close(fd)` | 注销会话句柄 |
+| `http_request(fd, method, path, headers, body)` | method ∈ GET/POST/PUT/DELETE/PATCH；**path 只允许相对路径**（绝对/scheme-relative 一律拒绝）、ASCII 且无空格；返回表 `{result, status, body, headers}`——**HTTP 4xx/5xx 也是 `result="OK"` 的合法响应**（status 携带状态码，3xx 不跟随重定向），仅传输层失败返回 `result="ERR"`；请求体/响应体上限 4 MiB |
+
 其他：
 
 - `milli_sleep(ms)`：阻塞（上限 4294967ms）。
@@ -134,7 +143,8 @@ SPI（pyftdi / Linux spidev；详见 `modules/lib/hal/spi.lua`）：
   `gpio_*`、`pwm_*`、`speaker_*`、原生 `open/ioctl/read/write/termios` 族。
   需要这些外设时用受支持总线写协议实现。
 - 未加 `--allow-hardware` 时：物理 `i2c_open` / `spi_open`、非 `loop://` 的 `uart_open`、
-  非文件的 camera 采集一律拒绝。
+  非文件的 camera 采集、**非回环主机的 `http_open`** 一律拒绝
+  （回环 = `127.0.0.1` / `localhost` / `[::1]`，与串口 `loop://` 同一口径）。
 
 ## 5. drv_common 工具函数
 

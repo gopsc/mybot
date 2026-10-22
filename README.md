@@ -277,11 +277,12 @@ pymybot run --robot robots/<任务>.sql --input scripts/<任务>.mt \
 
 - **双模式入口**：智能体模式（PydanticAI）与控制器模式（直接 CLI）独立可选
 - **三层脚本**：`modules/*.lua` 驱动、`robots/*.sql` 结构、`scripts/*.mt` 动作，一一对应
-- **默认安全**：静态命令不激活驱动；`run` / `sample` / `apply-sql` 默认只允许虚拟总线、串口回环或图片文件，必须显式 `--allow-hardware` 才打开物理设备
-- **跨平台 HAL**：UART 走 pyserial，I2C/SPI 走 pyftdi（MPSSE），Camera 采集走 PyAV（可选）、图片编解码走 Pillow；Linux 可选 smbus2/spidev
+- **默认安全**：静态命令不激活驱动；`run` / `sample` / `apply-sql` 默认只允许虚拟总线、串口回环、图片文件或回环 HTTP，必须显式 `--allow-hardware` 才打开物理设备或非回环网络端点
+- **跨平台 HAL**：UART 走 pyserial，I2C/SPI 走 pyftdi（MPSSE），Camera 采集走 PyAV（可选）、图片编解码走 Pillow，HTTP 走标准库 urllib（零额外依赖）；Linux 可选 smbus2/spidev
 - **无硬件验证**：内置虚拟总线（`virtbus`）、寄存器映射模型、串口 `loop://` 回环，支持 NACK / 超时 / 短读等故障注入
+- **HTTP 总线与云端网关**：`HTTP` 表与 I2C/SPI/UART 同级声明服务端点（回环默认可用，非回环需 `--allow-hardware`）；`Qsont` 驱动接入 qsont iot-server（登录/推数据/拉指令/回执，传感器经 controller 链自动上云）
 - **后台采样**：Daemon 表基于 Python 线程和独立 Lua 状态做周期采样，支持单设备、多设备同总线和聚合
-- **预置芯片驱动**：自带 45 个真实器件驱动（自 C++/Rust 版迁移，I2C/SPI/UART 三族），多数内嵌虚拟器件模型，无硬件即可端到端验证；未迁移的 GPIO / PWM / Speaker / Sim 及 V4L2 Camera 见下文说明
+- **预置驱动**：自带 45 个真实器件驱动（自 C++/Rust 版迁移，I2C/SPI/UART 三族）加 Qsont 云端网关，多数内嵌虚拟器件模型，无硬件即可端到端验证；未迁移的 GPIO / PWM / Speaker / Sim 及 V4L2 Camera 见下文说明
 
 ### 目录结构
 
@@ -289,6 +290,7 @@ pymybot run --robot robots/<任务>.sql --input scripts/<任务>.mt \
 pymybot/                  Python 包：CLI、SQL 解析、动作执行、HAL、Daemon、智能体
 modules/                  Lua 基础资源与公共库
   I2C.lua SPI.lua UART.lua Camera.lua     四种基础总线/设备资源
+  HTTP.lua                                HTTP 端点会话（回环默认可用）
   Timer.lua Relay.lua dummy.lua           纯软件模块（Relay 仅转发参数，非物理继电器）
   Ema.lua Kalman.lua Monitor.lua          滤波与监视
   bitcompat.lua                           LuaJIT 5.1 位运算兼容层
@@ -296,24 +298,25 @@ modules/                  Lua 基础资源与公共库
   lib/bus_contract.lua                    总线参数与引用契约
   lib/sensor_daemon*.lua sensor_aggregate.lua  采样 chunk
   lib/virtbus.lua lib/virtbus/regmap.lua  虚拟总线与寄存器模型
-  <芯片驱动>.lua                          45 个真实器件驱动（见下）
-robots/                   SQL 结构文件（示例：relay-test.sql、camx.sql）
+  <芯片驱动>.lua                          45 个真实器件驱动 + Qsont.lua 云端网关（见下）
+robots/                   SQL 结构文件（示例：relay-test.sql、qsont.sql、camx.sql）
 scripts/                  MT 动作脚本（示例：relay-test.mt）
 skills/                   智能体参考技能（SKILL.md + references；示例：pymybot-scripting）
 docs/                     补充文档（如 Windows faulthandler 说明）
 tests/                    pytest 测试（fixtures/virt/ 为逐驱动无硬件端到端夹具）
 ```
 
-#### 预置芯片驱动（45 个，自 C++/Rust 版 mybot 迁移）
+#### 预置驱动（46 个）
 
 | 总线 | 数量 | 驱动 |
 | --- | --- | --- |
 | I2C | 36 | ADS1015、ADS1115、ADXL345、AMG8833、APDS9900、AS3935、AS7262、BH1745、BH1750、BME280、BME688、BMI270、BMM150、CHT8305、EMC2101、INA219、INA226、INA3221、LCD1206、LPS22HB、LSM6DSV、LTC2944、MAX17043、MAX17048、MAX30102、MCP3421、MCP4725、MLX90393、MPU6050、MS5611、PCA9685、PCF8574、SGP30、SHT3X、VL53L0X、VL53L4CD |
 | SPI | 4 | AD9833、ADS1256、MT6826S、TPL0501 |
 | UART | 3 | MHZ19、SCSCL、SDS011 |
+| 云端 | 1 | Qsont（qsont iot-server 网关，HTTP 总线原生实现） |
 | 控制器链 | 2 | Servo（经 controller 引用舵机控制板）、H03ARR（电机驱动） |
 
-其中 43 个内嵌 `<驱动>_VIRT` 虚拟器件模型：结构脚本声明 `proto='virt'` 即可在无硬件下跑真实驱动的 build/call/destroy 全链路，`tests/fixtures/virt/` 为其中 40 个提供逐驱动端到端夹具（SQL + 动作脚本，与 C++ 版测试同源）。依赖原生 GPIO/PWM/ALSA/V4L2 或仿真器后端的 GPIO、PWM、Speaker、Sim 及旧版 Camera 驱动未迁移——可移植 HAL 不提供这些后端，相关调用会响亮报错而非静默降级。
+芯片驱动中 43 个内嵌 `<驱动>_VIRT` 虚拟器件模型：结构脚本声明 `proto='virt'` 即可在无硬件下跑真实驱动的 build/call/destroy 全链路，`tests/fixtures/virt/` 为其中 40 个提供逐驱动端到端夹具（SQL + 动作脚本，与 C++ 版测试同源）。依赖原生 GPIO/PWM/ALSA/V4L2 或仿真器后端的 GPIO、PWM、Speaker、Sim 及旧版 Camera 驱动未迁移——可移植 HAL 不提供这些后端，相关调用会响亮报错而非静默降级。
 
 ### 安装
 
@@ -344,6 +347,7 @@ Linux 上需要原生 `/dev/i2c-*` / `/dev/spidev*` 时追加 `.[linux]`；需�
 - I2C/SPI：pyftdi；需要支持 MPSSE 的 FTDI 适配器和 libusb 驱动，地址形如 `ftdi://ftdi:232h/1`，SPI 可带 `?cs=0`
 - `/dev/i2c-*`、`/dev/spidev*`：仅 Linux，依赖可选 smbus2/spidev
 - Camera：物理设备经 PyAV（`.[camera]`）采集，Windows 走 DirectShow（设备序号按枚举顺序映射）、Linux 走 V4L2（序号或 `/dev/videoN`）、macOS 走 AVFoundation（需 macOS 14+，固定 30 fps）；`width`/`height` 必须是摄像头支持的模式，否则打开失败而不是静默改用其他分辨率；文件输入由 Pillow 完整解码校验，必须指定 `--camera-src-dir`
+- HTTP：标准库 urllib；回环主机（127.0.0.1 / localhost / [::1]）无需开关，非回环主机需要 `--allow-hardware`（URL 禁带凭据/query，不跟随重定向，请求路径强制相对）
 - 不提供 GPIO/PWM/Speaker 原生后端；相应外设通过受支持总线编写协议实现
 - Lua 指令预算和可取消等待不能中断阻塞的原生库调用；进程退出不等于执行器物理急停
 - Windows：LuaJIT 以 SEH 异常（`0xE24C4A02`）抛出每个 Lua 错误，CPython faulthandler 会误判为崩溃并可能导致进程段错误，因此 CLI 在 Windows 上会关闭 `-X faulthandler` / `PYTHONFAULTHANDLER`（stderr 提示一行），测试套件同样在 Windows 上关闭 pytest 的 faulthandler
@@ -354,6 +358,7 @@ Linux 上需要原生 `/dev/i2c-*` / `/dev/spidev*` 时追加 `.[linux]`；需�
 - 只执行已审阅且可信的 Lua。Lupa 使用 LuaJIT 2.1，FFI 可用；路径与属性限制不是恶意代码隔离
 - `active` / `build` / `destroy` 以及 `sample` 都可能写硬件：初始化会配置器件，`read` 可能回退到驱动 `call`
 - 不把真实路径静默替换为虚拟路径，不把合成数据报告为真实测量；虚拟和真机使用分别命名的 SQL
+- HTTP 请求只指向结构文件声明的 base（相对路径强制、重定向不跟随），非回环主机与物理设备同受 `--allow-hardware` 约束
 - 结构文件、动作脚本和 SQL 文本上限 8 MiB，结果体同样受限
 
 ### 构建

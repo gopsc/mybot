@@ -39,7 +39,7 @@ references 内的相对路径均以仓库根 `mybot/` 为基准。
    虚拟与真机用分别命名的 SQL。
 8. `destroy` 是尽力释放：资源不可用就跳过动作、仍返回 OK。
 9. `@if`/`@while` 条件写在块名内且中间无空格：`@if(x>0)`。
-10. 默认拒绝物理设备（`--allow-hardware` 才放开）；virt 总线与 `loop://` 不需要该开关。
+10. 默认拒绝物理设备与非回环网络（`--allow-hardware` 才放开）；virt 总线、`loop://` 与回环 HTTP（127.0.0.1/localhost/[::1]）不需要该开关。
 
 ## 验证闭环（在 `mybot/` 下执行）
 

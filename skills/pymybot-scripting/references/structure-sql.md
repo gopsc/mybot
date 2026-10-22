@@ -7,7 +7,7 @@
 
 - 只支持这些语句：`CREATE TABLE`、`INSERT INTO`、`SELECT * FROM`、`SHOW TABLES;`、
   `DELETE FROM`、`DROP TABLE`、`UPDATE ... SET`。**结构文件只能含 CREATE/INSERT**；
-  其余语句属于 `query` / `apply-sql`（见第 8 节）。
+  其余语句属于 `query` / `apply-sql`（见第 9 节）。
 - **每条语句必须以 `;` 结尾**，单条语句也不例外，否则报 `SQL: unexpected end of script`。
 - 注释只有两种：`--` 行注释与 `/* ... */` 块注释。
 - 字符串：单引号 `'...'`，内部单引号写两遍 `''`；双引号 `"..."` 同样接受（转义规则相同）。
@@ -134,7 +134,48 @@ INSERT INTO Daemon (name, chunk, driver, proto, path, addr, interval, fields, si
 另有整总线级虚拟化：总线行的 `path` 直接写 `virt-<名字>`（如 `virt-bus0`），
 该总线 open 即虚拟总线。
 
-## 8. query 与 apply-sql
+## 8. HTTP 总线与 Qsont 云端网关
+
+`HTTP` 表与 I2C/SPI/UART 同级：每行声明一个服务端点会话（`base` 为无凭据的
+`http(s)://` URL，`timeout` 毫秒缺省 10000）。**回环主机（`127.0.0.1` /
+`localhost` / `[::1]`）默认可用，其余主机需要 `--allow-hardware`**——与串口
+`loop://` 同一安全口径。
+
+```sql
+CREATE TABLE HTTP (name String, base String, timeout Number);
+INSERT INTO HTTP (name, base, timeout) VALUES ('cloud', 'http://127.0.0.1:8000/api/v1', 5000);
+CREATE TABLE Qsont (name String, HTTP String, user String, pass String, device Number);
+INSERT INTO Qsont (name, HTTP, user, pass, device) VALUES ('qs', '$cloud', 'iot_01', 'pass123', 1);
+```
+
+`Qsont` 是 qsont iot-server 的 IoT 设备客户端（`HTTP` 列用 `$会话` 引用）：
+`build` 用 `user`/`pass` 登录换 JWT（401 自动重登），`device` 为服务器上已注册
+的设备 ID（不在 build 里静默注册账号/建设备）。动作分派列叫 **`op`**（`mode`
+是宿主保留键）：
+
+| op | 参数 | 说明 |
+| --- | --- | --- |
+| `push`（给了 `key` 时可省 op） | `key` + `value` | POST /data 单条 |
+| `batch` | `items` = `k=v\|k2=v2` | POST /data/batch |
+| `pull` | — | GET /commands/pending → `{count, commands=JSON 串}` |
+| `ack` | `cmd`（+`status` 缺省 executed） | PUT /commands/{id}/status |
+| `online` | `online`（0/1，缺省 1） | PUT /devices/{id}/status |
+| `bind` | `key` = 对方给出的 device_key | POST /devices/bind 绑定**他人创建的**设备；成功后本会话自动改用该设备 id，持久化需同步更新 `device` 列 |
+| `unbind` | — | DELETE /devices/{id}/unbind（只能解绑绑定来的设备） |
+| `devices` / `latest` | `latest` 可带 `key` | GET 设备列表（含绑定设备）/ 最新数据点 |
+| （缺省，无 key 无 op） | 整个 payload | **autopush**：controller 转发来的结果表剔除框架/结构键后整批上推——传感器行写 `controller1='qs'` 即可让每次采样自动上云 |
+
+**mobile ↔ iot 跨账号关联**靠设备绑定：mobile 账号建设备（拿到 device_key）→
+机器人 `op='bind'` 输入 device_key → 绑定后机器人可对该设备推数据/拉指令，
+mobile 可对其发指令/查数据（`pull` 能拉到 mobile 发来的指令，执行后 `ack`）。
+
+`HTTP` 总线也可脱离驱动独立使用：动作行直接给 `method`/`path`（如
+`cloud.method cloud.path; $("GET") $("/devices");`）即透传执行一次请求，
+返回 `{result, status, body, headers}`。范本：`robots/qsont.sql` +
+`scripts/qsont.mt`。HTTP 无 virtbus/virt 模型——无硬件验证用本地回环假服务器
+（`tests/test_qsont.py`）。
+
+## 9. query 与 apply-sql
 
 **`query --sql`** 只接受 `SHOW TABLES;` 和 `SELECT * FROM 表 [WHERE 列=值 AND ...];`
 （WHERE 只支持字符串等值匹配，配合 `-` 继承语义）。

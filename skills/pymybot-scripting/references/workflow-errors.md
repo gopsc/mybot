@@ -40,6 +40,8 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 - UART：Windows 用 `COMn`；`loop://` 回环不需要硬件。
 - Camera：真机采集用 PyAV（需装 `.[camera]`），分辨率必须是摄像头支持的模式，否则打开失败；
   文件输入用 Pillow 校验，必须 `--camera-src-dir`。
+- HTTP：标准库 urllib，无额外依赖；回环主机（127.0.0.1/localhost/[::1]）默认可用，
+  其余主机需要 `--allow-hardware`。
 - Windows：CLI 自动关闭 faulthandler（LuaJIT SEH 与 CPython 冲突，详见
   `docs/windows-faulthandler-luajit.md`）；stdout/stderr 固定 UTF-8。
 - Lua 指令预算与可取消等待**不能中断阻塞的原生库调用**；进程退出不是物理急停。
@@ -56,6 +58,9 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 | `'x' references undefined variable 'y'` | `$y` / 流向列引用了后面才声明的变量；调整声明顺序 |
 | `UART path '...' has multiple independent consumers` | 同一串口被两个变量打开；合并为一个或改共享结构 |
 | `Single-consumer conflict` | 带 `SINGLE_CONSUMER` 标记的驱动同 `(总线,地址)` 被声明两次 |
+| `HTTP access beyond loopback requires explicit --allow-hardware` | base 指向非回环主机；本地联调或加开关 |
+| `HTTP path must be relative to the declared base URL` | http_request 的 path 写了绝对/scheme-relative URL |
+| `login failed: HTTP 401 ...`（Qsont build） | user/pass 不对，或服务器不可达（看 status） |
 | `Cannot parse matrix cell ... as Float64` | MT 数据格写了裸文本；文本要写成 `$("...")` |
 | `@Action cell $(...) cannot produce a boolean result` | 参数表达式算出布尔；布尔只用于 `@if/@while` |
 | `expression '==' cannot compare a number with a text` | 跨类型比较；先统一类型 |
