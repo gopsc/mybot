@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib
 import io
+import json
 from pathlib import Path
+import socket
 import struct
 import sys
 import threading
@@ -808,3 +811,113 @@ def test_lua_existing_bus_modules_and_camera(manager, ftdi, serial_fake, av_fake
             assert result["b64"] and result["format"] == "jpeg"
             assert lua.globals().read(lua.table())["result"] == "OK"
         assert lua.globals().destroy(lua.table())["result"] == "OK"
+
+
+class _EchoHandler(BaseHTTPRequestHandler):
+    """Echo endpoint: replies with method/path/auth/body; /missing → 404, /redirect → 302."""
+
+    def log_message(self, *args):
+        pass
+
+    def _respond(self):
+        if self.path.endswith("/redirect"):
+            self.send_response(302)
+            self.send_header("Location", "http://example.com/x")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        length = int(self.headers.get("Content-Length") or 0)
+        body = self.rfile.read(length).decode("utf-8") if length else ""
+        payload = json.dumps({
+            "method": self.command,
+            "path": self.path,
+            "auth": self.headers.get("Authorization"),
+            "ctype": self.headers.get("Content-Type"),
+            "body": body,
+        }).encode("utf-8")
+        self.send_response(404 if self.path.endswith("/missing") else 200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = lambda self: self._respond()
+
+
+@pytest.fixture
+def httpd():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _EchoHandler)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_http_open_rejects_invalid_bases(manager):
+    for bad in ["ftp://127.0.0.1/", "http://", "http://user:pw@127.0.0.1:1/",
+                "http://127.0.0.1:1/?q=1", "http://127.0.0.1:1/#frag",
+                "http://127.0.0.1:bad/", "http://127.0.0.1:1/x y", "plain text", 5, None]:
+        assert manager.call("http_open", bad) == -1
+    # timeout bounds are enforced next to the URL shape
+    assert manager.call("http_open", "http://127.0.0.1:1/", 0) == -1
+    assert manager.call("http_open", "http://127.0.0.1:1/", 60001) == -1
+
+
+def test_http_request_roundtrip_status_and_redirects(manager, httpd):
+    handle = manager.call("http_open", httpd + "/base/", 2000)
+    assert handle >= 0
+    out = manager.call("http_request", handle, "get", "echo?x=1", {"Authorization": "Bearer t"}, None)
+    assert out["result"] == "OK" and out["status"] == 200
+    echo = json.loads(out["body"])
+    assert echo["path"] == "/base/echo?x=1" and echo["method"] == "GET" and echo["auth"] == "Bearer t"
+    assert out["headers"]["content-type"] == "application/json"
+    out = manager.call("http_request", handle, "POST", "/echo", None, '{"a": 1}')
+    assert json.loads(out["body"])["body"] == '{"a": 1}'
+    # 4xx is a valid response (status carries the code), not a transport error
+    out = manager.call("http_request", handle, "GET", "/missing", None, None)
+    assert out["result"] == "OK" and out["status"] == 404
+    # redirects surface as status, never followed to another host
+    out = manager.call("http_request", handle, "GET", "/redirect", None, None)
+    assert out["result"] == "OK" and out["status"] == 302
+
+
+def test_http_request_rejects_escape_attempts(manager, httpd):
+    handle = manager.call("http_open", httpd, 2000)
+    # absolute or scheme-relative paths would bypass the declared base
+    for path in ["http://example.com/", "//example.com/", "https://example.com"]:
+        assert manager.call("http_request", handle, "GET", path, None, None)["result"] == "ERR"
+    # header injection / unknown method / oversized header sets
+    assert manager.call("http_request", handle, "GET", "/x", {"Bad": "a\r\nb"}, None)["result"] == "ERR"
+    assert manager.call("http_request", handle, "FLY", "/x", None, None)["result"] == "ERR"
+    assert manager.call("http_request", handle, "GET", "/x",
+                        {f"H{i}": "v" for i in range(17)}, None)["result"] == "ERR"
+    manager.call("close_handle", handle)
+    assert manager.call("http_request", handle, "GET", "/x", None, None)["result"] == "ERR"
+
+
+def test_http_request_transport_failure(manager):
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    handle = manager.call("http_open", f"http://127.0.0.1:{port}/", 500)
+    out = manager.call("http_request", handle, "GET", "/", None, None)
+    assert out == {"result": "ERR", "message": manager.call("last_error")}
+
+
+def test_lua_http_globals(manager, monkeypatch, httpd):
+    lua = lua_runtime(manager, monkeypatch)
+    lua.globals()["base"] = httpd
+    lua.execute('''
+        local fd = http_open(base .. "/", 2000)
+        assert(fd >= 0)
+        local out = http_request(fd, "GET", "/echo", {["X-K"] = "v"}, nil)
+        assert(out.result == "OK" and out.status == 200)
+        assert(http_close(fd) == 0)
+        assert(http_open(base, 0) == -1)
+        assert(http_open(base, 70000) == -1)
+    ''')

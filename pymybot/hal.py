@@ -19,6 +19,8 @@ import sys
 import threading
 import time
 from typing import Callable
+import urllib.error
+import urllib.request
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 import zlib
 
@@ -35,6 +37,16 @@ class _Resource:
         self.closed = False
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """3xx must surface as a status; never follow to another host silently."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_HTTP_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 class HALManager:
     """Shared, reference-counted buses with per-bus transaction locks.
 
@@ -48,11 +60,15 @@ class HALManager:
     CAMERA_FORMATS = {"win32": "dshow", "linux": "v4l2", "darwin": "avfoundation"}
     UART_MAX_BYTES = 512
     UART_MAX_MS = 60000
+    HTTP_MAX_BYTES = 4 * 1024 * 1024
+    HTTP_MAX_HEADERS = 16
+    HTTP_TIMEOUT_MS = 60000
     BAUDS = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
              230400, 460800, 500000, 921600, 1000000}
     _OPERATIONS = {
         "i2c_open", "i2c_transfer", "spi_open", "spi_setup", "spi_transfer",
         "uart_open", "uart_write", "uart_read", "uart_flush",
+        "http_open", "http_request",
         "camera_open", "camera_capture", "close_handle", "sleep_ms", "last_error",
     }
 
@@ -94,7 +110,7 @@ class HALManager:
         except Exception as exc:
             message = f"{operation}: {exc}"
             self._errors.message = message
-            if operation == "camera_capture":
+            if operation == "camera_capture" or operation == "http_request":
                 return {"result": "ERR", "message": message}
             if operation in {"i2c_transfer", "spi_transfer", "uart_read"}:
                 return None
@@ -347,6 +363,91 @@ class HALManager:
             self._live(r)
             r.device.reset_input_buffer()
         return 0
+
+    @staticmethod
+    def _http_base(base):
+        if not isinstance(base, str):
+            raise ValueError("HTTP base URL must be text")
+        u = urlsplit(base)
+        if u.scheme not in {"http", "https"} or not u.netloc:
+            raise ValueError("HTTP base requires an http(s):// URL with a host")
+        if u.username is not None or u.password is not None or u.query or u.fragment:
+            raise ValueError("HTTP base must not embed credentials, query, or fragment")
+        u.port  # property access raises ValueError on malformed ports
+        if not re.fullmatch(r"[0-9A-Za-z.\[\]:\-]+", u.netloc):
+            raise ValueError("HTTP base host contains invalid characters")
+        path = u.path or "/"
+        if not path.isascii() or re.search(r"[\x00-\x1f\x7f ]", path):
+            raise ValueError("HTTP base path must be ASCII text without spaces")
+        if len(path) > 1:
+            path = path.rstrip("/") or "/"
+        return urlunsplit((u.scheme, u.netloc, path, "", ""))
+
+    def _http_open(self, base, timeout_ms=10000):
+        base = self._http_base(base)
+        timeout_ms = self._integer(timeout_ms, 1, self.HTTP_TIMEOUT_MS)
+        with self._lock:
+            # Like camera_open: validation only; HTTP has no persistent connection
+            # to establish, requests happen per http_request call.
+            return self._register(_Resource("http", None, "urllib", None,
+                                            base=base, timeout=timeout_ms))
+
+    def _http_request(self, handle, method, path, headers=None, body=None):
+        if not isinstance(method, str) or method.upper() not in {"GET", "POST", "PUT", "DELETE", "PATCH"}:
+            raise ValueError("HTTP method must be GET, POST, PUT, DELETE, or PATCH")
+        method = method.upper()
+        if not isinstance(path, str) or not path.isascii() or re.search(r"[\x00-\x1f\x7f ]", path):
+            raise ValueError("HTTP path must be relative ASCII text without spaces")
+        if "://" in path or path.startswith("//"):
+            raise ValueError("HTTP path must be relative to the declared base URL")
+        if path and not path.startswith("/"):
+            path = "/" + path
+        target = urlsplit(path)
+        if target.scheme or target.netloc:
+            raise ValueError("HTTP path must be relative to the declared base URL")
+        headers = {} if headers in (None, []) else headers
+        if not isinstance(headers, dict) or len(headers) > self.HTTP_MAX_HEADERS:
+            raise ValueError(f"HTTP headers must be a table of at most {self.HTTP_MAX_HEADERS} entries")
+        for key, value in headers.items():
+            if (not isinstance(key, str) or not isinstance(value, str) or not key
+                    or not key.isascii() or not value.isascii()
+                    or re.search(r"[\x00-\x1f\x7f]", key + value)):
+                raise ValueError("HTTP header names and values must be plain ASCII text")
+        data = None
+        if body is not None:
+            if not isinstance(body, str) or len(body.encode("utf-8")) > self.HTTP_MAX_BYTES:
+                raise ValueError("HTTP body must be text within the size ceiling")
+            data = body.encode("utf-8")
+        r = self._get(handle, "http")
+        with r.lock:
+            self._live(r)
+            request = urllib.request.Request(r.state["base"] + path, data=data, method=method)
+            for key, value in headers.items():
+                request.add_header(key, value)
+            try:
+                response = _HTTP_OPENER.open(request, timeout=r.state["timeout"] / 1000)
+            except urllib.error.HTTPError as error:
+                # 4xx/5xx (and 3xx, since redirects are refused) are responses.
+                with error:
+                    return self._http_result(error.code, error.read(self.HTTP_MAX_BYTES + 1),
+                                             error.headers)
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                raise IOError(str(getattr(error, "reason", error))) from error
+            with response:
+                return self._http_result(response.status,
+                                         response.read(self.HTTP_MAX_BYTES + 1),
+                                         response.headers)
+
+    def _http_result(self, status, payload, headers):
+        if len(payload) > self.HTTP_MAX_BYTES:
+            raise ValueError("HTTP response exceeds the size ceiling")
+        trimmed = {}
+        for index, (key, value) in enumerate(headers.items()):
+            if index >= self.HTTP_MAX_HEADERS:
+                break
+            trimmed[key.lower()] = value
+        return {"result": "OK", "status": self._integer(status, 100, 599),
+                "body": payload.decode("utf-8", "replace"), "headers": trimmed}
 
     def _sleep_ms(self, ms):
         ms = float(ms)

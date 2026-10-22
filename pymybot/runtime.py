@@ -5,11 +5,24 @@ import os
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from lupa.luajit21 import LuaRuntime, lua_type
 
 from .errors import BudgetExceeded, DriverError, ScriptError
 from .hardware import Budget
+
+
+def _loopback_base(base):
+    """True when base is an http(s) URL whose host is a loopback address."""
+    if not isinstance(base, str):
+        return False
+    try:
+        parts = urlsplit(base)
+        parts.port  # property access raises ValueError on malformed ports
+    except ValueError:
+        return False
+    return parts.scheme in {"http", "https"} and parts.hostname in {"127.0.0.1", "localhost", "::1"}
 
 
 _BOOTSTRAP = r'''
@@ -114,6 +127,8 @@ class LuaState:
                 physical |= not bool(options.get("src"))
             if physical:
                 raise DriverError("Physical hardware access requires explicit --allow-hardware confirmation")
+            if operation == "http_open" and not _loopback_base(values[0] if values else None):
+                raise DriverError("HTTP access beyond loopback requires explicit --allow-hardware confirmation")
         if operation == "sleep_ms" and values:
             milliseconds = float(values[0])
             if math.isfinite(milliseconds) and milliseconds > 0:

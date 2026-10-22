@@ -127,3 +127,53 @@ function destroy(d) __hal_call("sleep_ms", 1); return {result="OK"} end
     finally:
         with_runtime.close()
         hal.close()
+
+
+def test_http_gate_loopback_without_allow_hardware(tmp_path):
+    from pymybot.hal import HALManager
+
+    hal = HALManager()
+    state = LuaState([tmp_path], hal, threading.Event())
+    probe = tmp_path / "probe.lua"
+    probe.write_text('function call(d) return {result="OK", fd=__hal_call("http_open", d.base, 100)} end')
+    try:
+        state.load(probe)
+        for base in ("http://127.0.0.1:1/", "https://localhost:8443/api",
+                     "http://[::1]:8000/", "http://127.0.0.1/api/v1"):
+            assert state.call("call", {"base": base})["fd"] >= 0
+        for base in ("http://qsont.me:8004/", "https://example.com/", "http://192.168.1.5:8000/",
+                     "http://0.0.0.0:8000/", "loop://", "not a url"):
+            with pytest.raises(DriverError, match="loopback"):
+                state.call("call", {"base": base})
+    finally:
+        state.close()
+        hal.close()
+
+
+def test_http_gate_offloop_open_with_allow_hardware(tmp_path):
+    import socket
+
+    from pymybot.hal import HALManager
+
+    hal = HALManager()
+    state = LuaState([tmp_path], hal, threading.Event(), allow_hardware=True)
+    probe = tmp_path / "probe.lua"
+    # open never connects; the follow-up request to a closed port must return
+    # a plain ERR table instead of raising.
+    probe.write_text('''
+function call(d)
+    local fd = __hal_call("http_open", d.base, 300)
+    return __hal_call("http_request", fd, "GET", "/", nil, nil)
+end
+''')
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    try:
+        state.load(probe)
+        out = state.call("call", {"base": f"http://127.0.0.1:{port}/"})
+        assert out["result"] == "ERR" and "message" in out
+    finally:
+        state.close()
+        hal.close()

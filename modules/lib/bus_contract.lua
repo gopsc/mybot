@@ -114,6 +114,29 @@ function M.baud_ok(baud)
 end
 
 ------------------------------------------------------------------
+-- HTTP 端点 URL 白名单（host[:port][/prefix]，凭据/query/fragment 一律不收）
+------------------------------------------------------------------
+
+-- 与 UART loop:// 同一安全口径的快速失败层：宿主 HAL 的 urlsplit 校验才是
+-- 权威判定，这里保证「Lua 侧拒绝的，宿主侧必拒绝」不漂移（本文件头注的
+-- 单点契约原则同样适用于 http）。IPv6 字面量走方括号形式 [::1]:8000。
+function M.http_url_ok(url)
+	if type(url) ~= "string" then return false end
+	local prefix = url:match("^https?://")
+	if prefix == nil then return false end
+	local rest = url:sub(#prefix + 1)
+	local host, path = rest:match("^([^/]*)(.*)$")
+	if host == nil or host == "" then return false end
+	local plain = host:match("^[0-9A-Za-z][0-9A-Za-z%.%-]*$") ~= nil
+	local ported = host:match("^[0-9A-Za-z][0-9A-Za-z%.%-]*:[0-9]+$") ~= nil
+	local v6 = host:match("^%[[0-9A-Fa-f:]+%]$") ~= nil
+		or host:match("^%[[0-9A-Fa-f:]+%]:[0-9]+$") ~= nil
+	if not (plain or ported or v6) then return false end
+	if path == "" then return true end
+	return path:match("^[0-9A-Za-z._~/%%%(%)-]+$") ~= nil
+end
+
+------------------------------------------------------------------
 -- 长度上限
 ------------------------------------------------------------------
 
@@ -144,6 +167,11 @@ M.I2C_IO_MAX_BYTES = 256
 -- uart_read 超时上限（ms）：iters = timeout_ms + 1 按 1ms 空转，配置笔误
 -- （如少写一个单位）必须立即失败而非阻塞数小时
 M.UART_READ_MAX_MS = 60000
+
+-- http 请求超时上限（ms）：与 UART_READ_MAX_MS 同值同理由——HTTP 请求阻塞
+-- 的是 Lua 状态机所在线程，预算看护（debug hook）无法中断原生 socket I/O，
+-- 上限必须在此处拦下（宿主 HAL 侧另有同值硬校验）
+M.HTTP_TIMEOUT_MAX_MS = 60000
 
 __BOT4CJ_BUS_CONTRACT = M
 return M

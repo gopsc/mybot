@@ -108,6 +108,8 @@ class Robot:
             values = {col: table.inherited(row, j) for j, col in enumerate(table.header)}
             if table.name in {"I2C", "SPI", "UART"}:
                 paths[name] = values.get("path", "")
+            elif table.name == "HTTP":
+                paths[name] = values.get("base", "")
             if table.name not in {"Alias", "Vars", "Daemon"}:
                 safe_ident(table.name)
                 self._module(table.name + ".lua")
@@ -159,7 +161,7 @@ class Robot:
                 uart_paths[path] = name
             consumers = []
             if table.name not in {"Alias", "Vars", "Daemon"}:
-                bus = next((values[c][1:] for c in ("I2C", "SPI", "UART") if values.get(c, "").startswith("$")), None)
+                bus = next((values[c][1:] for c in ("I2C", "SPI", "UART", "HTTP") if values.get(c, "").startswith("$")), None)
                 if bus:
                     consumers.append((table.name, paths.get(bus, bus), values.get("address", ""), name))
             elif table.name == "Daemon" and proto != "virt" and values.get("sources", "-") == "-":

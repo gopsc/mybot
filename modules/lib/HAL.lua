@@ -6,7 +6,7 @@ local ffi = require("ffi")
 local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
 local bus = dofile(mpath.resolve("lib/bus_contract.lua"))
 local HAL = {
-    backend = "python", backend_name = "pyserial/pyftdi/pyav",
+    backend = "python", backend_name = "pyserial/pyftdi/pyav/urllib",
     platform = { name = "portable", gpio_prefix = false, pwm_sysfs_root = false },
     PWM_SYSFS_ROOT = false, i2c_addr = {}, uart_baud = {}, uart_orig = {}, pwm_state = {},
     UART_READ_MAX_MS = bus.UART_READ_MAX_MS,
@@ -133,6 +133,25 @@ function uart_read(fd, n, timeout_ms)
     timeout_ms = timeout_ms == nil and 0 or bus.finite_of(timeout_ms)
     if n == nil or n < 1 or timeout_ms == nil or timeout_ms > bus.UART_READ_MAX_MS then return nil end
     return report(bridge("uart_read", tonumber(fd), math.min(n, bus.UART_IO_MAX_BYTES), timeout_ms))
+end
+-- HTTP 端点会话：open 只做 URL/超时校验（不建连，HTTP 无持久连接），
+-- 实际请求由 http_request 逐次发起。回环之外的 base 由宿主 runtime 门
+-- （--allow-hardware）拦截，Lua 侧不重复判定。http_request 返回表
+-- {result, status, body, headers}——HTTP 4xx/5xx 也是 result="OK" 的合法
+-- 响应（status 携带状态码），仅传输层失败返回 result="ERR"。
+function http_open(base, timeout_ms)
+    timeout_ms = bus.finite_of(timeout_ms)
+    if timeout_ms == nil then timeout_ms = 10000 end
+    if timeout_ms < 1 or timeout_ms > bus.HTTP_TIMEOUT_MAX_MS then return -1 end
+    return report(bridge("http_open", base, timeout_ms))
+end
+function http_close(fd)
+    fd = bus.int_of(fd, 0)
+    if fd == nil then return -1 end
+    return report(bridge("close_handle", fd))
+end
+function http_request(fd, method, path, headers, body)
+    return bridge("http_request", tonumber(fd), method, path, headers, body)
 end
 for _, name in ipairs({ "gpio_request_line", "gpio_set_value", "gpio_get_value", "gpio_free_line",
     "pwm_npwm", "pwm_exported", "pwm_export", "pwm_config", "pwm_set_polarity", "pwm_enable", "pwm_unexport",

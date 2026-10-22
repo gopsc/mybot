@@ -417,6 +417,14 @@ function require_driver(bus, spec)
 			end
 			return fd, nil, nil
 		end,
+		-- HTTP 会话句柄经 $引用 从 HTTP 总线变量合并进元数据（fd >= 0，同 uart 口径）
+		http = function(d)
+			local fd = tonumber(d.fd)
+			if fd == nil or fd < 0 then
+				return nil, nil, err("Invalid Argument: fd (does the HTTP column reference an @HTTP variable?)")
+			end
+			return fd, nil, nil
+		end,
 	}
 	local validate = validators[bus]
 	if validate == nil then
