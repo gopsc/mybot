@@ -1,13 +1,13 @@
-# pymybot CI：pytest 全量回归 + README 快速开始自检。
+# pymybot CI：无 agent 的 base 回归 + agent 集成 + 独立 wheel/README 自检。
 #
 # GitCode 属 GitLab 系托管，经 .gitlab-ci.yml 驱动（与 main 分支同一约定）；若托管方
 # 不识别本文件则静默不生效（无副作用），迁移其它平台时按同结构翻译即可。
 #
-# 与 main 分支的差异如实声明：本分支没有 C++ 构建产物、也没有 test/run_all.sh 守门，
-# 因此不设 build 阶段，守门就是 pytest 本身。
+# 共用 scripts/ci_smoke.py；没有 C++ 构建产物，Python sdist/wheel 在独立 test
+# 作业中构建并安装到源码树外的新 venv，不复用 editable 安装。Windows 通道见 GitHub。
 #
 # 版本矩阵的判据：
-# - 3.11 是 pyproject 里 requires-python 的下界，3.13 是当前最新，3.12 取中。
+# - 3.11 是 pyproject 里 requires-python 的下界，3.12/3.13 作为额外回归版本。
 #   任一版本红 ⇒ `requires-python = ">=3.11"` 的声明与实际不符。
 # - lupa（LuaJIT）、pillow 均有 manylinux wheel，pyftdi/pyserial 为纯
 #   Python，故 python:slim 镜像即可，不需要 gcc / luajit-dev，job 时长可控。
@@ -25,6 +25,7 @@ stages:
   script:
     - python -m pip install --upgrade pip
     - python -m pip install -e ".[test]"
+    - python -I scripts/ci_smoke.py base
     - python -m pytest -q
 
 test:py3.11:
@@ -39,12 +40,30 @@ test:py3.13:
   extends: .pytest
   image: python:3.13-slim
 
+# 离线模型与回环服务验证最低 Python 版本；Windows 通道由 GitHub 覆盖。
+test:agent:py3.11:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - python -m pip install --upgrade pip
+    - python -m pip install -e ".[agent,test]"
+    - python -I scripts/ci_smoke.py agent
+    - python -m pytest -q
+
+smoke:wheel:
+  stage: test
+  image: python:3.11-slim
+  script:
+    - python -m pip install build
+    - python -I scripts/ci_smoke.py wheel
+
 # README「快速开始」的两条命令：文档里的承诺由 CI 验证，而不是靠人工记得跑。
-# 这两条命令不激活驱动、只走 Timer/Relay 纯软件模块，可在无硬件环境执行。
+# 这两条命令不激活物理硬件、只走 Timer/Relay 纯软件模块，可在无硬件环境执行。
 smoke:quickstart:
   stage: test
   image: python:3.13-slim
   script:
     - python -m pip install -e ".[test]"
+    - python -I scripts/ci_smoke.py base
     - python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
     - python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10

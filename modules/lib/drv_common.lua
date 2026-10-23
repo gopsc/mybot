@@ -358,6 +358,8 @@ function require_driver(bus, spec)
 	if type(spec) ~= "table" then
 		error("require_driver: spec must be a table", 2)
 	end
+	-- 入口绑定调用者 fenv，公共 helper 保留共享环境（LuaJIT / Lua 5.1）。
+	local entry_env = getfenv(2)
 
 	-- ① 标准前导剩余部分（dofile 幂等，多驱动状态机内重复加载安全）
 	-- 驱动文件调 require_driver 之前须先 dofile drv_common（1 行 prelude，
@@ -443,7 +445,7 @@ function require_driver(bus, spec)
 	local name  = spec.name or "unknown"
 
 	-- ④ 包装 build：arg_table → 总线校验 → 用户 build(ctx, data)
-	function build(data)
+	local function build(data)
 		local ok, ek = arg_table(data)
 		if not ok then return ek end
 		local fd, addr, ek2 = validate(data)
@@ -454,7 +456,7 @@ function require_driver(bus, spec)
 	end
 
 	-- ⑤ 包装 call：同上
-	function call(data)
+	local function call(data)
 		local ok, ek = arg_table(data)
 		if not ok then return ek end
 		local fd, addr, ek2 = validate(data)
@@ -465,8 +467,9 @@ function require_driver(bus, spec)
 	end
 
 	-- ⑥ 包装 destroy：缺省即空操作（覆盖 ~40 份驱动）；自定义版本仍走 arg_table
+	local destroy
 	if user_destroy then
-		function destroy(data)
+		destroy = function(data)
 			local ok, ek = arg_table(data)
 			if not ok then return ek end
 			return user_destroy({
@@ -474,12 +477,16 @@ function require_driver(bus, spec)
 			}, data)
 		end
 	else
-		function destroy(data)
+		destroy = function(data)
 			local ok, ek = arg_table(data)
 			if not ok then return ek end
 			return { result = "OK" }
 		end
 	end
 
+	-- wrapper 捕获本次 state，HAL/virtbus 后续的共享注入仍然可见。
+	rawset(entry_env, "build", build)
+	rawset(entry_env, "call", call)
+	rawset(entry_env, "destroy", destroy)
 	return spec
 end

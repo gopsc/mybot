@@ -865,6 +865,84 @@ def test_provider_clients_disable_automatic_retries(monkeypatch, provider, key):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("provider", agent_module.PROVIDERS)
+@pytest.mark.parametrize("base_url", [None, "https://model.invalid/v1//"], ids=["default", "custom"])
+@pytest.mark.parametrize("status,redirect", [
+    pytest.param(200, None, id="success"),
+    *[pytest.param(status, redirect, id=f"{status}-{redirect}")
+      for status in (307, 308)
+      for redirect in ("same-origin", "cross-origin", "https-downgrade", "cross-origin-downgrade")],
+])
+def test_provider_http_requests_do_not_follow_redirects(monkeypatch, provider, base_url, status, redirect):
+    """Exercise real adapters/SDKs while intercepting every destination, including redirects."""
+    import httpx2 as httpx
+    from pydantic_ai.exceptions import ModelAPIError
+
+    key, prompt = "offline-synthetic-api-key", "synthetic-private-prompt"
+    monkeypatch.setenv(agent_module.PROVIDER_KEY_ENV[provider], key)
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", True)  # MockTransport only; no sockets.
+    default_url = {"openai": "https://api.openai.com/v1", "openai-chat": "https://api.openai.com/v1",
+                   "deepseek": "https://api.deepseek.com", "anthropic": "https://api.anthropic.com"}
+    route = "v1/messages" if provider == "anthropic" else "chat/completions"
+    endpoint = f"{(base_url or default_url[provider]).rstrip('/')}/{route}"
+    destination = {
+        "same-origin": "/redirected",
+        "cross-origin": "https://redirect.invalid/redirected",
+        "https-downgrade": str(httpx.URL(endpoint).copy_with(scheme="http", path="/redirected")),
+        "cross-origin-downgrade": "http://redirect.invalid/redirected",
+    }.get(redirect)
+    if provider == "anthropic":
+        payload = {"id": "offline-message", "type": "message", "role": "assistant", "model": "test",
+                   "content": [{"type": "text", "text": "done"}], "stop_reason": "end_turn",
+                   "stop_sequence": None, "usage": {"input_tokens": 20, "output_tokens": 10}}
+    else:
+        _, payload = completion({"role": "assistant", "content": "done"})
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        if redirect and len(requests) == 1:
+            return httpx.Response(status, headers={"Location": destination}, json={"error": "redirect"})
+        return httpx.Response(200, json=payload)
+
+    transport = httpx.MockTransport(respond)
+    # Intercept proxy mounts too, without changing SDK redirect settings.
+    monkeypatch.setattr(httpx.AsyncClient, "_transport_for_url", lambda self, url: transport)
+
+    async def scenario():
+        config = AgentConfig(model=f"{provider}:test", base_url=base_url, timeout=7 if base_url else 180)
+        model, client = create_model(config)
+        session = AgentSession(FakeExecutor(), model, config)
+        try:
+            assert requests == []  # Construction must not probe the endpoint.
+            error = result = None
+            try:
+                result = await session.ask(prompt)
+            except ModelAPIError as exc:
+                error = exc
+            # Anthropic may add a beta query parameter without changing the destination.
+            assert [(request.method, str(request.url.copy_with(query=None)))
+                    for request in requests] == [("POST", endpoint)]
+            request = requests[0]
+            body = json.loads(request.content)
+            assert body["model"] == "test" and prompt in request.content.decode("utf-8")
+            header = "x-api-key" if provider == "anthropic" else "authorization"
+            assert request.headers[header] == (key if provider == "anthropic" else f"Bearer {key}")
+            assert request.extensions["timeout"] == dict.fromkeys(
+                ("connect", "read", "write", "pool"), min(30, config.timeout))
+            assert client.max_retries == 0
+            if redirect:
+                # PydanticAI wraps SDK 3xx errors as ModelAPIError, not ModelHTTPError.
+                assert error is not None and error.__cause__.status_code == status
+                assert result is None
+            else:
+                assert error is None and result["output"] == "done"
+        finally:
+            await session.close()
+            await client.close()
+    asyncio.run(scenario())
+
+
 def test_failure_names_endpoint_and_status_but_not_body():
     from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
     describe = agent_module.describe_failure

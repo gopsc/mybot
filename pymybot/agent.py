@@ -119,30 +119,31 @@ def create_model(config):
         raise AgentConfigurationError(f"Missing API key environment variable: {key_env}")
     # SDKs append "/path" to the base, so extra trailing slashes become "//" that servers may not route.
     custom_url = config.base_url.rstrip("/") if config.base_url else None
+    # Never let redirects forward prompts or credentials beyond the validated endpoint.
+    http_options = {"follow_redirects": False}
     # Self-hosted servers and their proxies may drop idle keep-alive connections without notice, and
     # with retries disabled the next request then fails with RemoteProtocolError; reconnect instead.
-    no_keepalive = None
     if custom_url:
         try:
             import httpx
         except ImportError:  # openai 3.x / pydantic-ai generations ship httpx2 instead
             import httpx2 as httpx
-        no_keepalive = httpx.Limits(max_connections=100, max_keepalive_connections=0)
+        http_options["limits"] = httpx.Limits(max_connections=100, max_keepalive_connections=0)
     if provider == "anthropic":
         from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
         from pydantic_ai.models.anthropic import AnthropicModel
         from pydantic_ai.providers.anthropic import AnthropicProvider
-        http = {"http_client": DefaultAsyncHttpxClient(limits=no_keepalive)} if no_keepalive else {}
+        http = DefaultAsyncHttpxClient(**http_options)
         client = AsyncAnthropic(api_key=key, base_url=custom_url or "https://api.anthropic.com", max_retries=0,
-                                timeout=min(30, config.timeout), **http)
+                                timeout=min(30, config.timeout), http_client=http)
         return AnthropicModel(name, provider=AnthropicProvider(anthropic_client=client)), client
     from openai import AsyncOpenAI, DefaultAsyncHttpxClient
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider
     from pydantic_ai.providers.deepseek import DeepSeekProvider
     base_url = custom_url or ("https://api.deepseek.com" if provider == "deepseek" else "https://api.openai.com/v1")
-    http = {"http_client": DefaultAsyncHttpxClient(limits=no_keepalive)} if no_keepalive else {}
-    client = AsyncOpenAI(api_key=key, base_url=base_url, max_retries=0, timeout=min(30, config.timeout), **http)
+    http = DefaultAsyncHttpxClient(**http_options)
+    client = AsyncOpenAI(api_key=key, base_url=base_url, max_retries=0, timeout=min(30, config.timeout), http_client=http)
     adapter = DeepSeekProvider(openai_client=client) if provider == "deepseek" else OpenAIProvider(openai_client=client)
     # Instructions and per-run robot context are separate system messages; chat templates such as
     # llama-server's often raise "System message must be at the beginning" unless they are merged.
@@ -170,7 +171,8 @@ def describe_failure(exc, endpoint=None):
         while cause is not None and len(chain) < 5:
             chain.append(type(cause).__name__)
             cause = cause.__cause__ or cause.__context__
-        return f"{type(exc).__name__}{f' ({' <- '.join(chain)})' if chain else ''}{where}"
+        detail = f" ({' <- '.join(chain)})" if chain else ""
+        return f"{type(exc).__name__}{detail}{where}"
     return type(exc).__name__
 
 

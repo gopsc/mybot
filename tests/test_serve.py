@@ -220,6 +220,16 @@ def test_no_agent_disables_agent_methods(workspace, client_factory):
     assert client.close() == 0
 
 
+def test_shutdown_with_eof_closes_active_session(workspace, client_factory):
+    client = client_factory(workspace, "--no-agent")
+    client.call("session.activate", {"robot": str(workspace / "robot.sql")})
+    assert client.call("shutdown") == {}
+    assert client.close() == 0
+    assert client.next() == {"jsonrpc": "2.0", "method": "session",
+                             "params": {"state": "Inactive", "busy": None, "agent": False}}
+    assert client.next() == {"ok": True, "command": "serve", "stopped": False}
+
+
 class Out:
     def __init__(self):
         self.lines = queue.Queue()
@@ -229,6 +239,552 @@ class Out:
 
     def flush(self):
         pass
+
+
+class LifecycleGate:
+    """An explicit async barrier, also usable from the robot owner thread."""
+    def __init__(self):
+        self.loop = asyncio.get_running_loop()
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def wait(self):
+        self.entered.set()
+        await self.release.wait()
+
+    def wait_on_worker(self):
+        asyncio.run_coroutine_threadsafe(self.wait(), self.loop).result(timeout=10)
+
+    async def reached(self):
+        await asyncio.wait_for(self.entered.wait(), 5)
+
+
+class LifecycleHarness:
+    """Real RPC dispatch/worker, fake resources: no Lua, hardware or model IO."""
+    def __init__(self, workspace, monkeypatch):
+        self.server = serve.Server(self, threading.Event())
+        self.seq = 0
+        self.replies = {}
+        self.tasks = {}
+        self.gates = {}
+        self.errors = set()
+        self.robots = []
+        self.agents = []
+        self.params = {"robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace), "task": "test"}
+        harness = self
+
+        class FakeRobot:
+            def __init__(self, *args, **kwargs):
+                self.owner = threading.get_ident()
+                assert self.owner != threading.main_thread().ident
+                self.stop_event = threading.Event()
+                self.tables = {}
+                self.live = False
+                self.closed = 0
+                harness.robots.append(self)
+
+            def phase(self, name):
+                assert threading.get_ident() == self.owner
+                if name in harness.gates:
+                    harness.gates[name].wait_on_worker()
+                if name in harness.errors:
+                    raise RuntimeError("synthetic " + name)
+
+            def active(self):
+                self.live = True
+                self.phase("activate")
+
+            def _rows(self, tables):
+                self.phase("metadata")
+                return {}
+
+            def run(self, *args, cancel, **kwargs):
+                self.phase("run")
+                if cancel.is_set():
+                    raise serve.BudgetExceeded("Stop requested")
+                return []
+
+            def deactivate(self):
+                try:
+                    self.phase("deactivate")
+                finally:
+                    self.live = False
+                    self.closed += 1
+
+        class FakeSession:
+            def __init__(self):
+                self.executor = self
+                self.events = []
+                self.stopped = False
+                self.closed = False
+
+            def cancel(self):
+                self.stopped = True
+
+            async def ask(self, task):
+                await harness.phase("ask")
+                if self.stopped:
+                    raise serve.AgentInterrupted("Stop requested")
+                return {"output": "fake"}
+
+            async def close(self):
+                try:
+                    await harness.phase("agent_close")
+                finally:
+                    self.closed = True
+
+        class FakeClient:
+            def __init__(self):
+                self.closed = False
+
+            async def close(self):
+                try:
+                    await harness.phase("client_close")
+                finally:
+                    self.closed = True
+
+        async def open_agent(key):
+            await self.phase("open")
+            agent = {"session": FakeSession(), "client": FakeClient()}
+            self.agents.append(agent)
+            return agent
+
+        monkeypatch.setattr(serve, "Robot", FakeRobot)
+        monkeypatch.setattr(self.server, "open_agent", open_agent)
+
+    def block(self, name):
+        gate = self.gates[name] = LifecycleGate()
+        return gate
+
+    async def phase(self, name):
+        if name in self.gates:
+            await self.gates[name].wait()
+        if name in self.errors:
+            raise RuntimeError("synthetic " + name)
+
+    def write(self, text):
+        message = json.loads(text)
+        if "id" in message:
+            self.replies[message["id"]].set_result(message)
+
+    def flush(self):
+        pass
+
+    def start(self, method, params=None):
+        self.seq += 1
+        ident = self.seq
+        self.replies[ident] = asyncio.get_running_loop().create_future()
+        before = set(self.server.tasks)
+        self.server.receive(json.dumps({"jsonrpc": "2.0", "id": ident, "method": method,
+                                       "params": self.params if params is None else params}),
+                            asyncio.get_running_loop())
+        self.tasks[ident] = (self.server.tasks - before).pop()
+        return ident
+
+    async def reply(self, ident):
+        return await asyncio.wait_for(asyncio.shield(self.replies[ident]), 5)
+
+    async def call(self, method, params=None):
+        reply = await self.reply(self.start(method, params))
+        assert "result" in reply, reply
+        return reply["result"]
+
+    async def error(self, method, code, params=None):
+        reply = await self.reply(self.start(method, params))
+        assert reply.get("error", {}).get("code") == code, reply
+
+    async def check_free(self):
+        await self.call("session.activate")
+        await self.error("agent.ask", serve.WRONG_STATE)
+        await self.call("session.deactivate")
+        await self.call("agent.ask")
+        await self.error("session.activate", serve.WRONG_STATE)
+        await self.call("agent.reset")
+
+    async def finish(self):
+        self.errors.clear()
+        for gate in self.gates.values():
+            gate.release.set()
+        await asyncio.wait_for(asyncio.gather(*self.tasks.values(), return_exceptions=True), 10)
+        await asyncio.wait_for(self.server.shutdown(), 10)
+
+
+def lifecycle_scenario(workspace, monkeypatch, scenario):
+    async def run():
+        harness = LifecycleHarness(workspace, monkeypatch)
+        try:
+            await scenario(harness)
+        finally:
+            await harness.finish()
+    asyncio.run(run())
+
+
+def test_owner_session_activation_blocks_agent(workspace, monkeypatch):
+    async def scenario(h):
+        gate = h.block("activate")
+        active = h.start("session.activate")
+        await gate.reached()
+        assert (await h.call("session.status"))["busy"] == "session.activate"
+        await h.error("agent.ask", serve.WRONG_STATE)
+        await h.error("session.activate", serve.BUSY)
+        assert not h.agents
+        gate.release.set()
+        assert "result" in await h.reply(active)
+        await h.error("agent.ask", serve.WRONG_STATE)
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("phase", ["open", "ask", "agent_close", "client_close", "reconfigure"])
+def test_owner_agent_transitions_block_session(workspace, monkeypatch, phase):
+    async def scenario(h):
+        if phase in {"agent_close", "client_close", "reconfigure"}:
+            await h.call("agent.ask")
+        gate = h.block("agent_close" if phase == "reconfigure" else phase)
+        method = "agent.reset" if phase in {"agent_close", "client_close"} else "agent.ask"
+        pending = h.start(method, {**h.params, "model": "changed"} if phase == "reconfigure" else None)
+        await gate.reached()
+        await h.call("session.status")  # The event loop remains responsive.
+        await h.error("session.activate", serve.WRONG_STATE)
+        await h.error("agent.ask", serve.BUSY)
+        await h.error("agent.reset", serve.BUSY)
+        assert not h.robots
+        gate.release.set()
+        assert "result" in await h.reply(pending)
+        await h.call("agent.reset")
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+def test_owner_session_cleanup_blocks_new_owners(workspace, monkeypatch):
+    async def scenario(h):
+        await h.call("session.activate")
+        gate = h.block("deactivate")
+        first = h.start("session.deactivate")
+        await gate.reached()
+        second = h.start("session.deactivate")
+        await h.error("agent.ask", serve.WRONG_STATE)
+        await h.error("session.activate", serve.BUSY)
+        await h.error("run", serve.BUSY, {"input": str(workspace / "action.mt")})
+        assert not h.replies[second].done()
+        assert not h.agents
+        gate.release.set()
+        assert (await h.reply(first))["result"]["state"] == "Inactive"
+        assert (await h.reply(second))["result"]["state"] == "Inactive"
+        assert h.robots[0].closed == 1
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("cancel_kind", ["rpc", "deactivate", "task"])
+def test_owner_activation_cancel_keeps_claim_until_rollback(workspace, monkeypatch, cancel_kind):
+    async def scenario(h):
+        activation = h.block("activate")
+        cleanup = h.block("deactivate")
+        pending = h.start("session.activate")
+        await activation.reached()
+        deactivation = None
+        if cancel_kind == "deactivate":
+            cancelled = asyncio.Event()
+            h.server.requests[pending]["hooks"].append(cancelled.set)
+            deactivation = h.start("session.deactivate")
+            await asyncio.wait_for(cancelled.wait(), 5)
+            assert not h.replies[deactivation].done()
+        elif cancel_kind == "task":
+            h.tasks[pending].cancel()
+        else:
+            h.server.cancel({"id": pending})
+        await h.error("agent.ask", serve.WRONG_STATE)
+        activation.release.set()
+        await cleanup.reached()
+        await h.error("agent.ask", serve.WRONG_STATE)
+        await h.error("session.activate", serve.BUSY)
+        cleanup.release.set()
+        if cancel_kind == "task":
+            with pytest.raises(asyncio.CancelledError):
+                await h.tasks[pending]
+        else:
+            assert (await h.reply(pending))["error"]["code"] == serve.CANCELLED
+        if deactivation:
+            assert (await h.reply(deactivation))["result"]["state"] == "Inactive"
+        assert h.robots[0].closed == 1 and not h.robots[0].live
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("phase", ["activate", "metadata", "deactivate", "open"])
+def test_owner_exception_releases_after_cleanup(workspace, monkeypatch, phase):
+    async def scenario(h):
+        if phase == "deactivate":
+            await h.call("session.activate")
+        h.errors.add(phase)
+        method = "agent.ask" if phase == "open" else "session.deactivate" if phase == "deactivate" else "session.activate"
+        await h.error(method, serve.EXECUTION_ERROR)
+        assert all(not robot.live and robot.closed == 1 for robot in h.robots)
+        h.errors.clear()
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("cancel_kind", ["rpc", "task"])
+@pytest.mark.parametrize("phase", ["open", "ask"])
+def test_owner_agent_cancel_closes_before_reopen(workspace, monkeypatch, phase, cancel_kind):
+    pytest.importorskip("pydantic_ai")
+
+    async def scenario(h):
+        gate = h.block(phase)
+        cleanup = h.block("agent_close")
+        pending = h.start("agent.ask")
+        await gate.reached()
+        if cancel_kind == "task":
+            h.tasks[pending].cancel()
+        else:
+            h.server.cancel({"id": pending})
+        await h.error("session.activate", serve.WRONG_STATE)
+        gate.release.set()
+        await cleanup.reached()
+        await h.error("session.activate", serve.WRONG_STATE)
+        await h.error("agent.ask", serve.BUSY)
+        cleanup.release.set()
+        if cancel_kind == "task":
+            with pytest.raises(asyncio.CancelledError):
+                await h.tasks[pending]
+        else:
+            assert (await h.reply(pending))["error"]["code"] == serve.CANCELLED
+        assert all(resource.closed for resource in h.agents[0].values())
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("phase", ["ask", "agent_close", "client_close"])
+def test_owner_agent_failure_cleanup_is_exclusive(workspace, monkeypatch, phase):
+    pytest.importorskip("pydantic_ai")
+
+    async def scenario(h):
+        h.errors.add(phase)
+        cleanup = h.block("client_close")
+        if phase == "ask":
+            pending = h.start("agent.ask")
+        else:
+            await h.call("agent.ask")
+            pending = h.start("agent.reset")
+        await cleanup.reached()
+        await h.error("session.activate", serve.WRONG_STATE)
+        await h.error("agent.ask", serve.BUSY)
+        cleanup.release.set()
+        reply = await h.reply(pending)
+        assert "error" in reply if phase == "ask" else "result" in reply
+        assert all(resource.closed for resource in h.agents[0].values())
+        h.errors.clear()
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+def test_owner_deactivate_waits_for_cancelled_run(workspace, monkeypatch):
+    async def scenario(h):
+        await h.call("session.activate")
+        running = h.block("run")
+        cleanup = h.block("deactivate")
+        pending = h.start("run", {"input": str(workspace / "action.mt")})
+        await running.reached()
+        await h.error("agent.ask", serve.WRONG_STATE)
+        await h.error("run", serve.BUSY, {"input": str(workspace / "action.mt")})
+        cancelled = asyncio.Event()
+        h.server.requests[pending]["hooks"].append(cancelled.set)
+        deactivation = h.start("session.deactivate")
+        await asyncio.wait_for(cancelled.wait(), 5)
+        await h.error("agent.ask", serve.WRONG_STATE)
+        assert not cleanup.entered.is_set()
+        running.release.set()
+        await cleanup.reached()
+        await h.error("agent.ask", serve.WRONG_STATE)
+        assert (await h.reply(pending))["error"]["code"] == serve.CANCELLED
+        cleanup.release.set()
+        assert "result" in await h.reply(deactivation)
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("phase", ["deactivate", "agent_close", "client_close"])
+def test_owner_cleanup_survives_repeated_task_cancel(workspace, monkeypatch, phase):
+    async def scenario(h):
+        session = phase == "deactivate"
+        await h.call("session.activate" if session else "agent.ask")
+        gate = h.block(phase)
+        pending = h.start("session.deactivate" if session else "agent.reset")
+        await gate.reached()
+        for _ in range(2):
+            h.tasks[pending].cancel()
+            await h.error("agent.ask" if session else "session.activate", serve.WRONG_STATE)
+            assert not h.tasks[pending].done()
+        gate.release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await h.tasks[pending]
+        if session:
+            assert h.robots[0].closed == 1
+        else:
+            assert all(resource.closed for resource in h.agents[0].values())
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("owner", ["session", "agent"])
+def test_owner_cleanup_survives_cancellation_before_task_starts(workspace, monkeypatch, owner):
+    async def scenario(h):
+        await h.call("session.activate" if owner == "session" else "agent.ask")
+        create_task = asyncio.create_task
+        interrupted = []
+        def cancel_first_cleanup(coro, *args, **kwargs):
+            task = create_task(coro, *args, **kwargs)
+            if not interrupted and coro.cr_code.co_name == ("_deactivate" if owner == "session" else "close"):
+                interrupted.append(task)
+                task.cancel()
+            return task
+        monkeypatch.setattr(asyncio, "create_task", cancel_first_cleanup)
+        pending = h.start("session.deactivate" if owner == "session" else "agent.reset")
+        with pytest.raises(asyncio.CancelledError):
+            await h.tasks[pending]
+        assert interrupted
+        if owner == "session":
+            assert h.robots[0].closed == 1
+        else:
+            assert all(resource.closed for resource in h.agents[0].values())
+        assert h.server.owner is None and h.server.robot is None and h.server.agent is None
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+def test_owner_cleanup_survives_inner_and_outer_task_cancellation(workspace, monkeypatch):
+    async def scenario(h):
+        await h.call("session.activate")
+        running = h.block("run")
+        cleanup = h.block("deactivate")
+        operation = h.start("run", {"input": str(workspace / "action.mt")})
+        await running.reached()
+        waiting = asyncio.Event()
+        wait_idle = h.server.robot_idle.wait
+        async def wait_for_idle():
+            waiting.set()
+            await wait_idle()
+        monkeypatch.setattr(h.server.robot_idle, "wait", wait_for_idle)
+        deactivation = h.start("session.deactivate")
+        await asyncio.wait_for(waiting.wait(), 5)
+        inner = h.server.deactivating
+        h.tasks[operation].cancel()
+        h.tasks[deactivation].cancel()
+        inner.cancel()
+        await asyncio.sleep(0)
+        assert h.server.owner == "session" and h.server.robot is not None
+        assert not inner.done()
+        await h.error("agent.ask", serve.WRONG_STATE)
+        running.release.set()
+        await cleanup.reached()
+        assert h.server.owner == "session"
+        cleanup.release.set()
+        await asyncio.gather(h.tasks[operation], h.tasks[deactivation], inner, return_exceptions=True)
+        assert h.robots[0].closed == 1 and not h.robots[0].live
+        assert h.server.owner is None and h.server.robot is None
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("failure", ["error", "task_cancel"])
+def test_owner_run_failure_keeps_session_but_releases_operation(workspace, monkeypatch, failure):
+    async def scenario(h):
+        await h.call("session.activate")
+        gate = h.block("run")
+        pending = h.start("run", {"input": str(workspace / "action.mt")})
+        await gate.reached()
+        if failure == "error":
+            h.errors.add("run")
+        else:
+            h.tasks[pending].cancel()
+        await h.error("agent.ask", serve.WRONG_STATE)
+        gate.release.set()
+        expected = serve.EXECUTION_ERROR if failure == "error" else serve.CANCELLED
+        assert (await h.reply(pending))["error"]["code"] == expected
+        h.errors.clear()
+        assert (await h.call("session.status"))["busy"] is None
+        assert not h.robots[0].stop_event.is_set()
+        await h.call("run", {"input": str(workspace / "action.mt")})
+        await h.error("agent.ask", serve.WRONG_STATE)
+        await h.call("session.deactivate")
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("constructor", ["executor", "session"])
+def test_owner_real_open_agent_cleans_partial_construction(workspace, monkeypatch, constructor):
+    pytest.importorskip("pydantic_ai")
+    from pymybot import agent as agent_module, agent_executor
+
+    async def scenario(h):
+        gate = h.block("client_close")
+        closed = []
+
+        class FakeClient:
+            async def close(self):
+                await h.phase("client_close")
+                closed.append("client")
+
+        class FakeExecutor:
+            def __init__(self, *args, **kwargs):
+                if constructor == "executor":
+                    raise RuntimeError("synthetic executor construction")
+
+            async def close(self):
+                closed.append("executor")
+
+        def fail_session(*args, **kwargs):
+            raise RuntimeError("synthetic session construction")
+
+        monkeypatch.setattr(agent_module, "create_model", lambda config: (object(), FakeClient()))
+        monkeypatch.setattr(agent_module, "AgentSession", fail_session)
+        monkeypatch.setattr(agent_executor, "RobotExecutor", FakeExecutor)
+        fake_open = h.server.open_agent
+        monkeypatch.setattr(h.server, "open_agent", serve.Server.open_agent.__get__(h.server))
+        pending = h.start("agent.ask")
+        await gate.reached()
+        await h.error("session.activate", serve.WRONG_STATE)
+        await h.error("agent.ask", serve.BUSY)
+        gate.release.set()
+        assert (await h.reply(pending))["error"]["code"] == serve.EXECUTION_ERROR
+        assert closed == (["executor", "client"] if constructor == "session" else ["client"])
+        monkeypatch.setattr(h.server, "open_agent", fake_open)
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+@pytest.mark.parametrize("owner", ["session", "agent"])
+def test_owner_eof_waits_for_initialization_and_cleanup(workspace, monkeypatch, owner):
+    pytest.importorskip("pydantic_ai")
+
+    async def scenario(h):
+        gate = h.block("activate" if owner == "session" else "open")
+        cleanup = h.block("deactivate" if owner == "session" else "agent_close")
+        pending = h.start("session.activate" if owner == "session" else "agent.ask")
+        await gate.reached()
+        cancelled = asyncio.Event()
+        h.server.requests[pending]["hooks"].append(cancelled.set)
+        lines = asyncio.Queue()
+        serving = asyncio.create_task(h.server.serve(lines))
+        try:
+            lines.put_nowait(None)
+            await asyncio.wait_for(cancelled.wait(), 5)
+            await h.error("session.activate", serve.BUSY)
+            await h.error("agent.ask", serve.BUSY)
+            gate.release.set()
+            await cleanup.reached()
+            assert not serving.done()
+            cleanup.release.set()
+            await asyncio.wait_for(serving, 5)
+            assert (await h.reply(pending))["error"]["code"] == serve.CANCELLED
+            assert h.server.owner is None
+            assert h.server.robot is None and h.server.agent is None
+        finally:
+            gate.release.set()
+            cleanup.release.set()
+            await asyncio.wait_for(serving, 5)
+    lifecycle_scenario(workspace, monkeypatch, scenario)
 
 
 def test_agent_tool_approval_round_trip(workspace, monkeypatch):

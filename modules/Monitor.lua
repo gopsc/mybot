@@ -91,7 +91,7 @@ end
 -- P4/M1：引用语义 = 读最近一次决策快照（无副作用）
 function read(data)
 	if last == nil then
-		return err("no sample yet")
+		return { result = "ERR", code = "NOT_READY", message = "no sample yet" }
 	end
 	return last
 end

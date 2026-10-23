@@ -6,8 +6,8 @@
 
 ## 1. 生命周期与运行环境
 
-- **每个硬件变量一个独立 Lua 状态**（LuaJIT 2.1）。一个状态机里只加载一个驱动文件
-  （因此一个文件里至多一个 `*_VIRT` 模型）。
+- **普通硬件变量各有独立 Lua 状态**（LuaJIT 2.1）。多器件 Daemon 在一个状态中为各器件
+  创建独立环境；`require_driver` 将入口绑定到调用者环境，实例状态隔离，HAL/helper 共享。
 - 沙箱：`python` / `io` / `debug` 被删；`package.loaders` 受限；拒绝 Lua 字节码；
   单文件 ≤8 MiB；指令计数钩子 + JIT 开关实现协作预算（阻塞的原生 I/O 不可中断）。
 - 文件加载：宿主注入 `__mpath`，`__mpath.resolve("lib/xxx.lua")` 把模块相对路径解析为
@@ -22,6 +22,9 @@
 - **返回值契约**：非空 Lua 表；若含 `result` 键必须恰为 `"OK"`。
   推荐成功 `{ result="OK", ...字段 }`，失败 `err("原因")`（生成
   `{result="ERR", message=...}`）。无 `result` 键的非空表也合法，但推荐显式带 OK。
+- **引用读取失败会阻断下游执行**，不能把 ERR 合并后继续派发。快照尚未产生时可返回
+  `{result="ERR", code="NOT_READY", message="no sample yet"}`：仅下游初始化时省略这份
+  未就绪元数据，不制造样本；动作和采样仍报错。其他读取错误即使在初始化时也会传播。
 
 ## 2. 声明式写法（推荐）：require_driver
 

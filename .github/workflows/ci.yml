@@ -1,6 +1,7 @@
-# pymybot CI：pytest 全量回归 + README 快速开始自检。
+# pymybot CI：无 agent 的 base 回归 + agent 集成 + 独立 wheel/README 自检。
 #
-# 与 .gitlab-ci.yml 的关系：两者判据一致（Python 3.11/3.12/3.13 矩阵 + 快速开始自检），
+# 与 .gitlab-ci.yml 共用 scripts/ci_smoke.py：base 显式拒绝 pydantic_ai，agent
+# 必须先导入依赖和 pymybot.agent，wheel 从 sdist 构建并在源码树外的新 venv 验证。
 # 本文件是同一套守门在 GitHub Actions 上的落地件。托管方若同时识别两者，回归会跑两遍，
 # 属于预期重复，不是冲突；只保留一处时，删掉另一处即可。
 #
@@ -8,7 +9,7 @@
 # 此前 Windows 上的行为只能靠本地手跑；GitHub 提供 windows-latest，于是补上。
 #
 # 版本矩阵的判据：
-# - 3.11 是 pyproject 里 requires-python 的下界，3.13 是当前最新，3.12 取中。
+# - 3.11 是 pyproject 里 requires-python 的下界，3.12/3.13 作为额外回归版本。
 #   任一版本红 ⇒ `requires-python = ">=3.11"` 的声明与实际不符。
 # - lupa（LuaJIT）、pillow 在 Linux/Windows 均有 wheel，pyftdi/pyserial
 #   为纯 Python，故直接用标准 runner 即可，不需要 gcc / luajit-dev。
@@ -39,7 +40,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
-      - name: 全量回归
+      - name: 确认 base 未安装 agent
+        run: python -I scripts/ci_smoke.py base
+      - name: Base 回归（agent 集成由独立通道覆盖）
         run: python -m pytest -q
 
   # Windows 上的守门对象是文档记录过的两处平台差异，二者都只在 Windows 生效，
@@ -61,11 +64,60 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
-      - name: 全量回归
+      - name: 确认 base 未安装 agent
+        run: python -I scripts/ci_smoke.py base
+      - name: Base 回归（agent 集成由独立通道覆盖）
         run: python -m pytest -q
 
+  # 离线模型与回环服务验证最低 Python 版本及 Windows 智能体集成。
+  agent:
+    name: agent / ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 安装 agent 与测试依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[agent,test]"
+      - name: Agent 导入预检（不允许整模块静默 skip）
+        run: python -I scripts/ci_smoke.py agent
+      - name: 含 agent 的全量回归
+        run: python -m pytest -q
+
+  wheel:
+    name: wheel smoke / ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 仅安装构建前端（不安装 checkout）
+        run: python -m pip install build
+      - name: 构建 sdist/wheel 并隔离验证安装产物
+        run: python -I scripts/ci_smoke.py wheel
+
   # README「快速开始」的两条命令：文档里的承诺由 CI 验证，而不是靠人工记得跑。
-  # 这两条命令不激活驱动、只走 Timer/Relay 纯软件模块，可在无硬件环境执行。
+  # 这两条命令不激活物理硬件、只走 Timer/Relay 纯软件模块，可在无硬件环境执行。
   quickstart:
     name: README 快速开始自检
     runs-on: ubuntu-latest
@@ -78,6 +130,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
+      - name: 确认 base 未安装 agent
+        run: python -I scripts/ci_smoke.py base
       - name: check
         run: python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
       - name: run

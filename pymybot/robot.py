@@ -368,33 +368,45 @@ class Robot:
                 refs.update(Expression(body).identifiers if body is not None else [value[1:]])
         return refs
 
-    def _remove_variables(self, names):
+    def _remove_variables(self, names, budget):
         removed = []
+        rows = self._rows(self.tables)
+        dependents = {name: set() for name in names}
+        for name in names:
+            for target in self._references(*rows[name]) & names:
+                dependents[target].add(name)
         deadline = time.monotonic() + self.deactivate_grace_ms / 1000
         for name in names:
+            budget.check()
             var = self.registry.require(name)
             if var.kind == "daemon":
                 var.request_stop(deadline)
-        for name in reversed(list(self.registry)):
-            if name not in names:
-                continue
-            var = self.registry.require(name)
-            failure = None
-            try:
-                var.destroy()
-            except Exception as exc:
-                failure = exc
-            self.registry.remove(name)
-            self._metas.pop(name, None)
-            removed.append(name)
-            for table in self.tables.values():
-                if "name" in table.header:
-                    index = table.header.index("name")
-                    table.rows[1:] = [[table.inherited(i, j) for j in range(len(table.header))]
-                                      for i in range(1, len(table.rows)) if table.rows[i][index] != name]
-            self._refresh_flow_refs()
-            if failure is not None:
-                raise DriverError(f"Hot deletion failed at '{name}'; removed {removed}: {failure}") from failure
+        order = [name for name in reversed(list(self.registry)) if name in names]
+        pending = set(names)
+        while pending:
+            budget.check()
+            ready = next((name for name in order if name in pending and not dependents[name] & pending), None)
+            # Cyclic dependencies must finish teardown together before cancellation.
+            batch = [ready] if ready is not None else [name for name in order if name in pending]
+            for name in batch:
+                var = self.registry.require(name)
+                failure = None
+                try:
+                    var.destroy()
+                except Exception as exc:
+                    failure = exc
+                self.registry.remove(name)
+                self._metas.pop(name, None)
+                removed.append(name)
+                pending.remove(name)
+                for table in self.tables.values():
+                    if "name" in table.header:
+                        index = table.header.index("name")
+                        table.rows[1:] = [[table.inherited(i, j) for j in range(len(table.header))]
+                                          for i in range(1, len(table.rows)) if table.rows[i][index] != name]
+                self._refresh_flow_refs()
+                if failure is not None:
+                    raise DriverError(f"Hot deletion failed at '{name}'; removed {removed}: {failure}") from failure
         return removed
 
     def _refresh_flow_refs(self):
@@ -404,50 +416,73 @@ class Robot:
         with self._lock:
             if self.state != "Active":
                 raise ScriptError("Hot SQL requires an active robot")
+            budget = Budget(self.stop_event, cancel=cancel)
+            budget.check()
             statements = parse_sql(check_script(sql))
             candidate = copy.deepcopy(self.tables)
             old_rows = self._rows(self.tables)
-            updates = set()
+            old_config = {name: (table.name, {col: table.inherited(row, j) for j, col in enumerate(table.header)})
+                          for name, (table, row) in old_rows.items()}
+            updates, deleted = set(), set()
             for stmt in statements:
                 if stmt.kind in {"SELECT", "SHOW"}:
                     raise ScriptError("apply_sql does not accept read-only statements")
-                if stmt.kind == "UPDATE" and stmt.table in candidate:
+                previous = []
+                if stmt.kind in {"UPDATE", "DELETE", "DROP"} and stmt.table in candidate and stmt.table != "Action":
                     table = candidate[stmt.table]
-                    for name, (t, i) in self._rows({stmt.table: table}).items():
-                        if all(t.inherited(i, t.header.index(c)) == v for c, v in stmt.where):
-                            updates.add(name)
+                    if "name" in table.header:
+                        previous = [{col: table.inherited(row, j) for j, col in enumerate(table.header)}
+                                    for row in range(1, len(table.rows))]
                 apply_statement(candidate, stmt, allow_mutations=True)
+                for values in previous:
+                    if all(values[c] == v for c, v in stmt.where):
+                        name = values["name"]
+                        if stmt.kind == "UPDATE":
+                            updates.add(name)
+                        elif old_config.get(name) == (stmt.table, values):
+                            deleted.add(name)
             new_rows = self._validate(candidate)
+            updates |= deleted & new_rows.keys()
+            updates &= old_rows.keys()
+            for name in old_rows.keys() & new_rows.keys():
+                table, row = new_rows[name]
+                values = {col: table.inherited(row, j) for j, col in enumerate(table.header)}
+                if old_config[name] != (table.name, values):
+                    updates.add(name)
             removed = (old_rows.keys() - new_rows.keys()) | updates
             added = (new_rows.keys() - old_rows.keys()) | (updates & new_rows.keys())
             for name, (table, row) in new_rows.items():
                 overlap = self._references(table, row) & removed
                 if overlap:
                     raise ScriptError(f"Cannot delete/update {sorted(overlap)}: still referenced by '{name}'")
+            budget.check()
             delete_first = bool(updates)
             if delete_first:
-                self._remove_variables(removed)
+                self._remove_variables(removed, budget)
             before = set(self.registry)
             try:
+                budget.check()
                 self._assemble(new_rows, added)
                 for name in self.registry:
                     if name not in before:
-                        Budget(self.stop_event, cancel=cancel).check()
+                        budget.check()
                         self.registry.require(name).build()
+                budget.check()
                 action = candidate.get("Action")
                 if action and len(action.rows) > 1:
-                    budget = Budget(self.stop_event, 180, cancel)
+                    action_budget = Budget(self.stop_event, 180, cancel)
                     lua_vars = [var for var in self.registry.values() if var.kind == "lua"]
                     for var in lua_vars:
-                        var.budget = budget
+                        var.budget = action_budget
                     try:
                         with self.registry.session():
-                            ActionRunner(self.registry, budget).dispatch(action)
+                            ActionRunner(self.registry, action_budget).dispatch(action)
                     finally:
                         for var in lua_vars:
                             var.budget = None
                 if not delete_first:
-                    self._remove_variables(removed)
+                    self._remove_variables(removed, budget)
+                budget.check()
             except BaseException as exc:
                 for name in reversed(list(self.registry)):
                     if name not in before:

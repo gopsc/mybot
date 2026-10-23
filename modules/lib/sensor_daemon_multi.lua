@@ -188,10 +188,7 @@ if total_vals > MAX_VALUES then
 	return
 end
 
--- 驱动加载：dofile 进器件私有 fenv（__index 落到 _G，共享 HAL/virtbus 注入
--- 的 i2c_* 全局）。驱动把 build/call/destroy 定义成「全局」函数，实际落进
--- dev_env——两份驱动互不覆盖；驱动文件内 dofile 的 HAL/drv_common 走
--- __BOT4CJ_HAL guard / 幂等重定义，共享无害。
+-- 器件入口和状态独立，公共 helper/HAL 仍经 __index 共享。
 local function load_driver_env(dev)
 	local env = setmetatable({}, { __index = _G })
 	local drvpath = mpath.resolve(dev.driver .. ".lua")
@@ -317,8 +314,8 @@ for _, dev in ipairs(devs) do
 		params[k] = v
 	end
 	dev.params = params
-	-- build 的全局函数名在器件 fenv 里（驱动 dofile 时的「全局」定义）
-	local buildf = dev.env.build
+	-- 入口必须属于本器件；仅 helper/HAL 允许经 __index 共享，缺入口不能回落 _G。
+	local buildf = rawget(dev.env, "build")
 	if type(buildf) ~= "function" then
 		fail(-2, "devices[" .. dev.idx .. "] driver '" .. dev.driver .. "' has no global build()")
 		return
@@ -351,7 +348,7 @@ function daemon_tick()
 		if dev.vdev ~= nil and type(dev.vdev.virt_tick) == "function" then
 			pcall(function() dev.vdev:virt_tick(n) end)
 		end
-		local callf = dev.env.call
+		local callf = rawget(dev.env, "call")
 		local s = callf and callf(dev.params) or nil
 		local crc_bad = (type(s) == "table" and s.result == "OK" and s.CRC_OK == 0)
 		local ok_sample = (type(s) == "table" and s.result == "OK" and not crc_bad)
@@ -405,7 +402,7 @@ end
 -- 退出路径上的资源释放优先于传播一个无人接收的错误），最后关总线 fd。
 function daemon_cleanup()
 	for _, dev in ipairs(devs) do
-		local destroyf = dev.env.destroy
+		local destroyf = rawget(dev.env, "destroy")
 		if type(destroyf) == "function" then
 			local ok, err = pcall(destroyf, dev.params)
 			if not ok then

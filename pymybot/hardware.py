@@ -9,7 +9,7 @@ import time
 from contextlib import contextmanager
 from typing import Callable
 
-from .errors import BudgetExceeded, DriverError, ScriptError
+from .errors import BudgetExceeded, DriverError, DriverNotReady, ScriptError
 from .expr import Expression, expr_body, parse_number, render, select_member
 from .matrix import struct_json
 
@@ -58,7 +58,8 @@ def ensure_ok(result, context="driver"):
     if "result" in result and not isinstance(status, str):
         raise DriverError(f"{context}: result must be a string")
     if isinstance(status, str) and status.strip() == "ERR":
-        raise DriverError(f"{context}: {result.get('message', 'driver returned ERR')}")
+        error = DriverNotReady if result.get("code") == "NOT_READY" else DriverError
+        raise error(f"{context}: {result.get('message', 'driver returned ERR')}")
     if status is not None and status.strip() != "OK":
         raise DriverError(f"{context}: unknown result status {status!r}")
     return result
@@ -241,7 +242,7 @@ class Metadata:
             else:
                 self.static[column] = value
 
-    def collect(self, for_destroy=False):
+    def collect(self, for_destroy=False, *, for_build=False):
         with depth_guard("metadata"):
             result = self.static.copy()
             for column, expression in self.expressions:
@@ -259,10 +260,13 @@ class Metadata:
                     if target.kind == "vars":
                         result[column] = value
                     elif isinstance(value, dict):
-                        if not for_destroy or value.get("result") != "ERR":
-                            result.update(value)
+                        result.update(ensure_ok(value, f"read {target.name}"))
                     else:
                         raise ScriptError(f"'${target.name}' returned a scalar; only @Vars can fill a column")
+                except DriverNotReady:
+                    # Snapshot consumers can initialize before the first sample exists.
+                    if not for_build and not for_destroy:
+                        raise
                 except Exception:
                     if not for_destroy:
                         raise
@@ -285,7 +289,7 @@ class LuaVariable(Variable):
     def build(self):
         self.runtime = self.runtime_factory()
         self.runtime.load(self.path)
-        ensure_ok(self.runtime.call("build", self.metadata.collect()), f"build {self.name}")
+        ensure_ok(self.runtime.call("build", self.metadata.collect(for_build=True)), f"build {self.name}")
 
     def play(self, params):
         if self.runtime is None:

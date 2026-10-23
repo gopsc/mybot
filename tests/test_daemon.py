@@ -1,3 +1,4 @@
+import math
 import threading
 import time
 from pathlib import Path
@@ -419,3 +420,214 @@ def test_unmodified_runtime_embedded_model_integration(synthetic_modules):
         hal.close()
     assert daemon._done.is_set() and not daemon._thread.is_alive()
     assert not hal._handles and not hal._buses
+
+
+@pytest.fixture
+def multi_runtime(lua_factory, monkeypatch):
+    """Run the real multi chunk synchronously; any non-virtual I/O fails the test."""
+    from pymybot.hal import HALManager
+
+    def no_hardware(self, operation, *args):
+        assert operation == "sleep_ms", f"Unexpected physical HAL operation: {operation}"
+        return 0  # Virtual models do not need wall-clock sleeps.
+
+    monkeypatch.setattr(HALManager, "call", no_hardware)
+    states = []
+
+    def make(devices):
+        daemon = lua_factory("manual", {"chunk": "lib/sensor_daemon_multi.lua",
+                                        "proto": "virt", "devices": devices}, Registry())
+        state = daemon.runtime_factory(daemon=daemon)
+        states.append(state)
+        state.lua.execute('''
+            dofile(__mpath.resolve("lib/HAL.lua"))
+            -- Observe loaded chunks without wrapping their execution or copying entries.
+            driver_chunks = {}
+            local load = loadfile
+            loadfile = function(path)
+                local f, message = load(path)
+                if f then driver_chunks[#driver_chunks + 1] = f end
+                return f, message
+            end
+        ''')
+        state.load(MODULES / "lib/sensor_daemon_multi.lua")
+        return daemon, state
+
+    yield make
+    for state in states:
+        try:
+            # Some tests inspect teardown themselves; do not destroy twice after restore().
+            if state.has_function("daemon_cleanup") and state.globals["__BOT4CJ_VIRTBUS"]._injected:
+                state.call("daemon_cleanup")
+            assert state.lua.eval("__BOT4CJ_VIRTBUS.fd_count()") == 0
+            assert not state.globals["__BOT4CJ_VIRTBUS"]._injected
+            assert not state.hal._handles and not state.hal._buses
+        finally:
+            state.close()
+
+
+def assert_multi_environments(state):
+    state.lua.execute('''
+        assert(#driver_chunks == 2)
+        local a, b = getfenv(driver_chunks[1]), getfenv(driver_chunks[2])
+        assert(a ~= b and a ~= _G and b ~= _G)
+        for _, name in ipairs({"build", "call", "destroy"}) do
+            assert(type(rawget(a, name)) == "function", name .. " missing from first instance")
+            assert(type(rawget(b, name)) == "function", name .. " missing from second instance")
+            assert(a[name] ~= b[name], name .. " shared between instances")
+            assert(rawget(_G, name) == nil, name .. " leaked into shared globals")
+        end
+        for _, name in ipairs({"require_driver", "arg_table", "err", "i2c_pair",
+                              "num_or", "virt_prepare", "i2c_set_addr", "i2c_write_multi"}) do
+            assert(rawget(a, name) == nil and rawget(b, name) == nil)
+            assert(a[name] == _G[name] and b[name] == _G[name], name .. " must stay shared")
+        end
+        assert(getfenv(a.i2c_pair) == _G)
+        assert(a.__BOT4CJ_HAL == b.__BOT4CJ_HAL)
+        assert(a.__BOT4CJ_VIRTBUS == b.__BOT4CJ_VIRTBUS)
+        assert(a.i2c_write_multi == __BOT4CJ_VIRTBUS.v_i2c_write_multi)
+        assert(__BOT4CJ_VIRTBUS.bus_contract == __BOT4CJ_BUS_CONTRACT)
+        assert(__BOT4CJ_VIRTBUS.fd_count() == 1)
+    ''')
+
+
+@pytest.mark.parametrize("reverse", [False, True], ids=["bh1750-first", "ads1115-first"])
+def test_multi_real_heterogeneous_driver_isolation(multi_runtime, reverse):
+    specs = ["BH1750@0x23@LUX:f", "ADS1115@0x48@voltage:f"]
+    if reverse:
+        specs.reverse()
+    daemon, state = multi_runtime("|".join(specs))  # Deliberately leave path at its default.
+    assert daemon.slot.snapshot()["status"] == 0
+    assert_multi_environments(state)
+    state.lua.execute('''
+        local light = __BOT4CJ_VIRTBUS.devs[0x23].model
+        local adc = __BOT4CJ_VIRTBUS.devs[0x48].model
+        assert(light.state.power and light.state.mode == "H")
+        assert(#light.cmds == 2 and light.cmds[1] == 1 and light.cmds[2] == 0x10)
+        assert(#adc:config_writes() == 1 and adc:config_shadow() == 0x4583)
+        local opened = __BOT4CJ_VIRTBUS.txlog[1]
+        assert(opened.dir == "open" and opened.bytes.raw == "/dev/i2c-1")
+    ''')
+    phase = 2 * math.pi / 32
+    lux = math.floor(15002 + 3000 * math.sin(int(reverse) * phase) + 0.5) / 1.2
+    volts = 1.65 + 0.25 * math.sin(int(not reverse) * phase)
+    volts = math.floor(volts * 32768 / 2.048 + 0.5) * 2.048 / 32768
+    expected = [volts, lux] if reverse else [lux, volts]
+    for count in (1, 2, 3):
+        state.call("daemon_tick")
+        sample = daemon.slot.snapshot()
+        assert sample["status"] == 0 and sample["count"] == count and sample["nvals"] == 2
+        assert sample["values"] == pytest.approx(expected)
+    state.call("daemon_cleanup")
+    state.lua.execute('''
+        local light = __BOT4CJ_VIRTBUS.devs[0x23].model
+        local adc = __BOT4CJ_VIRTBUS.devs[0x48].model
+        assert(not light.state.power and light.cmds[#light.cmds] == 0)
+        assert(#adc:config_writes() == 5 and adc:start_count() == 3)
+        assert(adc:config_shadow() == 0x4583)
+    ''')
+
+
+@pytest.mark.parametrize("first,second", [(('H', 69, 1), ('H2', 138, 0.5)),
+                                          (('L', 31, 4), ('H', 69, 1))])
+def test_multi_same_driver_configuration_isolation(multi_runtime, first, second):
+    specs = [f"BH1750@{addr}@LUX:f@mode={mode}@mtreg={mtreg}"
+             for addr, (mode, mtreg, _) in zip(("0x23", "0x5C"), (first, second))]
+    daemon, state = multi_runtime("|".join(specs))
+    assert daemon.slot.snapshot()["status"] == 0
+    expected = [math.floor(15002 + 3000 * math.sin(i * 2 * math.pi / 32) + 0.5)
+                * lsb * 69 / (1.2 * mtreg)
+                for i, (_, mtreg, lsb) in enumerate((first, second))]
+    for count in (1, 2):
+        state.call("daemon_tick")
+        assert daemon.slot.snapshot()["count"] == count
+        assert daemon.slot.snapshot()["values"] == pytest.approx(expected)
+    assert_multi_environments(state)
+    # Rebuilding only the first instance must not replace the second's local configuration.
+    state.lua.execute('''
+        local a, b = getfenv(driver_chunks[1]), getfenv(driver_chunks[2])
+        local fd = i2c_open("/dev/i2c-1")
+        local pa, pb = {fd=fd, address=0x23, mode="H2", mtreg=69}, {fd=fd, address=0x5C}
+        local light = __BOT4CJ_VIRTBUS.devs[0x23].model
+        local other = __BOT4CJ_VIRTBUS.devs[0x5C].model
+        local before = assert(b.call(pb).LUX)
+        assert(a.build(pa).result == "OK")
+        assert(a.call(pa).LUX == light.count / 2.4)
+        assert(b.call(pb).LUX == before)
+        assert(a.destroy(pa).result == "OK")
+        assert(not light.state.power and other.state.power)
+        assert(b.call(pb).LUX == before)
+        assert(b.destroy(pb).result == "OK")
+        assert(not other.state.power)
+        i2c_close(fd)
+    ''')
+
+
+@pytest.mark.parametrize("explicit_state", [False, True], ids=["default-state", "spec-state"])
+def test_require_driver_instance_entry_and_state_isolation(lua_factory, explicit_state):
+    daemon = lua_factory("contract", {"chunk": "lib/daemon_probe.lua"}, Registry())
+    state = daemon.runtime_factory(daemon=daemon)
+    try:
+        state.globals["explicit_state"] = explicit_state
+        state.lua.execute('''
+            dofile(__mpath.resolve("lib/drv_common.lua"))
+            local source = [[
+                local spec = {
+                    name = "state-probe",
+                    state = explicit_state and {} or nil,
+                    build = function(ctx, data)
+                        ctx.state.tag = data.tag
+                        ctx.state.calls = 0
+                        ctx.state.destroyed = false
+                        return {result="OK", state=ctx.state}
+                    end,
+                    call = function(ctx, data)
+                        ctx.state.calls = ctx.state.calls + 1
+                        return {result="OK", state=ctx.state}
+                    end,
+                    destroy = function(ctx, data)
+                        ctx.state.destroyed = true
+                        return {result="OK", state=ctx.state}
+                    end,
+                }
+                assert(require_driver("i2c", spec) == spec)
+                declared_state = spec.state
+            ]]
+            local function load_instance()
+                local env = setmetatable({}, {__index=_G})
+                local chunk = assert(loadstring(source))
+                setfenv(chunk, env)
+                chunk()
+                return env
+            end
+            local a, b = load_instance(), load_instance()
+            local vbus = __BOT4CJ_VIRTBUS
+            vbus.attach("first", 0x31, {})
+            vbus.attach("second", 0x32, {})
+            vbus.inject()
+            local fd = i2c_open("/dev/i2c-1")
+            local pa, pb = {fd=fd, address=0x31, tag=11}, {fd=fd, address=0x32, tag=29}
+            local sa, sb = a.build(pa).state, b.build(pb).state
+            assert(sa ~= sb, "driver state shared between instances")
+            assert(sa.tag == 11 and sb.tag == 29)
+            if explicit_state then
+                assert(sa == a.declared_state and sb == b.declared_state)
+            end
+            for _, name in ipairs({"build", "call", "destroy"}) do
+                assert(type(rawget(a, name)) == "function")
+                assert(type(rawget(b, name)) == "function" and a[name] ~= b[name])
+                assert(rawget(_G, name) == nil)
+                assert(a[name]("invalid").result == "ERR")
+            end
+            assert(a.call(pa).state == sa and a.call(pa).state == sa)
+            assert(b.call(pb).state == sb and sa.calls == 2 and sb.calls == 1)
+            assert(a.destroy(pa).state == sa and sa.destroyed and not sb.destroyed)
+            assert(b.call(pb).state == sb and sb.calls == 2)
+            assert(a.build(pa).state == sa and not sa.destroyed and sa.calls == 0)
+            assert(sb.calls == 2 and sb.tag == 29)
+            assert(b.destroy(pb).state == sb and sb.destroyed and not sa.destroyed)
+            i2c_close(fd)
+            vbus.restore()
+        ''')
+    finally:
+        state.close()

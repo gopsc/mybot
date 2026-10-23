@@ -10,6 +10,10 @@ class DriverError(ControllerError):
     pass
 
 
+class DriverNotReady(DriverError):
+    pass
+
+
 class BudgetExceeded(ControllerError):
     pass
 

@@ -101,7 +101,6 @@ require_driver("i2c", {
     end,
     destroy=cleanup,
 })
-build, call, destroy = _G.build, _G.call, _G.destroy
 '''
 
 SPI_DRIVER = '''
@@ -140,7 +139,6 @@ require_driver("spi", {
     end,
     destroy=cleanup,
 })
-build, call, destroy = _G.build, _G.call, _G.destroy
 '''
 
 UART_DRIVER = '''
@@ -179,7 +177,6 @@ require_driver("uart", {
     end,
     destroy=cleanup,
 })
-build, call, destroy = _G.build, _G.call, _G.destroy
 '''
 
 

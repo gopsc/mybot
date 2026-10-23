@@ -1,9 +1,11 @@
+import copy
 from pathlib import Path
+import threading
 import time
 
 import pytest
 
-from pymybot.errors import ControllerError, DriverError, ScriptError
+from pymybot.errors import BudgetExceeded, ControllerError, DriverError, ScriptError
 from pymybot.robot import Robot
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,12 +102,235 @@ def test_hot_insert_rollback_update_delete_and_query(modules):
         assert not robot.tables
 
 
+@pytest.mark.parametrize("same_table", [False, True])
+def test_hot_temporary_duplicate_does_not_rebuild_original(same_table):
+    sql = ("CREATE TABLE Vars(name String,value Number); INSERT INTO Vars(name,value) VALUES('n',1);"
+           "CREATE TABLE Alias(name String,alias String);")
+    mutation = ("INSERT INTO Vars(name,value) VALUES('n',2); DELETE FROM Vars WHERE value=2;"
+                if same_table else "INSERT INTO Alias(name,alias) VALUES('n','temporary'); DELETE FROM Alias;")
+    with Robot(sql) as robot:
+        previous = robot.registry["n"]
+        tables = copy.deepcopy(robot.tables)
+        robot.apply_sql(mutation)
+        assert robot.registry["n"] is previous
+        assert robot.tables == tables
+
+
+@pytest.mark.parametrize("cancel_after", ["a", "b"])
+def test_hot_cancelled_deletion_preserves_dependency_validity(cancel_after):
+    sql = ("CREATE TABLE Vars(name String,value Number);"
+           "INSERT INTO Vars(name,value) VALUES('a','$(b+1)');"
+           "INSERT INTO Vars(name,value) VALUES('b',1);")
+    with Robot(sql) as robot:
+        assert robot.registry.resolve_number("a") == 2
+        cancel = threading.Event()
+        robot.registry[cancel_after].destroy = cancel.set
+        with pytest.raises(BudgetExceeded):
+            robot.apply_sql("DELETE FROM Vars;", cancel=cancel)
+        if cancel_after == "a":
+            assert list(robot.registry) == ["b"]
+            assert robot.registry.resolve_number("b") == 1
+        else:
+            assert not robot.registry
+        assert set(robot._rows(robot.tables)) == set(robot.registry)
+
+
+def test_hot_cancelled_cyclic_deletion_finishes_cleanup_group():
+    sql = ("CREATE TABLE Vars(name String,value Number);"
+           "INSERT INTO Vars(name,value) VALUES('a','$(b+1)');"
+           "INSERT INTO Vars(name,value) VALUES('b','$(a+1)');")
+    with Robot(sql) as robot:
+        cancel = threading.Event()
+        robot.registry["b"].destroy = cancel.set
+        with pytest.raises(BudgetExceeded):
+            robot.apply_sql("DELETE FROM Vars;", cancel=cancel)
+        assert not robot.registry and not robot.tables["Vars"].data
+
+
+@pytest.mark.parametrize("kind", ["UPDATE Probe SET fail='no'", "DELETE FROM Probe"])
+def test_hot_sql_rejects_invalid_where_before_changing_devices(modules, kind):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        previous = robot.registry["dev"]
+        with pytest.raises(ScriptError, match="no such column"):
+            robot.apply_sql(f"{kind} WHERE missing='value';")
+        assert robot.registry["dev"] is previous and previous.runtime is not None
+
+
+@pytest.mark.parametrize("module,parameter", [("Ema", "in"), ("Kalman", "in"), ("Monitor", "v0")])
+def test_snapshot_chain_can_build_without_samples_but_cannot_execute(module, parameter):
+    sql = ("CREATE TABLE Monitor(name String,src String);"
+           "INSERT INTO Monitor(name,src) VALUES('filter','-');" if module == "Monitor" else
+           f"CREATE TABLE {module}(name String); INSERT INTO {module}(name) VALUES('filter');"
+           "CREATE TABLE Monitor(name String,src String);")
+    sql += ("INSERT INTO Monitor(name,src) VALUES('consumer','$filter');"
+            "INSERT INTO Monitor(name,src) VALUES('downstream','$consumer');")
+    with Robot(sql) as robot:
+        with pytest.raises(DriverError, match="no sample yet"):
+            robot.run("@Action\ndownstream.tick;\n1;\n@")
+        outputs = robot.run(f"@Action\nfilter.{parameter};\n5;\n@\n"
+                            "@Action\nconsumer.tick;\n1;\n@\n@Action\ndownstream.tick;\n1;\n@")
+        assert outputs[-1]["out"] == outputs[0]["v0"]
+        assert outputs[-1]["result"] == "OK"
+
+
 def test_hot_sql_transient_action_executes_and_clears():
     with Robot("CREATE TABLE Timer(name String); INSERT INTO Timer(name) VALUES('t0');") as robot:
         result = robot.apply_sql("CREATE TABLE Action(t0.delay Number); INSERT INTO Action(t0.delay) VALUES(1);")
         assert "已生效" in result
         assert robot.tables["Action"].data == []
         assert list(robot.registry) == ["t0"]
+
+
+@pytest.mark.parametrize("value", ["1", "2"])
+def test_hot_same_name_scalar_replacement_rebuilds(value):
+    sql = "CREATE TABLE Vars(name String,value Number); INSERT INTO Vars(name,value) VALUES('n',1);"
+    with Robot(sql) as robot:
+        previous = robot.registry["n"]
+        receipt = robot.apply_sql(f"DELETE FROM Vars; INSERT INTO Vars(name,value) VALUES('n',{value});")
+        assert robot.registry["n"] is not previous
+        assert robot.registry.resolve_number("n") == float(value)
+        assert robot.query_sql("SELECT * FROM Vars;").splitlines()[-1] == f"n\t{value}"
+        assert "热更新 1 行" in receipt
+
+
+def test_hot_same_name_driver_replacement_preserves_inherited_survivor(modules):
+    sql = ("CREATE TABLE Probe(name String,value String);"
+           "INSERT INTO Probe(name,value) VALUES('first',10);"
+           "INSERT INTO Probe(name,value) VALUES('second','-');")
+    with Robot(sql, module_paths=modules) as robot:
+        first, second = robot.registry["first"], robot.registry["second"]
+        robot.run("@Action\nfirst.tick second.tick;\n1 1;\n@")
+        robot.apply_sql("DELETE FROM Probe WHERE name='first';"
+                        "INSERT INTO Probe(name,value) VALUES('first',20);")
+        assert first.runtime is None
+        assert robot.registry["first"] is not first
+        assert robot.registry["second"] is second
+        output = robot.run("@Action\nfirst.tick second.tick;\n1 1;\n@")
+        assert [(item["value"], item["count"]) for item in output] == [("20", 1), ("10", 2)]
+
+
+def test_hot_same_name_replacement_can_change_driver_type(modules):
+    sql = probe_sql("CREATE TABLE dummy(name String);")
+    with Robot(sql, module_paths=modules) as robot:
+        previous = robot.registry["dev"]
+        robot.apply_sql("DELETE FROM Probe; INSERT INTO dummy(name) VALUES('dev');")
+        assert previous.runtime is None
+        assert robot.registry["dev"].path.name == "dummy.lua"
+        assert robot.run("@Action\ndev.echo;\n7;\n@")[0]["echo"] == 7
+
+
+def test_hot_same_name_failed_replacement_does_not_restore_old_device(modules):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        previous = robot.registry["dev"]
+        with pytest.raises(DriverError, match="remain deactivated"):
+            robot.apply_sql("DELETE FROM Probe; INSERT INTO Probe(name,fail) VALUES('dev','yes');")
+        assert previous.runtime is None
+        assert "dev" not in robot.registry
+        assert not robot.tables["Probe"].data
+
+
+def test_hot_same_name_replacement_rejects_surviving_references(modules):
+    sql = probe_sql("CREATE TABLE Relay(name String,controller String);"
+                    "INSERT INTO Relay(name,controller) VALUES('relay','dev');")
+    with Robot(sql, module_paths=modules) as robot:
+        previous = robot.registry["dev"]
+        with pytest.raises(ScriptError, match="still referenced"):
+            robot.apply_sql("DELETE FROM Probe; INSERT INTO Probe(name,fail) VALUES('dev','no');")
+        assert robot.registry["dev"] is previous and previous.runtime is not None
+
+
+@pytest.mark.parametrize("mutation", [
+    "DELETE FROM Probe;",
+    "DROP TABLE Probe;",
+    "UPDATE Probe SET fail='no' WHERE name='dev';",
+    "DELETE FROM Probe; INSERT INTO Probe(name,fail) VALUES('dev','no');",
+    "INSERT INTO Probe(name,fail) VALUES('second','no');",
+])
+@pytest.mark.parametrize("robot_stop", [False, True])
+def test_hot_sql_precancelled_has_no_side_effects(modules, monkeypatch, mutation, robot_stop):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        previous = robot.registry["dev"]
+        tables = copy.deepcopy(robot.tables)
+        cancel = robot.stop_event if robot_stop else threading.Event()
+        cancel.set()
+        with monkeypatch.context() as patch:
+            patch.setattr(previous, "destroy", lambda: pytest.fail("Cancelled SQL destroyed a device"))
+            patch.setattr(robot, "_assemble", lambda *args: pytest.fail("Cancelled SQL assembled variables"))
+            with pytest.raises(BudgetExceeded):
+                robot.apply_sql(mutation, cancel=None if robot_stop else cancel)
+        assert robot.tables == tables
+        assert list(robot.registry) == ["dev"] and robot.registry["dev"] is previous
+        cancel.clear()
+
+
+def test_hot_sql_cancelled_after_validation_has_no_side_effects(modules, monkeypatch):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        cancel = threading.Event()
+        previous = robot.registry["dev"]
+        validate = robot._validate
+        def cancel_after_validation(tables):
+            rows = validate(tables)
+            cancel.set()
+            return rows
+        monkeypatch.setattr(robot, "_validate", cancel_after_validation)
+        with pytest.raises(BudgetExceeded):
+            robot.apply_sql("DELETE FROM Probe;", cancel=cancel)
+        assert robot.registry["dev"] is previous and previous.runtime is not None
+        assert robot.tables["Probe"].data == [["dev", "no"]]
+
+
+def test_hot_sql_cancellation_stops_further_deletions(modules):
+    sql = probe_sql("INSERT INTO Probe(name,fail) VALUES('second','no');")
+    with Robot(sql, module_paths=modules) as robot:
+        cancel = threading.Event()
+        second = robot.registry["second"]
+        destroy = second.destroy
+        def cancel_after_destroy():
+            destroy()
+            cancel.set()
+        second.destroy = cancel_after_destroy
+        with pytest.raises(BudgetExceeded):
+            robot.apply_sql("DELETE FROM Probe;", cancel=cancel)
+        assert list(robot.registry) == ["dev"]
+        assert robot.tables["Probe"].data == [["dev", "no"]]
+        assert second.runtime is None
+
+
+@pytest.mark.parametrize("result", [{"result": "ERR", "message": "source failed"}, {},
+                                     {"result": "UNKNOWN"}, {"result": 1}])
+def test_metadata_read_failure_blocks_downstream_and_allows_cleanup(modules, monkeypatch, result):
+    sql = (probe_sql() + "CREATE TABLE Relay(name String,src String);"
+           "INSERT INTO Relay(name,src) VALUES('relay','$dev');")
+    with Robot(sql, module_paths=modules) as robot:
+        source, downstream = robot.registry["dev"], robot.registry["relay"]
+        monkeypatch.setattr(source, "read", lambda: result)
+        def forbidden(*args, **kwargs):
+            pytest.fail("Downstream driver executed after metadata read failure")
+        with monkeypatch.context() as patch:
+            patch.setattr(downstream.runtime, "call", forbidden)
+            with pytest.raises(DriverError):
+                downstream.play({"test": 7})
+        assert downstream.metadata.collect(for_destroy=True) == downstream.metadata.static
+        downstream.destroy()
+        assert downstream.runtime is None
+
+
+def test_metadata_read_failure_blocks_activation_before_downstream_build(monkeypatch):
+    from pymybot.runtime import LuaState
+
+    sql = ("CREATE TABLE Timer(name String); INSERT INTO Timer(name) VALUES('src');"
+           "CREATE TABLE dummy(name String,src String); INSERT INTO dummy(name,src) VALUES('dev','$src');")
+    calls = []
+    original = LuaState.call
+    def record(self, name, data=None, **kwargs):
+        calls.append((name, dict(data or {})))
+        return original(self, name, data, **kwargs)
+    monkeypatch.setattr(LuaState, "call", record)
+    robot = Robot(sql)
+    with pytest.raises(DriverError, match="delay"):
+        robot.active()
+    assert len([name for name, _ in calls if name == "build"]) == 1
+    assert robot.state == "Inactive"
 
 
 def test_update_failure_does_not_restore_powered_down_variable(modules):

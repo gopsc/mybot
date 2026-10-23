@@ -116,6 +116,11 @@ class Server:
         self.robot = None
         self.session = None
         self.robot_op = None
+        # Ownership includes initialization and cleanup, not just published objects.
+        self.owner = None
+        self.robot_idle = asyncio.Event()
+        self.robot_idle.set()
+        self.deactivating = None
         self.requests = {}
         self.tasks = set()
         self.client_calls = {}
@@ -227,18 +232,52 @@ class Server:
         finally:
             self.requests.pop(ident, None)
 
+    # -- ownership --------------------------------------------------------
+    async def finish(self, future, cancel=None):
+        """Cancellation must not abandon initialization or owner cleanup."""
+        cancelled = False
+        while True:
+            try:
+                result = await asyncio.shield(future)
+                break
+            except asyncio.CancelledError:
+                if future.cancelled():
+                    raise
+                cancelled = True
+                if cancel is not None:
+                    cancel()
+        if cancelled:
+            raise asyncio.CancelledError
+        return result
+
+    def require_owner(self, owner):
+        if self.closing:
+            raise RpcError(BUSY, "Server is shutting down")
+        if self.owner is not None and self.owner != owner:
+            if self.owner == "agent":
+                raise RpcError(WRONG_STATE, "An agent conversation owns the robot; call agent.reset first")
+            raise RpcError(WRONG_STATE, "A robot session owns the robot; deactivate it before using the agent")
+
     # -- session robot ----------------------------------------------------
     async def on_worker(self, fn, *args):
-        return await asyncio.get_running_loop().run_in_executor(self.worker, fn, *args)
+        future = asyncio.get_running_loop().run_in_executor(self.worker, fn, *args)
+        operation = self.robot_op
+        await_cancel = (lambda: self.cancel({"id": operation[0]})) if operation else None
+        return await self.finish(future, await_cancel)
 
     def claim(self, ident, method):
+        self.require_owner("session")
+        if self.deactivating is not None:
+            raise RpcError(BUSY, "Session is deactivating")
         if self.robot_op is not None:
             raise RpcError(BUSY, f"Session is busy with '{self.robot_op[1]}'")
         self.robot_op = (ident, method)
+        self.robot_idle.clear()
 
     def release(self, ident):
         if self.robot_op and self.robot_op[0] == ident:
             self.robot_op = None
+            self.robot_idle.set()
 
     def require_session(self):
         if self.robot is None:
@@ -262,11 +301,13 @@ class Server:
         module_paths = params.strings("modulePaths") or None
         camera = params.text("cameraSrcDir")
         allow_hardware = params.flag("allowHardware")
+        self.require_owner("session")
+        if self.deactivating is not None:
+            raise RpcError(BUSY, "Session is deactivating")
         if self.robot is not None:
             raise RpcError(WRONG_STATE, "Session already active; deactivate it first")
-        if self.agent is not None:
-            raise RpcError(WRONG_STATE, "An agent conversation owns the robot; call agent.reset first")
         self.claim(ident, "session.activate")
+        self.owner = "session"
         holder = {}
         self.requests[ident]["hooks"].append(lambda: holder.get("robot") and holder["robot"].stop_event.set())
 
@@ -288,12 +329,18 @@ class Server:
         try:
             robot, hardware = await self.on_worker(activate)
             if cancel.is_set():
-                await self.on_worker(robot.deactivate)
                 raise BudgetExceeded("Stop requested; activation rolled back")
+            self.robot = robot
+            self.session = {"robot": robot.structure_path, "allowHardware": allow_hardware, "since": time.time()}
+        except BaseException:
+            # The owner thread must also clean partially completed activation.
+            if "robot" in holder:
+                await self.on_worker(holder["robot"].deactivate)
+            raise
         finally:
             self.release(ident)
-        self.robot = robot
-        self.session = {"robot": robot.structure_path, "allowHardware": allow_hardware, "since": time.time()}
+            if self.robot is None and self.deactivating is None:
+                self.owner = None
         self.notify("session", self.status())
         return {**self.status(), "hardware": hardware}
 
@@ -302,17 +349,40 @@ class Server:
         return self.status()
 
     async def deactivate(self):
-        if self.robot_op is not None:
-            self.cancel({"id": self.robot_op[0]})
-        robot = self.robot
-        if robot is None:
-            return
-        self.robot = None
-        self.session = None
+        cancelled = False
+        while self.owner == "session":
+            if self.deactivating is None or self.deactivating.cancelled():
+                self.deactivating = asyncio.create_task(self._deactivate())
+            try:
+                await self.finish(self.deactivating)
+                break
+            except asyncio.CancelledError:
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _deactivate(self):
+        cancelled = False
         try:
-            await self.on_worker(robot.deactivate)
+            if self.robot_op is not None:
+                self.cancel({"id": self.robot_op[0]})
+            # Loop-wide cancellation can target this cleanup task directly.
+            while True:
+                try:
+                    await self.robot_idle.wait()
+                    break
+                except asyncio.CancelledError:
+                    cancelled = True
+            if self.robot is not None:
+                await self.on_worker(self.robot.deactivate)
         finally:
+            self.robot = None
+            self.session = None
+            self.owner = None
+            self.deactivating = None
             self.notify("session", self.status())
+        if cancelled:
+            raise asyncio.CancelledError
 
     async def m_run(self, ident, params, cancel):
         source = params.text("input", required=True)
@@ -410,36 +480,46 @@ class Server:
             "timeout": params.seconds("timeout", 180), "maxRequests": params.integer("maxRequests", 1, 100, 8),
             "maxToolCalls": params.integer("maxToolCalls", 1, 1000, 16),
         }
-        if self.robot is not None:
-            raise RpcError(WRONG_STATE, "A robot session is active; deactivate it before using the agent")
+        self.require_owner("agent")
         if self.agent_lock.locked():
             raise RpcError(BUSY, "Another agent turn is running")
         async with self.agent_lock:
-            if self.agent is not None and self.agent_key != key:
-                await self.close_agent()
-            if self.agent is None:
-                self.agent = await self.open_agent(key)
-                self.agent_key = key
-                self.notify("session", self.status())
-            session = self.agent["session"]
-            session.on_event = lambda event: self.notify("agent.event", {"id": ident, "event": event})
-            self.requests[ident]["hooks"].append(session.executor.cancel)
-            if cancel.is_set():
-                session.executor.cancel()
-            mark = len(session.events)
+            self.owner = "agent"
             try:
-                result = await session.ask(task)
-            except BaseException as exc:
-                from .agent import AgentError, describe_failure, request_endpoint
-                events = session.events[mark:]
-                endpoint = request_endpoint(self.agent["client"])
+                if self.agent is not None and self.agent_key != key:
+                    await self.close_agent()
+                if self.agent is None:
+                    async def open_conversation():
+                        self.agent = await self.open_agent(key)
+                        self.agent_key = key
+                    # Cancellation must not orphan resources created during initialization.
+                    await self.finish(asyncio.create_task(open_conversation()),
+                                      lambda: self.cancel({"id": ident}))
+                    self.notify("session", self.status())
+                session = self.agent["session"]
+                session.on_event = lambda event: self.notify("agent.event", {"id": ident, "event": event})
+                self.requests[ident]["hooks"].append(session.executor.cancel)
+                if cancel.is_set():
+                    session.executor.cancel()
+                mark = len(session.events)
+                try:
+                    result = await session.ask(task)
+                except BaseException as exc:
+                    from .agent import AgentError, describe_failure, request_endpoint
+                    events = session.events[mark:]
+                    endpoint = request_endpoint(self.agent["client"])
+                    if not isinstance(exc, (AgentError, AgentInterrupted, asyncio.CancelledError)):
+                        exc = AgentError(f"Agent failed ({describe_failure(exc, endpoint)}); check configuration or tool receipts. "
+                                         "Already dispatched actions are not rolled back or automatically retried")
+                    exc.tool_events = events
+                    raise exc from None
+                return {**result, "tool_events": session.events[mark:]}
+            except BaseException:
                 await self.close_agent()
-                if not isinstance(exc, (AgentError, AgentInterrupted, asyncio.CancelledError)):
-                    exc = AgentError(f"Agent failed ({describe_failure(exc, endpoint)}); check configuration or tool receipts. "
-                                     "Already dispatched actions are not rolled back or automatically retried")
-                exc.tool_events = events
-                raise exc from None
-            return {**result, "tool_events": session.events[mark:]}
+                raise
+            finally:
+                if self.agent is None:
+                    self.owner = None
 
     async def open_agent(self, key):
         from .agent import AgentConfig, AgentConfigurationError, AgentSession, create_model
@@ -451,41 +531,66 @@ class Server:
                              request_limit=key["maxRequests"], tool_calls_limit=key["maxToolCalls"],
                              allow_actions=key["allowActions"])
         model, client = create_model(config)
+        executor = None
         try:
             skills = SkillsLibrary(key["skillsDir"] or default_skills_root(), required=key["skillsDir"] is not None)
             executor = RobotExecutor(key["robot"], module_paths=key["modulePaths"] or None,
                                      camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"],
                                      allow_hardware=key["allowHardware"], read_vars=key["readVars"],
                                      camera_vars=key["cameraVars"], skills=skills)
+
+            async def confirm(name, arguments):
+                reply = await self.ask_client("confirm", {"tool": name, "arguments": arguments})
+                return isinstance(reply, dict) and reply.get("approved") is True
+
+            session = AgentSession(executor, model, config, confirm=confirm, read_vars=key["readVars"],
+                                   camera_vars=key["cameraVars"], skills=skills)
+            return {"session": session, "client": client}
         except BaseException as exc:
-            await client.close()
+            try:
+                if executor is not None:
+                    await executor.close()
+            finally:
+                await client.close()
             if isinstance(exc, SecurityError):
                 raise AgentConfigurationError(f"Cannot load skills configuration: {exc}; no model request was sent") from None
             raise
 
-        async def confirm(name, arguments):
-            reply = await self.ask_client("confirm", {"tool": name, "arguments": arguments})
-            return isinstance(reply, dict) and reply.get("approved") is True
-
-        session = AgentSession(executor, model, config, confirm=confirm, read_vars=key["readVars"],
-                               camera_vars=key["cameraVars"], skills=skills)
-        return {"session": session, "client": client}
-
     async def close_agent(self):
-        agent, self.agent, self.agent_key = self.agent, None, None
+        # Retain ownership until both resources finish closing.
+        agent = self.agent
         if agent is None:
             return
-        for resource in (agent["session"], agent["client"]):
+
+        async def close():
             try:
-                await resource.close()
-            except BaseException as exc:
-                print(f"pymybot serve: agent cleanup: {type(exc).__name__}", file=sys.stderr)
-        self.notify("session", self.status())
+                for resource in (agent["session"], agent["client"]):
+                    try:
+                        await resource.close()
+                    except BaseException as exc:
+                        print(f"pymybot serve: agent cleanup: {type(exc).__name__}", file=sys.stderr)
+            finally:
+                self.agent = self.agent_key = None
+                self.notify("session", self.status())
+        cancelled = False
+        while self.agent is agent:
+            try:
+                await self.finish(asyncio.create_task(close()))
+                break
+            except asyncio.CancelledError:
+                cancelled = True
+        if cancelled:
+            raise asyncio.CancelledError
 
     async def m_agent_reset(self, ident, params, cancel):
         if self.agent_lock.locked():
             raise RpcError(BUSY, "Cancel the running agent turn first")
-        await self.close_agent()
+        async with self.agent_lock:
+            try:
+                await self.close_agent()
+            finally:
+                if self.owner == "agent":
+                    self.owner = None
         return self.status()
 
     async def m_shutdown(self, ident, params, cancel):
@@ -506,8 +611,15 @@ class Server:
         try:
             await self.deactivate()
         finally:
-            await self.close_agent()
-            self.worker.shutdown(wait=True)
+            try:
+                async with self.agent_lock:
+                    try:
+                        await self.close_agent()
+                    finally:
+                        if self.owner == "agent":
+                            self.owner = None
+            finally:
+                await asyncio.to_thread(self.worker.shutdown, wait=True)
 
 
 def _reader(stream, queue, loop):

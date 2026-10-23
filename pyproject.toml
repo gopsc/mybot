@@ -20,7 +20,10 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8,<10"]
 camera = ["av>=19,<20"]
-agent = ["pydantic-ai-slim[openai,anthropic]==2.57.0"]
+agent = [
+  "pydantic-ai-slim[openai,anthropic]==2.57.0",
+  "anthropic>=1.12.1,<2", # 2.x replaces the constructible BetaMessageParam expected by PydanticAI 2.57.
+]
 linux = ["smbus2>=0.5; sys_platform == 'linux'", "spidev>=3.6; sys_platform == 'linux'"]
 
 [project.scripts]
