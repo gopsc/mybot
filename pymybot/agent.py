@@ -123,7 +123,10 @@ def create_model(config):
     # with retries disabled the next request then fails with RemoteProtocolError; reconnect instead.
     no_keepalive = None
     if custom_url:
-        import httpx
+        try:
+            import httpx
+        except ImportError:  # openai 3.x / pydantic-ai generations ship httpx2 instead
+            import httpx2 as httpx
         no_keepalive = httpx.Limits(max_connections=100, max_keepalive_connections=0)
     if provider == "anthropic":
         from anthropic import AsyncAnthropic, DefaultAsyncHttpxClient
