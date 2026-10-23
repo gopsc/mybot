@@ -153,6 +153,25 @@ end
 function http_request(fd, method, path, headers, body)
     return bridge("http_request", tonumber(fd), method, path, headers, body)
 end
+-- 宿主进程执行会话：open 仅登记默认超时（不拉起进程），实际执行在 shell_run，
+-- 进程逐次创建、随调用结束击杀。该能力属宿主世界访问，由宿主 runtime 门统一
+-- 要求 --allow-hardware（与物理设备/非回环 HTTP 同门，Lua 侧不重复判定）。
+-- shell_run 返回 {result, code, out, err, truncated}——非零退出码仍是
+-- result="OK" 的正常完成（code 携带退出码），仅启动失败/超时/取消为 ERR。
+function shell_open(timeout_ms)
+    timeout_ms = bus.finite_of(timeout_ms)
+    if timeout_ms == nil then timeout_ms = 10000 end
+    if timeout_ms < 1 or timeout_ms > bus.SHELL_TIMEOUT_MAX_MS then return -1 end
+    return report(bridge("shell_open", timeout_ms))
+end
+function shell_close(fd)
+    fd = bus.int_of(fd, 0)
+    if fd == nil then return -1 end
+    return report(bridge("close_handle", fd))
+end
+function shell_run(fd, command, timeout_ms)
+    return bridge("shell_run", tonumber(fd), command, timeout_ms)
+end
 for _, name in ipairs({ "gpio_request_line", "gpio_set_value", "gpio_get_value", "gpio_free_line",
     "pwm_npwm", "pwm_exported", "pwm_export", "pwm_config", "pwm_set_polarity", "pwm_enable", "pwm_unexport",
     "speaker_open", "speaker_write", "speaker_close" }) do

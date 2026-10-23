@@ -173,5 +173,13 @@ M.UART_READ_MAX_MS = 60000
 -- 上限必须在此处拦下（宿主 HAL 侧另有同值硬校验）
 M.HTTP_TIMEOUT_MAX_MS = 60000
 
+-- shell 驱动（宿主进程执行）上限：命令长度 / 单流输出长度 / 执行超时。
+-- 超时与 UART_READ_MAX_MS/HTTP_TIMEOUT_MAX_MS 同值同理——shell 阻塞的是
+-- Lua 状态机所在线程；三者宿主 HAL 侧另有同值硬校验，此处先拦可在配置
+-- 笔误时立即失败而非阻塞数分钟
+M.SHELL_MAX_CMD_BYTES = 65536
+M.SHELL_MAX_OUT_BYTES = 1048576
+M.SHELL_TIMEOUT_MAX_MS = 60000
+
 __BOT4CJ_BUS_CONTRACT = M
 return M

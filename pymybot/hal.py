@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import stat
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -23,6 +24,8 @@ import urllib.error
 import urllib.request
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 import zlib
+
+from .process import kill_tree, read_pipe, shell_command
 
 # PyAV's log level and capture are process-global.
 _AV_LOG_LOCK = threading.Lock()
@@ -63,12 +66,16 @@ class HALManager:
     HTTP_MAX_BYTES = 4 * 1024 * 1024
     HTTP_MAX_HEADERS = 16
     HTTP_TIMEOUT_MS = 60000
+    SHELL_MAX_CMD_BYTES = 64 * 1024
+    SHELL_MAX_OUT_BYTES = 1024 * 1024
+    SHELL_TIMEOUT_MS = 60000
     BAUDS = {1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
              230400, 460800, 500000, 921600, 1000000}
     _OPERATIONS = {
         "i2c_open", "i2c_transfer", "spi_open", "spi_setup", "spi_transfer",
         "uart_open", "uart_write", "uart_read", "uart_flush",
         "http_open", "http_request",
+        "shell_open", "shell_run",
         "camera_open", "camera_capture", "close_handle", "sleep_ms", "last_error",
     }
 
@@ -110,7 +117,7 @@ class HALManager:
         except Exception as exc:
             message = f"{operation}: {exc}"
             self._errors.message = message
-            if operation == "camera_capture" or operation == "http_request":
+            if operation == "camera_capture" or operation in {"http_request", "shell_run"}:
                 return {"result": "ERR", "message": message}
             if operation in {"i2c_transfer", "spi_transfer", "uart_read"}:
                 return None
@@ -448,6 +455,102 @@ class HALManager:
             trimmed[key.lower()] = value
         return {"result": "OK", "status": self._integer(status, 100, 599),
                 "body": payload.decode("utf-8", "replace"), "headers": trimmed}
+
+    def _shell_open(self, timeout_ms=10000):
+        timeout_ms = self._integer(timeout_ms, 1, self.SHELL_TIMEOUT_MS)
+        with self._lock:
+            # Like http_open: validation only; the process is spawned per
+            # shell_run call, so there is no persistent resource to hold.
+            return self._register(_Resource("shell", None, "subprocess", None,
+                                            timeout=timeout_ms))
+
+    def _shell_run(self, handle, command, timeout_ms=None):
+        """Run one command through the platform shell; output is capped, not lost.
+
+        A finished command returns result="OK" whatever its exit code was; only
+        launch failures, timeouts, and cancellation are ERR. The gate that keeps
+        this op behind --allow-hardware lives in the host runtime, not here.
+        """
+        if not isinstance(command, str) or not command or "\0" in command:
+            raise ValueError("shell command must be nonempty text without NUL")
+        if len(command.encode("utf-8")) > self.SHELL_MAX_CMD_BYTES:
+            raise ValueError("shell command exceeds the size ceiling")
+        r = self._get(handle, "shell")
+        with r.lock:
+            self._live(r)
+            if timeout_ms is None:
+                timeout_ms = r.state["timeout"]
+            timeout_ms = self._integer(timeout_ms, 1, self.SHELL_TIMEOUT_MS)
+            deadline = time.monotonic() + timeout_ms / 1000
+            argv, options, _ = shell_command(command)
+            try:
+                child = subprocess.Popen(argv, stdin=subprocess.DEVNULL,
+                                         stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE, bufsize=0, **options)
+            except OSError as exc:
+                raise IOError(f"cannot start the platform shell: {exc}") from exc
+            timed_out = False
+            truncated = False
+            try:
+                pipes = [child.stdout, child.stderr]
+                if os.name != "nt":
+                    for pipe in pipes:
+                        os.set_blocking(pipe.fileno(), False)
+                buffers = [bytearray(), bytearray()]
+                active = {0, 1}
+                exited_at = None
+                while True:
+                    if self._cancel_check:
+                        self._cancel_check()
+                    for index in tuple(active):
+                        chunk = read_pipe(pipes[index])
+                        if chunk == b"":
+                            active.remove(index)
+                        elif chunk:
+                            room = self.SHELL_MAX_OUT_BYTES - len(buffers[index])
+                            buffers[index].extend(chunk[:room])
+                            truncated |= len(chunk) > room
+                    exit_code = child.poll()
+                    now = time.monotonic()
+                    if exited_at is None:
+                        if exit_code is not None:
+                            # The shell is gone; kill leftovers so pipes reach EOF.
+                            exited_at = now
+                            kill_tree(child)
+                        elif now >= deadline:
+                            timed_out = True
+                            exited_at = now
+                            kill_tree(child)
+                    if exited_at is not None:
+                        if not active:
+                            break
+                        if now - exited_at >= 0.25:
+                            truncated = True  # An escaped descendant kept a pipe.
+                            break
+                        time.sleep(0.001)
+                    else:
+                        # Short bounded wait keeps the loop cancellable and cheap.
+                        try:
+                            child.wait(timeout=0.01)
+                        except subprocess.TimeoutExpired:
+                            pass
+            finally:
+                if child.poll() is None:
+                    kill_tree(child)
+                try:
+                    child.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    pass
+                child.stdout.close()
+                child.stderr.close()
+            code = child.returncode if child.returncode is not None else -1
+            result = {"result": "OK", "code": code, "truncated": truncated,
+                      "out": buffers[0].decode("utf-8", "replace"),
+                      "err": buffers[1].decode("utf-8", "replace")}
+            if timed_out:
+                result["result"] = "ERR"
+                result["message"] = f"command timed out after {timeout_ms} ms"
+            return result
 
     def _sleep_ms(self, ms):
         ms = float(ms)

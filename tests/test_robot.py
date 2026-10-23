@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from pymybot.errors import ControllerError, ScriptError
+from pymybot.errors import ControllerError, DriverError, ScriptError
 from pymybot.robot import Robot
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -269,3 +269,26 @@ def test_hot_delete_failure_removes_dead_variable_and_rolls_back_additions(modul
             robot.apply_sql("INSERT INTO Probe(name,fail) VALUES('new','no'); DELETE FROM Probe WHERE name='dev';")
         assert not robot.tables["Probe"].data
         assert set(robot.registry) == set()
+
+
+def test_shell_driver_end_to_end_with_allow_hardware():
+    sql = ("CREATE TABLE Shell(name String, timeout Number); "
+           "INSERT INTO Shell(name,timeout) VALUES('sh',10000);")
+    with Robot(sql, module_paths=[ROOT / "modules"], allow_hardware=True) as robot:
+        result = robot.run('@Action\nsh.cmd;\n$("echo\\te2e-shell-ok");\n$("exit\\t7");\n@')
+        assert result[0]["result"] == "OK" and result[0]["code"] == 0
+        assert "e2e-shell-ok" in result[0]["out"] and result[0]["err"] == ""
+        # a non-zero exit code is a normal completion, not an ERR
+        assert result[1]["result"] == "OK" and result[1]["code"] == 7
+
+
+def test_shell_driver_refused_without_allow_hardware():
+    sql = ("CREATE TABLE Shell(name String, timeout Number); "
+           "INSERT INTO Shell(name,timeout) VALUES('sh',10000);")
+    robot = Robot(sql, module_paths=[ROOT / "modules"])
+    try:
+        # activation fails at build: the session gate refuses shell_open
+        with pytest.raises(DriverError, match="allow-hardware"):
+            robot.active()
+    finally:
+        robot.deactivate()

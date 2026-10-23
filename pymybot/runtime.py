@@ -129,6 +129,8 @@ class LuaState:
                 raise DriverError("Physical hardware access requires explicit --allow-hardware confirmation")
             if operation == "http_open" and not _loopback_base(values[0] if values else None):
                 raise DriverError("HTTP access beyond loopback requires explicit --allow-hardware confirmation")
+            if operation == "shell_open":
+                raise DriverError("Host command execution requires explicit --allow-hardware confirmation")
         if operation == "sleep_ms" and values:
             milliseconds = float(values[0])
             if math.isfinite(milliseconds) and milliseconds > 0:

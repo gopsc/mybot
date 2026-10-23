@@ -5,11 +5,11 @@ from contextlib import contextmanager
 import os
 from pathlib import Path, PureWindowsPath
 import secrets
-import signal
 import stat
 import subprocess
 import time
 
+from .process import kill_tree, read_pipe, shell_command
 from .security import SecurityError, dumps
 
 MAX_FILE_BYTES = 1024 * 1024
@@ -382,16 +382,7 @@ class Workspace:
 
     @staticmethod
     def _shell(command, cwd, fd, guard, check, started):
-        if os.name != "nt":
-            interpreter = "/bin/sh"
-            argv = [interpreter, "-c", command]
-            options = {"start_new_session": True}
-        else:
-            interpreter = str(_windows_system_directory() / "cmd.exe")
-            # Popen(list) would re-quote with CRT backslash escapes that cmd.exe
-            # does not understand; /s strips exactly these outer quotes instead.
-            argv = f'"{interpreter}" /d /s /c "{command}"'
-            options = {}
+        argv, options, interpreter = shell_command(command)
         # Linux procfs provides descriptor-pinned cwd without preexec_fn (unsafe
         # in the executor's multithreaded process). Other platforms use checks.
         if fd is not None and Path("/proc/self/fd").is_dir():
@@ -417,7 +408,7 @@ class Workspace:
             while True:
                 check()
                 for index in tuple(active):
-                    chunk = _read_pipe(pipes[index])
+                    chunk = read_pipe(pipes[index])
                     if chunk == b"":
                         active.remove(index)
                     elif chunk:
@@ -428,7 +419,7 @@ class Workspace:
                 if exit_code is not None:
                     if exited_at is None:
                         exited_at = time.monotonic()
-                        _kill_tree(process)
+                        kill_tree(process)
                         tree_killed = True
                     if not active:
                         break
@@ -457,66 +448,8 @@ class Workspace:
         finally:
             try:
                 if not tree_killed:
-                    _kill_tree(process)
+                    kill_tree(process)
                 process.wait(timeout=3)
             finally:
                 process.stdout.close()
                 process.stderr.close()
-
-
-def _read_pipe(pipe):
-    if os.name == "nt":
-        # Peek first: Windows anonymous pipes are not selectable and Python 3.11
-        # cannot set them nonblocking. No reader threads can be left behind.
-        import ctypes
-        from ctypes import wintypes
-        import msvcrt
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        peek = kernel.PeekNamedPipe
-        peek.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
-                         ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD),
-                         ctypes.POINTER(wintypes.DWORD)]
-        peek.restype = wintypes.BOOL
-        available = wintypes.DWORD()
-        if not peek(msvcrt.get_osfhandle(pipe.fileno()), None, 0, None, ctypes.byref(available), None):
-            if ctypes.get_last_error() in (109, 232):
-                return b""
-            raise OSError("Could not read shell output pipe")
-        return os.read(pipe.fileno(), min(65536, available.value)) if available.value else None
-    try:
-        return os.read(pipe.fileno(), 65536)
-    except BlockingIOError:
-        return None
-
-
-def _windows_system_directory():
-    import ctypes
-    from ctypes import wintypes
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    get_directory = kernel.GetSystemDirectoryW
-    get_directory.argtypes = [wintypes.LPWSTR, wintypes.UINT]
-    get_directory.restype = wintypes.UINT
-    buffer = ctypes.create_unicode_buffer(32768)
-    size = get_directory(buffer, len(buffer))
-    if not 0 < size < len(buffer):
-        raise OSError("Cannot locate the Windows system shell")
-    return Path(buffer.value)
-
-
-def _kill_tree(process):
-    if os.name != "nt":
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    else:
-        taskkill = _windows_system_directory() / "taskkill.exe"
-        if taskkill.is_file():
-            try:
-                subprocess.run([str(taskkill), "/PID", str(process.pid), "/T", "/F"],
-                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.DEVNULL, timeout=3, check=False)
-            except (OSError, subprocess.TimeoutExpired):
-                pass  # Still kill/reap the direct child when tree cleanup is unavailable.
-        if process.poll() is None:
-            process.kill()

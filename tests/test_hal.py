@@ -921,3 +921,79 @@ def test_lua_http_globals(manager, monkeypatch, httpd):
         assert(http_open(base, 0) == -1)
         assert(http_open(base, 70000) == -1)
     ''')
+
+
+def test_shell_open_validates_timeout(manager):
+    assert manager.call("shell_open") >= 0
+    assert manager.call("shell_open", 1) >= 0
+    assert manager.call("shell_open", 60000) >= 0
+    assert manager.call("shell_open", 0) == -1
+    assert manager.call("shell_open", 60001) == -1
+    assert manager.call("shell_open", "slow") == -1
+
+
+def test_shell_run_captures_streams_and_exit_code(manager):
+    handle = manager.call("shell_open", 10000)
+    out = manager.call("shell_run", handle, "echo out-words")
+    assert out["result"] == "OK" and out["code"] == 0 and not out["truncated"]
+    assert "out-words" in out["out"] and out["err"] == ""
+    # both cmd.exe and sh accept 1>&2 as the stderr redirect
+    out = manager.call("shell_run", handle, "echo err-words 1>&2")
+    assert out["result"] == "OK" and "err-words" in out["err"] and out["out"] == ""
+    # a finished command is OK whatever its exit code; code carries it
+    out = manager.call("shell_run", handle, "exit 3")
+    assert out["result"] == "OK" and out["code"] == 3
+
+
+def test_shell_run_timeout_kills_and_reports_partial_output(manager):
+    handle = manager.call("shell_open", 400)
+    # the explicit flush matters: a piped stdout is block-buffered, so without
+    # it the line would still sit in the child's buffer when the kill arrives
+    command = (f'"{sys.executable}" -c "import sys; print(\'partial-out\'); '
+               'sys.stdout.flush(); import time; time.sleep(30)"')
+    started = time.monotonic()
+    out = manager.call("shell_run", handle, command)
+    assert time.monotonic() - started < 10
+    assert out["result"] == "ERR" and "timed out" in out["message"]
+    assert "partial-out" in out["out"]
+
+
+def test_shell_run_caps_output_streams(manager):
+    handle = manager.call("shell_open", 20000)
+    size = HALManager.SHELL_MAX_OUT_BYTES + 4096
+    command = f'"{sys.executable}" -c "print(\'x\' * {size})"'
+    out = manager.call("shell_run", handle, command)
+    assert out["result"] == "OK" and out["truncated"] is True
+    assert len(out["out"].encode("utf-8")) <= HALManager.SHELL_MAX_OUT_BYTES
+    out = manager.call("shell_run", handle, "echo small")
+    assert out["result"] == "OK" and out["truncated"] is False
+
+
+def test_shell_run_rejects_bad_commands_and_handles(manager):
+    handle = manager.call("shell_open", 1000)
+    for bad in ("", None, 5, "echo\0hi", "x" * (HALManager.SHELL_MAX_CMD_BYTES + 1)):
+        assert manager.call("shell_run", handle, bad)["result"] == "ERR"
+    for timeout in (0, 60001, "slow"):
+        assert manager.call("shell_run", handle, "echo hi", timeout)["result"] == "ERR"
+    assert manager.call("shell_run", 987654321, "echo hi")["result"] == "ERR"
+
+
+def test_shell_close_invalidates_the_session(manager):
+    handle = manager.call("shell_open", 1000)
+    assert manager.call("shell_run", handle, "echo hi")["result"] == "OK"
+    assert manager.call("close_handle", handle) == 0
+    assert manager.call("shell_run", handle, "echo hi")["result"] == "ERR"
+
+
+def test_lua_shell_globals(manager, monkeypatch):
+    lua = lua_runtime(manager, monkeypatch)
+    lua.execute('''
+        local fd = shell_open(5000)
+        assert(fd >= 0)
+        local out = shell_run(fd, "echo lua-shell")
+        assert(out.result == "OK" and out.code == 0)
+        assert(string.find(out.out, "lua-shell", 1, true) ~= nil)
+        assert(shell_close(fd) == 0)
+        assert(shell_open(0) == -1)
+        assert(shell_open(70000) == -1)
+    ''')

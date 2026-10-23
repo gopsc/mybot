@@ -59,6 +59,8 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 | `UART path '...' has multiple independent consumers` | 同一串口被两个变量打开；合并为一个或改共享结构 |
 | `Single-consumer conflict` | 带 `SINGLE_CONSUMER` 标记的驱动同 `(总线,地址)` 被声明两次 |
 | `HTTP access beyond loopback requires explicit --allow-hardware` | base 指向非回环主机；本地联调或加开关 |
+| `Host command execution requires explicit --allow-hardware`（Shell build） | Shell 驱动整个能力都要该开关；确认可信后加 `--allow-hardware` |
+| `command timed out after N ms`（Shell call） | 命令超时被击杀；调大 `timeout` 列/参数，或检查命令是否等待输入 |
 | `HTTP path must be relative to the declared base URL` | http_request 的 path 写了绝对/scheme-relative URL |
 | `login failed: HTTP 401 ...`（Qsont build） | user/pass 不对，或服务器不可达（看 status） |
 | `Cannot parse matrix cell ... as Float64` | MT 数据格写了裸文本；文本要写成 `$("...")` |

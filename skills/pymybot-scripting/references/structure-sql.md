@@ -175,7 +175,39 @@ mobile 可对其发指令/查数据（`pull` 能拉到 mobile 发来的指令，
 `scripts/qsont.mt`。HTTP 无 virtbus/virt 模型——无硬件验证用本地回环假服务器
 （`tests/test_qsont.py`）。
 
-## 9. query 与 apply-sql
+## 9. Shell 宿主命令驱动
+
+`Shell` 是通用宿主命令驱动（软件资源，非总线）：`call` 收一条命令字符串，
+经平台 shell（POSIX `/bin/sh -c`、Windows `cmd.exe /c`）执行，返回
+`{result, code, out, err, truncated}`。**非零退出码是正常完成**（`code` 携带
+退出码），仅启动失败/超时返回 ERR（超时时仍带回已捕获的部分输出）。
+
+```sql
+CREATE TABLE Shell (name String, timeout Number);
+INSERT INTO Shell (name, timeout) VALUES ('sh', 10000);  -- timeout 毫秒，缺省 10000
+```
+
+```mt
+@Action
+sh.cmd;
+$("echo\thello");     # 词间用 \t 转义（shell 视 TAB 为参数分隔）
+$("exit\t3");         # → result="OK", code=3
+@
+```
+
+硬纪律：
+
+- **整个能力默认拒绝，激活需要 `--allow-hardware`**（与物理设备、非回环
+  HTTP 同门）；命令以宿主用户权限与环境在当前目录执行，不是沙箱。
+- MT 单元格按空白切分、不接受字面空格——命令词间用 `$("a\tb")` 的 `\t`
+  转义；含字面空格的复杂命令用 `--var CMD="..."` 传入后写 `$(CMD)`。
+- 上限：命令 64 KiB、单流输出 1 MiB（超限截断并 `truncated=true`）、
+  超时 1..60000 ms（逐次可用 `timeout` 参数覆盖 build 缺省）。
+- 超时/取消击杀整个进程树（POSIX 进程组、Windows taskkill /T）。
+- 无 virt 模型：`proto='virt'` 写在 Shell 行上会因找不到 `SHELL_VIRT`
+  响亮报错。范本：`robots/shell.sql` + `scripts/shell.mt`。
+
+## 10. query 与 apply-sql
 
 **`query --sql`** 只接受 `SHOW TABLES;` 和 `SELECT * FROM 表 [WHERE 列=值 AND ...];`
 （WHERE 只支持字符串等值匹配，配合 `-` 继承语义）。

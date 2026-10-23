@@ -86,6 +86,7 @@ def test_secret_environment_hidden(state, monkeypatch):
     ("spi_open", ["/dev/spidev0.0"]),
     ("uart_open", ["COM3", 115200]),
     ("camera_capture", [1, {}]),
+    ("shell_open", [1000]),
 ])
 def test_physical_hardware_requires_opt_in(state, operation, args):
     with pytest.raises(DriverError, match="allow-hardware"):
@@ -174,6 +175,28 @@ end
         state.load(probe)
         out = state.call("call", {"base": f"http://127.0.0.1:{port}/"})
         assert out["result"] == "ERR" and "message" in out
+    finally:
+        state.close()
+        hal.close()
+
+
+def test_shell_gate_runs_with_allow_hardware(tmp_path):
+    from pymybot.hal import HALManager
+
+    hal = HALManager()
+    state = LuaState([tmp_path], hal, threading.Event(), allow_hardware=True)
+    probe = tmp_path / "probe.lua"
+    probe.write_text('''
+function call(d)
+    local fd = __hal_call("shell_open", 5000)
+    return __hal_call("shell_run", fd, d.cmd)
+end
+''')
+    try:
+        state.load(probe)
+        out = state.call("call", {"cmd": "echo gate-ok"})
+        assert out["result"] == "OK" and out["code"] == 0
+        assert "gate-ok" in out["out"]
     finally:
         state.close()
         hal.close()
