@@ -83,4 +83,4 @@ def windows_system_directory():
     size = get_directory(buffer, len(buffer))
     if not 0 < size < len(buffer):
         raise OSError("Cannot locate the Windows system shell")
-    return Path(buffer)
+    return Path(buffer.value)
