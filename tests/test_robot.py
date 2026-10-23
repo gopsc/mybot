@@ -292,3 +292,193 @@ def test_shell_driver_refused_without_allow_hardware():
             robot.active()
     finally:
         robot.deactivate()
+
+
+def test_struct_loop_capture_and_per_run_scope(modules):
+    script = '''@Struct(state)
+{"count":0,"points":[{"x":10}],"enabled":true}
+@
+@while(state.enabled&&state.count<3)
+@Action
+dev.value dev.capture;
+$(state.count+1) $state.count=value;
+@
+@
+@Action
+dev.value dev.capture;
+$(state.points[0].x) $state.points[0].x=count;
+$(state.points[0].x) -;
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        outputs = robot.run(script)
+        assert [v["value"] for v in outputs] == [1, 2, 3, 10, 4]
+        assert robot.registry.get("state") is None
+        assert robot.run(script)[0]["value"] == 1
+        assert robot.registry["dev"].read()["count"] == 10
+
+
+def test_struct_capture_indices_and_values_are_frozen_before_row_dispatch(modules):
+    script = '''@Struct(state)
+{"values":[0,0]}
+@
+@Vars
+name value;
+i 0;
+@
+@Action
+dev.value dev.i dev.slot;
+$(state.values[i]) $i=count $state.values[i]=count;
+- - -;
+@
+@Action
+dev.value;
+$(state.values[0]*10+state.values[1]);
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        outputs = robot.run(script)
+        assert [v["value"] for v in outputs] == [0, 0, 12]
+
+
+def test_struct_hoisting_and_vars_can_read_numeric_members(modules):
+    script = '''@Vars
+name value;
+scaled $(state.value*2);
+@
+@Action
+dev.value dev.capture;
+$(scaled) $state.value=count;
+- -;
+@
+@Struct(state)
+{"value":3}
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        assert [v["value"] for v in robot.run(script)] == [6, 2]
+
+
+def test_struct_whole_assignment_and_nested_capture_preserve_receipts(modules):
+    (modules[0] / "JsonProbe.lua").write_text('''
+function build(d) return {result="OK"} end
+function call(d)
+    return {result="OK", payload={points={{x=1},{x=2}},flag=true}, number=7, flag=false, value=d.value}
+end
+function destroy(d) return {result="OK"} end
+''', encoding="utf-8")
+    sql = "CREATE TABLE JsonProbe(name String); INSERT INTO JsonProbe(name) VALUES('dev');"
+    script = '''@Struct(state)
+{}
+@
+@Action
+dev.capture;
+$state=payload;
+$state.points[0].x=number;
+$state.points[1]=payload;
+$state.flag=flag;
+@
+@if(!state.flag)
+@Action
+dev.value;
+$(state.points[0].x+state.points[1].points[1].x);
+@
+@
+@Action
+dev.capture;
+$state=number;
+@
+@Action
+dev.value;
+$(state);
+@
+'''
+    with Robot(sql, module_paths=modules) as robot:
+        outputs = robot.run(script)
+        assert outputs[0]["payload"]["points"][0]["x"] == 1
+        assert outputs[4]["value"] == 9
+        assert outputs[-1]["value"] == 7
+        assert robot.registry.get("state") is None
+
+
+@pytest.mark.parametrize("target", ["state.missing", "state.points[1]", "state.points[-1]",
+                                       "state.points[0].x", "absent.x", "state.points[0.5]"])
+def test_struct_invalid_capture_targets_restore_scope(modules, target):
+    script = '@Struct(state)\n{"points":[1]}\n@\n@Action\ndev.value;\n$' + target + '=count;\n@\n'
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        with pytest.raises(ScriptError):
+            robot.run(script)
+        assert robot.registry.get("state") is None
+
+
+def test_struct_assignment_failure_restores_previous_struct_without_undoing_driver(modules):
+    from pymybot.hardware import Struct
+
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        state = Struct("state", {"count": 0})
+        robot.registry.add(state)
+        with pytest.raises(ScriptError):
+            robot.run('@Action\ndev.value;\n$state.count=count;\n$state.missing=count;\n@\n')
+        assert robot.registry.get("state") is state and state.read() == {"count": 0}
+        assert robot.registry["dev"].read()["count"] == 2
+
+
+@pytest.mark.parametrize("before,after", [
+    ('@Struct(state)\n{}\n@\n', '@Struct(state)\n[]\n@\n'),
+    ('@Struct(state)\n{}\n@\n', '@Alias\nname alias;\nstate dev;\n@\n'),
+    ('@Alias\nname alias;\nstate dev;\n@\n', '@Struct(state)\n{}\n@\n'),
+    ('@Vars\nname value;\nstate 1;\n@\n', '@Struct(state)\n{}\n@\n'),
+    ('@Struct(dev)\n{}\n@\n', ''),
+])
+def test_struct_rejects_duplicate_or_shadowed_declarations_before_play(modules, before, after):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        with pytest.raises(ScriptError, match="Duplicate"):
+            robot.run(before + after + '@Action\ndev.value;\n1;\n@\n')
+        assert robot.registry["dev"].read()["count"] == 0
+        assert robot.registry.get("state") is None
+
+
+def test_struct_rejects_cli_binding_override(modules):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        with pytest.raises(ScriptError, match="Struct"):
+            robot.run('@Struct(state)\n{}\n@\n@Action\ndev.value;\n1;\n@\n', vars={"state": "text"})
+        assert robot.registry["dev"].read()["count"] == 0
+
+
+def test_struct_reflex_captures_survive_between_calls_only(modules):
+    script = '''@Struct(state)
+{"count":0}
+@
+@Reflex
+name dev.value;
+read $state.count=count;
+use $(state.count);
+@
+@Trigger
+trigger;
+read;
+use;
+read;
+use;
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        assert [v["value"] for v in robot.run(script)] == [0, 1, 0, 3]
+        assert robot.registry.get("state") is None
+
+
+@pytest.mark.parametrize("directive", ["Include", "Merge"])
+def test_struct_composed_scripts_run_without_payload_loss(modules, tmp_path, directive):
+    (tmp_path / "part.mt").write_text('''@Struct(cfg)
+{"word":"text # ; @ with spaces", "value":7}
+@
+@Action
+dev.value;
+$(cfg.word);
+$(cfg.value);
+@
+''', encoding="utf-8")
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        outputs = robot.run(f'@{directive}\npath;\npart.mt;\n@\n', base_dir=tmp_path)
+        assert [v["value"] for v in outputs] == ["text # ; @ with spaces", 7]
+        assert robot.registry.get("cfg") is None

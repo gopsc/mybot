@@ -293,7 +293,7 @@ def test_stop_and_deadline_budget_propagate_even_in_empty_loop():
 
 @pytest.mark.parametrize(("header", "cell", "extras"), [
     ("dev", "1", []), ("dev..p", "1", []), (".p", "1", []), ("dev.", "1", []),
-    ("dev.$(1.5)", "1", []), ("dev.p", "garbage", []), ("dev.p", "$(1>0)", []),
+    ("dev.$(1>0)", "1", []), ("dev.p", "garbage", []), ("dev.p", "$(1>0)", []),
     ("dev.p", "nan", []), ("dev.p", "inf", []), ("dev.p", "1_000", []),
     ("dev.p", "$(1+", []), ("n.p", "1", [Number("n", 2)]),
     ("a.p", "1", [Alias("a", "b"), Alias("b", "dev")]),
@@ -662,3 +662,388 @@ def test_include_knob_fixture(tmp_path):
     variables = [Number(name, float(value)) for name, value in matrices[0].data]
     ActionRunner(FakeRegistry(relay, *variables), FakeBudget()).run(matrices)
     assert relay.calls == [{"test": 35.0}]
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("state.count", 3.0), ("-state.count+2", -1.0),
+    ("state.points[i+1].x", 7.0), ("(state.points)[i+1].x*2", 14.0),
+    ("state.grid[state.indices[i]][i+1]", 9.0),
+    ("state.points[.0].x", 2.0), ("state.points[1e0].x", 7.0),
+    ("state.points[+1.].x", 7.0), ("state.points[-0].x", 2.0),
+    ('state.label+state.count', "count=3"),
+    ('state.points[0].label=="origin"', True),
+    ("state.enabled", True), ("!!state.enabled", True),
+    ("!state.enabled", False), ("state.enabled&&state.count>1", True),
+    ("state.flags[0]||state.flags[1]", True),
+    ("state.enabled||(missing[1/0].x>0)", True),
+    ("state.flags[0]&&state.points[999].x>0", False),
+])
+def test_expression_json_field_and_index_chains(text, expected):
+    state = {"count": 3, "points": [{"x": 2, "label": "origin"}, {"x": 7}],
+             "grid": [[4, 5], [8, 9]], "indices": [1], "label": "count=",
+             "enabled": True, "flags": [False, True]}
+    result = Expression(text).evaluate({"state": state, "i": 0}.__getitem__)
+    assert result == expected
+    assert type(result) is type(expected)
+
+
+def test_expression_json_identifiers_track_roots_not_field_names():
+    expression = Expression("state.points[i+offset.n].x+other.rows[lookup[j]]")
+    assert expression.identifiers == {"state", "i", "offset", "other", "lookup", "j"}
+
+
+def test_expression_json_python_names_are_only_data_keys():
+    state = {"__class__": {"__name__": "data"}, "items": [17]}
+    assert Expression("state.__class__.__name__").evaluate(lambda name: state) == "data"
+    assert Expression("state.items[0]").evaluate(lambda name: state) == 17.0
+    for text in ["state.keys", "state.items.__class__", "state.items[0].real"]:
+        with pytest.raises(ScriptError):
+            Expression(text).evaluate(lambda name: state)
+    with pytest.raises(ScriptError, match="no field"):
+        Expression("state.items").evaluate(lambda name: {})
+
+    class NotJson:
+        @property
+        def count(self):
+            pytest.fail("Expression must never access Python attributes")
+
+    with pytest.raises(ScriptError, match="JSON"):
+        Expression("state.count").evaluate(lambda name: NotJson())
+
+
+@pytest.mark.parametrize(("text", "value", "message"), [
+    ("state.missing", {}, "no field"),
+    ("state.x.y", {"x": None}, "requires an object"),
+    ("state.x[0]", {"x": None}, "requires an array"),
+    ("state.x", None, "requires an object"),
+    ("state.x", 1, "requires an object"),
+    ("state.x", "text", "requires an object"),
+    ("state.x", True, "requires an object"),
+    ("state.items", [], "requires an object"),
+    ("state[0]", {"0": 1}, "requires an array"),
+    ("state[0]", "text", "requires an array"),
+    ("state[0]", None, "requires an array"),
+    ("state[0]", 5, "requires an array"),
+    ("state[0]", [], "out of bounds"),
+    ("state[1]", [5], "out of bounds"),
+])
+def test_expression_json_invalid_traversal(text, value, message):
+    with pytest.raises(ScriptError, match=message):
+        Expression(text).evaluate(lambda name: value)
+
+
+@pytest.mark.parametrize("index", [
+    True, False, -1, -0.5, 0.5, "0", "x", None, [], {},
+    float("nan"), float("inf"), float("-inf"), 10**400,
+])
+def test_expression_json_invalid_dynamic_indices(index):
+    from pymybot.expr import Reference
+
+    resolve = {"state": [1], "i": index}.__getitem__
+    with pytest.raises(ScriptError):
+        Expression("state[i]").evaluate(resolve)
+    with pytest.raises(ScriptError):
+        Reference("state[i]").resolve_path(resolve)
+
+
+@pytest.mark.parametrize("index", ['"x"', '"0"', "1>0", "-1", "1/2", "1e308*10", "1/0"])
+def test_expression_json_invalid_index_expressions(index):
+    from pymybot.expr import Reference
+
+    text = f"state[{index}]"
+    with pytest.raises(ScriptError):
+        Expression(text).evaluate(lambda name: [1])
+    with pytest.raises(ScriptError):
+        Reference(text).resolve_path(lambda name: pytest.fail("Target must not be resolved"))
+
+
+@pytest.mark.parametrize("text", [
+    "state.", "state..x", "state.0", "state.[0]", "state[]", "state[1", "state[0]]",
+    "state[0:1]", "state[0,1]", "state[*i]", "state[0x0]", "state[0b0]",
+    "state.items()", "state.__class__.__subclasses__()", '__import__("os")',
+    "state[x for x in y]", "state[(i:=0)]", "state[lambda:0]", "state[{0:1}]",
+    "state[[0]]", "state[i=0]", "state[0];x", "state[0] = 1",
+])
+def test_expression_json_malformed_and_executable_syntax(text):
+    from pymybot.expr import Reference
+
+    for parser in (Expression, Reference):
+        with pytest.raises(ScriptError):
+            parser(text)
+
+
+@pytest.mark.parametrize("value", [{"x": 1}, [1], None])
+@pytest.mark.parametrize("text", ["state", "root.child", "root.array[0]"])
+def test_expression_json_final_value_must_be_scalar(value, text):
+    resolve = {"state": value, "root": {"child": value, "array": [value]}}.__getitem__
+    with pytest.raises(ScriptError, match="scalar"):
+        Expression(text).evaluate(resolve)
+
+
+@pytest.mark.parametrize("text", [
+    "state==state", "state!=state", "state+1", '"x"+state',
+    "state<1", "-state", "!state", "state&&1>0", "1>0&&state",
+])
+@pytest.mark.parametrize("value", [{}, [], None])
+def test_expression_json_containers_have_no_implicit_scalar_semantics(text, value):
+    with pytest.raises(ScriptError):
+        Expression(text).evaluate(lambda name: value)
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan"), 10**400])
+@pytest.mark.parametrize("text", ["state.x", "state.array[0]", "state.x==state.x", '"x"+state.x'])
+def test_expression_json_nonfinite_scalar_guards(value, text):
+    with pytest.raises(ScriptError, match="non-finite"):
+        Expression(text).evaluate(lambda name: {"x": value, "array": [value]})
+
+
+def test_expression_json_access_depth_and_shared_operator_budgets():
+    from pymybot.expr import Reference
+
+    fields, arrays = 7, 7
+    for _ in range(128):
+        fields, arrays = {"x": fields}, [arrays]
+    field_path = "state" + ".x" * 128
+    array_path = "state" + "[0]" * 128
+    assert Expression(field_path).evaluate(lambda name: fields) == 7.0
+    assert Expression(array_path).evaluate(lambda name: arrays) == 7.0
+    assert Reference(field_path).resolve_path(None) == ("x",) * 128
+    assert Reference(array_path).resolve_path(None) == (0,) * 128
+    assert Expression("state.x" + "+1" * 511).evaluate(lambda name: {"x": 1}) == 512.0
+    assert Reference("state[0" + "+0" * 510 + "].x").resolve_path(None) == (0, "x")
+    for text in [field_path + ".x", array_path + "[0]", "state[0" + "+0" * 511 + "].x"]:
+        for parser in (Expression, Reference):
+            with pytest.raises(ScriptError):
+                parser(text)
+    with pytest.raises(ScriptError, match="operators"):
+        Expression("state.x" + "+1" * 512)
+    with pytest.raises(ScriptError, match="access depth"):
+        Expression("(" + field_path + ").x")
+
+
+def test_expression_json_nested_indices_are_bounded_without_python_recursion():
+    from pymybot.expr import Reference
+
+    resolve = lambda name: [0]
+    nested = "n[0+" * 128 + "0" + "]" * 128
+    assert Expression(nested).evaluate(resolve) == 0.0
+    assert Reference(nested).resolve_path(resolve) == (0,)
+    mixed = "n[(" * 64 + "0" + ")]" * 64
+    assert Expression(mixed).evaluate(resolve) == 0.0
+    for text in ["n[" * 10000 + "0" + "]" * 10000,
+                 "n[(" * 65 + "0" + ")]" * 65]:
+        for parser in (Expression, Reference):
+            with pytest.raises(ScriptError, match="nesting") as error:
+                parser(text)
+            assert len(str(error.value)) < 512
+
+
+def test_expression_reference_resolves_only_index_dependencies_in_order():
+    from pymybot.expr import Reference
+
+    seen = []
+    values = {"i": 0, "lookup": [1], "j": 0, "offset": {"n": 2}}
+
+    def resolve(name):
+        seen.append(name)
+        assert name != "state", "Resolving a path must not read the capture target"
+        return values[name]
+
+    reference = Reference(" state.points[i+1].grid[lookup[j]][offset.n] ")
+    assert reference.name == "state"
+    assert reference.resolve_path(resolve) == ("points", 1, "grid", 1, 2)
+    assert seen == ["i", "lookup", "j", "offset"]
+    values["i"] = 2
+    assert reference.resolve_path(resolve) == ("points", 3, "grid", 1, 2)
+    assert Reference("state").name == "state"
+    assert Reference("state").resolve_path(None) == ()
+    # The target need not exist; bounds checks belong to subsequent traversal.
+    assert Reference("state[999].items.__class__").resolve_path(None) == (999, "items", "__class__")
+    assert Reference("state[state.count]").resolve_path(lambda name: {"count": 2}) == (2,)
+
+
+@pytest.mark.parametrize("text", [
+    "", " ", "1", '"state"', ".state", "(state)", "(state).x", "+state",
+    "--state", "!!state", "state+1", "state.x*2", "state[0]||other", "state other",
+    "state,other", "state()", "$state", "$(state)", "bad-name", "[state]",
+])
+def test_expression_reference_rejects_non_reference_capture_targets(text):
+    from pymybot.expr import Reference
+
+    with pytest.raises(ScriptError):
+        Reference(text)
+
+
+def test_expression_select_member_reads_data_without_coercion_or_mutation():
+    from pymybot.expr import select_member
+
+    child = {"count": 1}
+    array = [child, None, True]
+    value = {"items": array, "__class__": "data"}
+    assert select_member(value, "items") is array
+    assert select_member(value, "__class__") == "data"
+    assert select_member(array, 0) is child
+    assert select_member(array, 1) is None
+    assert select_member(array, 2) is True
+    assert select_member({"": "empty key"}, "") == "empty key"
+    assert value == {"items": [{"count": 1}, None, True], "__class__": "data"}
+
+
+@pytest.mark.parametrize(("value", "key"), [
+    ({}, "items"), ({}, "__class__"), ([1], "0"), ({0: "x"}, 0),
+    ((1,), 0), ("abc", 0), (None, 0), (None, "x"), (1, "real"),
+    ([1], True), ([1], False), ([1], 0.0), ([1], 0.5), ([1], -1),
+    ([1], 1), ([1], 10**400), ([1], None), ([1], float("nan")),
+])
+def test_expression_select_member_rejects_invalid_keys_and_containers(value, key):
+    from pymybot.expr import select_member
+
+    with pytest.raises(ScriptError):
+        select_member(value, key)
+
+
+@pytest.mark.parametrize("value", [None, True, False, 12, 1.5, "# ; @ \n中文", [], {},
+                                       {"points": [{"x": 1}], "text": 'a b # ; @ " \\'}])
+def test_struct_raw_json_parsing(value):
+    import json
+
+    source = "@Struct(state)\n" + json.dumps(value, ensure_ascii=False, indent=2) + "\n  @ # end\n"
+    matrix, action = parse_matrices(source + block("Action", "dev.p", "1"))
+    assert matrix.name == "Struct(state)" and not matrix.rows and not matrix.children
+    assert json.loads(matrix.json_text) == value
+    assert action.name == "Action"
+    assert parse_matrices(source.replace("\n", "\r\n"))[0] == matrix
+
+
+@pytest.mark.parametrize("body", ["", "{", "{};", "{} {}", "{'x':1}", '{"x":1,}',
+                                       '{"x":1,"x":2}', "NaN", "Infinity", "-Infinity",
+                                       '{"x":1e999}', '# comment\n{}', r'"\ud800"'])
+def test_struct_rejects_non_json_and_nonfinite_values(body):
+    with pytest.raises(ScriptError):
+        parse_matrices("@Struct(state)\n" + body + "\n@\n")
+
+
+@pytest.mark.parametrize("name", ["Struct", "Struct()", "Struct(bad-name)", "Struct(1bad)",
+                                       "Struct(a.b)", "Struct(a b)", "Struct(a)junk"])
+def test_struct_rejects_invalid_declaration_names(name):
+    with pytest.raises(ScriptError):
+        parse_matrices("@" + name + "\n{}\n@\n")
+
+
+def test_struct_top_level_and_json_depth_limits():
+    from pymybot.matrix import struct_json
+
+    with pytest.raises(ScriptError, match="top level"):
+        parse_matrices("@if(1>0)\n@Struct(state)\n{}\n@\n@\n")
+    with pytest.raises(ScriptError, match="unclosed"):
+        parse_matrices("@Struct(state)\n{}")
+    assert parse_matrices("@Struct(state)\n" + "[" * 32 + "0" + "]" * 32 + "\n@")
+    for depth in (33, 10000):
+        with pytest.raises(ScriptError):
+            parse_matrices("@Struct(state)\n" + "[" * depth + "0" + "]" * depth + "\n@")
+    cycle = []
+    cycle.append(cycle)
+    with pytest.raises(ScriptError, match="depth"):
+        struct_json(cycle)
+
+
+def test_struct_size_and_json_capture_value_limits(monkeypatch):
+    import pymybot.matrix as module
+
+    monkeypatch.setattr(module, "MAX_SCRIPT_BYTES", 32)
+    with pytest.raises(ScriptError, match="byte limit"):
+        module.struct_json("x" * 32)
+    for value in (float("nan"), 10**400, {1: "bad"}, (1, 2), object()):
+        with pytest.raises(ScriptError):
+            module.struct_json(value)
+
+
+def test_struct_copy_on_write_and_capture_does_not_alias_source():
+    from pymybot.hardware import Registry, Struct
+
+    source = {"points": [{"x": 1}], "enabled": True, "empty": None}
+    state = Struct("state", source)
+    registry = Registry()
+    registry.add(state)
+    with registry.session():
+        updated = state.updated(("points", 0, "x"), 8)
+        registry.override("state", updated)
+        assert registry.resolve("state")["points"][0]["x"] == 8
+        assert state.read() == source
+    assert registry.get("state") is state
+    assert source["points"][0]["x"] == 1
+    with pytest.raises(ScriptError):
+        state.updated(("missing",), 5)
+    with pytest.raises(ScriptError):
+        state.updated(("points", 1), {})
+    with pytest.raises(ScriptError):
+        state.updated(("points", 0, "x"), float("nan"))
+    assert state.read() == source
+
+
+def test_struct_member_expressions_in_action_headers():
+    from pymybot.hardware import Registry, Struct
+
+    registry = Registry()
+    registry.add(Struct("cfg", {"devices": ["dev"], "key": "p"}))
+    driver = Driver()
+    registry.add(driver)
+    ActionRunner(registry, FakeBudget()).run(parse_matrices(
+        block("Action", "$(cfg.devices[0]).$(cfg.key)", "4") + block("Action", "dev.$(1.5)", "2")))
+    assert driver.calls == [{"p": 4.0}, {"1.5": 2.0}]
+
+
+@pytest.mark.parametrize("directive", ["Include", "Merge"])
+def test_struct_payload_survives_include_merge(directive, tmp_path):
+    import json
+
+    payload = {"text": "a b # ; @\n", "x": 2}
+    (tmp_path / "part.mt").write_text(
+        "@Struct(cfg)\n" + json.dumps(payload) + "\n@\n" + block("Action", "dev.p", "$(cfg.x)"), encoding="utf-8")
+    matrices = expand(block(directive, "path", "part.mt"), tmp_path)
+    assert json.loads(matrices[0].json_text) == payload
+    assert matrices[1].name == "Action"
+
+
+def test_struct_is_rejected_in_position_local_merge_fragments(tmp_path):
+    (tmp_path / "part.mt").write_text("@Struct(cfg)\n{}\n@\n", encoding="utf-8")
+    source = "@if(1>0)\n" + block("Merge", "path", "part.mt") + block("Action", "dev.p", "1") + "@\n"
+    with pytest.raises(ScriptError, match="plain matrix"):
+        expand(source, tmp_path)
+
+
+@pytest.mark.parametrize("suffix", ["", " ", "\t", "#comment", " # comment", "\t # ; @ comment"])
+def test_struct_declaration_line_comments_do_not_become_json(suffix):
+    import json
+
+    source = '@Struct(state)' + suffix + '\n{"text":"# ; @"}\n@\n'
+    assert json.loads(parse_matrices(source)[0].json_text) == {"text": "# ; @"}
+    assert parse_matrices(source.replace("\n", "\r\n")) == parse_matrices(source)
+    with pytest.raises(ScriptError, match="Invalid Struct JSON"):
+        parse_matrices('@Struct(state)' + suffix + '\n# not a JSON comment\n{}\n@\n')
+
+
+def test_struct_rejects_inline_json_on_declaration_line():
+    with pytest.raises(ScriptError, match="line after"):
+        parse_matrices('@Struct(state) {}\n@\n')
+
+
+def test_struct_many_at_characters_do_not_copy_line_prefixes():
+    import json
+
+    copied = 0
+
+    class TrackedSource(str):
+        def replace(self, *args):
+            return TrackedSource(super().replace(*args))
+
+        def __getitem__(self, key):
+            nonlocal copied
+            if isinstance(key, slice):
+                copied += len(range(*key.indices(len(self))))
+            return super().__getitem__(key)
+
+    payload = "@" * 20000
+    source = TrackedSource('@Struct(state)\n"' + payload + '"\n@\n')
+    assert json.loads(parse_matrices(source)[0].json_text) == payload
+    assert copied <= len(source)

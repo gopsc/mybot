@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 import sys
@@ -11,9 +12,9 @@ from pathlib import Path
 from .actions import ActionRunner
 from .errors import ControllerError, DriverError, ScriptError
 from .expr import Expression, expr_body
-from .hardware import Alias, Budget, FLOW, LuaVariable, Metadata, Number, Registry, safe_ident
+from .hardware import Alias, Budget, FLOW, LuaVariable, Metadata, Number, Registry, Struct, safe_ident
 from .include import expand_includes
-from .matrix import Matrix, parse_matrices
+from .matrix import Matrix, parse_matrices, struct_name
 from .sql import apply_statement, load_structure, parse_sql
 
 MAX_SCRIPT_BYTES = 8 * 1024 * 1024
@@ -292,6 +293,13 @@ class Robot:
             with self.registry.session():
                 declared = set()
                 for matrix in matrices:
+                    name = struct_name(matrix.name)
+                    if name is not None:
+                        if name in declared or name in self.registry:
+                            raise ScriptError(f"Duplicate Struct variable '{name}'")
+                        declared.add(name)
+                        self.registry.override(name, Struct(name, json.loads(matrix.json_text)))
+                        continue
                     if matrix.name not in {"Alias", "Vars"}:
                         continue
                     field = "alias" if matrix.name == "Alias" else "value"

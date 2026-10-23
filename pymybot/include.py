@@ -7,7 +7,7 @@ import stat
 from pathlib import Path, PureWindowsPath
 
 from .errors import ScriptError
-from .matrix import Matrix, is_control, parse_matrices, split_action_column
+from .matrix import Matrix, is_control, parse_matrices, split_action_column, struct_name
 
 MAX_INCLUDES = 32
 MAX_INCLUDE_DEPTH = 32
@@ -196,7 +196,8 @@ class _Expander:
                 pending.append(matrix)
                 continue
             if pending:
-                if is_control(name) or matrix.children or name in {"Alias", "Vars", "Trigger", "Reflex"}:
+                if (is_control(name) or matrix.children or name in {"Alias", "Vars", "Trigger", "Reflex"}
+                        or struct_name(name) is not None):
                     raise ScriptError("Nested @Merge must be followed by a plain matrix table")
                 for directive in pending:
                     for relative, phase in _specs(directive):
@@ -205,17 +206,18 @@ class _Expander:
                         if not targets:
                             raise ScriptError("Nested @Merge target has no matrix")
                         for target in targets:
-                            if target.name.strip() in {"Alias", "Vars", "Include", "Merge", "Reflex", "Trigger"}:
+                            if (target.name.strip() in {"Alias", "Vars", "Include", "Merge", "Reflex", "Trigger"}
+                                    or struct_name(target.name) is not None):
                                 raise ScriptError("Nested @Merge target must contain only plain matrix tables")
                             matrix = _merge(matrix, target, phase)
                 pending.clear()
             children = self.nested(matrix.children, base) if matrix.children else []
-            out.append(Matrix(matrix.name, matrix.rows, children))
+            out.append(Matrix(matrix.name, matrix.rows, children, matrix.json_text))
         if pending:
             raise ScriptError("Nested @Merge has no following table to merge into")
         return out
 
-    def fragment(self, path: Path, depth: int) -> dict[str, Matrix | None]:
+    def fragment(self, path: Path, depth: int) -> dict[str, Matrix | list[Matrix] | None]:
         if path in self.visited:
             if path.name.endswith(".once.mt"):
                 _LOG.info("%s already included, skipped (include-once)", path)
@@ -226,13 +228,15 @@ class _Expander:
         if not seq:
             raise ScriptError(f"{path.name!r}: no matrix found")
         for matrix in seq:
-            if matrix.name.strip() not in {"Alias", "Vars", "Action", "Merge"}:
+            if (matrix.name.strip() not in {"Alias", "Vars", "Action", "Merge"}
+                    and struct_name(matrix.name) is None):
                 raise ScriptError(f"@{matrix.name[:100]} is not supported in @Merge fragments; "
                                   "use @Include for content copying")
         return self.accumulate(seq, path.parent, depth)
 
-    def accumulate(self, seq: list[Matrix], base: Path, depth: int) -> dict[str, Matrix | None]:
+    def accumulate(self, seq: list[Matrix], base: Path, depth: int) -> dict[str, Matrix | list[Matrix] | None]:
         acc = {name: _fold(seq, name) for name in ("Alias", "Vars")}
+        acc["Struct"] = [matrix for matrix in seq if struct_name(matrix.name) is not None]
         acc["Action"] = next((m for m in seq if m.name.strip() == "Action"), None)
         owned: dict[str, set[str]] = {}
         for kind in ("Alias", "Vars"):
@@ -250,6 +254,7 @@ class _Expander:
             for relative, phase in _specs(matrix):
                 path = self.path(base, relative, depth + 1)
                 parts = self.fragment(path, depth + 1)
+                acc["Struct"].extend(parts.get("Struct", []))
                 for kind in ("Alias", "Vars"):
                     child = parts.get(kind)
                     if child is None:
@@ -268,17 +273,17 @@ class _Expander:
 
     def run(self, matrices: list[Matrix]) -> list[Matrix]:
         seq = self.splice(matrices, self.root)
-        seq = [Matrix(m.name, m.rows, self.nested(m.children, self.root)) for m in seq]
+        seq = [Matrix(m.name, m.rows, self.nested(m.children, self.root), m.json_text) for m in seq]
         if not any(m.name.strip() == "Merge" for m in seq):
             return seq
         acc = self.accumulate(seq, self.root, 0)
-        out = [acc[k] for k in ("Alias", "Vars") if acc[k] is not None]
+        out = [acc[k] for k in ("Alias", "Vars") if acc[k] is not None] + acc["Struct"]
         action = acc["Action"]
         if action is not None and not any(m.name.strip() == "Action" for m in seq):
             out.append(action)
             action = None
         for matrix in seq:
-            if matrix.name.strip() in {"Alias", "Vars", "Merge"}:
+            if matrix.name.strip() in {"Alias", "Vars", "Merge"} or struct_name(matrix.name) is not None:
                 continue
             if matrix.name.strip() == "Action":
                 if action is not None:

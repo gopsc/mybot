@@ -96,6 +96,45 @@ def test_query_rejects_mutation_without_activation(workspace, monkeypatch, capsy
     assert code == 1 and "only SELECT" in result["error"]["message"]
 
 
+@pytest.mark.parametrize("command", ["run", "--no-agent"])
+def test_struct_real_cli_read_and_assignment(workspace, command):
+    (workspace / "struct.mt").write_text('''@Struct(state)
+{"count":0,"values":[2],"text":"a b # ; @"}
+@
+@while(state.count<3)
+@Action
+dev.echo dev.capture;
+$(state.values[0]+state.count) $state.count=count;
+@
+@
+@Action
+dev.echo;
+$(state.text);
+@
+''', encoding="utf-8")
+    result = run_cli(workspace, command, "--robot", "robot.sql", "--input", "struct.mt")
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert [v["echo"] for v in payload["outputs"]] == [2, 3, 4, "a b # ; @"]
+    assert len(result.stdout.splitlines()) == 1
+
+
+@pytest.mark.parametrize("command", ["check", "run"])
+def test_struct_invalid_json_is_rejected_before_cli_activation(workspace, monkeypatch, capsys, command):
+    monkeypatch.setattr(Robot, "active", forbid)
+    (workspace / "struct.mt").write_text('@Struct(state)\n{"value":Infinity}\n@\n', encoding="utf-8")
+    code, result, _ = invoke(capsys, command, "--robot", workspace / "robot.sql", "--input", workspace / "struct.mt")
+    assert code == 1 and result["error"]["type"] == "ScriptError"
+
+
+def test_struct_static_check_does_not_activate(workspace, monkeypatch, capsys):
+    monkeypatch.setattr(Robot, "active", forbid)
+    (workspace / "struct.mt").write_text('@Struct(state)\n{"value":2}\n@\n@Action\ndev.echo;\n$(state.value);\n@\n', encoding="utf-8")
+    code, result, _ = invoke(capsys, "check", "--robot", workspace / "robot.sql", "--input", workspace / "struct.mt")
+    assert code == 0 and result["activated"] is False
+    assert result["action_blocks"] == ["Struct(state)", "Action"]
+
+
 def test_include_base_is_input_parent(workspace, capsys):
     directory = workspace / "nested scripts"
     directory.mkdir()

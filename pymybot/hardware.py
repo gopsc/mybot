@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import json
 import math
 import re
 import threading
@@ -8,7 +10,8 @@ from contextlib import contextmanager
 from typing import Callable
 
 from .errors import BudgetExceeded, DriverError, ScriptError
-from .expr import Expression, expr_body, parse_number, render
+from .expr import Expression, expr_body, parse_number, render, select_member
+from .matrix import struct_json
 
 
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
@@ -114,6 +117,29 @@ class Number(Variable):
         return render(self.numeric())
 
 
+class Struct(Variable):
+    kind = "struct"
+
+    def __init__(self, name, value):
+        super().__init__(name)
+        self.value = json.loads(struct_json(value))
+
+    def play(self, params):
+        return self.value
+
+    def updated(self, keys, value):
+        candidate = copy.deepcopy(self.value)
+        if keys:
+            parent = candidate
+            for key in keys[:-1]:
+                parent = select_member(parent, key)
+            select_member(parent, keys[-1])
+            parent[keys[-1]] = value
+        else:
+            candidate = value
+        return Struct(self.name, candidate)
+
+
 class Registry:
     def __init__(self):
         self._base = {}
@@ -160,6 +186,9 @@ class Registry:
         safe_ident(name)
         if name in self.flow_refs:
             raise ScriptError(f"Cannot override '{name}': referenced by controller/trigger")
+        existing = self.get(name)
+        if existing is not None and existing.kind == "struct" and variable.kind != "struct":
+            raise ScriptError(f"Cannot replace Struct '{name}' with another variable type")
         self._overrides[name] = variable
 
     @contextmanager
@@ -174,14 +203,16 @@ class Registry:
         var = self.require(name)
         if var.kind == "vars":
             return var.numeric()
-        if var.kind == "alias":
+        if var.kind in {"alias", "struct"}:
             return var.read()
-        raise ScriptError(f"Expression identifier '{name}' is not an @Vars/@Alias scalar")
+        raise ScriptError(f"Expression identifier '{name}' is not an @Vars/@Alias/@Struct variable")
 
     def resolve_number(self, name):
         var = self.require(name)
+        if var.kind == "struct":
+            return var.read()
         if var.kind != "vars":
-            raise ScriptError(f"Expression identifier '{name}' must be an @Vars number")
+            raise ScriptError(f"Expression identifier '{name}' must be an @Vars number or @Struct value")
         return var.numeric()
 
 

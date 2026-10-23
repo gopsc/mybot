@@ -2,11 +2,77 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+import math
+import re
 
 from .errors import ScriptError
 
 MAX_BLOCK_DEPTH = 32
 MAX_SCRIPT_BYTES = 8 * 1024 * 1024
+_STRUCT = re.compile(r"Struct\(([A-Za-z_][A-Za-z_0-9]*)\)\Z")
+_STRUCT_END = re.compile(r"@[ \t]*(?:#[^\n]*)?(?=\n|$)")
+
+
+def struct_name(name: str) -> str | None:
+    if name == "Struct" or name.startswith("Struct("):
+        match = _STRUCT.fullmatch(name)
+        if match is None:
+            raise ScriptError("Expected @Struct(identifier) without whitespace")
+        return match[1]
+    return None
+
+
+def struct_json(value) -> str:
+    pending = [(value, 0)]
+    while pending:
+        item, depth = pending.pop()
+        if depth > MAX_BLOCK_DEPTH:
+            raise ScriptError("Struct JSON exceeds maximum nesting depth")
+        if isinstance(item, dict):
+            if not all(isinstance(key, str) for key in item):
+                raise ScriptError("Struct JSON object keys must be strings")
+            pending.extend((key, depth + 1) for key in item)
+            pending.extend((child, depth + 1) for child in item.values())
+        elif isinstance(item, list):
+            pending.extend((child, depth + 1) for child in item)
+        elif isinstance(item, str):
+            try:
+                item.encode("utf-8")
+            except UnicodeError:
+                raise ScriptError("Struct JSON strings must be valid UTF-8") from None
+        elif type(item) in {int, float}:
+            try:
+                finite = math.isfinite(item)
+            except OverflowError:
+                finite = False
+            if not finite:
+                raise ScriptError("Struct JSON numbers must be finite")
+        elif item is not None and type(item) is not bool:
+            raise ScriptError("Struct values must be JSON-compatible")
+    encoded = json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
+    if len(encoded) > MAX_SCRIPT_BYTES:
+        raise ScriptError("Struct JSON exceeds the byte limit")
+    return encoded
+
+
+def parse_struct_json(text: str) -> str:
+    def constant(_):
+        raise ScriptError("Struct JSON does not accept NaN or Infinity")
+
+    def object_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ScriptError("Struct JSON has duplicate object keys")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(text, parse_constant=constant, object_pairs_hook=object_pairs)
+    except (ValueError, RecursionError) as exc:
+        raise ScriptError("Invalid Struct JSON") from exc
+    return struct_json(value)
 
 
 def is_control(name: str) -> bool:
@@ -19,6 +85,7 @@ class Matrix:
     name: str
     rows: list[list[str]] = field(default_factory=list)
     children: list[Matrix] = field(default_factory=list)
+    json_text: str | None = None
 
     def __post_init__(self) -> None:
         if self.rows and any(len(row) != len(self.rows[0]) for row in self.rows):
@@ -48,10 +115,28 @@ class Matrix:
 
 
 def split_action_column(text: str) -> tuple[str, str]:
-    # Deliberately not expression-aware: C++ rejects decimal points in headers.
-    if text.count(".") != 1:
+    depth, quoted, escaped = 0, False, False
+    separators = []
+    for index, char in enumerate(text):
+        if quoted:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+        elif char == '"' and depth:
+            quoted = True
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "." and depth == 0:
+            separators.append(index)
+    if depth or quoted or len(separators) != 1:
         raise ScriptError(f"Action column {text[:160]!r}: expected <device>.<param>")
-    device, param = text.split(".")
+    index = separators[0]
+    device, param = text[:index], text[index + 1:]
     if not device or not param:
         raise ScriptError("Action column requires a nonempty device and parameter")
     return device, param
@@ -63,6 +148,8 @@ class _Frame:
     pending: list[list[str]] = field(default_factory=list)
     cells: list[str] = field(default_factory=list)
     token: list[str] = field(default_factory=list)
+    json_chars: list[str] = field(default_factory=list)
+    json_header_line: int = 0
 
     def item(self) -> None:
         if self.token:
@@ -114,6 +201,11 @@ def parse_matrices(text: str) -> list[Matrix]:
             frame.flush()
             (stack[-1].matrix.children if stack else out).append(frame.matrix)
         else:
+            if struct_name(name) is not None:
+                if stack:
+                    raise ScriptError("@Struct declarations may only appear at the top level")
+                stack.append(_Frame(Matrix(name, json_text=""), json_header_line=line))
+                return
             if stack:
                 if not is_control(stack[-1].matrix.name):
                     raise ScriptError(f"Line {line}: leaf @{stack[-1].matrix.name} "
@@ -123,7 +215,32 @@ def parse_matrices(text: str) -> list[Matrix]:
                 raise ScriptError(f"Block nesting depth exceeds {MAX_BLOCK_DEPTH}")
             stack.append(_Frame(Matrix(name)))
 
-    for char in text:
+    line_prefix = True
+    for index, char in enumerate(text):
+        at_line_prefix = line_prefix
+        if char == "\n":
+            line_prefix = True
+        elif char not in " \t\r":
+            line_prefix = False
+        if stack and stack[-1].matrix.json_text is not None and not naming and not comment:
+            frame = stack[-1]
+            if line == frame.json_header_line:
+                if char == "#":
+                    comment = True
+                elif char == "\n":
+                    line += 1
+                elif char not in " \t\r":
+                    raise ScriptError("Struct JSON must start on the line after its declaration")
+                continue
+            if char == "@" and at_line_prefix and _STRUCT_END.match(text, index):
+                frame.matrix.json_text = parse_struct_json("".join(frame.json_chars))
+                out.append(stack.pop().matrix)
+                at_start = True
+            else:
+                frame.json_chars.append(char)
+                if char == "\n":
+                    line += 1
+            continue
         if not comment and char == "#":
             comment = True
             if naming:

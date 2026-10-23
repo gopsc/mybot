@@ -235,7 +235,10 @@ echo.value;
 @
 ```
 
-支持 `@Alias`、`@Vars`、`@if(...)`、`@while(...)`、`$(表达式)`、`capture` 捕获结果和 Include 片段复用。
+支持 `@Alias`、`@Vars`、`@Struct(name)`、`@if(...)`、`@while(...)`、`$(表达式)`、`capture` 捕获结果和 Include 片段复用。
+`@Struct(name)` 块体直接写标准 JSON，通过 `$(state.points[0].x)` 读取字段和零基数组元素，
+通过 `$state=payload` 或 `$state.points[0].x=x` 捕获赋值；变量仅在本次运行内有效，不隐式创建字段或扩展数组。
+完整规则与无硬件示例见 [MT 动作脚本参考](skills/pymybot-scripting/references/action-mt.md#9-json-结构变量-structname)。
 
 #### 驱动模块（Lua）
 

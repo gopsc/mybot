@@ -1054,6 +1054,57 @@ def test_include_merge_and_control_frozen_for_real_robot(tmp_path):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("directive", ["Include", "Merge"])
+def test_struct_json_and_mutation_survive_agent_snapshot(tmp_path, directive):
+    (tmp_path / "main.mt").write_text(f"@{directive}\npath;\npart.mt;\n@\n", encoding="utf-8")
+    (tmp_path / "part.mt").write_text('''@Struct(state)
+{"count":0,"device":"relay0","parameter":"test","text":"literal # ; @ with spaces"}
+@
+@while(state.count<3)
+@Action
+$(state.device).$(state.parameter) relay0.capture;
+$(state.count+1) $state.count=slept;
+@
+@
+''' if directive == "Include" else '''@Struct(state)
+{"count":1,"text":"literal # ; @ with spaces"}
+@
+@Action
+relay0.test relay0.capture;
+$(state.count) $state.count=slept;
+$(state.count+1) -;
+@
+''', encoding="utf-8")
+
+    async def scenario():
+        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path)
+        try:
+            for _ in range(2):
+                result = await executor.call("run_action_script", {"script": "main.mt"})
+                assert result["ok"], result
+                expected = [1, 2, 3] if directive == "Include" else [1, 2]
+                assert [v["slept"] for v in result["data"]["outputs"]] == expected
+        finally:
+            await executor.close()
+    asyncio.run(scenario())
+
+
+def test_struct_invalid_json_rejected_before_agent_activation(tmp_path, monkeypatch):
+    (tmp_path / "main.mt").write_text('@Struct(state)\n{"x":NaN}\n@\n', encoding="utf-8")
+    monkeypatch.setattr(Robot, "active", lambda self: pytest.fail("Invalid JSON must not activate the robot"))
+
+    async def scenario():
+        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path)
+        try:
+            result = await executor.call("run_action_script", {"script": "main.mt"})
+            assert result["ok"] is False and result["executed"] is False
+            assert result["state"] == "not_executed"
+            assert not executor.faulted
+        finally:
+            await executor.close()
+    asyncio.run(scenario())
+
+
 def test_real_daemon_keeps_its_independent_worker(tmp_path, synthetic_modules):
     robot_path = tmp_path / "daemon.sql"
     robot_path.write_text(

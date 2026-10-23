@@ -188,7 +188,10 @@ class _Scripts:
                 if matrix.name.strip() in {"Include", "Merge"}:
                     raise SecurityError("Unexpanded file directive")
                 lines.append("@" + matrix.name + "\n")
-                lines.extend(" ".join(row) + ";\n" for row in matrix.rows)
+                if matrix.json_text is not None:
+                    lines.append(matrix.json_text + "\n")
+                else:
+                    lines.extend(" ".join(row) + ";\n" for row in matrix.rows)
                 render(matrix.children)
                 lines.append("@\n")
 

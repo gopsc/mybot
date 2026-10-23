@@ -4,11 +4,11 @@ from __future__ import annotations
 import re
 
 from .errors import ScriptError
-from .expr import Expression, expr_body, parse_number, render
-from .matrix import MAX_BLOCK_DEPTH, Matrix, is_control, split_action_column
+from .expr import Expression, Reference, expr_body, parse_number, render
+from .matrix import MAX_BLOCK_DEPTH, Matrix, is_control, split_action_column, struct_name
 
 _SAFE_IDENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
-_SCALARS = {"alias", "vars"}
+_SCALARS = {"alias", "vars", "struct"}
 
 
 class ActionRunner:
@@ -32,8 +32,8 @@ class ActionRunner:
         variable = self.registry.get(name)
         if variable is None or variable.kind not in _SCALARS:
             return name
-        if variable.kind == "vars":
-            raise ScriptError(f"@Vars '{name}' is numeric and cannot name an @Action device")
+        if variable.kind in {"vars", "struct"}:
+            raise ScriptError(f"Variable '{name}' cannot name an @Action device directly; use an expression or @Alias")
         target = variable.read()
         if not isinstance(target, str):
             raise ScriptError(f"@Alias '{name}' must contain text")
@@ -50,18 +50,18 @@ class ActionRunner:
         variable = self.registry.get(text)
         return render(variable.read()) if variable is not None and variable.kind in _SCALARS else text
 
-    @staticmethod
-    def _capture(text: str) -> tuple[str, str] | None:
+    def _capture(self, text: str) -> tuple[str, tuple, str] | None:
         if not text.startswith("$") or text.startswith("$("):
             return None
-        var, equals, path = text[1:].partition("=")
-        if not equals or not _SAFE_IDENT.fullmatch(var):
-            raise ScriptError("Invalid @Action capture: expected $safe_identifier=field.path")
+        target, equals, path = text[1:].partition("=")
+        if not equals:
+            raise ScriptError("Invalid @Action capture: expected $target=field.path")
+        reference = Reference(target)
         if not path or any(not part for part in path.split(".")):
             raise ScriptError("Capture field path must have nonempty dot-separated segments")
-        return var, path
+        return reference.name, reference.resolve_path(self.registry.resolve), path
 
-    def _apply_capture(self, result: dict, var: str, path: str) -> None:
+    def _apply_capture(self, result: dict, var: str, keys: tuple, path: str) -> None:
         from .hardware import Alias, Number
 
         value = result
@@ -71,8 +71,12 @@ class ActionRunner:
             value = value[segment]
         existing = self.registry.get(var)
         numeric = isinstance(value, (float, int)) and not isinstance(value, bool)
+        if keys and (existing is None or existing.kind != "struct"):
+            raise ScriptError("Capture member assignment requires a declared @Struct")
         if existing is not None:
-            if existing.kind == "vars":
+            if existing.kind == "struct":
+                variable = existing.updated(keys, value)
+            elif existing.kind == "vars":
                 if not numeric:
                     raise ScriptError(f"Capture target @Vars '{var}' requires a numeric field")
                 render(value)
@@ -131,7 +135,7 @@ class ActionRunner:
             if len(row) != len(columns):
                 raise ScriptError(f"Action row {row_index} does not match header column count")
             parameters: dict[str, dict] = {}
-            captures: dict[str, list[tuple[str, str]]] = {}
+            captures: dict[str, list[tuple[str, tuple, str]]] = {}
             # Entire row is evaluated before ANY device plays. Captured values
             # become visible to subsequent rows/blocks, never same-row cells.
             for col, raw in enumerate(row):
@@ -163,8 +167,8 @@ class ActionRunner:
                     continue
                 result = self._ensure_result(variable.play(parameters.get(device, {})), device)
                 outputs.append(result)
-                for var, path in captures.get(device, []):
-                    self._apply_capture(result, var, path)
+                for var, keys, path in captures.get(device, []):
+                    self._apply_capture(result, var, keys, path)
                 self.budget.check()
         return outputs
 
@@ -208,7 +212,7 @@ class ActionRunner:
                         if not self._test_condition(condition):
                             break
                         self._sequence(matrix.children, outputs, depth + 1)
-            elif name in {"Alias", "Vars", "Trigger", "Reflex"}:
+            elif name in {"Alias", "Vars", "Trigger", "Reflex"} or struct_name(name) is not None:
                 if depth:
                     raise ScriptError(f"@{name} may only be used at top level, not inside a control block")
             else:
