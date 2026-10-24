@@ -112,7 +112,7 @@ dev.echo;
 $(state.text);
 @
 ''', encoding="utf-8")
-    result = run_cli(workspace, command, "--robot", "robot.sql", "--input", "struct.mt")
+    result = run_cli(workspace, "--no-gui", command, "--robot", "robot.sql", "--input", "struct.mt")
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert [v["echo"] for v in payload["outputs"]] == [2, 3, 4, "a b # ; @"]
@@ -424,10 +424,12 @@ def test_help_errors_and_module_entrypoint(workspace):
     help_result = run_cli(workspace, "--help")
     assert help_result.returncode == 0 and "FFI" in help_result.stdout
     assert "malicious-code isolation" in help_result.stdout
+    assert "--no-gui" in help_result.stdout
     assert "MCP" not in help_result.stdout
     sample_help = run_cli(workspace, "sample", "--help")
     assert "activation itself may write" in sample_help.stdout
-    for args in [[], ["run"], ["check", "--robot", "absent.sql"]]:
+    # The GUI is the default entry, so a bare invocation is not a usage error.
+    for args in [["--no-gui"], ["run"], ["check", "--robot", "absent.sql"]]:
         result = run_cli(workspace, *args)
         assert result.returncode != 0 and json.loads(result.stdout)["ok"] is False
         assert result.stderr

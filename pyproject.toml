@@ -28,9 +28,10 @@ linux = ["smbus2>=0.5; sys_platform == 'linux'", "spidev>=3.6; sys_platform == '
 
 [project.scripts]
 pymybot = "pymybot.cli:main"
+mybot-gui = "pymybot.gui.__main__:main"
 
 [tool.setuptools]
-packages = ["pymybot"]
+packages = ["pymybot", "pymybot.gui"]
 
 [tool.setuptools.cmdclass]
 build_py = "build_support.BuildPy"

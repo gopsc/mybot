@@ -20,7 +20,7 @@ def files(tmp_path):
 
 
 def invoke(capsys, *args):
-    code = cli.main(list(map(str, args)))
+    code = cli.main(["--no-gui", *map(str, args)])
     captured = capsys.readouterr()
     assert len(captured.out.splitlines()) == 1
     return code, json.loads(captured.out), captured.err
@@ -107,12 +107,12 @@ def test_repeated_camera_var_collects_every_name(files, capsys, monkeypatch):
 
 def test_camera_var_names_are_validated(files):
     with pytest.raises(ScriptError):
-        cli.parse_args(["--robot", str(files[0]), "--task", "t", "--model", "openai:test",
+        cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "t", "--model", "openai:test",
                         "--camera-var", "bad name"])
 
 
 def test_flag_like_task_text_not_removed(files):
-    args = cli.parse_args(["--robot", str(files[0]), "--task=--no-agent"])
+    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task=--no-agent"])
     assert args.command == "agent" and args.task == "--no-agent"
 
 
@@ -129,15 +129,15 @@ def test_flag_like_task_text_not_removed(files):
 def test_workspace_options_require_explicit_capabilities(files, no_agent_import, extra, message):
     task = [] if "--no-agent" in extra else ["--task", "test"]
     with pytest.raises(cli.UsageError, match=message):
-        cli.parse_args(["--robot", str(files[0]), *task, *extra])
+        cli.parse_args(["--no-gui", "--robot", str(files[0]), *task, *extra])
 
 
 def test_workspace_options_do_not_grant_other_permissions(files):
-    args = cli.parse_args(["--robot", str(files[0]), "--task", "test", "--workspace-dir", ".",
+    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "test", "--workspace-dir", ".",
                            "--enable-shell", "--allow-shell", "--allow-file-writes"])
     assert args.workspace_dir == "." and args.enable_shell and args.allow_shell and args.allow_file_writes
     assert not args.allow_actions and not args.allow_hardware
-    defaults = cli.parse_args(["--robot", str(files[0]), "--task", "test", "--allow-actions"])
+    defaults = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "test", "--allow-actions"])
     assert defaults.workspace_dir is None and not defaults.enable_shell
     assert not defaults.allow_shell and not defaults.allow_file_writes
 

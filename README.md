@@ -11,6 +11,17 @@ pymybot 提供两种独立的使用方式，可按需选择或组合：
 - **机器人智能体**：PydanticAI 驱动的交互式 AI 助手，通过自然语言控制机器人
 - **机器人控制器**：直接执行 CLI 命令，无需模型依赖，适合自动化脚本和 CI/CD
 
+两种模式都有命令行入口；此外，**不带子命令运行 `pymybot` 会打开 tkinter 图形界面**
+（见「图形界面（GUI）」）。在脚本、CI 或没有显示器的环境里用 `--no-gui` 回到命令行：
+
+```sh
+pymybot                 # 图形界面（智能体为核心）
+pymybot --no-gui ...    # 命令行：智能体 REPL 或直接控制器命令
+```
+
+`--no-agent` 只对命令行有意义，写在子命令之前时会隐含 `--no-gui`，因此
+`pymybot --no-agent --robot x.sql --input a.mt` 仍是原来的直接执行路径。
+
 ---
 
 ## 机器人智能体
@@ -45,14 +56,16 @@ export DEEPSEEK_API_KEY="sk-..."
 
 ```sh
 # 一次性任务
-.venv/bin/python -m pymybot --robot robots/relay-test.sql \
+.venv/bin/python -m pymybot --no-gui --robot robots/relay-test.sql \
   --task "列出硬件和可用动作脚本"
 
 # 交互会话（/exit 退出）
-.venv/bin/python -m pymybot --robot robots/relay-test.sql
+.venv/bin/python -m pymybot --no-gui --robot robots/relay-test.sql
 ```
 
-不带子命令的 `--robot` 入口默认进智能体模式，也可显式写 `agent` 子命令。`--no-agent` 可让 agent 入口绕过模型直接执行脚本（需配合 `--input`）。
+不带子命令的 `--robot` 入口默认打开图形界面；上面的终端用法需要 `--no-gui`。
+也可显式写 `agent` 子命令（子命令本身即命令行模式）。
+`--no-agent` 可让 agent 入口绕过模型直接执行脚本（需配合 `--input`）。
 
 ### 工具集与能力
 
@@ -82,13 +95,15 @@ export DEEPSEEK_API_KEY="sk-..."
 
 ```sh
 # 交互使用文件和 shell 工具，每次写入/执行都确认
-.venv/bin/python -m pymybot --robot robots/relay-test.sql \
+.venv/bin/python -m pymybot --no-gui --robot robots/relay-test.sql \
   --workspace-dir . --enable-shell
 
 # 非交互只读文件任务，不启用 shell 或预授权写入
-.venv/bin/python -m pymybot --robot robots/relay-test.sql \
+.venv/bin/python -m pymybot --no-gui --robot robots/relay-test.sql \
   --workspace-dir . --task "读取并解释 scripts 目录中的动作脚本"
 ```
+
+> 图形界面暂不开放文件 / shell 工具，这类会话请用 `--no-gui`。
 
 **Shell 不是沙箱**：工作目录只决定初始 cwd，不能阻止命令访问目录外文件、网络、环境变量或物理设备，`--allow-hardware` 也不能约束 shell。命令继承宿主用户权限和环境；只在可信环境启用，不支持后台任务。超时/取消会终止进程并尝试清理子进程，但不是操作系统隔离，也不撤销已发生的副作用。文件写入若修改脚本、驱动或技能，会影响后续执行的信任边界；修改 SQL 文件不会重载当前 Robot，需重启会话。
 
@@ -181,12 +196,46 @@ python -m venv .venv
 | `sample --robot SQL --name VAR` | 是 | 激活并读取命名变量，支持 `--count` / `--interval-ms` |
 | `apply-sql --robot SQL --sql "..."` | 是 | 对临时激活的会话应用受限 SQL，不改磁盘文件 |
 | `serve [--no-agent]` | 按需 | 长驻 stdio JSON-RPC 2.0 服务，供 IDE 前端保持会话（见下文） |
+| `gui` | 按需 | 打开图形界面（默认入口，见「图形界面（GUI）」） |
 
 `--sql` 采用严格语法：每条语句都必须以 `;` 结尾，单条语句也不例外，否则报 `SQL: unexpected end of script`。
 
 通用选项：`--module-path DIR`（可重复，显式指定时须同时包含 `modules`）、`--camera-src-dir DIR`、`--timeout SECONDS`、`--var NAME=VALUE`、`--allow-hardware`。
 
 退出码：0 成功，1 运行错误，2 用法错误，130 被中断。
+
+### 图形界面（GUI）
+
+`pymybot` 不带子命令时打开 tkinter 窗口，也可以用 `gui` 子命令显式打开。
+窗口**以智能体为核心**：中间是对话，工具调用逐条显示并逐次请求批准，
+左侧只保留机器人上下文（结构文件、硬件、路径与预算）。它不做任何机器人逻辑，
+而是启动一个 `python -m pymybot serve` 子进程，通过同一个 JSON-RPC 协议驱动：
+权限、预算、超时、工具确认全部由 pymybot 负责，和命令行完全一致。
+
+```sh
+pymybot --robot robots/relay-test.sql          # 打开窗口并预选结构
+pymybot gui --robot robots/relay-test.sql --task "列出硬件"   # 预填提示，不自动发送
+pymybot --no-gui --robot robots/relay-test.sql --task "列出硬件"   # 终端等价用法
+```
+
+| 区域 | 内容 |
+| --- | --- |
+| 工具栏 | 工作区、结构（`.sql`）、刷新上下文、新对话、停止、设置 |
+| 左侧 | 脚本根目录 / 技能目录 / 模块路径 / 图片源；硬件列表（`hardware` 静态读取，不激活）；权限与预算；当前模型 |
+| 对话 | 模型增量文本、`→ 工具 参数` / `⇦ 工具 状态`、每轮 usage |
+| 日志 | `serve` 的 stderr、上下文读取的 stderr、窗口自身的诊断 |
+| 输入 | 多行任务，`Ctrl+Enter` 发送；`■ 停止` 取消当前轮 |
+
+安全约定：
+
+- 每个需要批准的工具调用都会弹出模态对话框，展示**完整**参数；参数过长（>4000 字符）直接拒绝，不截断审阅。
+- `允许硬件`（`--allow-hardware`）与`自动批准动作`（`--allow-actions`）是每次启动的开关，**不写入配置文件**；允许硬件在发送任务前还要再确认一次。
+- 设置只保存工作区、解释器、模型、端点、**密钥变量名**与路径；不保存 API Key，也不保存任何授权。
+- 窗口退出时先发 `shutdown` 并等 `serve` 清理驱动；强制关闭只是兜底。
+
+限制（原型）：没有编辑器、文件树、采样曲线与会话热更新；智能体的文件 / shell 工具（`--workspace-dir`、`--enable-shell`）
+未接入窗口，需要时用 `--no-gui`。图形界面需要 tkinter（Debian/Ubuntu：`apt install python3-tk`），
+对话还需要 `pymybot[agent]`；解释器缺依赖时窗口会明确提示，而不是静默降级。
 
 ### serve 协议
 
@@ -279,6 +328,7 @@ pymybot run --robot robots/<任务>.sql --input scripts/<任务>.mt \
 ### 特性
 
 - **双模式入口**：智能体模式（PydanticAI）与控制器模式（直接 CLI）独立可选
+- **默认图形界面**：`pymybot` 直接打开 tkinter 窗口（以智能体为核心），`--no-gui` 回到纯命令行；窗口只驱动 `serve` 子进程，不重复实现任何机器人逻辑
 - **三层脚本**：`modules/*.lua` 驱动、`robots/*.sql` 结构、`scripts/*.mt` 动作，一一对应
 - **默认安全**：静态命令不激活驱动；`run` / `sample` / `apply-sql` 默认只允许虚拟总线、串口回环、图片文件或回环 HTTP，必须显式 `--allow-hardware` 才打开物理设备、非回环网络端点或宿主命令执行（Shell 驱动）
 - **跨平台 HAL**：UART 走 pyserial，I2C/SPI 走 pyftdi（MPSSE），Camera 采集走 PyAV（可选）、图片编解码走 Pillow，HTTP 走标准库 urllib（零额外依赖）；Linux 可选 smbus2/spidev
@@ -292,6 +342,7 @@ pymybot run --robot robots/<任务>.sql --input scripts/<任务>.mt \
 
 ```
 pymybot/                  Python 包：CLI、SQL 解析、动作执行、HAL、Daemon、智能体
+  gui/                    tkinter 图形界面（默认入口：协议客户端、配置、窗口与审批对话框）
 modules/                  Lua 基础资源与公共库
   I2C.lua SPI.lua UART.lua Camera.lua     四种基础总线/设备资源
   HTTP.lua                                HTTP 端点会话（回环默认可用）
@@ -308,7 +359,7 @@ robots/                   SQL 结构文件（示例：relay-test.sql、qsont.sql
 scripts/                  MT 动作脚本（示例：relay-test.mt）
 skills/                   智能体参考技能（SKILL.md + references；示例：pymybot-scripting）
 docs/                     补充文档（如 Windows faulthandler 说明）
-tests/                    pytest 测试（fixtures/virt/ 为逐驱动无硬件端到端夹具）
+tests/                    pytest 测试（fixtures/virt/ 为逐驱动无硬件端到端夹具；test_gui.py 覆盖窗口与进程边界）
 ```
 
 #### 预置驱动（47 个）
@@ -337,6 +388,9 @@ python -m venv .venv
 ```
 
 Linux 上需要原生 `/dev/i2c-*` / `/dev/spidev*` 时追加 `.[linux]`；需要从物理摄像头采集时追加 `.[camera]`（PyAV，自带 FFmpeg，约 30 MB）。只用文件图片源不需要它。安装后可用 `pymybot` 命令或 `python -m pymybot`。
+
+图形界面只用标准库 tkinter：Windows / macOS 官方解释器已自带，Debian/Ubuntu 需要 `apt install python3-tk`。
+除 `pymybot` 外还会安装等价的 `mybot-gui` 入口。
 
 启用智能体时，在虚拟环境内安装 `python -m pip install -e ".[agent,test]"`。仅直接执行可继续使用基础安装，不需要 PydanticAI、模型 API Key 或模型网络请求。智能体依赖锁定为已验证接口版本；缺少依赖时明确报错，不静默降级。
 

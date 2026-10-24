@@ -579,7 +579,7 @@ def test_cli_cleanup_failures_preserve_receipts_and_primary_error(monkeypatch, c
         executor.call = unknown_call
     model = scripted_model([ToolCallPart("run_action_script", {"script": "action.mt"})], [TextPart("done")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=close_client))
-    code = cli.main(["--robot", "unused.sql", "--task", "execute", "--allow-actions"])
+    code = cli.main(["--no-gui", "--robot", "unused.sql", "--task", "execute", "--allow-actions"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 1 and not payload["ok"] and closed == ["executor", "client"]
@@ -601,7 +601,7 @@ def test_interactive_cli_confirms_and_emits_only_final_json(monkeypatch, capsys)
     model = scripted_model([ToolCallPart("run_action_script", {"script": "action.mt"})], [TextPart("已完成")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=close_client))
     monkeypatch.setattr(sys, "stdin", FakeTTY("执行动作\ny\n/exit\n"))
-    code = cli.main(["--robot", "unused.sql"])
+    code = cli.main(["--no-gui", "--robot", "unused.sql"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 0 and len(captured.out.splitlines()) == 1
@@ -616,7 +616,7 @@ def test_interactive_cli_streams_to_stderr_and_does_not_reprint(monkeypatch, cap
     model = scripted_model([ToolCallPart("list_hardware", {})], [TextPart("AAAA BBBB")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=lambda: asyncio.sleep(0)))
     monkeypatch.setattr(sys, "stdin", FakeTTY("list\n/exit\n"))
-    code = cli.main(["--robot", "unused.sql"])
+    code = cli.main(["--no-gui", "--robot", "unused.sql"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 0 and len(captured.out.splitlines()) == 1
@@ -733,7 +733,7 @@ def test_cli_real_sdk_model_loop_and_virtual_robot(tmp_path, monkeypatch, capsys
         assert json.loads(receipt["content"])["data"]["outputs"][0]["echo"] == 9
         return completion({"role": "assistant", "content": "虚拟动作完成"})
     with fake_openai(respond) as (url, requests):
-        code = cli.main(["--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "执行动作",
+        code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "执行动作",
                          "--model", "openai:test", "--base-url", url, "--allow-actions"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
@@ -777,7 +777,7 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
     thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
     thread.start()
     try:
-        code = cli.main(["--robot", str(path), "--task", "列出硬件", "--model", "openai-chat:test",
+        code = cli.main(["--no-gui", "--robot", str(path), "--task", "列出硬件", "--model", "openai-chat:test",
                          "--base-url", f"http://127.0.0.1:{server.server_port}/v1"])
     finally:
         server.shutdown()
@@ -822,7 +822,7 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
         pytest.fail("Workspace tools must not activate hardware")
     monkeypatch.setattr(Robot, "active", forbidden_activation)
     monkeypatch.setattr(agent_module, "create_model", lambda _: (FunctionModel(respond, stream_function=stream), None))
-    code = cli.main(["--robot", str(robot), "--scripts-dir", str(tmp_path),
+    code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),
                      "--workspace-dir", str(tmp_path), "--enable-shell", "--allow-shell",
                      "--allow-file-writes", "--task", "write, edit, read and run shell"])
     captured = capsys.readouterr()
@@ -842,7 +842,7 @@ def test_provider_error_is_sanitized_and_not_retried(tmp_path, monkeypatch, caps
     path = tmp_path / "robot.sql"
     path.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
     with fake_openai(lambda *_: (500, {"error": {"message": "SECRET must not leak", "type": "server_error"}})) as (url, requests):
-        code = cli.main(["--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
+        code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
                          "--model", "openai:test", "--base-url", url])
     captured = capsys.readouterr()
     assert code == 1 and len(requests) == 1
@@ -861,7 +861,7 @@ def test_unusable_skills_root_fails_as_configuration_before_any_request(tmp_path
         pytest.fail("skills root must be validated before a model request is sent")
 
     with fake_openai(forbid) as (url, requests):
-        code = cli.main(["--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
+        code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
                          "--skills-dir", str(tmp_path / "absent"),
                          "--model", "openai:test", "--base-url", url])
     captured = capsys.readouterr()

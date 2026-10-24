@@ -69,12 +69,17 @@ def variable(value):
 def parser():
     p = ArgumentParser(
         prog="pymybot", allow_abbrev=False,
-        description="Local robot CLI. With --robot and no command, start the PydanticAI agent. "
-                    "Existing commands bypass the model; results are JSON.",
+        description="GUI-first robot controller. Without a command it opens the tkinter agent window; "
+                    "use --no-gui for the command-line interface (agent REPL or direct controller commands). "
+                    "Command-line results are JSON on stdout.",
         epilog="Use only trusted Lua modules: LuaJIT FFI is not malicious-code isolation. "
                "Activation itself may write to devices, including when sampling. "
-               "Example: pymybot --robot robot.sql --task 'List hardware' --model openai:MODEL")
-    p.add_argument("--no-agent", action="store_true", help="bypass models; with --robot use --input to run a script")
+               "Examples: pymybot --robot robot.sql   (GUI) | "
+               "pymybot --no-gui --robot robot.sql --task 'List hardware'   (terminal agent)")
+    p.add_argument("--no-gui", action="store_true",
+                   help="command-line interface instead of the GUI (the GUI is the default)")
+    p.add_argument("--no-agent", action="store_true",
+                   help="bypass models; with --robot use --input to run a script (implies --no-gui)")
     commands = p.add_subparsers(dest="command", required=True)
     descriptions = {
         "check": "Statically validate structure SQL, modules/references and optional action Includes",
@@ -84,11 +89,33 @@ def parser():
         "run": "Activate, execute an action script and deactivate (virtual-only by default)",
         "sample": "Activate and read a named variable; activation itself may write to devices",
         "apply-sql": "Apply SQL to a temporarily active robot; does not write the structure file",
-        "agent": "PydanticAI task or interactive session (the default when only --robot is given)",
+        "agent": "PydanticAI task or interactive session on the terminal (see --no-gui)",
+        "gui": "tkinter agent window (the default entry; no command required)",
         "serve": "Long-lived stdio JSON-RPC 2.0 server for IDE frontends (one JSON object per line)",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
+        if name == "gui":
+            # The window is always agent-centric: no agent/controller mode switch.
+            command.add_argument("--robot", metavar="FILE", help="structure SQL file to open with")
+            command.add_argument("--task", help="pre-fill the prompt box (not sent automatically)")
+            command.add_argument("--workspace-dir", metavar="DIR", help="workspace root (default: current directory)")
+            command.add_argument("--module-path", action="append", metavar="DIR", help="trusted Lua module root; repeatable")
+            command.add_argument("--camera-src-dir", metavar="DIR", help="local camera image root")
+            command.add_argument("--scripts-dir", metavar="DIR", help="trusted .mt script root offered to the agent")
+            command.add_argument("--skills-dir", metavar="DIR", help="operator skill directories")
+            command.add_argument("--model", help="provider:model; defaults to MYBOT_MODEL")
+            command.add_argument("--base-url", help="provider endpoint; defaults to MYBOT_BASE_URL")
+            command.add_argument("--api-key-env", help="environment variable holding the API key")
+            command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
+            command.add_argument("--camera-var", action="append", default=[], metavar="NAME", help="allow image capture from this Camera variable; repeatable")
+            command.add_argument("--allow-actions", action="store_true", help="start with agent action approval disabled")
+            command.add_argument("--allow-hardware", action="store_true", help="start with physical device access checked")
+            command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
+            command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
+            command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
+                                 help="per-task wall-clock budget (default: 180)")
+            continue
         command.add_argument("--no-agent", action="store_true",
                              help="disable agent.* methods" if name == "serve"
                              else "bypass the model; agent entry requires --input MT")
@@ -147,11 +174,25 @@ def parser():
 
 def parse_args(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql", "agent", "serve"}
+    commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql", "agent", "gui", "serve"}
+    # --no-gui is a top-level switch: the GUI is the default entry, so drop it
+    # before choosing a command, and let a subcommand keep its own semantics.
+    no_gui = "--no-gui" in arguments
+    if no_gui:
+        arguments = [token for token in arguments if token != "--no-gui"]
+    # --no-agent only means something to the command-line controller, so a
+    # top-level use selects the CLI instead of failing against the GUI.
+    head = []
+    for token in arguments:
+        if token in commands:
+            break
+        head.append(token)
+    if "--no-agent" in head:
+        no_gui = True
     if len(arguments) > 1 and arguments[0] == "--no-agent" and arguments[1] in commands:
         arguments[:2] = [arguments[1], "--no-agent"]
-    if arguments and arguments[0] not in commands | {"--help", "-h"}:
-        arguments.insert(0, "agent")
+    if not arguments or arguments[0] not in commands | {"--help", "-h"}:
+        arguments.insert(0, "agent" if no_gui else "gui")
     args = parser().parse_args(arguments)
     if args.command != "agent":
         return args  # Existing subcommands always bypass the model.
@@ -241,6 +282,14 @@ def sample(robot, args, stop):
 def execute(args, stop):
     if args.command == "scripts":
         return list_scripts(args.scripts_dir or default_scripts_dir())
+    if args.command == "gui":
+        from .gui import GuiUnavailable, run_gui
+        try:
+            return run_gui(args)
+        except GuiUnavailable as exc:
+            raise RuntimeError(
+                f"Cannot open the GUI ({exc}); pass --no-gui for the command-line interface"
+            ) from None
     if args.command == "serve":
         from .serve import run_server
         return run_server(stop, enable_agent=not args.no_agent)
