@@ -4,11 +4,33 @@ from __future__ import annotations
 import re
 
 from .errors import ScriptError
-from .expr import Expression, Reference, expr_body, parse_number, render
+from .expr import Expression, Reference, evaluation_guard, expr_body, parse_number, render
 from .matrix import MAX_BLOCK_DEPTH, Matrix, is_control, split_action_column, struct_name
+from .security import MAX_BODY, dumps
 
 _SAFE_IDENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 _SCALARS = {"alias", "vars", "struct"}
+MAX_OUTPUT_BYTES = MAX_BODY
+MAX_OUTPUTS = 10_000
+
+
+class _OutputCollector:
+    def __init__(self, limit=None, max_items=None):
+        self.limit = MAX_OUTPUT_BYTES if limit is None else limit
+        self.max_items = MAX_OUTPUTS if max_items is None else max_items
+        self.items: list[dict] = []
+        self.size = 0
+
+    def add(self, value):
+        size = len(dumps(value).encode("utf-8"))
+        if len(self.items) >= self.max_items:
+            raise ScriptError(f"Action output budget exceeded: more than {self.max_items} "
+                              "results; remaining actions were not run")
+        if self.size + size > self.limit:
+            raise ScriptError(f"Action output budget exceeded: {self.size + size} bytes "
+                              f"> {self.limit}; remaining actions were not run")
+        self.size += size
+        self.items.append(value)
 
 
 class ActionRunner:
@@ -19,7 +41,8 @@ class ActionRunner:
 
     def _value(self, expression: Expression):
         self.budget.check()
-        return expression.evaluate(self.registry.resolve)
+        with evaluation_guard(self.budget.check):
+            return expression.evaluate(self.registry.resolve)
 
     def _parameter_value(self, text: str):
         value = self._value(Expression(expr_body(text)))
@@ -59,7 +82,9 @@ class ActionRunner:
         reference = Reference(target)
         if not path or any(not part for part in path.split(".")):
             raise ScriptError("Capture field path must have nonempty dot-separated segments")
-        return reference.name, reference.resolve_path(self.registry.resolve), path
+        with evaluation_guard(self.budget.check):
+            keys = reference.resolve_path(self.registry.resolve)
+        return reference.name, keys, path
 
     def _apply_capture(self, result: dict, var: str, keys: tuple, path: str) -> None:
         from .hardware import Alias, Number
@@ -106,9 +131,10 @@ class ActionRunner:
                 raise ScriptError(f"Hardware '{device}' failed: {value.get('message', result)!r}")
         return value
 
-    def dispatch(self, matrix: Matrix) -> list[dict]:
+    def dispatch(self, matrix: Matrix, outputs=None) -> list[dict]:
         """Dispatch a plain action matrix, also used by hot SQL and Reflex."""
         self.budget.check()
+        sink = outputs if outputs is not None else _OutputCollector()
         if matrix.children or is_control(matrix.name):
             raise ScriptError("dispatch expects a plain action matrix, not a control block")
         columns: list[tuple[str, str]] = []
@@ -127,7 +153,6 @@ class ActionRunner:
                 order.append(device)
             if any(row[col] not in {"-", ""} for row in matrix.data):
                 phase_devices.add(device)
-        outputs: list[dict] = []
         previous = ["-"] * len(columns)
         cache: list[tuple[str, Expression] | None] = [None] * len(columns)
         for row_index, row in enumerate(matrix.data, 1):
@@ -166,11 +191,11 @@ class ActionRunner:
                 if device not in parameters and device not in captures:
                     continue
                 result = self._ensure_result(variable.play(parameters.get(device, {})), device)
-                outputs.append(result)
                 for var, keys, path in captures.get(device, []):
                     self._apply_capture(result, var, keys, path)
+                sink.add(result)
                 self.budget.check()
-        return outputs
+        return sink.items
 
     @staticmethod
     def _condition(matrix: Matrix) -> Expression:
@@ -190,7 +215,7 @@ class ActionRunner:
             raise ScriptError("@if/@while condition must be logical; no implicit truth conversion")
         return value
 
-    def _sequence(self, matrices: list[Matrix], outputs: list[dict], depth: int = 0) -> bool:
+    def _sequence(self, matrices: list[Matrix], outputs: _OutputCollector, depth: int = 0) -> bool:
         if depth > MAX_BLOCK_DEPTH:
             raise ScriptError("Execution block nesting exceeds depth limit")
         actionable = False
@@ -199,7 +224,7 @@ class ActionRunner:
             name = matrix.name.strip()
             if name == "Action":
                 actionable = True
-                outputs.extend(self.dispatch(matrix))
+                self.dispatch(matrix, outputs)
             elif is_control(name):
                 actionable = True
                 condition = self._condition(matrix)
@@ -244,7 +269,7 @@ class ActionRunner:
             raise ScriptError("Trigger call is missing a reflex name")
         return name, args
 
-    def _reflex(self, matrices: list[Matrix], outputs: list[dict]) -> None:
+    def _reflex(self, matrices: list[Matrix], outputs: _OutputCollector) -> None:
         from .hardware import Alias
 
         triggers = [m for m in matrices if m.name.strip() == "Trigger"]
@@ -279,7 +304,7 @@ class ActionRunner:
                 with self.registry.session():
                     for key, value in args.items():
                         self.registry.override(key, Alias(key, value))
-                    outputs.extend(self.dispatch(action))
+                    self.dispatch(action, outputs)
             finally:
                 self._capture_writes = None
                 # Only argument bindings are trigger-local. Captures into other
@@ -290,9 +315,9 @@ class ActionRunner:
 
     def run(self, matrices: list[Matrix]) -> list[dict]:
         """Execute registered matrices; caller owns the enclosing run session."""
-        outputs: list[dict] = []
+        outputs = _OutputCollector()
         actionable = self._sequence(matrices, outputs)
         if not actionable and not any(m.name.strip() == "Trigger" for m in matrices):
             raise ScriptError("No @Action matrix found in the script")
         self._reflex(matrices, outputs)
-        return outputs
+        return outputs.items

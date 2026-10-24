@@ -67,6 +67,32 @@ def test_frontmatter_validation(tmp_path, skill_md, pattern):
         SkillsLibrary(make_root(tmp_path, skill_md=skill_md))
 
 
+def test_frontmatter_uses_bounded_reader(tmp_path, monkeypatch):
+    import pymybot.agent_skills as skills_module
+
+    calls = []
+    real = skills_module.read_file
+
+    def spy(path, cap=skills_module.MAX_SKILL_FILE):
+        calls.append((Path(path), cap))
+        return real(path, cap)
+
+    monkeypatch.setattr(skills_module, "read_file", spy)
+    assert SkillsLibrary(make_root(tmp_path)).enabled
+    assert calls == [(tmp_path / "skills" / "demo-skill" / "SKILL.md",
+                      skills_module.MAX_SKILL_FILE)]
+
+
+def test_skill_md_size_is_bounded(tmp_path):
+    import pymybot.agent_skills as skills_module
+
+    root = make_root(tmp_path)
+    with (root / "demo-skill" / "SKILL.md").open("ab") as stream:
+        stream.write(b"x" * skills_module.MAX_SKILL_FILE)
+    with pytest.raises(SecurityError, match="limit"):
+        SkillsLibrary(root)
+
+
 def test_directory_without_skill_md_is_an_error(tmp_path):
     root = tmp_path / "skills"
     (root / "empty-skill").mkdir(parents=True)

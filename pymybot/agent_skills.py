@@ -109,12 +109,13 @@ class SkillsLibrary:
 
     def _frontmatter(self, path, expected):
         try:
-            raw = path.read_bytes()
+            text = read_file(path, MAX_SKILL_FILE)
         except OSError as exc:
             raise SecurityError(f"Skill '{expected}' has no readable SKILL.md") from exc
-        if len(raw) > MAX_SKILL_FILE:
-            raise SecurityError(f"Skill '{expected}': SKILL.md exceeds the size limit")
-        text = checked_text(raw.decode("utf-8"), MAX_SKILL_FILE)
+        except UnicodeDecodeError as exc:
+            raise SecurityError(f"Skill '{expected}': SKILL.md is not UTF-8") from exc
+        except SecurityError as exc:
+            raise SecurityError(f"Skill '{expected}': {exc}") from exc
         lines = text.split("\n")
         if not lines or lines[0].strip() != "---":
             raise SecurityError(f"Skill '{expected}': SKILL.md must start with frontmatter")

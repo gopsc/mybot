@@ -1,4 +1,5 @@
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -10,8 +11,11 @@ from pymybot.runtime import LuaState
 
 
 class NoHardware:
-    def call(self, operation, *args):
+    def call(self, operation, *args, **kwargs):
         raise AssertionError("Test must not touch hardware")
+
+    def release_owner(self, owner):
+        pass
 
 
 @pytest.fixture
@@ -127,6 +131,76 @@ function destroy(d) __hal_call("sleep_ms", 1); return {result="OK"} end
         assert with_runtime.call("destroy", {})["result"] == "OK"
     finally:
         with_runtime.close()
+        hal.close()
+
+
+def test_lua_uart_polling_receives_call_budget(tmp_path):
+    pytest.importorskip("serial")
+    from pymybot.hal import HALManager
+
+    hal = HALManager()
+    state = LuaState([tmp_path], hal, threading.Event())
+    path = tmp_path / "Uart.lua"
+    path.write_text('''
+function call(d)
+    local h = __hal_call("uart_open", "loop://", 115200)
+    local data = __hal_call("uart_read", h, 1, 350)
+    return {result="OK", n=#data}
+end
+''')
+    try:
+        state.load(path)
+        started = time.monotonic()
+        with pytest.raises(BudgetExceeded):
+            state.call("call", {}, budget=Budget(timeout=0.02))
+        assert time.monotonic() - started < 0.2
+    finally:
+        state.close()
+        hal.close()
+
+
+def test_close_releases_handles_owned_by_the_state(tmp_path):
+    pytest.importorskip("serial")
+    from pymybot.hal import HALManager
+
+    hal = HALManager()
+    path = tmp_path / "Open.lua"
+    path.write_text('function call(d) return {result="OK", '
+                    'fd=__hal_call("uart_open", "loop://", 115200)} end')
+    state = LuaState([tmp_path], hal, threading.Event())
+    try:
+        state.load(path)
+        assert state.call("call", {})["fd"] >= 0
+        assert len(hal._handles) == 1 and len(hal._buses) == 1
+    finally:
+        state.close()
+    assert not hal._handles and not hal._buses
+    hal.close()
+
+
+def test_shared_bus_survives_until_last_owner_closes(tmp_path):
+    pytest.importorskip("serial")
+    from pymybot.hal import HALManager
+
+    hal = HALManager()
+    path = tmp_path / "Open.lua"
+    path.write_text('function call(d) return {result="OK", '
+                    'fd=__hal_call("uart_open", "loop://", 115200)} end')
+    first = LuaState([tmp_path], hal, threading.Event())
+    second = LuaState([tmp_path], hal, threading.Event())
+    try:
+        for state in (first, second):
+            state.load(path)
+            assert state.call("call", {})["fd"] >= 0
+        assert len(hal._handles) == 2 and len(hal._buses) == 1
+        bus = next(iter(hal._buses.values()))
+        first.close()
+        assert len(hal._handles) == 1 and not bus.closed
+        second.close()
+        assert not hal._handles and not hal._buses and bus.closed
+    finally:
+        first.close()
+        second.close()
         hal.close()
 
 

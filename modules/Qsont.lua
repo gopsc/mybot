@@ -47,6 +47,20 @@ local SKIP_KEYS = {
 	proto = true, I2C = true, SPI = true, UART = true, HTTP = true,
 }
 
+-- 每个端点显式接受的成功码：HAL 不跟随重定向，3xx 绝不能当作完成。
+local OK_STATUS = {
+	login   = { [200] = true },
+	push    = { [200] = true, [201] = true },
+	batch   = { [200] = true, [201] = true },
+	pull    = { [200] = true },
+	ack     = { [200] = true, [204] = true },
+	bind    = { [200] = true, [201] = true },
+	unbind  = { [200] = true, [204] = true },
+	online  = { [200] = true, [204] = true },
+	devices = { [200] = true },
+	latest  = { [200] = true },
+}
+
 local function api(ctx, method, path, payload)
 	local headers = nil
 	if token ~= nil then
@@ -86,8 +100,9 @@ local function login(ctx, data)
 	return nil
 end
 
--- api 的 401 包装：重登一次再重试；HTTP >= 400 统一折成 err
-local function call_api(ctx, data, method, path, payload)	local resp, decoded = api(ctx, method, path, payload)
+-- api 的 401 包装：重登一次再重试；只接受该端点显式声明的成功码。
+local function call_api(ctx, data, method, path, payload, ok)
+	local resp, decoded = api(ctx, method, path, payload)
 	if resp.result == "OK" and resp.status == 401 then
 		token = nil
 		local failure = login(ctx, data)
@@ -97,7 +112,7 @@ local function call_api(ctx, data, method, path, payload)	local resp, decoded = 
 	if resp.result ~= "OK" then
 		return resp
 	end
-	if resp.status >= 400 then
+	if not ok or not ok[resp.status] then
 		local note = type(resp.body) == "string" and resp.body or ""
 		if #note > 200 then note = note:sub(1, 200) .. "..." end
 		return err("HTTP " .. tostring(resp.status) .. ": " .. note)
@@ -150,7 +165,7 @@ require_driver("http", {
 				device_id = device_id,
 				data_key = tostring(data.key),
 				data_value = tostring(data.value),
-			})
+			}, OK_STATUS.push)
 			if resp.result ~= "OK" then return resp end
 			local id = nil
 			if type(decoded) == "table" then id = tonumber(decoded.id) end
@@ -172,15 +187,15 @@ require_driver("http", {
 				return err("Invalid Arguments: items (empty)")
 			end
 			local resp = call_api(ctx, data, "POST", "/data/batch",
-				{ device_id = device_id, items = items })
+				{ device_id = device_id, items = items }, OK_STATUS.batch)
 			if resp.result ~= "OK" then return resp end
 			return { result = "OK", count = #items }
 
 		elseif op == "pull" then
-			local resp, decoded = call_api(ctx, data, "GET", "/commands/pending")
+			local resp, decoded = call_api(ctx, data, "GET", "/commands/pending", nil, OK_STATUS.pull)
 			if resp.result ~= "OK" then return resp end
-			local n = 0
-			if type(decoded) == "table" then n = #decoded end
+			if type(decoded) ~= "table" then return err("Invalid pull response") end
+			local n = #decoded
 			local encoded = "[]"
 			if n > 0 then
 				local ok, text = pcall(json.encode, decoded)
@@ -199,7 +214,7 @@ require_driver("http", {
 				return err("Invalid Arguments: status (sent|executed|failed)")
 			end
 			local resp = call_api(ctx, data, "PUT",
-				"/commands/" .. tostring(cmd) .. "/status", { status = status })
+				"/commands/" .. tostring(cmd) .. "/status", { status = status }, OK_STATUS.ack)
 			if resp.result ~= "OK" then return resp end
 			return { result = "OK", cmd = cmd, status = status }
 
@@ -211,22 +226,23 @@ require_driver("http", {
 				return err("Invalid Arguments: key (device_key)")
 			end
 			local resp, decoded = call_api(ctx, data, "POST", "/devices/bind",
-				{ device_key = tostring(data.key) })
+				{ device_key = tostring(data.key) }, OK_STATUS.bind)
 			if resp.result ~= "OK" then return resp end
 			local bound_id, name = nil, nil
 			if type(decoded) == "table" then
 				bound_id = finite_of(decoded.device_id)
 				name = decoded.device_name
 			end
-			if bound_id ~= nil and bound_id == math.floor(bound_id) and bound_id >= 1 then
-				device_id = math.floor(bound_id)
+			if bound_id == nil or bound_id ~= math.floor(bound_id) or bound_id < 1 then
+				return err("Invalid bind response: device_id")
 			end
+			device_id = math.floor(bound_id)
 			return { result = "OK", device = device_id, name = name }
 
 		elseif op == "unbind" then
 			-- 解除绑定（只能解绑绑定来的设备；自己拥有的设备走服务器端删除）
 			local resp = call_api(ctx, data, "DELETE",
-				"/devices/" .. tostring(device_id) .. "/unbind")
+				"/devices/" .. tostring(device_id) .. "/unbind", nil, OK_STATUS.unbind)
 			if resp.result ~= "OK" then return resp end
 			return { result = "OK", device = device_id }
 
@@ -239,15 +255,15 @@ require_driver("http", {
 			end
 			local resp = call_api(ctx, data, "PUT",
 				"/devices/" .. tostring(device_id) .. "/status",
-				{ is_online = flag == 1 })
+				{ is_online = flag == 1 }, OK_STATUS.online)
 			if resp.result ~= "OK" then return resp end
 			return { result = "OK", online = flag }
 
 		elseif op == "devices" then
-			local resp, decoded = call_api(ctx, data, "GET", "/devices")
+			local resp, decoded = call_api(ctx, data, "GET", "/devices", nil, OK_STATUS.devices)
 			if resp.result ~= "OK" then return resp end
-			local n = 0
-			if type(decoded) == "table" then n = #decoded end
+			if type(decoded) ~= "table" then return err("Invalid devices response") end
+			local n = #decoded
 			local encoded = "[]"
 			if n > 0 then
 				local ok, text = pcall(json.encode, decoded)
@@ -256,10 +272,10 @@ require_driver("http", {
 			return { result = "OK", count = n, devices = encoded }
 
 		elseif op == "latest" then
-			local resp, decoded = call_api(ctx, data, "GET", latest_path(data.key))
+			local resp, decoded = call_api(ctx, data, "GET", latest_path(data.key), nil, OK_STATUS.latest)
 			if resp.result ~= "OK" then return resp end
-			if type(decoded) ~= "table" then
-				return err("no data point")
+			if type(decoded) ~= "table" or decoded.data_key == nil or decoded.data_value == nil then
+				return err("Invalid latest response")
 			end
 			return {
 				result = "OK",
@@ -286,7 +302,7 @@ require_driver("http", {
 				return err("Invalid Arguments: op (push|batch|pull|ack|online|devices|latest)")
 			end
 			local resp = call_api(ctx, data, "POST", "/data/batch",
-				{ device_id = device_id, items = items })
+				{ device_id = device_id, items = items }, OK_STATUS.batch)
 			if resp.result ~= "OK" then return resp end
 			return { result = "OK", count = #items }
 
@@ -307,10 +323,10 @@ function read(data)
 	if fd == nil or fd < 0 then
 		return err("Invalid Argument: fd (does the HTTP column reference an @HTTP variable?)")
 	end
-	local resp, decoded = call_api({ fd = fd }, data, "GET", latest_path(data.key))
+	local resp, decoded = call_api({ fd = fd }, data, "GET", latest_path(data.key), nil, OK_STATUS.latest)
 	if resp.result ~= "OK" then return resp end
-	if type(decoded) ~= "table" then
-		return err("no data point")
+	if type(decoded) ~= "table" or decoded.data_key == nil or decoded.data_value == nil then
+		return err("Invalid latest response")
 	end
 	return {
 		result = "OK",

@@ -80,6 +80,7 @@ class LuaState:
         self.allow_hardware = allow_hardware
         self.budget = None
         self._closed = False
+        self._owner = object()
         self.lua = LuaRuntime(
             register_eval=False,
             register_builtins=False,
@@ -138,11 +139,11 @@ class LuaState:
                 while remaining > 0:
                     self._check()
                     duration = min(remaining, 50)
-                    self.hal.call(operation, duration)
+                    self.hal.call(operation, duration, cancel_check=self._check, owner=self._owner)
                     remaining -= duration
                 self._check()
                 return 0
-        result = self.hal.call(operation, *values)
+        result = self.hal.call(operation, *values, cancel_check=self._check, owner=self._owner)
         self._check()
         return self.to_lua(result)
 
@@ -281,3 +282,4 @@ class LuaState:
             self.globals = None
             self._set_hook = None
             self.lua = None
+            self.hal.release_owner(self._owner)

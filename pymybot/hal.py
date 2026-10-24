@@ -40,6 +40,17 @@ class _Resource:
         self.closed = False
 
 
+class _Call:
+    """Per-request context; thread-local so concurrent workers never share it."""
+
+    __slots__ = ("cancel", "owner", "cancelled")
+
+    def __init__(self, cancel, owner):
+        self.cancel = cancel
+        self.owner = owner
+        self.cancelled = False
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """3xx must surface as a status; never follow to another host silently."""
 
@@ -95,33 +106,45 @@ class HALManager:
         self._next_handle = 1 << 40
         self._closed = False
         self._errors = threading.local()
+        self._calls = threading.local()
+        self._owners: dict[int, object] = {}
 
-    def call(self, operation: str, *args) -> dict | list[int] | int | str | None:
+    def call(self, operation: str, *args, cancel_check=None,
+             owner=None) -> dict | list[int] | int | str | None:
         """Dispatch, returning scalars/lists/dicts/None (never device objects).
 
         Open/setup/write/close failures return -1; transfer/read failures None;
         camera failures and unsupported operations return {result: ERR, message}.
         last_error returns the calling thread's most recent diagnostic string.
         sleep_ms raises cancellation exceptions so cancellation is not swallowed.
+        cancel_check is request-scoped (thread-local); owner tags handles opened
+        by that request so they can be released together.
         """
         if operation == "last_error":
             return getattr(self._errors, "message", "")
         if not isinstance(operation, str) or operation not in self._OPERATIONS:
             return {"result": "ERR", "message": f"Unsupported HAL operation: {operation}"}
-        if operation == "sleep_ms":
-            return self._sleep_ms(*args)
+        previous = getattr(self._calls, "current", None)
+        context = self._calls.current = _Call(cancel_check, owner)
         try:
-            if self._closed:
-                raise RuntimeError("HAL manager is closed")
-            return getattr(self, "_" + operation)(*args)
-        except Exception as exc:
-            message = f"{operation}: {exc}"
-            self._errors.message = message
-            if operation == "camera_capture" or operation in {"http_request", "shell_run"}:
-                return {"result": "ERR", "message": message}
-            if operation in {"i2c_transfer", "spi_transfer", "uart_read"}:
-                return None
-            return -1
+            if operation == "sleep_ms":
+                return self._sleep_ms(*args)
+            try:
+                if self._closed:
+                    raise RuntimeError("HAL manager is closed")
+                return getattr(self, "_" + operation)(*args)
+            except Exception as exc:
+                if context.cancelled:
+                    raise
+                message = f"{operation}: {exc}"
+                self._errors.message = message
+                if operation == "camera_capture" or operation in {"http_request", "shell_run"}:
+                    return {"result": "ERR", "message": message}
+                if operation in {"i2c_transfer", "spi_transfer", "uart_read"}:
+                    return None
+                return -1
+        finally:
+            self._calls.current = previous
 
     @staticmethod
     def _integer(value, low=0, high=0xFFFFFFFF):
@@ -164,8 +187,41 @@ class HALManager:
         self._next_handle += 1
         self._handles[handle] = resource
         self._settings[handle] = settings
+        context = getattr(self._calls, "current", None)
+        if context is not None and context.owner is not None:
+            self._owners[handle] = context.owner
         resource.refs += 1
         return handle
+
+    def _active_cancel(self):
+        context = getattr(self._calls, "current", None)
+        if context is not None and context.cancel is not None:
+            return context.cancel
+        return self._cancel_check
+
+    def _tick_cancel(self):
+        check = self._active_cancel()
+        if check is None:
+            return
+        try:
+            check()
+        except BaseException:
+            context = getattr(self._calls, "current", None)
+            if context is not None:
+                context.cancelled = True
+            raise
+
+    def release_owner(self, owner):
+        """Close handles opened under one owner; shared buses wait for their last ref."""
+        if owner is None:
+            return
+        with self._lock:
+            handles = [handle for handle, held in self._owners.items() if held is owner]
+        for handle in handles:
+            try:
+                self._close_handle(handle)
+            except Exception as exc:
+                self._errors.message = f"release_owner: {exc}"
 
     def _get(self, handle, kind=None):
         handle = self._integer(handle, 0, (1 << 53) - 1)
@@ -353,8 +409,7 @@ class HALManager:
         with r.lock:
             self._live(r)
             while True:
-                if self._cancel_check:
-                    self._cancel_check()
+                self._tick_cancel()
                 part = r.device.read(n - len(out))  # timeout=0: portable nonblocking read
                 if len(part) > n - len(out):
                     raise IOError("oversized UART read")
@@ -500,8 +555,7 @@ class HALManager:
                 active = {0, 1}
                 exited_at = None
                 while True:
-                    if self._cancel_check:
-                        self._cancel_check()
+                    self._tick_cancel()
                     for index in tuple(active):
                         chunk = read_pipe(pipes[index])
                         if chunk == b"":
@@ -558,12 +612,11 @@ class HALManager:
             return 0
         deadline = time.monotonic() + min(ms, 4294967) / 1000
         while True:
-            if self._cancel_check:
-                self._cancel_check()
+            self._tick_cancel()
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return 0
-            time.sleep(min(remaining, .05) if self._cancel_check else remaining)
+            time.sleep(min(remaining, .05) if self._active_cancel() else remaining)
 
     @classmethod
     def _size(cls, width, height):
@@ -825,6 +878,7 @@ class HALManager:
             r = self._get(handle)
             del self._handles[int(handle)]
             self._settings.pop(int(handle), None)
+            self._owners.pop(int(handle), None)
             r.refs -= 1
             if r.refs:
                 return 0

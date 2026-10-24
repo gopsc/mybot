@@ -157,6 +157,42 @@ def test_static_context_and_single_owner(setup):
     asyncio.run(scenario())
 
 
+def test_start_honors_deadline_before_validation(setup):
+    calls = []
+
+    class SlowRobot:
+        tables = []
+
+        def __init__(self, *args, **kwargs):
+            calls.append("init")
+            time.sleep(0.12)
+
+        def _validate(self, tables):
+            calls.append("validate")
+
+        def _rows(self, tables):
+            calls.append("rows")
+
+        def deactivate(self):
+            calls.append("deactivate")
+
+    async def scenario():
+        ex = setup.factory(robot_factory=SlowRobot)
+        try:
+            started = time.monotonic()
+            result = await ex.start(deadline=time.monotonic() + 0.02)
+            assert result["ok"] is False
+            assert result["executed"] is False
+            assert result["state"] == "not_executed"
+            assert result["error"]["type"] == "BudgetExceeded"
+            assert calls == ["init"]
+            assert time.monotonic() - started < 0.5
+        finally:
+            await ex.close()
+        assert calls[-1] == "deactivate"
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("tool,args", [
     ("list_files", {}), ("read_file", {"path": "action.mt"}),
     ("write_file", {"path": "created.txt", "content": "test"}),

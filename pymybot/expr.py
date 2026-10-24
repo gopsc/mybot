@@ -1,14 +1,40 @@
 """Bounded .mt expression parser, with no Python code evaluation."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import math
 import re
+import threading
 from collections.abc import Callable
 
 from .errors import ScriptError
 
 Value = float | str | bool
 ResolvedValue = Value | int | dict[str, "ResolvedValue"] | list["ResolvedValue"] | None
+MAX_EVAL_STEPS = 100_000
+_eval_state = threading.local()
+
+
+@contextmanager
+def evaluation_guard(check, steps=None):
+    """Bound nested expression work and run the caller's budget check per step."""
+    previous = getattr(_eval_state, "state", None)
+    _eval_state.state = [MAX_EVAL_STEPS if steps is None else steps, check]
+    try:
+        yield
+    finally:
+        _eval_state.state = previous
+
+
+def _evaluation_step():
+    state = getattr(_eval_state, "state", None)
+    if state is None:
+        return
+    if state[0] <= 0:
+        raise ScriptError("Expression evaluation exceeded the step budget")
+    state[0] -= 1
+    if state[1] is not None:
+        state[1]()
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 _DECIMAL = re.compile(r"(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 _HEX = re.compile(r"[+-]?0[xX](?:[0-9a-fA-F]+(?:\.[0-9a-fA-F]*)?|\.[0-9a-fA-F]+)(?:[pP][+-]?[0-9]+)?")
@@ -384,6 +410,7 @@ def _evaluate(root, resolve: Callable[[str], ResolvedValue]) -> ResolvedValue:
     todo = [(root, 0)]
     values: list[ResolvedValue] = []
     while todo:
+        _evaluation_step()
         node, phase = todo.pop()
         op = node[0]
         if op == "literal":

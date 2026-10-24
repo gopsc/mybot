@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -39,7 +40,7 @@ class FakeExecutor:
         self.closed = False
         self.records = []
 
-    async def start(self):
+    async def start(self, *, deadline=None):
         return {"robot": "test", "hardware": [{"name": "dev", "type": "dummy"}]}
 
     async def call(self, name, arguments, *, timeout):
@@ -166,6 +167,20 @@ def test_streaming_timeout_is_enforced_between_deltas():
         finally:
             await session.close()
     asyncio.run(scenario())
+
+
+def test_stream_renderer_neutralizes_controls_in_text_and_tool_labels():
+    buffer = io.StringIO()
+    renderer = agent_module.StreamRenderer(stream=buffer)
+    renderer({"type": "text_delta", "text": "a\x1b[2Jb\x07c\x9bd\nnext\tok"})
+    renderer({"type": "tool_call", "tool": "evil\x1b]0;pwn\x07", "arguments": {"x": 1}})
+    renderer({"type": "tool_result", "tool": "evil\x1b]0;pwn\x07",
+              "ok": True, "state": "done\x1b[2J"})
+    renderer.end_turn()
+    output = buffer.getvalue()
+    assert all(ord(ch) >= 0x20 or ch in "\n\t" for ch in output)
+    assert "a" in output and "next\tok" in output
+    assert "\\x1b" in output and "\\x07" in output and "\\x9b" in output
 
 
 def test_stream_renderer_neutralizes_and_truncates_tool_arguments():
@@ -430,13 +445,45 @@ def test_history_prunes_complete_turns():
 
 def test_failed_start_never_sends_model_request():
     executor = FakeExecutor()
-    async def fail_start():
+    async def fail_start(*, deadline=None):
         return {"ok": False, "executed": False, "state": "not_executed"}
     executor.start = fail_start
     async def forbidden(messages, info):
         pytest.fail("Invalid robot startup reached model")
     with pytest.raises(AgentConfigurationError):
         asyncio.run(AgentSession(executor, FunctionModel(forbidden)).ask("hello"))
+
+
+def test_slow_start_is_covered_by_the_turn_deadline():
+    class SlowExecutor:
+        def __init__(self):
+            self.stop_event = threading.Event()
+
+        async def start(self, *, deadline=None):
+            assert deadline is not None, "startup must receive the turn deadline"
+            remaining = deadline - time.monotonic()
+            await asyncio.sleep(min(0.12, max(0, remaining)))
+            if time.monotonic() >= deadline:
+                return {"ok": False, "executed": False, "state": "not_executed"}
+            return {"ok": True}
+
+        def cancel(self):
+            self.stop_event.set()
+
+        async def call(self, name, arguments, *, timeout):
+            pytest.fail("A timed-out startup must not dispatch tools")
+
+        async def close(self):
+            pass
+
+    async def forbidden(messages, info):
+        pytest.fail("A timed-out startup must not send a model request")
+
+    started = time.monotonic()
+    with pytest.raises(AgentBudgetExceeded):
+        asyncio.run(AgentSession(SlowExecutor(), FunctionModel(forbidden),
+                                 AgentConfig(timeout=0.02)).ask("hello"))
+    assert time.monotonic() - started < 0.1
 
 
 @pytest.mark.parametrize("receipt_state", ["completed", "not_executed"])

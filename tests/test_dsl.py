@@ -8,7 +8,7 @@ from conftest import usable_symlink
 from pymybot.actions import ActionRunner
 from pymybot.errors import BudgetExceeded, ScriptError
 from pymybot.expr import Expression, expr_body, render
-from pymybot.hardware import Alias, Number
+from pymybot.hardware import Alias, Metadata, Number
 from pymybot.include import expand_includes
 from pymybot.matrix import Matrix, parse_matrices
 
@@ -1047,3 +1047,91 @@ def test_struct_many_at_characters_do_not_copy_line_prefixes():
     source = TrackedSource('@Struct(state)\n"' + payload + '"\n@\n')
     assert json.loads(parse_matrices(source)[0].json_text) == payload
     assert copied <= len(source)
+
+
+class _MetaTable:
+    header = ["name", "count"]
+
+    def inherited(self, row, index):
+        return row[index]
+
+
+class _MetaRegistry:
+    def __init__(self):
+        self.variables = {}
+
+    def require(self, name):
+        return self.variables[name]
+
+
+class _MetaVariable:
+    def __init__(self, name, kind, value):
+        self.name = name
+        self.kind = kind
+        self.value = value
+
+    def read(self):
+        return self.value
+
+
+def test_metadata_reference_resolves_session_override_by_name():
+    registry = _MetaRegistry()
+    registry.variables["n"] = _MetaVariable("n", "vars", 1.0)
+    metadata = Metadata(_MetaTable(), ["dev", "$n"], registry)
+    metadata.seed()
+    assert metadata.collect()["count"] == 1.0
+    registry.variables["n"] = _MetaVariable("n", "vars", 2.0)
+    assert metadata.collect()["count"] == 2.0
+    registry.variables["n"] = _MetaVariable("n", "vars", 1.0)
+    assert metadata.collect()["count"] == 1.0
+
+
+def test_metadata_reference_still_merges_driver_tables():
+    registry = _MetaRegistry()
+    registry.variables["dev"] = _MetaVariable("dev", "lua", {"result": "OK", "T": 25})
+    metadata = Metadata(_MetaTable(), ["dev", "$dev"], registry)
+    metadata.seed()
+    assert metadata.collect() == {"result": "OK", "T": 25}
+
+
+def test_action_output_budget_is_cumulative(monkeypatch):
+    import pymybot.actions as actions_module
+
+    monkeypatch.setattr(actions_module, "MAX_OUTPUT_BYTES", 200, raising=False)
+    dev = Driver(callback=lambda params: {"result": "OK", "payload": "x" * 120})
+    script = (block("Action", "dev.p", "1") + block("Action", "dev.p", "2")
+              + block("Action", "dev.p", "3"))
+    with pytest.raises(ScriptError, match="output budget"):
+        run(script, dev)
+    assert len(dev.calls) == 2
+
+
+def test_action_output_count_is_bounded(monkeypatch):
+    import pymybot.actions as actions_module
+
+    monkeypatch.setattr(actions_module, "MAX_OUTPUTS", 2, raising=False)
+    dev = Driver(callback=lambda params: {"result": "OK", "n": 1})
+    script = (block("Action", "dev.p", "1") + block("Action", "dev.p", "2")
+              + block("Action", "dev.p", "3"))
+    with pytest.raises(ScriptError, match="output budget"):
+        run(script, dev)
+    assert len(dev.calls) == 3
+
+
+def test_expression_dependency_expansion_checks_budget():
+    values = {"n0": Number("n0", "1")}
+
+    def resolve(name):
+        return values[name].numeric()
+
+    for index in range(1, 16):
+        values[f"n{index}"] = Number(f"n{index}", f"$(n{index-1} + n{index-1})", resolve)
+
+    class Registry(FakeRegistry):
+        def resolve(self, name):
+            return values[name].numeric()
+
+    runner = ActionRunner(Registry(), FakeBudget(limit=100))
+    with pytest.raises(BudgetExceeded):
+        runner._value(Expression("n15"))
+    assert ActionRunner(Registry(), FakeBudget())._value(Expression("n3")) == 8.0

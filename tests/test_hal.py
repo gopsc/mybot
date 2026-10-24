@@ -18,6 +18,7 @@ import zlib
 
 import pytest
 
+from pymybot.errors import BudgetExceeded
 from pymybot.hal import HALManager
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -308,6 +309,31 @@ def test_uart_error_limits(manager, serial_fake):
     serial_fake[0].fail = True
     assert manager.call("uart_read", h, 1, 10) is None
     assert "unplugged" in manager.call("last_error")
+
+
+def test_uart_per_call_cancel_interrupts_polling(manager, serial_fake):
+    h = manager.call("uart_open", "COM5", 115200)
+    def cancel():
+        raise BudgetExceeded("per-call cancel")
+    started = time.monotonic()
+    with pytest.raises(BudgetExceeded, match="per-call cancel"):
+        manager.call("uart_read", h, 1, 300, cancel_check=cancel)
+    assert time.monotonic() - started < 0.2
+    # The check is scoped to that request and must not stick to the thread.
+    assert manager.call("uart_read", h, 1, 5) == []
+
+
+def test_uart_per_call_cancel_is_thread_local(manager, serial_fake):
+    a = manager.call("uart_open", "COM6", 115200)
+    b = manager.call("uart_open", "COM6", 115200)
+    def cancel():
+        raise BudgetExceeded("worker cancel")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        cancelled = pool.submit(manager.call, "uart_read", a, 1, 300, cancel_check=cancel)
+        normal = pool.submit(manager.call, "uart_read", b, 1, 40)
+        with pytest.raises(BudgetExceeded, match="worker cancel"):
+            cancelled.result()
+        assert normal.result() == []
 
 
 def test_real_pyserial_loopback(manager):

@@ -1,9 +1,11 @@
 """serve: stdio JSON-RPC session server — real subprocess for protocol/session, in-process for the agent."""
 import asyncio
+import io
 import json
 import os
 from pathlib import Path
 import queue
+from types import SimpleNamespace
 import shutil
 import subprocess
 import sys
@@ -13,6 +15,7 @@ import time
 import pytest
 
 from pymybot import serve
+from pymybot.errors import BudgetExceeded
 
 ROOT = Path(__file__).resolve().parents[1]
 VIRTUAL_SQL = """
@@ -191,6 +194,63 @@ def test_sample_streams_and_cancel_keeps_daemons_alive(workspace, client_factory
     assert client.close() == 0
 
 
+class _ReadTarget:
+    kind = "sensor"
+    budget = None
+
+    def __init__(self, read):
+        self._read = read
+
+    def read(self):
+        return self._read()
+
+
+class _ReadRegistry:
+    def __init__(self, target):
+        self.target = target
+
+    def require(self, name):
+        assert name == "cl0"
+        return self.target
+
+    def values(self):
+        return [self.target]
+
+
+def sample_robot(read):
+    return SimpleNamespace(stop_event=threading.Event(),
+                           registry=_ReadRegistry(_ReadTarget(read)))
+
+
+def test_sample_rechecks_cancel_after_read():
+    cancel = threading.Event()
+    server = serve.Server(io.StringIO(), threading.Event())
+    robot = sample_robot(lambda: (cancel.set(), {"result": "OK", "value": 1})[1])
+    with pytest.raises(BudgetExceeded):
+        server.sample(robot, "s1", "cl0", 1, 0, None, cancel)
+
+
+def test_sample_rechecks_deadline_after_read():
+    server = serve.Server(io.StringIO(), threading.Event())
+    robot = sample_robot(lambda: (time.sleep(0.02), {"result": "OK", "value": 1})[1])
+    with pytest.raises(BudgetExceeded):
+        server.sample(robot, "s1", "cl0", 1, 0, 0.01, threading.Event())
+
+
+def test_sample_rechecks_budget_before_reporting_last_of_multiple():
+    calls = []
+
+    def read():
+        calls.append(1)
+        if len(calls) == 3:
+            time.sleep(0.02)
+        return {"result": "OK", "value": 1}
+
+    server = serve.Server(io.StringIO(), threading.Event())
+    with pytest.raises(BudgetExceeded):
+        server.sample(sample_robot(read), "s1", "cl0", 3, 0, 0.01, threading.Event())
+
+
 def test_stdout_carries_only_protocol_and_eof_deactivates(workspace, client_factory):
     client = client_factory(workspace)
     client.call("session.activate", {"robot": str(workspace / "bh1750.sql")})
@@ -239,6 +299,60 @@ class Out:
 
     def flush(self):
         pass
+
+
+def test_cancelled_confirm_notifies_client_and_ignores_late_approval():
+    async def scenario():
+        out = Out()
+        server = serve.Server(out, threading.Event())
+        try:
+            task = asyncio.create_task(server.ask_client("confirm", {"tool": "run_action_script"}))
+            request = await asyncio.to_thread(out.lines.get, True, 5)
+            assert request["method"] == "confirm"
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert out.lines.get_nowait() == {"jsonrpc": "2.0", "method": "cancel",
+                                              "params": {"id": request["id"]}}
+            server.receive(json.dumps({"jsonrpc": "2.0", "id": request["id"],
+                                       "result": {"approved": True}}), asyncio.get_running_loop())
+            assert out.lines.empty()
+            assert server.client_calls == {}
+        finally:
+            await server.shutdown()
+    asyncio.run(scenario())
+
+
+def test_confirm_timeout_notifies_client():
+    async def scenario():
+        out = Out()
+        server = serve.Server(out, threading.Event())
+        try:
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(server.ask_client("confirm", {"tool": "run_action_script"}), 0.02)
+            request = out.lines.get_nowait()
+            assert request["method"] == "confirm"
+            assert out.lines.get_nowait() == {"jsonrpc": "2.0", "method": "cancel",
+                                              "params": {"id": request["id"]}}
+        finally:
+            await server.shutdown()
+    asyncio.run(scenario())
+
+
+def test_shutdown_revokes_unanswered_confirm():
+    async def scenario():
+        out = Out()
+        server = serve.Server(out, threading.Event())
+        task = asyncio.create_task(server.ask_client("confirm", {"tool": "run_action_script"}))
+        request = await asyncio.to_thread(out.lines.get, True, 5)
+        assert request["method"] == "confirm"
+        await server.shutdown()
+        assert await task is None
+        messages = []
+        while not out.lines.empty():
+            messages.append(out.lines.get_nowait())
+        assert messages == [{"jsonrpc": "2.0", "method": "cancel", "params": {"id": request["id"]}}]
+    asyncio.run(scenario())
 
 
 class LifecycleGate:

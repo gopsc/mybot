@@ -238,7 +238,9 @@ class Metadata:
                     self.registry.require(name)
                 self.expressions.append((column, expression))
             elif value.startswith("$"):
-                self.references.append((column, self.registry.require(value[1:])))
+                name = value[1:]
+                self.registry.require(name)
+                self.references.append((column, name))
             else:
                 self.static[column] = value
 
@@ -254,15 +256,16 @@ class Metadata:
                 except Exception:
                     if not for_destroy:
                         raise
-            for column, target in self.references:
+            for column, name in self.references:
                 try:
+                    target = self.registry.require(name)
                     value = target.read()
                     if target.kind == "vars":
                         result[column] = value
                     elif isinstance(value, dict):
-                        result.update(ensure_ok(value, f"read {target.name}"))
+                        result.update(ensure_ok(value, f"read {name}"))
                     else:
-                        raise ScriptError(f"'${target.name}' returned a scalar; only @Vars can fill a column")
+                        raise ScriptError(f"'${name}' returned a scalar; only @Vars can fill a column")
                 except DriverNotReady:
                     # Snapshot consumers can initialize before the first sample exists.
                     if not for_build and not for_destroy:

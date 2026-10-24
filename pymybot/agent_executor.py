@@ -440,6 +440,9 @@ class RobotExecutor:
             self._robot = self._factory(sql, module_paths=self._module_paths,
                                         camera_src_root=self._camera_src_root,
                                         stop_event=self._stop, allow_hardware=self._allow_hardware)
+        # Construction may already have consumed the whole budget; do not
+        # enumerate metadata or validate a robot once the turn has expired.
+        self._check(deadline)
         self._robot._validate(self._robot.tables)
         self._rows = self._robot._rows(self._robot.tables)
         self._scripts = scripts
@@ -460,28 +463,30 @@ class RobotExecutor:
                                        for i, col in enumerate(table.header) if col != "name"}})
         return {"hardware": items, "truncated": truncated}
 
-    def _start(self):
+    def _start(self, deadline=None):
         try:
-            self._check(None)
+            self._check(deadline)
             if self._faulted:
                 raise SecurityError("Executor faulted")
-            self._load(None)
+            self._load(deadline)
             hardware = self._hardware()
-            scripts = self._scripts.listing(lambda: self._check(None))
+            scripts = self._scripts.listing(lambda: self._check(deadline))
             context = {"robot": self._robot_path.stem, "hardware": hardware["hardware"],
                        "scripts": scripts["scripts"],
                        "truncated": hardware["truncated"] or scripts["truncated"]}
             if self._workspace is not None:
                 context["workspace"] = {"root": str(self._workspace.path), "shell_enabled": self._enable_shell,
                                         "shell_sandboxed": False}
+            self._check(deadline)
             return _bounded(context)
         except Exception as exc:
             return self._failure(exc)
 
-    async def start(self) -> dict:
+    async def start(self, *, deadline=None) -> dict:
         if self._closing:
             return self._failure(SecurityError())
-        return await self._wait(asyncio.wrap_future(self._pool.submit(self._start)), propagate=True)
+        return await self._wait(asyncio.wrap_future(self._pool.submit(self._start, deadline)),
+                                propagate=True)
 
     @staticmethod
     def _arguments(name, arguments):

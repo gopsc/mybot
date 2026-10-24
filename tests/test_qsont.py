@@ -39,6 +39,7 @@ class FakeIotApi:
         self.command_status = {}
         self.online = None
         self.requests = []         # (method, path, authorization)
+        self.responder = None      # optional forced (status, payload) per request
 
     def _reachable(self, device_id):
         entry = self.devices.get(device_id)
@@ -47,6 +48,10 @@ class FakeIotApi:
     def handle(self, method, path, query, auth, body):
         with self.lock:
             self.requests.append((method, path, auth))
+            if self.responder is not None:
+                forced = self.responder(method, path, query, auth, body)
+                if forced is not None:
+                    return forced
             if path == "/api/v1/ping" and method == "GET":
                 return 200, {"pong": True}
             if path == "/api/v1/users/login" and method == "POST":
@@ -268,4 +273,39 @@ def test_qsont_bind_unbind_foreign_device(iot_server):
         assert api.bound == set()
         with pytest.raises(DriverError, match="404"):
             robot.run('@Action\nqs.op      qs.key     qs.value;\n$("push")  $("soil") 43;\n@',
+                      timeout=30)
+
+
+def test_qsont_3xx_is_not_reported_as_success(iot_server):
+    base, api = iot_server
+    with Robot(qsont_sql(base), module_paths=[MODULES]) as robot:
+        cases = [
+            ("/api/v1/data", "POST",
+             '@Action\nqs.op      qs.key           qs.value;\n'
+             '$("push")  $("temperature") 23.5;\n@'),
+            ("/api/v1/data/batch", "POST",
+             '@Action\nqs.op      qs.items;\n$("batch")  $("humidity=60");\n@'),
+            ("/api/v1/commands/11/status", "PUT",
+             '@Action\nqs.op     qs.cmd;\n$("ack")  11;\n@'),
+        ]
+        for path, method, script in cases:
+            api.responder = lambda m, p, q, a, b, path=path, method=method: (
+                (307, {"detail": "redirect"}) if m == method and p == path else None)
+            with pytest.raises(DriverError, match="307"):
+                robot.run(script, timeout=30)
+
+
+def test_qsont_requires_contract_fields(iot_server):
+    base, api = iot_server
+    with Robot(qsont_sql(base), module_paths=[MODULES]) as robot:
+        api.responder = lambda m, p, q, a, b: (
+            (200, {"id": 1}) if m == "GET" and p.endswith("/latest") else None)
+        with pytest.raises(DriverError, match="latest"):
+            robot.run('@Action\nqs.op       qs.key;\n'
+                      '$("latest")  $("temperature");\n@', timeout=30)
+
+        api.responder = lambda m, p, q, a, b: (
+            (200, {"message": "ok"}) if m == "POST" and p == "/api/v1/devices/bind" else None)
+        with pytest.raises(DriverError, match="device_id"):
+            robot.run('@Action\nqs.op      qs.key;\n$("bind")  $("%s");\n@' % FOREIGN_KEY,
                       timeout=30)

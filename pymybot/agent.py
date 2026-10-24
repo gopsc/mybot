@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import dataclass
 import math
 import os
+import re
 import sys
 import threading
 import time
@@ -29,6 +30,11 @@ from .errors import AgentInterrupted
 from .security import SecurityError, checked_text, dumps
 
 MAX_TEXT = 64 * 1024
+_TERMINAL_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _display_text(text):
+    return _TERMINAL_CONTROLS.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
 MAX_PROMPT = 16 * 1024
 MAX_HISTORY = 4 * 1024 * 1024
 IO_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
@@ -320,8 +326,11 @@ class AgentSession:
         self._asking = False
 
     async def start(self):
-        context = await self.executor.start()
+        context = await self.executor.start(deadline=self.deadline)
         if context.get("ok") is False:
+            # A start that ran out of time or was stopped must not be reported
+            # as a configuration error the operator could try to "fix".
+            self._check()
             raise AgentConfigurationError("Cannot load robot, scripts or workspace configuration; no model request was sent")
         self.context = context
         return self.context
@@ -496,9 +505,10 @@ class StreamRenderer:
     def __call__(self, event):
         kind = event.get("type")
         if kind == "text_delta":
-            if self.text_chars >= MAX_TEXT:
+            remaining = MAX_TEXT - self.text_chars
+            if remaining <= 0:
                 return
-            text = event["text"]
+            text = _display_text(event["text"])[:remaining]
             self.text_chars += len(text)
             self.stream.write(text)
             self.stream.flush()
@@ -509,12 +519,12 @@ class StreamRenderer:
             brief = repr(dumps(event["arguments"])) if event.get("arguments") is not None else ""
             if len(brief) > 120:
                 brief = brief[:117] + "..."
-            self.stream.write(f"→ {event['tool']}({brief})\n")
+            self.stream.write(f"→ {_display_text(str(event['tool']))}({brief})\n")
             self.stream.flush()
         elif kind == "tool_result":
             state = event.get("state")
-            tail = f" {state}" if state else ""
-            self.stream.write(f"⇦ {event['tool']}{tail}\n")
+            tail = f" {_display_text(str(state))}" if state else ""
+            self.stream.write(f"⇦ {_display_text(str(event['tool']))}{tail}\n")
             self.stream.flush()
 
     def _end_line(self):

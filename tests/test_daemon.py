@@ -422,12 +422,81 @@ def test_unmodified_runtime_embedded_model_integration(synthetic_modules):
     assert not hal._handles and not hal._buses
 
 
+def test_daemon_workers_release_hal_handles_on_destroy(tmp_path):
+    pytest.importorskip("lupa.luajit21")
+    pytest.importorskip("serial")
+    from pymybot.hal import HALManager
+    from pymybot.runtime import LuaState
+
+    (tmp_path / "leak.lua").write_text(
+        'function daemon_tick()\n'
+        '    __hal_call("uart_open", "loop://", 115200)\n'
+        '    return {result="OK"}\n'
+        'end\n')
+    hal, stop, registry = HALManager(), threading.Event(), Registry()
+
+    def make(name):
+        daemon = DaemonVariable(name, {"chunk": "leak.lua", "interval": "3600000"}, registry,
+                                lambda **kw: LuaState([tmp_path], hal, stop, **kw), stop)
+        registry.add(daemon)
+        return daemon
+
+    def wait_handles(count):
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if len(hal._handles) == count:
+                return True
+            time.sleep(0.005)
+        return False
+
+    first, second = make("first"), make("second")
+    try:
+        first.build()
+        assert wait_handles(1)
+        second.build()
+        assert wait_handles(2)
+        assert len(hal._buses) == 1
+        bus = next(iter(hal._buses.values()))
+        first.destroy()
+        assert wait_handles(1)
+        assert not bus.closed
+        second.destroy()
+        assert wait_handles(0)
+        assert bus.closed
+        third = make("third")
+        third.build()
+        assert wait_handles(1)
+        third.destroy()
+        assert wait_handles(0)
+        assert not hal._buses
+    finally:
+        stop.set()
+        for daemon in (first, second):
+            try:
+                daemon.destroy()
+            except DriverError:
+                pass
+        hal.close()
+
+
+def test_multi_partial_setup_failure_destroys_already_built_devices(multi_runtime):
+    daemon, state = multi_runtime("BH1750@0x23@LUX:f|BH1750@0x5C@LUX:f@mode=BAD")
+    assert daemon.slot.snapshot()["status"] == -2
+    state.lua.execute('''
+        local light = __BOT4CJ_VIRTBUS.devs[0x23].model
+        assert(not light.state.power,
+            "first device stayed powered after the second device failed to build")
+        assert(__BOT4CJ_VIRTBUS.fd_count() == 0)
+        assert(not __BOT4CJ_VIRTBUS._injected)
+    ''')
+
+
 @pytest.fixture
 def multi_runtime(lua_factory, monkeypatch):
     """Run the real multi chunk synchronously; any non-virtual I/O fails the test."""
     from pymybot.hal import HALManager
 
-    def no_hardware(self, operation, *args):
+    def no_hardware(self, operation, *args, **kwargs):
         assert operation == "sleep_ms", f"Unexpected physical HAL operation: {operation}"
         return 0  # Virtual models do not need wall-clock sleeps.
 

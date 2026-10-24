@@ -32,6 +32,19 @@ PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS = -32700, -32600,
 EXECUTION_ERROR, BUSY, WRONG_STATE, CANCELLED = -32000, -32001, -32002, -32800
 
 
+class _ClientCall:
+    """A confirm request plus whether the client actually answered it.
+
+    Cancellation and shutdown complete the future without a reply, so done()
+    cannot decide whether the client should still receive a cancel notice.
+    """
+    __slots__ = ("future", "replied")
+
+    def __init__(self, future):
+        self.future = future
+        self.replied = False
+
+
 class RpcError(Exception):
     def __init__(self, code, message, **data):
         super().__init__(message)
@@ -143,14 +156,14 @@ class Server:
     async def ask_client(self, method, params):
         self.client_seq += 1
         ident = f"s{self.client_seq}"
-        future = asyncio.get_running_loop().create_future()
-        self.client_calls[ident] = future
+        call = _ClientCall(asyncio.get_running_loop().create_future())
+        self.client_calls[ident] = call
         try:
             self.send({"id": ident, "method": method, "params": params})
-            return await future
+            return await call.future
         finally:
             self.client_calls.pop(ident, None)
-            if not future.done():
+            if not call.replied:
                 self.notify("cancel", {"id": ident})
 
     async def serve(self, lines):
@@ -178,9 +191,10 @@ class Server:
                        "error": {"code": INVALID_REQUEST, "message": "Invalid JSON-RPC 2.0 message"}})
             return
         if "method" not in message:
-            future = self.client_calls.get(ident)
-            if future is not None and not future.done():
-                future.set_result(message.get("result") if "error" not in message else None)
+            call = self.client_calls.get(ident)
+            if call is not None and not call.future.done():
+                call.replied = True
+                call.future.set_result(message.get("result") if "error" not in message else None)
             return
         method = message["method"]
         if not isinstance(method, str):
@@ -456,8 +470,10 @@ class Server:
                     ensure_ok(value, f"sample {name}")
                 if len(dumps(value).encode("utf-8")) > MAX_BODY:
                     raise SecurityError("One sample exceeds the 8 MiB message budget")
+                budget.check()
                 self.notify("sample", {"id": ident, "index": index, "value": value, "t": time.time()})
                 sent += 1
+                budget.check()
             return {"name": name, "count": sent}
         finally:
             for var, old in previous:
@@ -601,9 +617,9 @@ class Server:
         self.closing = True
         for ident in list(self.requests):
             self.cancel({"id": ident})
-        for future in self.client_calls.values():
-            if not future.done():
-                future.set_result(None)
+        for call in list(self.client_calls.values()):
+            if not call.future.done():
+                call.future.set_result(None)
         current = asyncio.current_task()
         pending = [task for task in self.tasks if task is not current]
         if pending:

@@ -72,6 +72,23 @@ local MAX_VALUES = P.SLOT_MAXVALS
 local fd = nil
 -- proto=virt：虚拟总线句柄（多器件共用一个注入态）
 local vbus = nil
+-- 成功 build 的器件按启动顺序登记；失败回滚与正常退出都逆序销毁
+local built = {}
+
+local function destroy_built()
+	while #built > 0 do
+		local dev = table.remove(built)
+		local destroyf = rawget(dev.env, "destroy")
+		if type(destroyf) == "function" then
+			local ok, err = pcall(destroyf, dev.params)
+			if not ok then
+				io.stderr:write(string.format(
+					"[sensor_daemon_multi] devices[%d] %s destroy() failed (will still release the rest): %s\n",
+					dev.idx, dev.driver, tostring(err)))
+			end
+		end
+	end
+end
 
 -- H-07：关闭已打开的总线 fd（幂等；fail 与 daemon_cleanup 共用）
 local function close_bus()
@@ -81,13 +98,15 @@ local function close_bus()
 	end
 end
 
--- setup 失败：打日志 → 关总线 fd → 写 status 失败码 → daemon_tick 置空转
+-- setup 失败：打日志 → 逆序销毁已成功 build 的器件 → 关总线 fd → 写 status
+-- 失败码 → daemon_tick 置空转
 -- （语义与 sensor_daemon.fail 完全一致：失败码进槽的 status 字段，
 -- 不伪装成采样值；宿主读路径见 status ≠ 0 即响亮报错）。
 -- 错误码沿用单器件版口径：-9 缺 driver、-8 驱动/模型加载失败、-1 开总线失败、
 -- -2 build 失败（兼作 chunk 级配置错误：proto 不支持、spec 残缺、字段超预算）。
 local function fail(code, msg)
 	log("[sensor_daemon_multi] setup failed (" .. tostring(code) .. "): " .. tostring(msg))
+	destroy_built()
 	close_bus()
 	if vbus ~= nil then pcall(vbus.restore) end
 	P.set_status(slot, code)
@@ -333,6 +352,7 @@ for _, dev in ipairs(devs) do
 		fail(-2, "devices[" .. dev.idx .. "] " .. why)
 		return
 	end
+	built[#built + 1] = dev
 end
 
 -- daemon_body 逐拍调用：全部器件各采一拍 → 拼接 → 一次 publish（原子快照）
@@ -400,18 +420,9 @@ end
 -- H-07：守护退出（stop 后、Lua_free 前）由 daemon_body 调用。逐器件 destroy
 -- （有才调）——任一失败都继续释放余下器件与总线（语义取舍与单器件版一致：
 -- 退出路径上的资源释放优先于传播一个无人接收的错误），最后关总线 fd。
+-- 只销毁成功 build 的器件：setup 失败时 fail() 已逆序回滚并清空 built。
 function daemon_cleanup()
-	for _, dev in ipairs(devs) do
-		local destroyf = rawget(dev.env, "destroy")
-		if type(destroyf) == "function" then
-			local ok, err = pcall(destroyf, dev.params)
-			if not ok then
-				io.stderr:write(string.format(
-					"[sensor_daemon_multi] devices[%d] %s destroy() failed during cleanup (will still release the rest): %s\n",
-					dev.idx, dev.driver, tostring(err)))
-			end
-		end
-	end
+	destroy_built()
 	close_bus()
 	-- virt：还原全局 i2c_*（独立守护 lua_State 随之销毁，主要为状态对称）
 	if vbus ~= nil then pcall(vbus.restore) end
