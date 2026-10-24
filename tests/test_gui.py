@@ -285,13 +285,13 @@ def tk_root():
         pass
 
 
-def build_app(monkeypatch, tk_root, tmp_path):
+def build_app(monkeypatch, tk_root, tmp_path, config_path=None):
     from pymybot.gui import app as gui_app
 
     monkeypatch.setattr(gui_app.App, "_start_server", lambda self: None)
     monkeypatch.setattr(gui_app.App, "_refresh_hardware", lambda self: None)
     config = GuiConfig(workspace=str(ROOT), robot=str(ROOT / "robots" / "relay-test.sql"))
-    instance = gui_app.App(tk_root, config, tmp_path / "settings.json")
+    instance = gui_app.App(tk_root, config, config_path or (tmp_path / "settings.json"))
     tk_root.update()
     return gui_app, instance
 
@@ -339,6 +339,19 @@ def test_confirm_request_round_trips_to_the_server(monkeypatch, tk_root, tmp_pat
     app._on_request(app.generation, "s1", "confirm",
                     {"tool": "run_action_script", "arguments": {"script": "a.mt"}})
     assert replies == [("s1", {"approved": True})]
+
+
+def test_settings_save_reports_success_and_failure(monkeypatch, tk_root, tmp_path):
+    _, app = build_app(monkeypatch, tk_root, tmp_path)
+    assert app._save() is True
+    assert "设置已写入" in app.log.get("1.0", "end")
+    assert (tmp_path / "settings.json").is_file()
+
+    # A directory cannot be replaced by the settings file: the failure must be
+    # reported in the log instead of surfacing as a traceback or a silent no-op.
+    _, failing = build_app(monkeypatch, tk_root, tmp_path, config_path=tmp_path)
+    assert failing._save() is False
+    assert "设置保存失败" in failing.log.get("1.0", "end")
 
 
 def test_permission_toggle_never_persists(monkeypatch, tk_root, tmp_path):

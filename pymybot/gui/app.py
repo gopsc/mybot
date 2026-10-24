@@ -806,7 +806,8 @@ class App:
 
     # -- settings ----------------------------------------------------------
     def open_settings(self):
-        dialog = SettingsDialog(self.root, self.cfg, self.cfg.workspace or default_workspace())
+        dialog = SettingsDialog(self.root, self.cfg, self.cfg.workspace or default_workspace(),
+                                str(self.config_path))
         self.root.wait_window(dialog.top)
         if not dialog.result:
             return
@@ -814,19 +815,28 @@ class App:
         for name, value in dialog.result.items():
             setattr(self.cfg, name, value)
         self.cfg.task = ""
-        self._save()
+        saved = self._save()
         self._refresh_model_label()
         self._load_robot_list()
         self._refresh_hardware()
         if before != (self.cfg.workspace, self.cfg.python):
             self._restart_server()
-        self._notice("设置已保存")
+        self._notice("设置已保存" if saved else "设置已应用，但配置文件写入失败（见日志）")
 
     def _save(self):
+        """Persist preferences; a read-only config dir must never break the window."""
         try:
             self.cfg.store(self.config_path)
         except OSError as exc:
-            self._notice(f"设置保存失败：{exc}")
+            reason = f"设置保存失败（{self.config_path}）：{exc}"
+            print(f"pymybot gui: {reason}", file=sys.stderr)
+            if not self._stopping:
+                self._log(f"[gui] {reason}\n")
+                self._notice("配置写入失败，详见日志")
+            return False
+        if not self._stopping:
+            self._log(f"[gui] 设置已写入 {self.config_path}\n")
+        return True
 
     # -- status ------------------------------------------------------------
     def _refresh_status(self):
@@ -928,7 +938,7 @@ class SettingsDialog:
         ("module_paths", "模块路径（每行一个）"),
     )
 
-    def __init__(self, parent, cfg: GuiConfig, workspace):
+    def __init__(self, parent, cfg: GuiConfig, workspace, config_path=""):
         self.result = None
         top = self.top = tk.Toplevel(parent)
         top.title("设置")
@@ -970,6 +980,9 @@ class SettingsDialog:
         row += 1
         ttk.Label(body, text="密钥只读取环境变量，窗口不保存也不显示它。", style="Muted.TLabel").grid(
             row=row, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        row += 1
+        ttk.Label(body, text=f"配置文件：{config_path or '（默认位置）'}", style="Muted.TLabel").grid(
+            row=row, column=0, columnspan=3, sticky="w", pady=(2, 0))
         row += 1
         buttons = ttk.Frame(body)
         buttons.grid(row=row, column=0, columnspan=3, sticky="e", pady=(10, 0))
