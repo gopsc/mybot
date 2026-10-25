@@ -7,7 +7,7 @@ independently.
 
 | Edition | Path | Stack | Status | Version |
 | --- | --- | --- | --- | --- |
-| Python (reference) | [`../pymybot`](../pymybot) | Python 3.11+ · LuaJIT · PydanticAI | Active | 0.2.x |
+| Python (reference) | [`../pymybot`](../pymybot) | Python 3.11+ · LuaJIT · PydanticAI | Active | 0.3.x |
 | Cangjie | [`cangjie/`](cangjie) | Cangjie 1.1.3 · LuaJIT | Maintained | 0.3.3 |
 | C++17 + Rust agent | [`cpp-rust/`](cpp-rust) | C++17 · Rust · LuaJIT | Maintained | 1.x |
 
