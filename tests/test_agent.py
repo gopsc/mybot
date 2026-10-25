@@ -454,6 +454,14 @@ def test_failed_start_never_sends_model_request():
         asyncio.run(AgentSession(executor, FunctionModel(forbidden)).ask("hello"))
 
 
+def test_history_byte_budget_is_bounded():
+    assert AgentConfig(history_bytes=64 * 1024).history_bytes == 64 * 1024
+    with pytest.raises(AgentConfigurationError, match="history_bytes"):
+        AgentConfig(history_bytes=1024)
+    with pytest.raises(AgentConfigurationError, match="history_bytes"):
+        AgentConfig(history_bytes=65 * 1024 * 1024)
+
+
 def test_slow_start_is_covered_by_the_turn_deadline():
     class SlowExecutor:
         def __init__(self):

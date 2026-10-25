@@ -175,6 +175,9 @@ def parser():
                                  help="preapprove workspace file creation/edits; requires --workspace-dir")
             command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
             command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
+            command.add_argument("--max-history-bytes", type=bounded_int(64 * 1024, 64 * 1024 * 1024),
+                                 default=4 * 1024 * 1024,
+                                 help="upper bound for retained conversation history (default: 4 MiB)")
     return p
 
 

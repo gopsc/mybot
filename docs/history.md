@@ -13,6 +13,7 @@ contributor can find every edition in one place.
 | `cangjie` | Full Cangjie edition | Separate history, easy to miss |
 | `cangjie_new` | 6-file independent prototype | No merge base; incomplete |
 | `cpp_rust_agent` | C++17 host + Rust agent | Separate history, easy to miss |
+| `release` | Packaged build with a built-in endpoint and session transcripts | Shared credential conflicts with the security policy |
 
 ## After
 
@@ -22,9 +23,12 @@ contributor can find every edition in one place.
 - `implementations/cangjie/` — Cangjie edition, copied from `cangjie`.
 - `implementations/cpp-rust/` — C++17 + Rust edition, copied from
   `cpp_rust_agent`.
-- `archive/cangjie`, `archive/cpp-rust-agent`, `archive/cangjie-new` — tags
-  preserving the old branch tips and their full history.
-- `pymybot`, `cangjie`, `cangjie_new` and `cpp_rust_agent` branches deleted.
+- `archive/cangjie`, `archive/cpp-rust-agent`, `archive/cangjie-new`,
+  `archive/release-session-log` — tags preserving the old branch tips and their
+  full history.
+- `pymybot`, `cangjie`, `cangjie_new`, `cpp_rust_agent` and `release` branches
+  deleted. The `release` prototype’s built-in endpoint/key was rejected; its
+  session-transcript design is kept in the archive and on the 0.3 roadmap.
 
 ## Why copy instead of merge?
 
