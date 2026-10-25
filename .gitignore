@@ -10,3 +10,7 @@ dist/
 .qoder/
 .codearts/
 .opencode/
+build-nuitka/
+build-pyi/
+dist-pyi/
+nuitka-crash-report.xml
