@@ -79,6 +79,7 @@ class App:
         self.queue: "queue.Queue" = queue.Queue()
         self.serve: ServeClient | None = None
         self.starting = False
+        self._restart_pending = False
         self.generation = 0
         self.greeted = False
         self.serve_state = "未启动"
@@ -492,6 +493,14 @@ class App:
 
     def _server_started(self, generation, value, error):
         if generation != self.generation:
+            # A restart superseded this launch. Stop its client before starting
+            # the replacement, or the old process may still hold the hardware.
+            self.starting = False
+            if error is None:
+                client, _ = value
+                self._start_after_stop(client)
+            elif self._restart_pending:
+                self._schedule_start()
             return
         self.starting = False
         if error is not None:
@@ -518,14 +527,39 @@ class App:
             task, self.pending_task = self.pending_task, ""
             self._send(task)
 
+    def _schedule_start(self):
+        self._restart_pending = False
+        self.root.after(150, self._start_server)
+
+    def _start_after_stop(self, client):
+        """Stop a stale client before launching its replacement."""
+        def stop_then_start():
+            try:
+                client.stop()
+            finally:
+                self.post(self._schedule_start)
+        threading.Thread(target=stop_then_start, daemon=True).start()
+
     def _restart_server(self):
         client, self.serve = self.serve, None
         self.agent_available = False
         self.generation += 1  # anything still arriving from the old child is stale
         self.serve_state = "重新启动…"
-        if client is not None:
-            threading.Thread(target=client.stop, daemon=True).start()
-        self.root.after(150, self._start_server)
+        if self.busy:
+            self._chat_line("✗ 服务重启；上一轮结果未知，检查机器人后再重试。", "error")
+        self.busy = False
+        self.turn_id = None
+        self.turn_text = 0
+        self.at_line_start = True
+        self._set_busy(False)
+        if self.starting:
+            # The in-flight launch will be discarded by generation; its
+            # callback stops the stale client and starts the replacement.
+            self._restart_pending = True
+        elif client is None:
+            self._schedule_start()
+        else:
+            self._start_after_stop(client)
         self._refresh_status()
 
     def _on_serve_exit(self, generation, code):

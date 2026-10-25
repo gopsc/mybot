@@ -369,3 +369,75 @@ def test_composer_sends_without_a_server_and_remembers_the_task(monkeypatch, tk_
     app.task_box.insert("1.0", "列出硬件")
     app.send_task()
     assert app.pending_task == "列出硬件" and started == [True]
+
+
+def _bare_app(gui_app, scheduled):
+    """App state for lifecycle tests that must run without a Tk display."""
+    app = object.__new__(gui_app.App)
+    app.starting = False
+    app._restart_pending = False
+    app.generation = 0
+    app.serve = None
+    app.agent_available = False
+    app.busy = False
+    app.turn_id = None
+    app.turn_text = 0
+    app.at_line_start = True
+    app._stopping = False
+    app._refresh_status = lambda: None
+    app._chat_line = lambda *args, **kwargs: None
+    app._set_busy = lambda busy: setattr(app, "busy", busy)
+    app.post = lambda callback: callback()
+    app.root = SimpleNamespace(after=lambda delay, callback: scheduled.append((delay, callback)))
+    return app
+
+
+class _InlineThread:
+    """Run a background target synchronously so the test is deterministic."""
+
+    def __init__(self, target, daemon=None, name=None):
+        self.target = target
+
+    def start(self):
+        self.target()
+
+
+def test_restart_while_starting_defers_until_old_launch_returns(monkeypatch):
+    from pymybot.gui import app as gui_app
+
+    stopped, scheduled = [], []
+    app = _bare_app(gui_app, scheduled)
+    app.starting = True
+    app.busy = True
+    app.turn_id = "turn-1"
+    app.generation = 7
+
+    monkeypatch.setattr(gui_app.threading, "Thread", _InlineThread)
+    app._restart_server()
+    assert app.starting is True and app._restart_pending is True
+    assert app.busy is False and app.turn_id is None
+    assert scheduled == []
+
+    stale = SimpleNamespace(stop=lambda: stopped.append(True))
+    app._server_started(7, (stale, {"agent": True}), None)
+    assert app.starting is False and app._restart_pending is False
+    assert stopped == [True]
+    assert scheduled == [(150, app._start_server)]
+
+
+def test_restart_stops_an_existing_client_before_the_replacement(monkeypatch):
+    from pymybot.gui import app as gui_app
+
+    stopped, scheduled = [], []
+    app = _bare_app(gui_app, scheduled)
+    app.busy = True
+    app.turn_id = "turn-2"
+    app.generation = 3
+    app.serve = SimpleNamespace(stop=lambda: stopped.append(True))
+
+    monkeypatch.setattr(gui_app.threading, "Thread", _InlineThread)
+    app._restart_server()
+    assert app.serve is None and app.starting is False
+    assert app.busy is False and app.turn_id is None
+    assert stopped == [True]
+    assert scheduled == [(150, app._start_server)]
