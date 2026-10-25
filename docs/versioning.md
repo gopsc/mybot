@@ -13,10 +13,11 @@ monorepo layout. Edition versions are independent:
 
 ## Compatibility promises
 
-Within a minor line (`0.2.x`):
+Within a minor line (`0.3.x`):
 
 - CLI command names and JSON keys remain stable.
-- `robots/*.sql` and `scripts/*.mt` accepted by 0.2.0 remain accepted, except
+- `robots/*.sql` and `scripts/*.mt` accepted by earlier 0.2.x/0.3.x releases
+  remain accepted, except
   where a security fix requires a documented rejection.
 - Public Python module paths used by integrations (`pymybot.cli`,
   `pymybot.robot`, `pymybot.serve`) keep their entry points.
