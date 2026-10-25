@@ -3,6 +3,7 @@
 Robot behaviour is not re-tested here: the window never executes robot code.
 """
 import json
+import os
 import sys
 import time
 import tkinter as tk
@@ -364,7 +365,7 @@ def test_permission_toggle_never_persists(monkeypatch, tk_root, tmp_path):
 
 def test_frozen_gui_uses_the_sibling_cli(monkeypatch, tmp_path):
     gui = tmp_path / "mybot-gui"
-    cli = tmp_path / "pymybot"
+    cli = tmp_path / ("pymybot.exe" if os.name == "nt" else "pymybot")
     gui.write_text("", encoding="utf-8")
     cli.write_text("", encoding="utf-8")
     monkeypatch.setattr(gui_protocol.sys, "frozen", True, raising=False)
