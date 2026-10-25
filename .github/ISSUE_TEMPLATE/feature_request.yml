@@ -1,0 +1,66 @@
+name: Feature request
+description: Propose a new capability or a change to the operator experience
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Start with the problem, not the implementation. A feature that touches
+        shell, files, network, hardware, prompts or credentials needs an
+        explicit security/privacy section.
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Python reference edition
+        - Cangjie edition
+        - C++17 + Rust edition
+        - Cross-edition / repository
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do, and what blocks you today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Operator-facing behaviour, CLI/API shape, and alternatives considered
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy impact
+      description: New trust boundaries, approvals, secrets, network or hardware access
+      placeholder: "No new capability; or: requires an explicit new approval because ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: How should this be tested?
+      description: Unit/integration/virtual-hardware plan
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: I described the problem before proposing an implementation.
+          required: true

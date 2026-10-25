@@ -1,0 +1,44 @@
+name: Usage question
+description: Ask how to install, configure or operate pymybot
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For installation failures, include the full command and error output.
+        For hardware questions, state the board, adapter and sensor model.
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Python reference edition
+        - Cangjie edition
+        - C++17 + Rust edition
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What have you tried?
+      description: Commands, docs read, environment and output
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I read the README and the relevant docs page.
+          required: true

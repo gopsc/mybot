@@ -1,0 +1,90 @@
+name: Bug report
+description: Report a reproducible failure in any pymybot edition
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please remove API keys,
+        tokens and personal data from logs before submitting.
+
+        For a security vulnerability, use the private advisory link in
+        `SECURITY.md` instead of this form.
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition
+      options:
+        - Python reference edition
+        - Cangjie edition
+        - C++17 + Rust edition
+        - Documentation / packaging / CI
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: "`pymybot --version` or `git rev-parse HEAD`"
+      placeholder: "0.2.0 / bbfb3f0"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python/Cangjie/Rust version, install method, hardware or virtual bus
+      placeholder: "Windows 11 23H2, Python 3.12.8, pip editable install, virtual bus"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: The exact commands, SQL/MT files and input needed to reproduce
+      placeholder: |
+        1. save this SQL ...
+        2. run `pymybot ...`
+        3. observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include the full JSON/error output with secrets removed
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Logs, screenshots, driver/sensor model, whether hardware was connected
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed credentials and personal data from this report.
+          required: true
+        - label: I can reproduce this without physical hardware, or I described the hardware setup.
+          required: false

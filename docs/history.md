@@ -1,0 +1,44 @@
+# Repository history and branch consolidation
+
+The project grew several independent implementations before it had a stable
+repository layout. The 0.2.0 cleanup consolidated them so that a new
+contributor can find every edition in one place.
+
+## Before
+
+| Branch | Contents | Problem |
+| --- | --- | --- |
+| `pymybot` | Python reference edition | Ancestor of `gui-mybot`; stale |
+| `gui-mybot` | Python edition + Tk GUI | Default branch; name describes a feature, not the edition |
+| `cangjie` | Full Cangjie edition | Separate history, easy to miss |
+| `cangjie_new` | 6-file independent prototype | No merge base; incomplete |
+| `cpp_rust_agent` | C++17 host + Rust agent | Separate history, easy to miss |
+
+## After
+
+- `main` — Python reference edition and the monorepo root.
+- `implementations/cangjie/` — Cangjie edition, copied from `cangjie`.
+- `implementations/cpp-rust/` — C++17 + Rust edition, copied from
+  `cpp_rust_agent`.
+- `archive/cangjie`, `archive/cpp-rust-agent`, `archive/cangjie-new` — tags
+  preserving the old branch tips and their full history.
+- `pymybot`, `cangjie`, `cangjie_new` and `cpp_rust_agent` branches deleted.
+
+## Why copy instead of merge?
+
+The three editions do not share a file layout or build system. Merging their
+histories would create conflicts in `modules/`, `robots/` and `compatibility`
+files without any shared code to resolve them. Copying each tree into its own
+directory keeps every edition self-contained, while the archive tags preserve
+the original commits for archaeology.
+
+## What about `cangjie_new`?
+
+It is an unrelated, incomplete rewrite (six files, no tests). Importing it
+would present a non-working edition as supported. It is archived and documented
+as a prototype, not part of the monorepo.
+
+## Current branch model
+
+Only `main` is long-lived. Topic branches are short-lived and deleted after
+merge. See [`development.md`](development.md) and [`release.md`](release.md).
