@@ -219,7 +219,7 @@ tests/                    pytest 与逐驱动虚拟夹具
 docs/                     架构、CLI、GUI、开发、测试、发布、安全文档
 docs/history/             已完成的迁移与调试记录
 implementations/          Cangjie 与 C++17 + Rust 版本（各自独立构建）
-tools/                    PyInstaller / Nuitka 打包辅助
+tools/                    打包与 CI 辅助（PyInstaller spec、smoke 脚本、Nuitka 实验命令）
 .github/                  CI、发布工作流、Issue/PR 模板、社区规范
 ```
 
