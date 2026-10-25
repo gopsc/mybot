@@ -7,6 +7,8 @@
    --enable-plugins=pyside6 `
    --include-module=lupa.luajit21 `
    --include-package=serial --include-package=pyftdi --include-package=PIL --include-package=av `
+   --include-package=openai --include-package=anthropic `
+   --include-package=pydantic_ai --include-package=httpx2 `
    --include-package-data=genai_prices `
    --include-distribution-metadata=pydantic-ai-slim --include-distribution-metadata=pydantic-graph `
    --include-distribution-metadata=pydantic --include-distribution-metadata=openai `
