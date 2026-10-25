@@ -191,7 +191,9 @@ TH_TEST(robot_daemon_grace_ms_setter_affects_deactivate_barrier) {
 	fx::EnvVar modPath("BOT4CJ_MODULE_PATH", ".tmp");
 	/* 从 test_daemon.cpp::writeSlowTickChunk 复制慢拍夹具
 	 * （3s/拍，interval=10ms，joinTimeout=max(10*5,2000)=2000ms） */
+	std::filesystem::create_directories(".tmp");
 	std::ofstream out(".tmp/test_daemon_grace_slow_tick.lua", std::ios::binary | std::ios::trunc);
+	TH_CHECK(out.good());
 	out << "local ffi = require(\"ffi\")\n"
 	    << "ffi.cdef(\"int usleep(unsigned int usec);\")\n"
 	    << "function daemon_tick()\n"
