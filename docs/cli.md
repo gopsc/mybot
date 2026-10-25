@@ -83,7 +83,8 @@ Failure:
 
 Exit codes: `0` success, `1` runtime error, `2` usage error, `130` interrupted.
 The agent may add `tool_events` and `cleanup_errors`; it never includes tool
-arguments, secrets or images in the final JSON.
+arguments, secrets or images in the final JSON. Full transcripts are written
+separately; see [Session transcripts](#session-transcripts).
 
 ## `serve` protocol
 
@@ -128,5 +129,28 @@ The important flags are:
 | `--allow-file-writes` | Pre-approve file creation/editing. |
 | `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
 | `--max-requests`, `--max-tool-calls`, `--max-history-bytes`, `--timeout` | Budgets. `--max-history-bytes` bounds retained conversation history (64 KiB–64 MiB, default 4 MiB). |
+| `--no-session-log` | Do not write a session transcript (also accepted by `serve`). |
+
+## Session transcripts
+
+`agent` and `serve` (`agent.ask`) write each conversation to
+`~/.mybot/sessions/<timestamp>-<8-char id>/` by default:
+
+- `meta.json` — start time, structure file, model name (no key), mode (`cli`/`serve`);
+- `transcript.jsonl` — one JSON object per line: `session_start`, `user`,
+  `assistant`, `tool_call` (with arguments), `tool_result` (bounded result),
+  `usage`, `error`, `session_end`;
+- `images/<sha256>.jpg|png` — images returned by actions or captures,
+  de-duplicated by content; the JSONL only stores hash, MIME type, size and path.
+
+Transcripts are for review and audit only. They are **not** resumable: hardware
+state, unfinished actions and model context are never restored from them, and
+the GUI has no history browser.
+
+Disable with `--no-session-log` (`agent`, `serve`) or `MYBOT_SESSION_LOG=0`,
+which the GUI's `serve` child inherits. `MYBOT_HOME` overrides the root
+(default `~/.mybot`). Each event is capped at 64 KiB; each image at 8 MiB and
+each session at 256 images / 128 MiB, beyond which only an `omitted` marker is
+written. On POSIX, directories are `0700` and files `0600`.
 
 See [`gui.md`](gui.md) for the graphical equivalent.

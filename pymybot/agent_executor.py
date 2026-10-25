@@ -14,6 +14,7 @@ import math
 import os
 from pathlib import Path, PureWindowsPath
 import stat
+import sys
 import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -644,6 +645,11 @@ class RobotExecutor:
                 result["images"] = images
         except BaseException as exc:
             if executed:
+                # Operator-only diagnostics: the model still receives the
+                # deliberately vague unknown receipt, but the GUI log and
+                # terminal need the failure class. Never print str(exc):
+                # driver errors may contain secrets or user data.
+                print(f"pymybot: {name} failed after dispatch: {type(exc).__name__}", file=sys.stderr)
                 self._interrupted = self._stop.is_set()
                 self._faulted = True
                 self.cancel()

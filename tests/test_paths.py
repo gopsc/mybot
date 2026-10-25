@@ -25,6 +25,13 @@ def test_frozen_assets_come_from_meipass(tmp_path, monkeypatch):
     assert paths.asset_path("skills") == expected / "skills"
 
 
+def test_nuitka_build_counts_as_frozen(monkeypatch):
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert not paths.frozen()
+    monkeypatch.setattr(paths, "__compiled__", object(), raising=False)
+    assert paths.frozen()
+
+
 def test_real_checkout_uses_top_level_directories():
     assert paths.asset_path("modules") == paths.source_root() / "modules"
     assert paths.asset_path("scripts") == paths.source_root() / "scripts"

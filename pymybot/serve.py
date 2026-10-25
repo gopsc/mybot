@@ -120,10 +120,11 @@ def agent_available():
 
 
 class Server:
-    def __init__(self, out, stop, *, enable_agent=True):
+    def __init__(self, out, stop, *, enable_agent=True, enable_session_log=True):
         self.out = out
         self.stop = stop
         self.enable_agent = enable_agent
+        self.enable_session_log = enable_session_log
         self._write_lock = threading.Lock()
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="serve-robot")
         self.robot = None
@@ -541,6 +542,7 @@ class Server:
         from .agent import AgentConfig, AgentConfigurationError, AgentSession, create_model
         from .agent_executor import RobotExecutor
         from .agent_skills import SkillsLibrary, default_skills_root
+        from .session_log import create_session_log
         config = AgentConfig(model=key["model"] or os.environ.get("MYBOT_MODEL", ""),
                              base_url=key["baseUrl"] or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=key["apiKeyEnv"], timeout=key["timeout"],
@@ -548,7 +550,10 @@ class Server:
                              allow_actions=key["allowActions"])
         model, client = create_model(config)
         executor = None
+        session_log = None
         try:
+            session_log = create_session_log(enabled=self.enable_session_log, robot=key["robot"],
+                                             model=config.model, mode="serve")
             skills = SkillsLibrary(key["skillsDir"] or default_skills_root(), required=key["skillsDir"] is not None)
             executor = RobotExecutor(key["robot"], module_paths=key["modulePaths"] or None,
                                      camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"],
@@ -560,13 +565,15 @@ class Server:
                 return isinstance(reply, dict) and reply.get("approved") is True
 
             session = AgentSession(executor, model, config, confirm=confirm, read_vars=key["readVars"],
-                                   camera_vars=key["cameraVars"], skills=skills)
+                                   camera_vars=key["cameraVars"], skills=skills, session_log=session_log)
             return {"session": session, "client": client}
         except BaseException as exc:
             try:
                 if executor is not None:
                     await executor.close()
             finally:
+                if session_log is not None:
+                    session_log.close()
                 await client.close()
             if isinstance(exc, SecurityError):
                 raise AgentConfigurationError(f"Cannot load skills configuration: {exc}; no model request was sent") from None
@@ -662,10 +669,10 @@ def _reader(stream, queue, loop):
             pass
 
 
-async def _main(out, stop, enable_agent):
+async def _main(out, stop, enable_agent, enable_session_log):
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue()
-    server = Server(out, stop, enable_agent=enable_agent)
+    server = Server(out, stop, enable_agent=enable_agent, enable_session_log=enable_session_log)
     threading.Thread(target=_reader, args=(sys.stdin.buffer, queue, loop), name="serve-stdin", daemon=True).start()
 
     async def watch_stop():
@@ -681,7 +688,7 @@ async def _main(out, stop, enable_agent):
     return {"stopped": stop.is_set()}
 
 
-def run_server(stop, *, enable_agent=True):
+def run_server(stop, *, enable_agent=True, enable_session_log=True):
     """Serve on the original stdout; fd 1 points at stderr until return."""
     sys.stdout.flush()
     sys.__stdout__.flush()
@@ -689,7 +696,7 @@ def run_server(stop, *, enable_agent=True):
     os.dup2(2, 1)
     out = open(os.dup(protocol_fd), "w", encoding="utf-8", newline="\n")
     try:
-        return asyncio.run(_main(out, stop, enable_agent))
+        return asyncio.run(_main(out, stop, enable_agent, enable_session_log))
     finally:
         out.close()
         os.dup2(protocol_fd, 1)

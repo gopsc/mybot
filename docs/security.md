@@ -32,7 +32,7 @@ flowchart LR
 | Model → network | Non-loopback HTTP requires `--allow-hardware`; redirects are refused; URL credentials/query/fragment are rejected. |
 | Scripts → Lua | Lua is trusted code. LuaJIT FFI is available; only run reviewed drivers. |
 | Driver → device | `active`/`build`/`destroy`/`sample` may write hardware even when they appear read-only. |
-| Agent → logs | Final JSON excludes arguments, secrets and images; diagnostics are escaped. The reference edition does not persist transcripts. |
+| Agent → logs | Final JSON excludes arguments, secrets and images; diagnostics are escaped. Session transcripts under `~/.mybot/sessions` do contain tool arguments, bounded results and images (never API keys); see [`cli.md`](cli.md#session-transcripts). |
 
 ## System prompt ownership
 
@@ -75,6 +75,8 @@ a public issue for an exploitable problem.
   explicitly.
 - Keep the workspace read-only for the agent unless file writes are required.
 - Leave `--enable-shell` and `--allow-shell` off by default.
+- Disable session transcripts (`MYBOT_SESSION_LOG=0`) when prompts, files or
+  camera images must not be kept on disk.
 - Use a private model endpoint or a local model for sensitive data.
 - Pin releases by SHA-256; verify `SHA256SUMS`.
 - Review every Lua driver and skill before use.

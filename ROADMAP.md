@@ -18,8 +18,8 @@ release; security and reproducibility work takes precedence.
 - [ ] Guided hardware discovery for UART/FTDI devices.
 - [ ] Action-script editor with syntax highlighting and dry-run.
 - [ ] Sampling charts and a session timeline in the GUI.
-- [ ] Opt-in, bounded conversation transcripts under `~/.mybot/sessions`
-  (archived prototype: `archive/release-session-log`).
+- [x] Bounded conversation transcripts under `~/.mybot/sessions`
+  (on by default; `--no-session-log` / `MYBOT_SESSION_LOG=0` disables them).
 - [ ] Prompt layering (`SOUL` / `USER` / `STATS`) with a GUI reset button;
   keep the safety prefix/suffix operator-owned.
 - [ ] Signed Windows/macOS installers (requires maintainer certificates).

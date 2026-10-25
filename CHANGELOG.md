@@ -9,6 +9,32 @@ Per-edition histories live next to each implementation:
 - Cangjie: [`implementations/cangjie/CHANGELOG.md`](implementations/cangjie/CHANGELOG.md)
 - C++17 + Rust agent: [`implementations/cpp-rust/docs/changelog.md`](implementations/cpp-rust/docs/changelog.md)
 
+## [Unreleased]
+
+### Added
+
+- Session transcripts for `agent` and `serve`: `~/.mybot/sessions/<id>/` holds
+  `meta.json`, `transcript.jsonl` and content-addressed images, with per-event
+  and per-session size caps. Disable with `--no-session-log` or
+  `MYBOT_SESSION_LOG=0`; `MYBOT_HOME` moves the root. Ported from the archived
+  `release` prototype without its built-in endpoint.
+- Nuitka standalone builds are recognised as frozen (`paths.frozen()` checks
+  `__compiled__`), so asset lookup, console hiding and the GUI's `serve` child
+  behave as in PyInstaller builds.
+- Reference for the generic `scripts/Camera.mt` action and `robots/camwin.sql`.
+
+### Changed
+
+- An “unknown outcome” receipt now names the failure class, and a failure after
+  dispatch prints its exception type (never the message) to stderr.
+- A missing agent dependency names the module that failed to import.
+
+### Fixed
+
+- DirectShow cameras listed as `(none)` by some FFmpeg builds are recognised via
+  the video-input category GUID.
+- Windowed builds without console streams no longer fail on the first `print`.
+
 ## [0.3.0] – 2026-10-26
 
 ### Added

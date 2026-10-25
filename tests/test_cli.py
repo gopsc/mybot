@@ -49,6 +49,7 @@ def clean_environment(monkeypatch):
     for key in list(os.environ):
         if key.startswith(("BOT4CJ_", "PYMYBOT_", "MYBOT_")):
             monkeypatch.delenv(key)
+    monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
 
 
 @pytest.fixture
@@ -475,3 +476,40 @@ def test_text_sql_limit_and_json_helpers(workspace, capsys):
     with pytest.raises(SecurityError):
         read_file(workspace)
     assert checked_text("x" * MAX_BODY) == "x" * MAX_BODY
+
+
+def test_windowed_build_replaces_missing_console_streams():
+    original_out, original_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout = sys.stderr = None
+        cli.utf8_streams()
+        assert sys.stdout is not None and sys.stderr is not None
+    finally:
+        replaced_out, replaced_err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = original_out, original_err
+        for stream in (replaced_out, replaced_err):
+            if stream not in (None, original_out, original_err):
+                stream.close()
+
+
+def test_camwin_example_checks(capsys):
+    code, result, _ = invoke(capsys, "check", "--robot", ROOT / "robots" / "camwin.sql",
+                             "--input", ROOT / "scripts" / "Camera.mt")
+    assert code == 0 and result["valid"] and result["activated"] is False
+
+
+def test_camera_script_captures_a_file_image(workspace, capsys):
+    from PIL import Image
+
+    Image.new("RGB", (2, 2), (0, 128, 255)).save(workspace / "frame.png")
+    (workspace / "camera.sql").write_text(
+        "CREATE TABLE Camera (name String, path String, src String);\n"
+        "INSERT INTO Camera (name, path, src) VALUES ('cam', '0', 'frame.png');\n",
+        encoding="utf-8")
+    code, result, _ = invoke(capsys, "run", "--robot", workspace / "camera.sql",
+                             "--input", ROOT / "scripts" / "Camera.mt",
+                             "--camera-src-dir", workspace, "--timeout", "10")
+    assert code == 0 and result["ok"]
+    shot = result["outputs"][0]
+    assert shot["result"] == "OK" and shot["source"] == "file"
+    assert shot["format"] == "png" and (shot["width"], shot["height"]) == (2, 2)

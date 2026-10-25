@@ -17,6 +17,12 @@ def pytest_configure(config):
         faulthandler.disable()
 
 
+@pytest.fixture(autouse=True)
+def no_session_logs(monkeypatch):
+    """Tests must never append to the operator's real ~/.mybot/sessions."""
+    monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
+
+
 def usable_symlink(link, target):
     """Create a symlink and report whether the result is actually usable.
 

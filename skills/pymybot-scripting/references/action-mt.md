@@ -304,3 +304,16 @@ $(state.points[0].x) $state.points[0].x=slept;
 - Include 和顶层 Merge 保留原始 JSON 语义，智能体执行前冻结脚本时同样保留；控制块内的
   局部 Merge 片段不能包含 Struct 声明。Struct 同名声明不采用 Merge 的标量覆盖规则。
 - 单个 Struct 的规范 JSON 序列化最多 8 MiB，值嵌套深度最多 32；捕获赋值也受这些限制。
+
+## 10. Camera 通用动作
+
+`scripts/Camera.mt` 抓取一帧并返回图片。默认目标变量是 `cam`；其他名称用
+`--var cameraVar=<name>`（或智能体 `run_action_script` 的 `vars={"cameraVar": "..."}`）覆盖：
+
+```sh
+pymybot run --robot robots/camwin.sql --input scripts/Camera.mt --allow-hardware
+pymybot run --robot robots/camwin.sql --input scripts/Camera.mt --allow-hardware --var cameraVar=cam0
+```
+
+Windows 示例见 `robots/camwin.sql`（DirectShow 设备序号，0 为第一个摄像头）。
+文件图片源在 SQL 中声明 `src` 并给 `--camera-src-dir`，不需要 `--allow-hardware`。

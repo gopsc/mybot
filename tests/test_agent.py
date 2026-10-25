@@ -31,6 +31,7 @@ def no_network(monkeypatch):
     for key in list(os.environ):
         if key.startswith(("MYBOT_", "OPENAI_", "DEEPSEEK_", "ANTHROPIC_")):
             monkeypatch.delenv(key)
+    monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
 
 
 class FakeExecutor:
@@ -470,7 +471,7 @@ def test_slow_start_is_covered_by_the_turn_deadline():
         async def start(self, *, deadline=None):
             assert deadline is not None, "startup must receive the turn deadline"
             remaining = deadline - time.monotonic()
-            await asyncio.sleep(min(0.12, max(0, remaining)))
+            await asyncio.sleep(min(0.12, max(0, remaining) + 0.01))
             if time.monotonic() >= deadline:
                 return {"ok": False, "executed": False, "state": "not_executed"}
             return {"ok": True}
@@ -1033,3 +1034,27 @@ def test_failure_endpoint_is_the_request_url(monkeypatch, provider, url):
     _, client = create_model(AgentConfig(model=f"{provider}:m", base_url="http://127.0.0.1:8080/v1/"))
     assert agent_module.request_endpoint(client) == f"POST {url}"
     assert agent_module.request_endpoint(object()) is None
+
+
+def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
+    from pymybot import cli
+
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
+    monkeypatch.setenv("MYBOT_SESSION_LOG", "1")
+    executor = FakeExecutor()
+    model = scripted_model([TextPart("done")])
+    install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=lambda: asyncio.sleep(0)))
+
+    code = cli.main(["--no-gui", "--robot", "unused.sql", "--model", "openai:test", "--task", "hello"])
+    captured = capsys.readouterr()
+    assert code == 0 and "session log:" in captured.err
+    sessions = list((tmp_path / "sessions").iterdir())
+    assert len(sessions) == 1
+    events = [json.loads(line) for line in
+              (sessions[0] / "transcript.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [event["type"] for event in events] == [
+        "session_start", "user", "assistant", "usage", "session_end"]
+    assert events[1]["text"] == "hello"
+    assert events[2]["text"] == "done"
+    meta = json.loads((sessions[0] / "meta.json").read_text(encoding="utf-8"))
+    assert meta["model"] == "openai:test"

@@ -59,9 +59,11 @@ byte budget is an explicit, provider-independent guard.
 
 ## Where are logs and session history?
 
-Diagnostics go to stderr and the GUI “日志” tab. The reference edition does not
-persist conversation transcripts. The withdrawn 2026-10-25 GUI binary wrote
-`~/.mybot/sessions`; that behaviour is not part of the source release.
+Diagnostics go to stderr and the GUI “日志” tab. Agent conversations are also
+transcribed to `~/.mybot/sessions/` by default (tool arguments, bounded results
+and images, never API keys); disable with `--no-session-log` or
+`MYBOT_SESSION_LOG=0`. Transcripts are not resumable and the GUI has no history
+browser; see [`cli.md`](cli.md#session-transcripts).
 
 ## Why is the Windows build unsigned?
 

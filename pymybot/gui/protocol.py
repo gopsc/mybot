@@ -17,6 +17,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ..paths import frozen
+
 MAX_STDOUT = 32 * 1024 * 1024
 MAX_STDERR = 256 * 1024
 EXITED = -32099
@@ -57,7 +59,7 @@ def parse_result(stdout):
 
 def _frozen_sibling():
     """Return the console CLI shipped next to a frozen GUI, if present."""
-    if not getattr(sys, "frozen", False):
+    if not frozen():
         return None
     name = "pymybot.exe" if os.name == "nt" else "pymybot"
     candidate = Path(sys.executable).with_name(name)
@@ -66,7 +68,7 @@ def _frozen_sibling():
 
 def _spawn_options():
     """Never flash a console window for children of a frozen GUI on Windows."""
-    if os.name == "nt" and getattr(sys, "frozen", False):
+    if os.name == "nt" and frozen():
         return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
     return {}
 

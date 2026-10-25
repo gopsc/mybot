@@ -28,6 +28,7 @@ from .agent_executor import RobotExecutor
 from .agent_skills import SkillsLibrary, default_skills_root
 from .errors import AgentInterrupted
 from .security import SecurityError, checked_text, dumps
+from .session_log import SessionLog, create_session_log
 
 MAX_TEXT = 64 * 1024
 _TERMINAL_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
@@ -313,11 +314,13 @@ def _stream_event_dict(event):
 
 class AgentSession:
     def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(), camera_vars=(),
-                 on_event=None, skills=None, workspace=False, enable_shell=False):
+                 on_event=None, skills=None, workspace=False, enable_shell=False, session_log=None):
         self.executor = executor
         self.config = config or AgentConfig()
         self.confirm = confirm
         self.on_event = on_event
+        self.session_log: SessionLog | None = session_log
+        self._turn = 0
         self.agent = make_agent(model, read_vars=read_vars, camera_vars=camera_vars, skills=skills,
                                 workspace=workspace, enable_shell=enable_shell)
         self.context = None
@@ -346,8 +349,25 @@ class AgentSession:
         if self.executor.stop_event.is_set():
             raise AgentInterrupted("Interrupted; already dispatched actions are not rolled back")
 
+    def _log(self, kind, **fields):
+        if self.session_log is not None:
+            self.session_log.write(kind, turn=self._turn, **fields)
+
+    def _log_images(self, tool, result):
+        if self.session_log is None:
+            return
+        image = result.get("image")
+        if isinstance(image, dict):
+            self.session_log.write_image(tool, image, turn=self._turn)
+        images = result.get("images")
+        if isinstance(images, list):
+            for item in images:
+                if isinstance(item, dict):
+                    self.session_log.write_image(tool, item, turn=self._turn)
+
     async def dispatch(self, name, arguments):
         self._check()
+        self._log("tool_call", tool=name, arguments=arguments)
         needs_approval = ((name in IO_TOOLS and not self.config.allow_actions)
                           or (name in FILE_WRITE_TOOLS and not self.config.allow_file_writes)
                           or (name == "shell" and not self.config.allow_shell))
@@ -358,15 +378,23 @@ class AgentSession:
                 result = {"ok": False, "executed": False, "state": "not_executed",
                           "error": "Operator approval denied or unavailable; do not retry or bypass"}
                 self.events.append({"tool": name, **result})
+                self._log("tool_result", tool=name, **result)
                 return result
         self._check()
         remaining = max(0.001, self.deadline - time.monotonic()) if self.deadline else self.config.timeout
         result = await self.executor.call(name, arguments, timeout=remaining)
         self.events.append({"tool": name, **{k: result[k] for k in ("ok", "executed", "state")}})
-        self._check()  # Preserve the receipt, but never request another model after stop.
+        self._log("tool_result", tool=name,
+                  **{key: result[key] for key in ("ok", "executed", "state") if key in result},
+                  data=result.get("data"), error=result.get("error"))
+        self._log_images(name, result)
         if result["state"] == "unknown":
-            raise AgentError("Execution outcome is unknown; inspect the robot and workspace before restarting. "
+            error = result.get("error")
+            kind = error.get("type") if isinstance(error, dict) else None
+            detail = f" ({kind})" if isinstance(kind, str) and kind else ""
+            raise AgentError(f"Execution outcome is unknown{detail}; inspect the robot and workspace before restarting. "
                              "Actions are not rolled back or automatically retried")
+        self._check()  # Preserve the receipt, but never request another model after stop.
         return result
 
     async def ask(self, prompt):
@@ -377,6 +405,8 @@ class AgentSession:
             raise AgentError("Concurrent turns on one robot session are not supported")
         self._asking = True
         self.deadline = time.monotonic() + self.config.timeout
+        self._turn += 1
+        self._log("user", text=prompt)
         task = None
         try:
             self._check()
@@ -427,12 +457,16 @@ class AgentSession:
                     or sum(len(ModelMessagesTypeAdapter.dump_json(t)) for t in self.turns)
                     > self.config.history_bytes):
                 self.turns.pop(0)
-            return {"output": result.output, "usage": {
+            usage = {
                 "requests": result.usage.requests, "tool_calls": result.usage.tool_calls,
-                "input_tokens": result.usage.input_tokens, "output_tokens": result.usage.output_tokens}}
-        except BaseException:
+                "input_tokens": result.usage.input_tokens, "output_tokens": result.usage.output_tokens}
+            self._log("assistant", text=result.output)
+            self._log("usage", **usage)
+            return {"output": result.output, "usage": usage}
+        except BaseException as exc:
             # Do not resume a partially executed turn after cancellation, model
             # failure or a limit exception. No tool/action replay is attempted.
+            self._log("error", error=type(exc).__name__, message=str(exc))
             self.executor.cancel()
             raise
         finally:
@@ -444,7 +478,11 @@ class AgentSession:
             self.deadline = None
 
     async def close(self):
-        await self.executor.close()
+        try:
+            await self.executor.close()
+        finally:
+            if self.session_log is not None:
+                self.session_log.close()
 
 
 async def console_line(prompt, stop):
@@ -571,7 +609,7 @@ async def _conversation(session, args, stop, renderer=None):
 
 
 async def run_cli_agent(args, stop):
-    executor = client = session = None
+    executor = client = session = session_log = None
     failure = result = None
     cleanup_errors = []
     try:
@@ -583,6 +621,8 @@ async def run_cli_agent(args, stop):
                              allow_actions=args.allow_actions, allow_shell=args.allow_shell,
                              allow_file_writes=args.allow_file_writes)
         model, client = create_model(config)
+        session_log = create_session_log(enabled=not getattr(args, "no_session_log", False),
+                                         robot=args.robot, model=config.model, mode="cli")
         try:
             skills = SkillsLibrary(args.skills_dir or default_skills_root(),
                                    required=args.skills_dir is not None)
@@ -604,18 +644,22 @@ async def run_cli_agent(args, stop):
         session = AgentSession(executor, model, config, confirm=confirm,
                                read_vars=args.read_var, camera_vars=args.camera_var,
                                on_event=renderer, skills=skills, workspace=args.workspace_dir is not None,
-                               enable_shell=args.enable_shell)
+                               enable_shell=args.enable_shell, session_log=session_log)
         result = await _conversation(session, args, stop, renderer)
     except BaseException as exc:
         failure = exc
     finally:
-        for resource in (executor, client):
+        # A live session owns the executor; closing both would run cleanup twice.
+        resources = (session, client) if session is not None else (executor, client)
+        for resource in resources:
             if resource is not None:
                 try:
                     await resource.close()
                 except BaseException as exc:
                     cleanup_errors.append(type(exc).__name__)
                     failure = failure or exc
+        if session is None and session_log is not None:
+            session_log.close()
     # One exit after cleanup: cleanup cannot erase prior receipts or leak a raw
     # client exception. Preserve the original reason if cleanup also failed.
     if failure is not None:

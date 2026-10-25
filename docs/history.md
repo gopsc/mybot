@@ -28,7 +28,8 @@ contributor can find every edition in one place.
   full history.
 - `pymybot`, `cangjie`, `cangjie_new`, `cpp_rust_agent` and `release` branches
   deleted. The `release` prototype’s built-in endpoint/key was rejected; its
-  session-transcript design is kept in the archive and on the 0.3 roadmap.
+  session-transcript design was later ported into the 0.3 line without the
+  built-in endpoint.
 
 ## Why copy instead of merge?
 

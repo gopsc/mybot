@@ -97,7 +97,13 @@ The spec produces `dist/mybot/` with:
   flashes behind the window.
 
 `pymybot/paths.py` resolves assets via `sys._MEIPASS` in frozen builds. Keep it
-as the only place that knows about frozen paths.
+as the only place that knows about frozen paths; other modules call
+`paths.frozen()` instead of reading `sys.frozen`.
+
+Nuitka standalone builds also work: Nuitka does not set `sys.frozen` but injects
+`__compiled__` into every compiled module, which `paths.frozen()` recognises.
+Place the data next to the executable as `pymybot/assets/` (the same layout
+`asset_dir()` probes when `_MEIPASS` is absent).
 
 ## Dependency policy
 

@@ -148,3 +148,15 @@ def test_agent_interrupt_has_exit_130(files, capsys, monkeypatch):
     monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
     code, result, _ = invoke(capsys, "--robot", files[0], "--task", "wait")
     assert code == 130 and result["ok"] is False
+
+
+def test_no_session_log_flag(files):
+    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "t", "--no-session-log"])
+    assert args.no_session_log is True
+    default = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "t"])
+    assert default.no_session_log is False
+
+
+def test_serve_can_disable_session_log():
+    args = cli.parse_args(["serve", "--no-session-log"])
+    assert args.command == "serve" and args.no_session_log is True

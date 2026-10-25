@@ -86,6 +86,8 @@ export DEEPSEEK_API_KEY="sk-..."
 
 支持的模型提供商：`openai`、`openai-chat`、`anthropic`、`deepseek`。密钥只从环境变量读取；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
 
+对话默认转录到 `~/.mybot/sessions`（含工具参数、受限结果与图片，不含密钥），只用于回看，不能恢复会话；用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，详见 [docs/cli.md](docs/cli.md#session-transcripts)。
+
 ## 架构
 
 ```mermaid

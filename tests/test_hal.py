@@ -371,6 +371,15 @@ DSHOW_DEVICES = (
     '  Alternative name "@device_pnp_\\\\?\\usb#vid_0c45&pid_6366#cam1\\global"\n'
 )
 
+# Some FFmpeg/PyAV builds print video inputs as "(none)" and identify the
+# category only through the DirectShow GUID in the alternative name.
+DSHOW_DEVICES_NONE = (
+    '"Integrated Webcam_FHD" (none)\n'
+    '  Alternative name "@device_pnp_cam0_{65E8773D-8F56-11D0-A3B9-00A0C9223196}"\n'
+    '"Microphone" (audio)\n'
+    '  Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_x"\n'
+)
+
 
 @pytest.fixture
 def av_fake(monkeypatch):
@@ -430,7 +439,7 @@ def av_fake(monkeypatch):
     def open_(file, format=None, options=None, timeout=None):
         if options.get("list_devices"):
             assert module.logging.level == module.logging.INFO and module.logging.capturing
-            module.logging.captured.append((32, "dshow", DSHOW_DEVICES))
+            module.logging.captured.append((32, "dshow", module.devices))
             raise FFmpegError("Immediate exit requested")
         if module.open_fail:
             raise FFmpegError("I/O error")
@@ -451,10 +460,17 @@ def av_fake(monkeypatch):
     logging.get_level = lambda: logging.level
     logging.set_level = lambda level: setattr(logging, "level", level)
     module = SimpleNamespace(open=open_, FFmpegError=FFmpegError, logging=logging,
-                             containers=containers, open_fail=False, encode_fail=False)
+                             containers=containers, devices=DSHOW_DEVICES,
+                             open_fail=False, encode_fail=False)
     monkeypatch.setitem(sys.modules, "av", module)
     monkeypatch.setitem(sys.modules, "av.logging", logging)
     return module
+
+
+def test_dshow_video_devices_accept_none_kind_with_video_guid(manager, av_fake):
+    av_fake.devices = DSHOW_DEVICES_NONE
+    assert manager._dshow_video_devices(av_fake) == [
+        "@device_pnp_cam0_{65E8773D-8F56-11D0-A3B9-00A0C9223196}"]
 
 
 def test_camera_lazy_capture_fields_reconfigure_close(manager, av_fake):

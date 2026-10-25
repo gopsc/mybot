@@ -29,6 +29,9 @@ from .process import kill_tree, read_pipe, shell_command
 
 # PyAV's log level and capture are process-global.
 _AV_LOG_LOCK = threading.Lock()
+# DirectShow's video input category; FFmpeg prints video devices as (video) or
+# (none), so the category GUID is the reliable discriminator from audio devices.
+_DSHOW_VIDEO_GUID = "65e8773d-8f56-11d0-a3b9-00a0c9223196"
 
 
 class _Resource:
@@ -775,7 +778,7 @@ class HALManager:
         text = "".join(message for _, _, message in logs)
         return [alt for kind, alt in re.findall(
             r'^"[^"\n]*" \(([^)\n]*)\)\s*\n\s*Alternative name "([^"\n]+)"', text, re.M)
-            if "video" in kind]
+            if "video" in kind.lower() or _DSHOW_VIDEO_GUID in alt.lower()]
 
     def _camera_input(self, av, device):
         fmt = self.CAMERA_FORMATS.get(sys.platform)

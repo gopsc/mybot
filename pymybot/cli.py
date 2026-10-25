@@ -21,7 +21,7 @@ from .errors import AgentInterrupted, ScriptError
 from .hardware import Budget, ensure_ok, safe_ident
 from .include import expand_includes
 from .matrix import parse_matrices
-from .paths import asset_path
+from .paths import asset_path, frozen
 from .robot import Robot, module_roots
 from .security import MAX_BODY, SecurityError, checked_text, dumps, read_file
 
@@ -125,6 +125,9 @@ def parser():
         command.add_argument("--no-agent", action="store_true",
                              help="disable agent.* methods" if name == "serve"
                              else "bypass the model; agent entry requires --input MT")
+        if name in {"serve", "agent"}:
+            command.add_argument("--no-session-log", action="store_true",
+                                 help="do not write conversation transcripts under ~/.mybot/sessions")
         if name == "scripts":
             command.add_argument("--scripts-dir", help="default: packaged assets/scripts, else source scripts")
             continue
@@ -367,12 +370,12 @@ def execute(args, stop):
             ) from None
     if args.command == "serve":
         from .serve import run_server
-        return run_server(stop, enable_agent=not args.no_agent)
+        return run_server(stop, enable_agent=not args.no_agent, enable_session_log=not args.no_session_log)
     if args.command == "agent":
         try:
             from .agent import run_cli_agent
         except ModuleNotFoundError as exc:
-            raise RuntimeError("Agent dependencies unavailable; install pymybot[agent] "
+            raise RuntimeError(f"Agent dependencies unavailable ({exc}); install pymybot[agent] "
                                "(source checkout: pip install -e '.[agent]'), "
                                "or use --no-agent --input MT") from exc
         return asyncio.run(run_cli_agent(args, stop))
@@ -420,7 +423,7 @@ def execute(args, stop):
 
 def hide_console_window():
     """A double-clicked frozen exe should show the GUI, not a console behind it."""
-    if os.name != "nt" or not getattr(sys, "frozen", False):
+    if os.name != "nt" or not frozen():
         return
     try:
         import ctypes
@@ -453,6 +456,11 @@ def utf8_streams():
     follows so callers decode both streams one way (as Python's UTF-8 mode, the
     default from 3.15 per PEP 686, would). stderr keeps backslashreplace.
     """
+    # Windowed builds have no console streams; print() must not raise there.
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="backslashreplace")
     for stream, errors in ((sys.stdout, "strict"), (sys.stderr, "backslashreplace")):
         encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "").replace("_", "")
         reconfigure = getattr(stream, "reconfigure", None)
@@ -461,8 +469,8 @@ def utf8_streams():
 
 
 def main(argv=None):
-    disable_windows_faulthandler()
     utf8_streams()
+    disable_windows_faulthandler()
     stop = threading.Event()
     handlers = {}
     args = None
