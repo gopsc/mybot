@@ -40,14 +40,15 @@ frozen-build commands. Edition-specific prerequisites are in each
 
 ## Branches and commits
 
-- `main` is the only long-lived branch. Work on a short-lived topic branch.
+- The default branch (`gui-mybot`; the owner may rename it to `main`) is the only
+  long-lived branch. Work on a short-lived topic branch.
 - Use Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`,
   `ci:`, `chore:`. The scope is optional but encouraged, e.g.
   `fix(gui): ...`.
 - Keep each commit focused. Do not mix formatting-only changes with behaviour
   changes.
-- Rebase on `main` before opening a pull request; do not merge `main` into the
-  topic branch.
+- Rebase on the default branch before opening a pull request; do not merge the
+  default branch into the topic branch.
 - Do not commit generated build output, editor state, credentials or model
   API keys.
 

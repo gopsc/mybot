@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/gopsc/mybot/security/advisories/new
     about: Please report exploitable vulnerabilities privately, not in a public issue.
   - name: Documentation
-    url: https://github.com/gopsc/mybot/tree/main/docs
+    url: https://github.com/gopsc/mybot/tree/gui-mybot/docs
     about: Installation, CLI, GUI, architecture, testing and release guides.

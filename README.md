@@ -247,7 +247,7 @@ CI 覆盖 Python 3.11–3.14、Windows、Agent（离线模型）、wheel/sdist �
 欢迎驱动、文档、测试和前端贡献。请先读 [CONTRIBUTING.md](CONTRIBUTING.md)：
 
 - Bug/功能先开 Issue；小修可直接提 PR。
-- Conventional Commits；`main` 是唯一长驻分支。
+- Conventional Commits；默认分支（`gui-mybot`，owner 可后续改名为 `main`）是唯一长驻分支。
 - 不提交密钥、生成物或无关格式化。
 - 安全漏洞走私密渠道：[SECURITY.md](SECURITY.md)。
 

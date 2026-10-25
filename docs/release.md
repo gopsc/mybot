@@ -19,7 +19,7 @@ and the state of the monorepo; edition-specific versions live in
 
 ## Release checklist
 
-1. `main` is green on every CI channel.
+1. The default branch (`gui-mybot`) is green on every CI channel.
 2. Version bumped in `pymybot/__init__.py` and `pyproject.toml`.
 3. `CHANGELOG.md` has a dated section; docs/screenshots are current.
 4. `python -I scripts/ci_smoke.py wheel` passes locally.
@@ -44,11 +44,11 @@ and the state of the monorepo; edition-specific versions live in
 
 ## Branch and tag policy
 
-- `main` — only long-lived branch.
+- Default branch (`gui-mybot`) — only long-lived branch.
 - `feat/*`, `fix/*`, `docs/*`, `ci/*`, `chore/*` — short-lived, deleted after
   merge.
 - `archive/*` tags preserve historical implementation branches.
-- Never force-push `main`; never rewrite published release tags.
+- Never force-push the default branch; never rewrite published release tags.
 
 ## Rollback
 
