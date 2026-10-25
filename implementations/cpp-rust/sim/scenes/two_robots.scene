@@ -1,0 +1,24 @@
+mybot-sim scene v2
+# 双机器人示例场景（C2）：两只蜘蛛并排出发沿 +X 前进，中间与两侧散布障碍。
+# v2 与 v1 的差别只在 robot 行数——多条 robot 行 = 多机器人；每条 robot 行按
+# 出现顺序对应 robot[0]、robot[1]…，robot[0] 是相机跟随/标题栏的主机器人。
+#
+# 每只机器人一套独立 socket（行协议零改动）：
+#   robot[0] → /tmp/mybot-sim.sock、/tmp/mybot-sim-sensor.sock（原缺省路径，字节不变）
+#   robot[1] → /tmp/mybot-sim-1.sock、/tmp/mybot-sim-sensor-1.sock（末尾 .sock 前插 -1）
+# 拍照桥单条即可（抓的是整幅 GL 视口，与机器人数量无关）。
+# 多 agent 各自把 MYBOT_SIM_SOCK / MYBOT_SIM_SENSOR_SOCK 指向自己的那套即可。
+#
+# 运行：MYBOT_SIM_SCENE=sim/scenes/two_robots.scene ./sim/build/mybot-sim
+# box: cx cy cz hx hy hz r g b mass [yaw_deg（绕Y朝向，0=轴对齐，缺省 0）]
+# robot: x z theta_deg carried_idx
+robot 0 -1.5 0
+robot 0 1.5 0
+box 2.0 0.40 0.0 0.40 0.40 0.40 0.72 0.30 0.24 61.44    # 正前方共用的红箱
+box 3.5 0.50 -1.5 0.20 0.50 1.20 0.45 0.52 0.60 192.00  # robot[0] 右前的矮墙
+box 3.5 0.50 1.5 0.20 0.50 1.20 0.45 0.52 0.60 192.00   # robot[1] 左前的矮墙
+box 1.2 0.25 -3.0 0.50 0.25 0.50 0.80 0.66 0.25 100.00  # robot[0] 外侧黄块
+box 1.2 0.25 3.0 0.50 0.25 0.50 0.80 0.66 0.25 100.00   # robot[1] 外侧黄块
+box 5.5 0.35 0.0 0.35 0.35 0.35 0.30 0.55 0.35 75.00    # 深处中央绿柱
+box 6.5 0.30 -2.0 0.30 0.30 0.30 0.55 0.42 0.60 69.12   # robot[0] 深处紫箱
+box 6.5 0.30 2.0 0.30 0.30 0.30 0.55 0.65 0.25 69.12    # robot[1] 深处绿黄箱

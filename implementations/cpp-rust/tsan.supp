@@ -1,0 +1,13 @@
+# tsan.supp —— gate:tsan 的竞争抑制（ThreadSanitizer suppression 语法）
+#
+# LuaJIT 未按 TSan 清洁维护：其内部对象图/字符串内化/字节码页写操作在
+# TSan 下大量误报，会淹没 mybot 自有线程代码（daemonvar/actionsource）
+# 的真实竞态信号。按库整段抑制后，残留告警即需人工甄别。
+# 本文件只做「降噪」，不做「洗白」：mybot 自身代码的竞态不在任何抑制规则内。
+
+# LuaJIT 静态/共享库内部的已知无害竞争（GC 触发、字符串驻留、trace 页权限切换）
+called_from_lib:libluajit
+
+# glibc/ld 自身的低层竞争（TSan 对 dlopen 路径的常见误报）
+called_from_lib:libdl
+called_from_lib:ld-linux

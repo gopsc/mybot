@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="940" viewBox="0 0 1500 940" font-family="'Noto Sans CJK SC','WenQuanYi Micro Hei',sans-serif">
+  <defs>
+    <marker id="ah" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#475569"/>
+    </marker>
+    <marker id="ahA" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#2563eb"/>
+    </marker>
+    <marker id="ahG" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#16a34a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1500" height="940" fill="#f8fafc"/>
+  <text x="750" y="40" text-anchor="middle" font-size="26" font-weight="700" fill="#0f172a">bot4cj 机器人控制框架 · 架构全景图</text>
+  <text x="750" y="64" text-anchor="middle" font-size="14" fill="#64748b">仓颉 (Cangjie) 脚本解析器 + LuaJIT 驱动层 + Linux HAL · 结构(.sql) / 驱动(.lua) / 动作(.mt) 三脚本分治</text>
+
+  <!-- ===== L7 输入层 ===== -->
+  <g>
+    <rect x="40" y="84" width="1420" height="118" rx="10" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1.5"/>
+    <text x="60" y="112" font-size="16" font-weight="700" fill="#3730a3">L7 · 输入 / 编排层（声明式）</text>
+    <g>
+      <rect x="80" y="128" width="300" height="58" rx="8" fill="#fff" stroke="#6366f1" stroke-width="1.5"/>
+      <text x="230" y="152" text-anchor="middle" font-size="15" font-weight="600" fill="#312e81">.sql 结构脚本</text>
+      <text x="230" y="172" text-anchor="middle" font-size="12" fill="#64748b">CREATE TABLE / INSERT（SQL4cj）</text>
+    </g>
+    <g>
+      <rect x="420" y="128" width="300" height="58" rx="8" fill="#fff" stroke="#6366f1" stroke-width="1.5"/>
+      <text x="570" y="152" text-anchor="middle" font-size="15" font-weight="600" fill="#312e81">.mt 动作脚本</text>
+      <text x="570" y="172" text-anchor="middle" font-size="12" fill="#64748b">mt2 行列 DSL · 一帧 = 一行</text>
+    </g>
+    <g>
+      <rect x="760" y="128" width="300" height="58" rx="8" fill="#fff" stroke="#6366f1" stroke-width="1.5"/>
+      <text x="910" y="152" text-anchor="middle" font-size="15" font-weight="600" fill="#312e81">.bot（已废弃）</text>
+      <text x="910" y="172" text-anchor="middle" font-size="12" fill="#64748b">0.3.0 前旧结构脚本格式</text>
+    </g>
+    <g>
+      <rect x="1100" y="128" width="320" height="58" rx="8" fill="#fff" stroke="#6366f1" stroke-width="1.5"/>
+      <text x="1260" y="152" text-anchor="middle" font-size="15" font-weight="600" fill="#312e81">环境变量</text>
+      <text x="1260" y="172" text-anchor="middle" font-size="12" fill="#64748b">BOT4CJ_MODULE_PATH · BOT4CJ_DEBUG</text>
+    </g>
+  </g>
+
+  <!-- ===== 仓颉核心层 ===== -->
+  <g>
+    <rect x="40" y="222" width="1420" height="250" rx="10" fill="#eff6ff" stroke="#bfdbfe" stroke-width="1.5"/>
+    <text x="60" y="250" font-size="16" font-weight="700" fill="#1e3a8a">仓颉核心层（Cangjie · src/）—— 解析 · 构建 · 播放</text>
+
+    <!-- main.cj -->
+    <g>
+      <rect x="80" y="268" width="260" height="180" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="210" y="294" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">main.cj</text>
+      <text x="210" y="320" text-anchor="middle" font-size="12.5" fill="#475569">argopt 解析 --robot</text>
+      <text x="210" y="342" text-anchor="middle" font-size="12.5" fill="#475569">RobotStruct(file)</text>
+      <text x="210" y="364" text-anchor="middle" font-size="12.5" fill="#475569">.active() → .run(stdin)</text>
+      <text x="210" y="386" text-anchor="middle" font-size="12.5" fill="#475569">finally .deactivate()</text>
+      <text x="210" y="412" text-anchor="middle" font-size="11.5" fill="#0ea5e9">两阶段构造入口</text>
+    </g>
+
+    <!-- r.cj -->
+    <g>
+      <rect x="380" y="268" width="300" height="180" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="530" y="294" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">r.cj · RobotStruct</text>
+      <text x="530" y="320" text-anchor="middle" font-size="12.5" fill="#475569">readSQL → 矩阵对象</text>
+      <text x="530" y="342" text-anchor="middle" font-size="12.5" fill="#475569">active() 建硬件变量 + build</text>
+      <text x="530" y="364" text-anchor="middle" font-size="12.5" fill="#475569">run() 逐行 play @Action</text>
+      <text x="530" y="386" text-anchor="middle" font-size="12.5" fill="#475569">MetaProvider 元数据闭包</text>
+      <text x="530" y="412" text-anchor="middle" font-size="11.5" fill="#0ea5e9">C 矩阵 + M 变量表 + hwSeq</text>
+    </g>
+
+    <!-- HV 变量类 -->
+    <g>
+      <rect x="720" y="268" width="300" height="180" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="870" y="294" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">src/HV · 硬件变量类</text>
+      <text x="870" y="320" text-anchor="middle" font-size="12.5" fill="#475569">MatrixVars_Hardware（基类）</text>
+      <text x="870" y="342" text-anchor="middle" font-size="12.5" fill="#475569">play / read / build / destroy</text>
+      <text x="870" y="364" text-anchor="middle" font-size="12.5" fill="#475569">MtVars_Lua（Lua 驱动）</text>
+      <text x="870" y="386" text-anchor="middle" font-size="12.5" fill="#475569">MtVars_Daemon（守护线程）</text>
+      <text x="870" y="412" text-anchor="middle" font-size="11.5" fill="#475569">MtVars_Alias（别名）</text>
+    </g>
+
+    <!-- 并发 / IPC 槽 -->
+    <g>
+      <rect x="1060" y="268" width="360" height="180" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+      <text x="1240" y="294" text-anchor="middle" font-size="15" font-weight="700" fill="#1e3a8a">@Daemon 并发模型</text>
+      <text x="1240" y="320" text-anchor="middle" font-size="12.5" fill="#475569">spawn 绿色线程 + 独立 lua_State</text>
+      <text x="1240" y="342" text-anchor="middle" font-size="12.5" fill="#475569">daemon_slot_t 共享内存槽 (208B)</text>
+      <text x="1240" y="364" text-anchor="middle" font-size="12.5" fill="#475569">mutex[64]+count(64)+nvals(68)</text>
+      <text x="1240" y="386" text-anchor="middle" font-size="12.5" fill="#475569">values[16]@72 + stop(200)</text>
+      <text x="1240" y="412" text-anchor="middle" font-size="11.5" fill="#0ea5e9">pthread4cj · 拍间让出式 sleep</text>
+    </g>
+  </g>
+
+  <!-- ===== L5 Lua 状态机 ===== -->
+  <g>
+    <rect x="40" y="492" width="1420" height="150" rx="10" fill="#ecfdf5" stroke="#bbf7d0" stroke-width="1.5"/>
+    <text x="60" y="520" font-size="16" font-weight="700" fill="#065f46">L5 · LuaJIT 状态机（独立 lua_State · 驱动运行期）</text>
+    <text x="60" y="548" font-size="13" fill="#475569">每个硬件变量一个独立 Lua 状态机；驱动模块 <tspan font-weight="600" fill="#065f46">modules/*.lua</tspan> 顶部 dofile 加载 HAL；build / call / destroy 三生命周期，返回 {result="OK"/"ERR", message}（halt-on-error 契约）</text>
+    <g>
+      <rect x="80" y="562" width="200" height="60" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.3"/>
+      <text x="180" y="588" text-anchor="middle" font-size="13.5" font-weight="600" fill="#065f46">build(data)</text>
+      <text x="180" y="608" text-anchor="middle" font-size="11.5" fill="#64748b">配置 / 器件甄别</text>
+    </g>
+    <g>
+      <rect x="300" y="562" width="200" height="60" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.3"/>
+      <text x="400" y="588" text-anchor="middle" font-size="13.5" font-weight="600" fill="#065f46">call(data)</text>
+      <text x="400" y="608" text-anchor="middle" font-size="11.5" fill="#64748b">读 / 写 / 采样</text>
+    </g>
+    <g>
+      <rect x="520" y="562" width="200" height="60" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.3"/>
+      <text x="620" y="588" text-anchor="middle" font-size="13.5" font-weight="600" fill="#065f46">destroy(data)</text>
+      <text x="620" y="608" text-anchor="middle" font-size="11.5" fill="#64748b">复位 / 关 fd / 省电</text>
+    </g>
+    <g>
+      <rect x="740" y="562" width="320" height="60" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.3"/>
+      <text x="900" y="588" text-anchor="middle" font-size="13.5" font-weight="600" fill="#065f46">read(data)</text>
+      <text x="900" y="608" text-anchor="middle" font-size="11.5" fill="#64748b">无副作用读（引用快照 / 滤波器）</text>
+    </g>
+    <g>
+      <rect x="1080" y="562" width="340" height="60" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.3"/>
+      <text x="1250" y="588" text-anchor="middle" font-size="13.5" font-weight="600" fill="#065f46">controller 转发</text>
+      <text x="1250" y="608" text-anchor="middle" font-size="11.5" fill="#64748b">先跑自己 Lua，再转发 {元数据 ∪ 返回表} 给下游</text>
+    </g>
+  </g>
+
+  <!-- ===== L4 驱动 + 库 ===== -->
+  <g>
+    <rect x="40" y="662" width="1420" height="130" rx="10" fill="#fff7ed" stroke="#fed7aa" stroke-width="1.5"/>
+    <text x="60" y="690" font-size="16" font-weight="700" fill="#9a3412">L4 · 驱动 + 库层（LuaJIT · modules/）—— 53 个硬件驱动 + 公共库</text>
+    <text x="60" y="716" font-size="13" fill="#475569"><tspan font-weight="600" fill="#9a3412">驱动（按总线/能力）：</tspan>I2C 传感（MPU6050/BME280/VL53L0X/MAX30102…）· SPI（ADS1256/AS7262…）· UART（MHZ19/SGP30/SDS011…）· 执行器（PCA9685/Servo/PWM/AD9833）· 电源（INA219/INA3221/LTC2944/MAX17043）· 框架（I2C/SPI/UART/Relay/Kalman/Ema/Monitor/dummy）</text>
+    <text x="60" y="742" font-size="13" fill="#475569"><tspan font-weight="600" fill="#9a3412">公共库（modules/lib/）：</tspan>HAL.lua · drv_common.lua · virtbus.lua（虚拟总线桩替身）· sensor_daemon.lua（万能采样 chunk）· pthread.lua · ema/kalman/fft.lua · mpath.lua（多路径模块查找）· bitcompat.lua（Lua 5.3+ 位运算兼容）</text>
+    <text x="60" y="768" font-size="12" fill="#64748b">传感器桩替身与 Relay 转发链路使「不接硬件也能跑通全流程」；virtbus 可在无真机时验证任意驱动 build/call/destroy 链路</text>
+  </g>
+
+  <!-- ===== L1-L3 基座 ===== -->
+  <g>
+    <rect x="40" y="812" width="1420" height="98" rx="10" fill="#fef2f2" stroke="#fecaca" stroke-width="1.5"/>
+    <text x="60" y="840" font-size="16" font-weight="700" fill="#991b1b">L1–L3 · 系统基座（Linux）</text>
+    <g>
+      <rect x="80" y="854" width="360" height="48" rx="8" fill="#fff" stroke="#dc2626" stroke-width="1.3"/>
+      <text x="260" y="874" text-anchor="middle" font-size="13" font-weight="600" fill="#991b1b">glibc · ffi.C 直调</text>
+      <text x="260" y="892" text-anchor="middle" font-size="11.5" fill="#64748b">open / ioctl / read / write / close / usleep</text>
+    </g>
+    <g>
+      <rect x="470" y="854" width="470" height="48" rx="8" fill="#fff" stroke="#dc2626" stroke-width="1.3"/>
+      <text x="705" y="874" text-anchor="middle" font-size="13" font-weight="600" fill="#991b1b">Linux 设备文件</text>
+      <text x="705" y="892" text-anchor="middle" font-size="11.5" fill="#64748b">/dev/i2c-* · /dev/spidev* · /dev/tty* · /sys/class/pwm · /dev/gpio*（gpiod）</text>
+    </g>
+    <g>
+      <rect x="970" y="854" width="350" height="48" rx="8" fill="#fff" stroke="#dc2626" stroke-width="1.3"/>
+      <text x="1145" y="874" text-anchor="middle" font-size="13" font-weight="600" fill="#991b1b">内核驱动</text>
+      <text x="1145" y="892" text-anchor="middle" font-size="11.5" fill="#64748b">I2C / SPI / UART / PWM / GPIO 子系统（I2C_RDWR 原子事务）</text>
+    </g>
+  </g>
+
+  <!-- ===== 主数据流箭头（右侧竖向主干）===== -->
+  <g stroke="#2563eb" stroke-width="2.2" fill="none" marker-end="url(#ahA)">
+    <path d="M1470 200 L1470 492"/>
+  </g>
+  <g stroke="#16a34a" stroke-width="2.2" fill="none" marker-end="url(#ahG)">
+    <path d="M1470 642 L1470 812"/>
+  </g>
+  <g stroke="#475569" stroke-width="2" fill="none" marker-end="url(#ah)">
+    <path d="M1470 662 L1470 492"/>
+  </g>
+  <text x="1485" y="360" font-size="12.5" fill="#2563eb" font-weight="600" transform="rotate(90 1485 360)">.sql/.mt 解析</text>
+  <text x="1485" y="600" font-size="12.5" fill="#16a34a" font-weight="600" transform="rotate(90 1485 600)">build/call/destroy</text>
+  <text x="1485" y="760" font-size="12.5" fill="#475569" font-weight="600" transform="rotate(90 1485 760)">ffi.C → 内核</text>
+
+  <!-- 跨层引用（daemon_slot 回读） -->
+  <g stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="6 4" fill="none" marker-end="url(#ah)">
+    <path d="M960 300 C 1120 300 1240 300 1340 348"/>
+  </g>
+  <text x="1080" y="288" font-size="11.5" fill="#b45309" font-weight="600">守护 publish → 主线程 play() 加锁读共享槽（v0..vN / values）</text>
+
+  <!-- 底部说明 -->
+  <text x="750" y="928" text-anchor="middle" font-size="12" fill="#94a3b8">数据主干：.sql 定义硬件拓扑 → RobotStruct 建变量表 → .mt 逐行驱动 hv.play → Lua call → HAL 基元 → 内核设备文件；@Daemon 经共享内存槽做跨线程 IPC，controller 与 $ 引用列把「传感器 → 滤波 → 执行器」串成引用链</text>
+</svg>

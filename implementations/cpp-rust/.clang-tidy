@@ -1,0 +1,22 @@
+# bot4cj clang-tidy 配置（fix-plan 2026-09-20 阶段 D-2，扣分点「门禁缺静态分析」）
+# 起步检查集：高信号类别（bugprone/performance/concurrency）+ clang 缺省诊断；
+# 格式类检查归 clang-format 管，一律不开。观察若干轮、告警收敛后
+# CI 的 gate:clang-tidy 由 allow_failure 转硬门禁（与 gate:tsan 同路径）。
+# 2026-09-25 转硬清障：存量 85 条告警逐条处置（拼接/拷贝/值传参等机械项全修，
+# strerror 类收敛到 util_env.hpp 的 errnoText 单点，getenv/setenv/readdir 在
+# 单线程窗口定点 NOLINT 并注明理由），此后基线归零、转硬看 CI 连续两轮。
+# -clang-analyzer-optin.performance.Padding：命中 CliOptions/AgentModeConfig 等
+# 启动期构造一次的配置结构，重排字段零运行收益，却要打散按语义分组的字段与
+# 贴身注释（「字符串保留原始输入，校验在 openActionSource 内完成」这类契约
+# 就写在字段上方）——留注释比留 4 字节填充值钱。
+---
+Checks: >
+  bugprone-*,
+  performance-*,
+  concurrency-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -clang-analyzer-optin.performance.Padding
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'src/[^/]*\.hpp'
+FormatStyle: none

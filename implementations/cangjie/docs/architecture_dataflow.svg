@@ -1,0 +1,225 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1010" viewBox="0 0 1400 1010" font-family="'Noto Sans CJK SC','WenQuanYi Micro Hei',sans-serif">
+  <defs>
+    <marker id="a2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#0f172a"/>
+    </marker>
+    <marker id="a2b" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#2563eb"/>
+    </marker>
+    <marker id="a2g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#16a34a"/>
+    </marker>
+    <marker id="a2r" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#dc2626"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="1010" fill="#f8fafc"/>
+  <text x="700" y="36" text-anchor="middle" font-size="24" font-weight="700" fill="#0f172a">bot4cj · 一次 play 动作的数据流 / 时序展开</text>
+  <text x="700" y="58" text-anchor="middle" font-size="13.5" fill="#64748b">从「管道输入 .mt 一帧」到「内核设备文件落盘」的完整调用链（左→右为阶段，纵向为调用深度）</text>
+
+  <!-- 阶段背景带 -->
+  <g>
+    <rect x="24"  y="78" width="330" height="906" rx="8" fill="#eef2ff" opacity="0.55"/>
+    <rect x="372" y="78" width="300" height="906" rx="8" fill="#eff6ff" opacity="0.5"/>
+    <rect x="690" y="78" width="330" height="906" rx="8" fill="#ecfdf5" opacity="0.5"/>
+    <rect x="1038" y="78" width="338" height="906" rx="8" fill="#fff7ed" opacity="0.55"/>
+    <text x="189"  y="100" text-anchor="middle" font-size="14" font-weight="700" fill="#3730a3">① 解析入栈</text>
+    <text x="522"  y="100" text-anchor="middle" font-size="14" font-weight="700" fill="#1e3a8a">② 逐帧播放</text>
+    <text x="855"  y="100" text-anchor="middle" font-size="14" font-weight="700" fill="#065f46">③ Lua 驱动</text>
+    <text x="1207" y="100" text-anchor="middle" font-size="14" font-weight="700" fill="#9a3412">④ 系统落盘</text>
+  </g>
+
+  <!-- ① 解析入栈 -->
+  <g>
+    <rect x="60" y="120" width="260" height="64" rx="8" fill="#fff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="190" y="146" text-anchor="middle" font-size="14" font-weight="600" fill="#312e81">stdin ← cat .mt</text>
+    <text x="190" y="166" text-anchor="middle" font-size="12" fill="#64748b">main.cj 取 --robot + 标准输入</text>
+
+    <rect x="60" y="216" width="260" height="64" rx="8" fill="#fff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="190" y="242" text-anchor="middle" font-size="14" font-weight="600" fill="#312e81">SQL4cj → 矩阵对象</text>
+    <text x="190" y="262" text-anchor="middle" font-size="12" fill="#64748b">.sql 解析（CREATE/INSERT）</text>
+
+    <rect x="60" y="312" width="260" height="64" rx="8" fill="#fff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="190" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#312e81">mt2 → @Action 行</text>
+    <text x="190" y="358" text-anchor="middle" font-size="12" fill="#64748b">.mt 行列 DSL 逐行解析</text>
+
+    <rect x="60" y="408" width="260" height="64" rx="8" fill="#fff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="190" y="434" text-anchor="middle" font-size="14" font-weight="600" fill="#312e81">建硬件变量表 M</text>
+    <text x="190" y="454" text-anchor="middle" font-size="12" fill="#64748b">每行 = 一个 MatrixVars_Hardware</text>
+
+    <rect x="60" y="504" width="260" height="64" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="190" y="530" text-anchor="middle" font-size="14" font-weight="600" fill="#065f46">active()：build</text>
+    <text x="190" y="550" text-anchor="middle" font-size="12" fill="#64748b">按 hwSeq 声明序逐变量 build()</text>
+  </g>
+
+  <!-- ② 逐帧播放 -->
+  <g>
+    <rect x="400" y="120" width="240" height="64" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="520" y="146" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">run() → run_action</text>
+    <text x="520" y="166" text-anchor="middle" font-size="12" fill="#64748b">按列序收集设备名</text>
+
+    <rect x="400" y="216" width="240" height="64" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="520" y="242" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">每帧：取参数 Json</text>
+    <text x="520" y="262" text-anchor="middle" font-size="12" fill="#64748b">列 &lt;device.param&gt; + 值</text>
+
+    <rect x="400" y="312" width="240" height="64" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="520" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">hv.play(params)</text>
+    <text x="520" y="358" text-anchor="middle" font-size="12" fill="#64748b">= things(json)</text>
+
+    <rect x="400" y="408" width="240" height="64" rx="8" fill="#fff" stroke="#dc2626" stroke-width="1.5"/>
+    <text x="520" y="434" text-anchor="middle" font-size="14" font-weight="600" fill="#991b1b">ensureOk(res)</text>
+    <text x="520" y="454" text-anchor="middle" font-size="12" fill="#64748b">result="ERR" → 中断动作</text>
+
+    <rect x="400" y="504" width="240" height="64" rx="8" fill="#fff" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="520" y="530" text-anchor="middle" font-size="14" font-weight="600" fill="#1e3a8a">$ 引用列 / controller</text>
+    <text x="520" y="550" text-anchor="middle" font-size="12" fill="#64748b">转发 {元数据 ∪ 返回表} 给下游</text>
+  </g>
+
+  <!-- ③ Lua 驱动 -->
+  <g>
+    <rect x="720" y="120" width="270" height="64" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="855" y="146" text-anchor="middle" font-size="14" font-weight="600" fill="#065f46">MtVars_Lua.callImpl</text>
+    <text x="855" y="166" text-anchor="middle" font-size="12" fill="#64748b">元数据 + 参数 合并进 obj</text>
+
+    <rect x="720" y="216" width="270" height="64" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="855" y="242" text-anchor="middle" font-size="14" font-weight="600" fill="#065f46">call_lua(L, obj)</text>
+    <text x="855" y="262" text-anchor="middle" font-size="12" fill="#64748b">注入 mode，Lua_pcall 驱动</text>
+
+    <rect x="720" y="312" width="270" height="64" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="855" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#065f46">驱动内局部变量</text>
+    <text x="855" y="358" text-anchor="middle" font-size="12" fill="#64748b">build/call/destroy + drv_common</text>
+
+    <rect x="720" y="408" width="270" height="64" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="855" y="434" text-anchor="middle" font-size="14" font-weight="600" fill="#065f46">HAL 全局函数</text>
+    <text x="855" y="454" text-anchor="middle" font-size="12" fill="#64748b">i2c_read / spi_write / …</text>
+
+    <rect x="720" y="504" width="270" height="64" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+    <text x="855" y="530" text-anchor="middle" font-size="14" font-weight="600" fill="#065f46">HAL.sys.* 间接层</text>
+    <text x="855" y="550" text-anchor="middle" font-size="12" fill="#64748b">ffi.cdef 调 glibc（可 mock）</text>
+  </g>
+
+  <!-- ④ 系统落盘 -->
+  <g>
+    <rect x="1064" y="120" width="290" height="64" rx="8" fill="#fff" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="1209" y="146" text-anchor="middle" font-size="14" font-weight="600" fill="#9a3412">glibc open/ioctl</text>
+    <text x="1209" y="166" text-anchor="middle" font-size="12" fill="#64748b">ffi.C · 路径白名单 + 数值校验</text>
+
+    <rect x="1064" y="216" width="290" height="64" rx="8" fill="#fff" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="1209" y="242" text-anchor="middle" font-size="14" font-weight="600" fill="#9a3412">/dev 设备文件</text>
+    <text x="1209" y="262" text-anchor="middle" font-size="12" fill="#64748b">i2c-* / spidev* / tty* / sysfs</text>
+
+    <rect x="1064" y="312" width="290" height="64" rx="8" fill="#fff" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="1209" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#9a3412">内核驱动</text>
+    <text x="1209" y="358" text-anchor="middle" font-size="12" fill="#64748b">I2C_RDWR 原子事务 / SPI 传输</text>
+
+    <rect x="1064" y="408" width="290" height="64" rx="8" fill="#fff" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="1209" y="434" text-anchor="middle" font-size="14" font-weight="600" fill="#9a3412">物理硬件</text>
+    <text x="1209" y="454" text-anchor="middle" font-size="12" fill="#64748b">传感器 / 舵机 / 执行器</text>
+  </g>
+
+  <!-- 数据回程（返回值向上） -->
+  <g stroke="#16a34a" stroke-width="2" fill="none" marker-end="url(#a2g)">
+    <path d="M855 568 L855 596"/>
+  </g>
+  <rect x="720" y="596" width="270" height="64" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="855" y="622" text-anchor="middle" font-size="13.5" font-weight="700" fill="#065f46">返回 {result,value,...}</text>
+  <text x="855" y="644" text-anchor="middle" font-size="12" fill="#475569">table → JsonValue（lua_value_to_json）</text>
+
+  <!-- 跨阶段箭头 -->
+  <g stroke="#0f172a" stroke-width="2" fill="none" marker-end="url(#a2)">
+    <path d="M320 152 L400 152"/>   <!-- stdin → run -->
+    <path d="M320 248 L400 248"/>
+    <path d="M320 344 L400 344"/>
+    <path d="M320 440 L400 440"/>
+    <path d="M320 536 L400 536"/>
+  </g>
+  <g stroke="#2563eb" stroke-width="2" fill="none" marker-end="url(#a2b)">
+    <path d="M640 152 L720 152"/>
+    <path d="M640 248 L720 248"/>
+    <path d="M640 344 L720 344"/>
+    <path d="M640 440 L720 440"/>
+    <path d="M640 536 L720 536"/>
+  </g>
+  <g stroke="#16a34a" stroke-width="2" fill="none" marker-end="url(#a2g)">
+    <path d="M990 152 L1064 152"/>
+    <path d="M990 248 L1064 248"/>
+    <path d="M990 344 L1064 344"/>
+    <path d="M990 440 L1064 440"/>
+    <path d="M990 536 L1064 536"/>
+  </g>
+
+  <!-- 返回链路（右→左，虚线） -->
+  <g stroke="#dc2626" stroke-width="1.8" stroke-dasharray="7 4" fill="none" marker-end="url(#a2r)">
+    <path d="M1064 628 C 855 700 520 700 520 568"/>
+  </g>
+  <text x="800" y="690" font-size="12.5" fill="#b91c1c" font-weight="600">返回 {result,value} → JsonValue → ensureOk 校验 → 顶层直出 / 转发 controller</text>
+
+  <!-- ===== 并发分支：@Daemon 守护 ===== -->
+  <g>
+    <rect x="24" y="700" width="1352" height="284" rx="10" fill="#fefce8" stroke="#fde68a" stroke-width="1.5"/>
+    <text x="60" y="728" font-size="15" font-weight="700" fill="#854d0e">并发分支：@Daemon 守护线程（与主线程并行采样，经共享内存槽 IPC）</text>
+
+    <!-- 守护线程侧 -->
+    <g>
+      <rect x="60" y="748" width="300" height="70" rx="8" fill="#fff" stroke="#ca8a04" stroke-width="1.5"/>
+      <text x="210" y="774" text-anchor="middle" font-size="13.5" font-weight="600" fill="#854d0e">spawn 守护线程（绿色线程）</text>
+      <text x="210" y="796" text-anchor="middle" font-size="12" fill="#64748b">独立 lua_State · 拍间 Cangjie sleep</text>
+      <text x="210" y="812" text-anchor="middle" font-size="11.5" fill="#94a3b8">loadfilex(chunk) + pcall 一次定义 daemon_tick</text>
+    </g>
+    <g>
+      <rect x="60" y="832" width="300" height="70" rx="8" fill="#fff" stroke="#ca8a04" stroke-width="1.5"/>
+      <text x="210" y="858" text-anchor="middle" font-size="13.5" font-weight="600" fill="#854d0e">daemon_tick 逐拍采样</text>
+      <text x="210" y="880" text-anchor="middle" font-size="12" fill="#64748b">while !stop { pcall(tick); sleep }</text>
+      <text x="210" y="896" text-anchor="middle" font-size="11.5" fill="#94a3b8">s.CRC_OK==0 坏样本不发布 · sign=16 补码</text>
+    </g>
+
+    <!-- 共享槽 -->
+    <g>
+      <rect x="420" y="748" width="300" height="154" rx="8" fill="#fff" stroke="#ca8a04" stroke-width="1.8"/>
+      <text x="570" y="774" text-anchor="middle" font-size="14" font-weight="700" fill="#854d0e">daemon_slot_t（208B 共享内存）</text>
+      <text x="445" y="802" font-size="12.5" fill="#475569">mutex @ 0（pthread，acquire/release）</text>
+      <text x="445" y="824" font-size="12.5" fill="#475569">count @ 64 · nvals @ 68</text>
+      <text x="445" y="846" font-size="12.5" fill="#475569">values[16] @ 72（double）</text>
+      <text x="445" y="868" font-size="12.5" fill="#475569">stop @ 200</text>
+      <text x="445" y="890" font-size="11.5" fill="#94a3b8">布局两侧严格一致（pthread.lua）</text>
+    </g>
+
+    <!-- 主线程侧 -->
+    <g>
+      <rect x="780" y="748" width="300" height="70" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+      <text x="930" y="774" text-anchor="middle" font-size="13.5" font-weight="600" fill="#065f46">主线程 hv.play()</text>
+      <text x="930" y="796" text-anchor="middle" font-size="12" fill="#64748b">_mutex_lock(slot) 读 values</text>
+      <text x="930" y="812" text-anchor="middle" font-size="11.5" fill="#94a3b8">→ v0..vN + values + count</text>
+    </g>
+    <g>
+      <rect x="780" y="832" width="300" height="70" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+      <text x="930" y="858" text-anchor="middle" font-size="13.5" font-weight="600" fill="#065f46">$ 引用列 / controller 消费</text>
+      <text x="930" y="880" text-anchor="middle" font-size="12" fill="#64748b">imu0 → kf0 → mon0 三级引用链</text>
+      <text x="930" y="896" text-anchor="middle" font-size="11.5" fill="#94a3b8">守护采样 → 滤波 → 执行器</text>
+    </g>
+
+    <!-- 退出 -->
+    <g>
+      <rect x="1140" y="748" width="240" height="154" rx="8" fill="#fff" stroke="#ca8a04" stroke-width="1.5"/>
+      <text x="1260" y="774" text-anchor="middle" font-size="13.5" font-weight="700" fill="#854d0e">deactivate() 退出</text>
+      <text x="1160" y="802" font-size="12.5" fill="#475569">先统一 stop，再 join</text>
+      <text x="1160" y="824" font-size="12.5" fill="#475569">（防 worker 饿死死锁）</text>
+      <text x="1160" y="846" font-size="12.5" fill="#475569">joinTimeout = max(5×iv, 2000ms)</text>
+      <text x="1160" y="868" font-size="12.5" fill="#475569">超时弃 join、保留 slot 防 UAF</text>
+      <text x="1160" y="890" font-size="11.5" fill="#94a3b8">daemon_cleanup 关总线 fd</text>
+    </g>
+
+    <!-- 箭头 -->
+    <g stroke="#ca8a04" stroke-width="2" fill="none" marker-end="url(#a2)">
+      <path d="M360 783 L420 783"/>   <!-- tick → slot -->
+      <path d="M720 783 L780 783"/>   <!-- slot → play -->
+    </g>
+    <g stroke="#ca8a04" stroke-width="2" fill="none" marker-end="url(#a2)">
+      <path d="M1080 800 L1140 800"/>
+    </g>
+  </g>
+
+  <!-- 底部说明 -->
+  <text x="700" y="1004" text-anchor="middle" font-size="11.8" fill="#94a3b8">主路径（串行）：stdin → SQL4cj/mt2 解析 → RobotStruct.play → ensureOk → Lua call → HAL.sys → glibc → /dev → 内核 → 硬件；返回逆向校验；@Daemon 为并行旁路，经 208B 共享槽与主线程解耦</text>
+</svg>
