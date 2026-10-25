@@ -1,3 +1,5 @@
+# Experimental Windows Nuitka standalone build. Not used by release CI.
+# Prerequisites: .venv with ".[agent]" plus `pip install nuitka`.
 .venv\Scripts\python.exe -m nuitka tools\entry_cli.py `
    --mode=standalone --msvc=latest --assume-yes-for-downloads `
    --output-dir=build-nuitka --output-folder-name=mybot --output-filename=pymybot.exe `

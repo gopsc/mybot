@@ -48,5 +48,11 @@ as a prototype, not part of the monorepo.
 ## Current branch model
 
 Only the default branch is long-lived. Topic branches are short-lived and
-deleted after merge. See [`development.md`](development.md) and
-[`release.md`](release.md).
+deleted after merge. See [`../development.md`](../development.md) and
+[`../release.md`](../release.md).
+
+## Completed migration notes
+
+- [Camera pipeline migration](camera-migration.md) — OpenCV to PyAV/Pillow.
+- [Windows faulthandler](windows-faulthandler.md) — diagnosing LuaJIT SEH
+  crashes.

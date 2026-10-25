@@ -32,9 +32,9 @@ python -m pytest -q                       # full suite, no hardware
 python -m pytest tests/test_gui.py -q     # display tests skip on headless CI
 python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
 python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10
-python -I scripts/ci_smoke.py base        # fail if pydantic_ai leaked into base env
-python -I scripts/ci_smoke.py agent       # fail if agent imports are missing
-python -I scripts/ci_smoke.py wheel       # sdist -> wheel -> clean venv
+python -I tools/ci_smoke.py base        # fail if pydantic_ai leaked into base env
+python -I tools/ci_smoke.py agent       # fail if agent imports are missing
+python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
 ```
 
 `--no-gui` is required for terminal use; without it, `pymybot` opens the GUI.
@@ -103,7 +103,10 @@ as the only place that knows about frozen paths; other modules call
 Nuitka standalone builds also work: Nuitka does not set `sys.frozen` but injects
 `__compiled__` into every compiled module, which `paths.frozen()` recognises.
 Place the data next to the executable as `pymybot/assets/` (the same layout
-`asset_dir()` probes when `_MEIPASS` is absent).
+`asset_dir()` probes when `_MEIPASS` is absent). An experimental Windows
+command lives in
+[`tools/nuitka_compile_test.ps1`](../tools/nuitka_compile_test.ps1); it is not
+part of release CI and is not a supported release artifact.
 
 ## Dependency policy
 

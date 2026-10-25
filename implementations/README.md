@@ -22,6 +22,24 @@ notes. Run commands from the edition directory, not from the repository root.
 Each directory has its own `README.md` with prerequisites, build steps and
 hardware notes.
 
+## Layout inside an edition
+
+| Directory | Contents |
+| --- | --- |
+| `src/` | Runtime: Cangjie package or C++ host sources |
+| `agent/` | Rust agent (C++17 + Rust edition only) |
+| `modules/` | Lua bus layers, drivers and shared libraries |
+| `robots/` | Structure SQL examples; hardware-independent fixtures under `robots/test/` |
+| `scripts/` | MT action examples; CI fixtures under `scripts/test/` |
+| `test/` | Native unit/integration tests and their data |
+| `docs/` | Edition-specific design, agent and hardware notes |
+| `sim/` | Simulator inputs and expectations (C++17 + Rust edition only) |
+
+Driver names repeat across editions on purpose: each edition pins its own HAL
+ABI and must remain buildable without the Python tree. Test fixtures are kept
+next to the edition that runs them, which is why the file count is large even
+though the runtime surface is small.
+
 ## Provenance
 
 The non-Python editions were imported from long-lived branches so that one

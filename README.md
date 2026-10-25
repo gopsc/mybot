@@ -7,6 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%E2%80%933.14-3776AB)](pyproject.toml)
 
+[English](docs/README.en.md) · [文档索引](docs/README.md) · [路线图](docs/roadmap.md)
+
 ![pymybot GUI](docs/screenshots/gui.png)
 
 > 截图来自本地回环演示端点：Agent 先调用 `list_hardware`，再解释得到的硬件上下文。
@@ -86,7 +88,7 @@ export DEEPSEEK_API_KEY="sk-..."
 
 支持的模型提供商：`openai`、`openai-chat`、`anthropic`、`deepseek`。密钥只从环境变量读取；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
 
-对话默认转录到 `~/.mybot/sessions`（含工具参数、受限结果与图片，不含密钥），只用于回看，不能恢复会话；用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，详见 [docs/cli.md](docs/cli.md#session-transcripts)。
+对话默认转录到 `~/.mybot/sessions`（含工具参数、受限结果与图片；环境变量中的密钥不会被主动读取）。转录只用于回看，不能恢复会话；用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，详见 [docs/cli.md](docs/cli.md#session-transcripts)。
 
 ## 架构
 
@@ -112,7 +114,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Python（参考实现） | 仓库根目录 | Python 3.11+ · LuaJIT · PydanticAI | 0.3.x |
 | Cangjie | [`implementations/cangjie/`](implementations/cangjie) | 仓颉 1.1.3 · LuaJIT | 0.3.3 |
-| C++17 + Rust Agent | [`implementations/cpp-rust/`](implementations/cpp-rust) | C++17 · Rust · LuaJIT | 1.x |
+| C++17 + Rust Agent | [`implementations/cpp-rust/`](implementations/cpp-rust) | C++17 · Rust · LuaJIT | 0.1.0 |
 
 三个版本共享同一套脚本模型，但 HAL ABI、构建系统和发布物各自独立。不要在版本之间直接复制驱动，先读各自 README 和 [`implementations/README.md`](implementations/README.md)。
 
@@ -215,43 +217,46 @@ scripts/                  MT 动作示例
 skills/                   Agent 参考技能
 tests/                    pytest 与逐驱动虚拟夹具
 docs/                     架构、CLI、GUI、开发、测试、发布、安全文档
-implementations/          Cangjie 与 C++17 + Rust 版本
-tools/                    PyInstaller spec 等打包辅助
-.github/                  CI、发布工作流、Issue/PR 模板
+docs/history/             已完成的迁移与调试记录
+implementations/          Cangjie 与 C++17 + Rust 版本（各自独立构建）
+tools/                    PyInstaller / Nuitka 打包辅助
+.github/                  CI、发布工作流、Issue/PR 模板、社区规范
 ```
 
 ## 文档
 
 | 想了解 | 从这里开始 |
 | --- | --- |
+| 全部文档 | [docs/README.md](docs/README.md) |
 | 架构与数据流 | [docs/architecture.md](docs/architecture.md) |
 | CLI / JSON / serve | [docs/cli.md](docs/cli.md) |
 | GUI | [docs/gui.md](docs/gui.md) |
 | 开发与打包 | [docs/development.md](docs/development.md) |
 | 测试与 CI 通道 | [docs/testing.md](docs/testing.md) |
 | 版本与发布 | [docs/release.md](docs/release.md) · [docs/versioning.md](docs/versioning.md) |
-| 安全模型 | [docs/security.md](docs/security.md) · [SECURITY.md](SECURITY.md) |
+| 安全模型 | [docs/security.md](docs/security.md) · [.github/SECURITY.md](.github/SECURITY.md) |
 | 常见问题 | [docs/faq.md](docs/faq.md) |
-| 分支历史 | [docs/history.md](docs/history.md) |
+| 分支迁移历史 | [docs/history/README.md](docs/history/README.md) |
+| 路线图 | [docs/roadmap.md](docs/roadmap.md) |
 
 ## 开发与 CI
 
 ```sh
 python -m pytest -q
-python -I scripts/ci_smoke.py base
-python -I scripts/ci_smoke.py wheel
+python -I tools/ci_smoke.py base
+python -I tools/ci_smoke.py wheel
 ```
 
 CI 覆盖 Python 3.11–3.14、Windows、Agent（离线模型）、wheel/sdist 干净安装和 README 快速开始。发布由 tag 触发，产出 sdist、wheel、Windows GUI zip 和 `SHA256SUMS`。
 
 ## 贡献
 
-欢迎驱动、文档、测试和前端贡献。请先读 [CONTRIBUTING.md](CONTRIBUTING.md)：
+欢迎驱动、文档、测试和前端贡献。请先读 [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md)：
 
 - Bug/功能先开 Issue；小修可直接提 PR。
 - Conventional Commits；默认分支（`gui-mybot`，owner 可后续改名为 `main`）是唯一长驻分支。
 - 不提交密钥、生成物或无关格式化。
-- 安全漏洞走私密渠道：[SECURITY.md](SECURITY.md)。
+- 安全漏洞走私密渠道：[.github/SECURITY.md](.github/SECURITY.md)。
 
 ## 许可证
 

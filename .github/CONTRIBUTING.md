@@ -34,7 +34,7 @@ For the agent and GUI:
 .venv/bin/python -m pymybot --no-gui   # terminal
 ```
 
-See [`docs/development.md`](docs/development.md) for linting, packaging and
+See [`../docs/development.md`](../docs/development.md) for linting, packaging and
 frozen-build commands. Edition-specific prerequisites are in each
 `implementations/*/README.md`.
 
@@ -73,7 +73,7 @@ authorized by the project owner.
 - New drivers: add a `tests/fixtures/virt/<driver>_virt.{sql,mt}` end-to-end
   case, or explain why the device cannot be modelled.
 - GUI/server changes: add tests that run without a display where possible.
-- Packaging changes: run `python -I scripts/ci_smoke.py wheel`.
+- Packaging changes: run `python -I tools/ci_smoke.py wheel`.
 - Cangjie/C++/Rust: run the edition's own test target as documented in its
   README.
 
@@ -92,7 +92,7 @@ or document the limitation in the issue.
 ## Documentation style
 
 - Chinese is the primary language for the reference edition; English summaries
-  live in `README.en.md` and selected docs.
+  live in [`docs/README.en.md`](../docs/README.en.md) and selected docs.
 - Prefer concrete commands, screenshots and tables over marketing prose.
 - Link to existing references instead of duplicating large sections.
 - Keep line-oriented Markdown; avoid hard wrapping inside paragraphs.
@@ -100,4 +100,4 @@ or document the limitation in the issue.
 ## License
 
 By contributing you agree that your contribution is licensed under the MIT
-License in [`LICENSE`](LICENSE).
+License in [`../LICENSE`](../LICENSE).

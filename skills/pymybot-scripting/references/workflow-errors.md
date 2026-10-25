@@ -43,7 +43,7 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 - HTTP：标准库 urllib，无额外依赖；回环主机（127.0.0.1/localhost/[::1]）默认可用，
   其余主机需要 `--allow-hardware`。
 - Windows：CLI 自动关闭 faulthandler（LuaJIT SEH 与 CPython 冲突，详见
-  `docs/windows-faulthandler-luajit.md`）；stdout/stderr 固定 UTF-8。
+  `docs/history/windows-faulthandler.md`）；stdout/stderr 固定 UTF-8。
 - Lua 指令预算与可取消等待**不能中断阻塞的原生库调用**；进程退出不是物理急停。
 
 ## 4. 常见错误对照

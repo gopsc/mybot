@@ -3,7 +3,7 @@
 # GitCode 属 GitLab 系托管，经 .gitlab-ci.yml 驱动（与 main 分支同一约定）；若托管方
 # 不识别本文件则静默不生效（无副作用），迁移其它平台时按同结构翻译即可。
 #
-# 共用 scripts/ci_smoke.py；没有 C++ 构建产物，Python sdist/wheel 在独立 test
+# 共用 tools/ci_smoke.py；没有 C++ 构建产物，Python sdist/wheel 在独立 test
 # 作业中构建并安装到源码树外的新 venv，不复用 editable 安装。Windows 通道见 GitHub。
 #
 # 版本矩阵的判据：
@@ -25,7 +25,7 @@ stages:
   script:
     - python -m pip install --upgrade pip
     - python -m pip install -e ".[test]"
-    - python -I scripts/ci_smoke.py base
+    - python -I tools/ci_smoke.py base
     - python -m pytest -q
 
 test:py3.11:
@@ -51,7 +51,7 @@ test:agent:py3.11:
   script:
     - python -m pip install --upgrade pip
     - python -m pip install -e ".[agent,test]"
-    - python -I scripts/ci_smoke.py agent
+    - python -I tools/ci_smoke.py agent
     - python -m pytest -q
 
 smoke:lint:
@@ -59,14 +59,14 @@ smoke:lint:
   image: python:3.12-slim
   script:
     - python -m pip install "ruff>=0.17,<1"
-    - ruff check pymybot tests scripts build_support.py
+    - ruff check pymybot tests tools build_support.py
 
 smoke:wheel:
   stage: test
   image: python:3.11-slim
   script:
     - python -m pip install build
-    - python -I scripts/ci_smoke.py wheel
+    - python -I tools/ci_smoke.py wheel
 
 # README「快速开始」的两条命令：文档里的承诺由 CI 验证，而不是靠人工记得跑。
 # 这两条命令不激活物理硬件、只走 Timer/Relay 纯软件模块，可在无硬件环境执行。
@@ -75,7 +75,7 @@ smoke:quickstart:
   image: python:3.13-slim
   script:
     - python -m pip install -e ".[test]"
-    - python -I scripts/ci_smoke.py base
+    - python -I tools/ci_smoke.py base
     - python -m pymybot --version
     - python -m pymybot doctor
     - python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt

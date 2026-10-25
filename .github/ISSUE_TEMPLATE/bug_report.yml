@@ -10,7 +10,7 @@ body:
         tokens and personal data from logs before submitting.
 
         For a security vulnerability, use the private advisory link in
-        `SECURITY.md` instead of this form.
+        `.github/SECURITY.md` instead of this form.
 
   - type: dropdown
     id: edition

@@ -72,7 +72,7 @@ The reference edition follows these rules:
 6. Releases are built from a tagged public commit; artifacts publish SHA-256
    checksums.
 
-See [`docs/security.md`](docs/security.md) for the detailed threat model.
+See [`../docs/security.md`](../docs/security.md) for the detailed threat model.
 
 ## Dependency and release hygiene
 
@@ -85,7 +85,7 @@ See [`docs/security.md`](docs/security.md) for the detailed threat model.
 ## Known limitations
 
 - Python's `faulthandler` is disabled on Windows because LuaJIT raises Lua
-  errors as SEH exceptions; see `docs/windows-faulthandler-luajit.md`.
+  errors as SEH exceptions; see `docs/history/windows-faulthandler.md`.
 - Cancellation stops new work and kills known child trees, but it is not a
   physical emergency stop.
 - The agent's model context is not encrypted at rest in memory; do not send

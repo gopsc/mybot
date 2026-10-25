@@ -64,24 +64,24 @@ PyAV 通过 FFmpeg 的设备输入采集，三个平台各用一个后端：
 
 ### `pymybot/hal.py`
 
-- [`_validate_image`](../pymybot/hal.py#L451)：
+- [`_validate_image`](../../pymybot/hal.py#L451)：
   先按文件头识别格式，再用 Pillow 只按该格式打开并 `load()` 完整解码，最后比对解码尺寸与文件头尺寸。
   解码失败时报 `invalid image data (decode failed: ...)`。
-- [`_camera_open`](../pymybot/hal.py#L381)：
+- [`_camera_open`](../../pymybot/hal.py#L381)：
   只登记资源，不导入 av，也不探测设备。激活结构时不碰硬件，这一点与改动前一致。
-- [`_dshow_video_devices`](../pymybot/hal.py#L504)：
+- [`_dshow_video_devices`](../../pymybot/hal.py#L504)：
   在 Windows 上枚举视频设备，过程如下：
   1. 用 `list_devices=true` 打开 dshow。FFmpeg 会把设备列表写进日志，随后打开必然失败。
   2. 用 `av.logging.Capture(local=False)` 截获这段日志。PyAV 默认日志级别为 None，所以要临时调到 INFO，用完再恢复。
   3. 用正则解析 `"名称" (video)` 下一行的 `Alternative name "@device_pnp_..."`。用 PnP 名而不是显示名，是因为显示名可能重名。
   4. 日志级别和日志截获都是进程全局状态，因此用模块级 `_AV_LOG_LOCK` 串行化。
-- [`_camera_input`](../pymybot/hal.py#L523)：
+- [`_camera_input`](../../pymybot/hal.py#L523)：
   按上表把设备索引转换成各平台的输入写法。字符串设备原样透传。不支持的平台报
   `camera capture is not supported on <platform>`。dshow 索引越界报
   `camera unavailable: N (K video devices found)`。
-- [`_latest_frame`](../pymybot/hal.py#L538)：
+- [`_latest_frame`](../../pymybot/hal.py#L538)：
   取最新帧，见下文「后续：采集返回陈旧帧」。
-- [`_camera_capture`](../pymybot/hal.py#L566)：
+- [`_camera_capture`](../../pymybot/hal.py#L566)：
   - 设备或尺寸变化时关闭设备，然后用 `video_size` 重新打开（macOS 另加 `framerate=30`），打开超时 10 s。
   - 用 `frame.to_image().save(..., "JPEG", quality=q)` 编码。
   - 结果里的 `source` 由 `opencv` 改为 `pyav`。
@@ -98,9 +98,9 @@ PyAV 通过 FFmpeg 的设备输入采集，三个平台各用一个后端：
 
 - `tests/test_hal.py`：
   - 原来的 `cv2_fake` 换成 `av_fake`，模拟了 Container、demux、Packet、Frame、`av.logging` 和 dshow 设备列表日志。设备列表样例里特意放了一个名称含括号的音频设备。
-  - 新增 [`test_camera_platform_device_inputs`](../tests/test_hal.py#L458)（三个平台的输入写法）和 [`test_camera_platform_failures`](../tests/test_hal.py#L469)。
-  - [`test_real_pillow_image_validation`](../tests/test_hal.py#L554) 使用真实的 Pillow，替代原来的 `test_real_cv2_image_validation`。其中新增了一个样例：IDAT 内容是垃圾数据、但 CRC 合法的 PNG。只看文件结构发现不了它，必须真正解码才能拒绝。
-- `tests/test_agent_executor.py`：[`test_real_camera_file_source_and_jpeg`](../tests/test_agent_executor.py#L933) 改用 PIL 生成测试图片，不再依赖 cv2/numpy。
+  - 新增 [`test_camera_platform_device_inputs`](../../tests/test_hal.py#L458)（三个平台的输入写法）和 [`test_camera_platform_failures`](../../tests/test_hal.py#L469)。
+  - [`test_real_pillow_image_validation`](../../tests/test_hal.py#L554) 使用真实的 Pillow，替代原来的 `test_real_cv2_image_validation`。其中新增了一个样例：IDAT 内容是垃圾数据、但 CRC 合法的 PNG。只看文件结构发现不了它，必须真正解码才能拒绝。
+- `tests/test_agent_executor.py`：[`test_real_camera_file_source_and_jpeg`](../../tests/test_agent_executor.py#L933) 改用 PIL 生成测试图片，不再依赖 cv2/numpy。
 
 ### 其他
 
@@ -187,7 +187,7 @@ PyAV 通过 FFmpeg 的设备输入采集，三个平台各用一个后端：
 
 fake Container 先瞬间吐出 `backlog` 个积压包，再隔 2 ms 吐一个"实时"包；只有实时包解码出的帧
 允许调用 `to_image()`，否则断言失败。
-[`test_camera_lazy_capture_fields_reconfigure_close`](../tests/test_hal.py#L431)
+[`test_camera_lazy_capture_fields_reconfigure_close`](../../tests/test_hal.py#L431)
 在第二次采集前把 `backlog` 设为 50，用来确认积压确实被跳过。
 
 ## 修复后的验证

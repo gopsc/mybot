@@ -21,7 +21,7 @@ for name, suffix in ASSET_SUFFIXES.items():
         relative = source.relative_to(ROOT)
         datas.append((str(source), str(Path("pymybot/assets") / relative.parent)))
 
-for extra in ("README.md", "LICENSE", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md"):
+for extra in ("README.md", "LICENSE", "CHANGELOG.md"):
     candidate = ROOT / extra
     if candidate.is_file():
         datas.append((str(candidate), "."))

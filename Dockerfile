@@ -10,7 +10,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE MANIFEST.in build_support.py ./
-COPY CHANGELOG.md CONTRIBUTING.md SECURITY.md ./
 COPY pymybot ./pymybot
 COPY modules ./modules
 COPY robots ./robots

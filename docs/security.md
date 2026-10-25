@@ -32,7 +32,7 @@ flowchart LR
 | Model → network | Non-loopback HTTP requires `--allow-hardware`; redirects are refused; URL credentials/query/fragment are rejected. |
 | Scripts → Lua | Lua is trusted code. LuaJIT FFI is available; only run reviewed drivers. |
 | Driver → device | `active`/`build`/`destroy`/`sample` may write hardware even when they appear read-only. |
-| Agent → logs | Final JSON excludes arguments, secrets and images; diagnostics are escaped. Session transcripts under `~/.mybot/sessions` do contain tool arguments, bounded results and images (never API keys); see [`cli.md`](cli.md#session-transcripts). |
+| Agent → logs | Final JSON excludes arguments, secrets and images; diagnostics are escaped. Session transcripts under `~/.mybot/sessions` do contain tool arguments, bounded results and images; API keys in environment variables are not read into them. See [`cli.md`](cli.md#session-transcripts). |
 
 ## System prompt ownership
 
@@ -65,7 +65,7 @@ closed as a deliberate design decision, not an implementation gap.
 
 ## Reporting
 
-Use the private advisory link in [`../SECURITY.md`](../SECURITY.md). Include the
+Use the private advisory link in [`../.github/SECURITY.md`](../.github/SECURITY.md). Include the
 affected edition, commit, preconditions and a minimal reproduction. Do not open
 a public issue for an exploitable problem.
 

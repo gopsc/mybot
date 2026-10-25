@@ -39,7 +39,7 @@ jobs:
       - name: Build
         run: python -m build --outdir dist
       - name: Verify wheel in a clean venv
-        run: python -I scripts/ci_smoke.py wheel
+        run: python -I tools/ci_smoke.py wheel
       - name: Checksums
         run: |
           cd dist

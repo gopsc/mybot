@@ -3,9 +3,9 @@
 **A three-layer robot controller — structure SQL, Lua drivers and MT action
 scripts — with a CLI, a desktop GUI and an AI agent.**
 
-[中文 README](README.md) · [Documentation](docs/README.md) · [Security](SECURITY.md)
+[中文 README](../README.md) · [Documentation](README.md) · [Roadmap](roadmap.md) · [Security](../.github/SECURITY.md)
 
-![pymybot GUI](docs/screenshots/gui.png)
+![pymybot GUI](screenshots/gui.png)
 
 ## Three entry points
 
@@ -45,6 +45,11 @@ export DEEPSEEK_API_KEY="sk-..."
   --robot robots/relay-test.sql --task "List the hardware"
 ```
 
+Agent conversations are transcribed to `~/.mybot/sessions` by default (tool
+arguments, bounded results and images; API keys in environment variables are
+never read into the transcript). Disable with `--no-session-log` or
+`MYBOT_SESSION_LOG=0`; see [the CLI guide](cli.md#session-transcripts).
+
 ## Design
 
 ```mermaid
@@ -69,24 +74,24 @@ and Lua is trusted code.
 | Edition | Path | Stack |
 | --- | --- | --- |
 | Python (reference) | root | Python 3.11+ · LuaJIT · PydanticAI |
-| Cangjie | [`implementations/cangjie/`](implementations/cangjie) | Cangjie 1.1.3 · LuaJIT |
-| C++17 + Rust | [`implementations/cpp-rust/`](implementations/cpp-rust) | C++17 · Rust · LuaJIT |
+| Cangjie | [`implementations/cangjie/`](../implementations/cangjie) | Cangjie 1.1.3 · LuaJIT |
+| C++17 + Rust | [`implementations/cpp-rust/`](../implementations/cpp-rust) | C++17 · Rust · LuaJIT |
 
 Each edition is self-contained; see
-[`implementations/README.md`](implementations/README.md).
+[`implementations/README.md`](../implementations/README.md).
 
 ## Documentation
 
 Architecture, CLI, GUI, development, testing, release, versioning and security
-guides live in [`docs/`](docs/README.md). Scripting references live in
-[`skills/pymybot-scripting/`](skills/pymybot-scripting/SKILL.md).
+guides live in [`docs/`](README.md). Scripting references live in
+[`skills/pymybot-scripting/`](../skills/pymybot-scripting/SKILL.md).
 
 ## Contributing
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md). Use issues for bugs/features, keep
-the default branch (`gui-mybot`, intended to become `main`) the only long-lived
-branch, and never commit credentials.
+Read [`CONTRIBUTING.md`](../.github/CONTRIBUTING.md). Use issues for
+bugs/features, keep the default branch (`gui-mybot`, intended to become `main`)
+the only long-lived branch, and never commit credentials.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see [`LICENSE`](../LICENSE).

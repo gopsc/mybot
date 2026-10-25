@@ -14,5 +14,5 @@ sync. Do not duplicate large sections wholesale—link to the docs page instead.
 
 Prompt layering (`SOUL`/`USER`/`STATS`), runtime prompt files and a GUI reset
 button are a 0.3 design item; the system safety prefix/suffix remain
-operator-owned. See [`../ROADMAP.md`](../ROADMAP.md) and
+operator-owned. See [`../docs/roadmap.md`](../docs/roadmap.md) and
 [`../docs/security.md`](../docs/security.md).

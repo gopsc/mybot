@@ -32,7 +32,7 @@ jobs:
       - name: Install
         run: python -m pip install "ruff>=0.17,<1"
       - name: Ruff
-        run: ruff check pymybot tests scripts build_support.py
+        run: ruff check pymybot tests tools build_support.py
 
   test:
     name: pytest / Python ${{ matrix.python-version }}
@@ -52,7 +52,7 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[test]"
       - name: Base dependency preflight
-        run: python -I scripts/ci_smoke.py base
+        run: python -I tools/ci_smoke.py base
       - name: Tests
         run: python -m pytest -q
 
@@ -70,7 +70,7 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[test]"
       - name: Base dependency preflight
-        run: python -I scripts/ci_smoke.py base
+        run: python -I tools/ci_smoke.py base
       - name: Tests
         run: python -m pytest -q
 
@@ -96,7 +96,7 @@ jobs:
       - name: Install agent and test dependencies
         run: python -m pip install -e ".[agent,test]"
       - name: Agent import preflight
-        run: python -I scripts/ci_smoke.py agent
+        run: python -I tools/ci_smoke.py agent
       - name: Offline model and full regression
         run: python -m pytest -q
 
@@ -122,7 +122,7 @@ jobs:
       - name: Install build frontend
         run: python -m pip install build
       - name: Build and verify in a clean venv
-        run: python -I scripts/ci_smoke.py wheel
+        run: python -I tools/ci_smoke.py wheel
 
   quickstart:
     name: README quick start

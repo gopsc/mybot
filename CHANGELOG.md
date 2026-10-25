@@ -28,12 +28,26 @@ Per-edition histories live next to each implementation:
 - An “unknown outcome” receipt now names the failure class, and a failure after
   dispatch prints its exception type (never the message) to stderr.
 - A missing agent dependency names the module that failed to import.
+- Repository layout: community files moved to `.github/`, the English README to
+  `docs/README.en.md`, the roadmap to `docs/roadmap.md`, and completed migration
+  notes to `docs/history/`. Root-level files are now limited to build entry
+  points, licensing and the main README.
+- The CI helper moved from `scripts/ci_smoke.py` to `tools/ci_smoke.py`, so
+  `scripts/` contains only MT action examples. Lint and packaging now include
+  `tools/`.
+- Packaging includes the moved docs and tools in the sdist; the Windows bundle
+  and Docker image no longer carry community files they cannot display.
 
 ### Fixed
 
 - DirectShow cameras listed as `(none)` by some FFmpeg builds are recognised via
   the video-input category GUID.
 - Windowed builds without console streams no longer fail on the first `print`.
+- The README edition table reports the actual C++17 + Rust version (`0.1.0`)
+  instead of `1.x`.
+- Session-transcript wording no longer promises that tool output can never
+  contain secrets; API keys in environment variables are not read, but
+  operator-supplied content is logged.
 
 ## [0.3.0] – 2026-10-26
 

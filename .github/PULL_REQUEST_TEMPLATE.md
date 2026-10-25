@@ -19,7 +19,7 @@
 
 ```sh
 python -m pytest -q
-python -I scripts/ci_smoke.py wheel
+python -I tools/ci_smoke.py wheel
 ```
 
 ## Edition

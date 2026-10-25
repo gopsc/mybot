@@ -10,7 +10,7 @@
 | Robot integration | `tests/test_robot.py`, `tests/test_daemon.py` | Activation, inheritance, controllers, sampling |
 | Agent | `tests/test_agent*.py` | Offline model loop, approval, budgets, cleanup |
 | Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs |
-| Packaging | `scripts/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
+| Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
 
 The suite must run without physical hardware. Tests that need a display skip
 cleanly on headless CI; they are not allowed to be silently skipped when the
@@ -53,7 +53,7 @@ timeout) when the driver supports it.
 ## Windows notes
 
 - LuaJIT raises Lua errors as SEH `0xE24C4A02`; the CLI disables
-  `faulthandler`. See [`windows-faulthandler-luajit.md`](windows-faulthandler-luajit.md).
+  `faulthandler`. See [`windows-faulthandler.md`](history/windows-faulthandler.md).
 - stdout/stderr are forced to UTF-8. Tests assert JSON survives non-ASCII output
   on a GBK console.
 - Symlink creation may be unavailable; `tests/conftest.py` converts that into a

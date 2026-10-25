@@ -22,7 +22,7 @@ and the state of the monorepo; edition-specific versions live in
 1. The default branch (`gui-mybot`) is green on every CI channel.
 2. Version bumped in `pymybot/__init__.py` and `pyproject.toml`.
 3. `CHANGELOG.md` has a dated section; docs/screenshots are current.
-4. `python -I scripts/ci_smoke.py wheel` passes locally.
+4. `python -I tools/ci_smoke.py wheel` passes locally.
 5. Commit, tag `vX.Y.Z`, push the tag.
 6. The release workflow builds:
    - `pymybot-X.Y.Z.tar.gz` (sdist);

@@ -26,13 +26,13 @@ test:
 	$(PY) -m pytest -q
 
 lint:
-	$(PY) -m ruff check pymybot tests scripts build_support.py --select E9,F63,F7,F82
+	$(PY) -m ruff check pymybot tests tools build_support.py --select E9,F63,F7,F82
 
 check:
 	$(PY) -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
 
 wheel:
-	$(PY) -I scripts/ci_smoke.py wheel
+	$(PY) -I tools/ci_smoke.py wheel
 
 package:
 	$(PIP) install -e ".[package]"

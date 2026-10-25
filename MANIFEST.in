@@ -1,13 +1,15 @@
 include build_support.py
 include LICENSE
 include CHANGELOG.md
-include CONTRIBUTING.md
-include SECURITY.md
 recursive-include modules *.lua
 recursive-include robots *.sql
 recursive-include scripts *.mt
 recursive-include skills *.md
 recursive-include docs *.md *.png
-recursive-include tools *.py *.spec
+recursive-include tools *.py *.spec *.ps1 *.ico
 recursive-include tests *.py
 include pymybot/py.typed
+include .github/CONTRIBUTING.md
+include .github/CODE_OF_CONDUCT.md
+include .github/SECURITY.md
+include .github/SUPPORT.md
