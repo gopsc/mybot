@@ -1,0 +1,24 @@
+.venv\Scripts\python.exe -m nuitka tools\entry_cli.py `
+   --mode=standalone --msvc=latest --assume-yes-for-downloads `
+   --output-dir=build-nuitka --output-folder-name=mybot --output-filename=pymybot.exe `
+   --windows-console-mode=force --windows-icon-from-ico=tools\icon.ico `
+   --enable-plugins=tk-inter `
+   --include-module=lupa.luajit21 `
+   --include-package=serial --include-package=pyftdi --include-package=PIL --include-package=av `
+   --include-package-data=genai_prices `
+   --include-distribution-metadata=pydantic-ai-slim --include-distribution-metadata=pydantic-graph `
+   --include-distribution-metadata=pydantic --include-distribution-metadata=openai `
+   --include-distribution-metadata=anthropic --include-distribution-metadata=genai-prices `
+   --include-distribution-metadata=httpx2 --include-distribution-metadata=httpcore2 `
+   --include-distribution-metadata=lupa --include-distribution-metadata=sqlparse `
+   --include-distribution-metadata=pyserial --include-distribution-metadata=pyftdi `
+   --include-distribution-metadata=pillow --include-distribution-metadata=av `
+   --include-data-dir=modules=pymybot/assets/modules `
+   --include-data-dir=robots=pymybot/assets/robots `
+   --include-data-dir=scripts=pymybot/assets/scripts `
+   --include-data-dir=skills=pymybot/assets/skills `
+   --include-data-dir=robots=robots --include-data-dir=scripts=scripts `
+   --include-data-files=README.md=README.md --include-data-files=LICENSE=LICENSE `
+   --noinclude-custom-mode=genai_prices.data:bytecode `
+   --noinclude-custom-mode=openai.types:bytecode `
+   --noinclude-custom-mode=anthropic.types:bytecode
