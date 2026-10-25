@@ -566,6 +566,50 @@ $(state.values[0]*10+state.values[1]);
         assert [v["value"] for v in outputs] == [0, 0, 12]
 
 
+def test_vars_precision_formats_rendered_parameters(modules):
+    script = '''@Vars
+name value precision;
+ratio 2.3456 2;
+whole 2.6 0;
+@
+@Action
+dev.value;
+$(ratio);
+@
+@Action
+dev.value;
+$(whole);
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        assert [result["value"] for result in robot.run(script)] == ["2.35", "3"]
+
+
+def test_structure_vars_precision_formats_parameters(modules):
+    sql = probe_sql() + (
+        "CREATE TABLE Vars(name String,value Number,precision Number);"
+        "INSERT INTO Vars(name,value,precision) VALUES('ratio','2.3456',2);"
+    )
+    with Robot(sql, module_paths=modules) as robot:
+        output = robot.run("@Action\ndev.value;\n$(ratio);\n@")[0]
+        assert output["value"] == "2.35"
+
+
+def test_vars_precision_rejects_invalid_values(modules):
+    script = '''@Vars
+name value precision;
+x 1 nope;
+@
+@Action
+dev.value;
+1;
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        with pytest.raises(ScriptError, match="precision"):
+            robot.run(script)
+
+
 def test_struct_hoisting_and_vars_can_read_numeric_members(modules):
     script = '''@Vars
 name value;

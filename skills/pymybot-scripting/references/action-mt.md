@@ -149,8 +149,9 @@ $t=T;
 
 ```mt
 @Vars
-name value;
+name value precision;
 level 2;
+ratio 2.3456 2;
 @
 @Alias
 name alias;
@@ -165,6 +166,9 @@ output relay0;
 - `@Vars` 的 `value` 若为 `$(...)`，每次读取都重新求值，可引用数值型 `@Vars` 或 Struct
   的数值成员，最终必须得到数值，不能引用 Alias。不能用重复声明或 `$(i+1)` 数据格来赋值，
   循环更新可通过捕获完成。
+- `@Vars` 可选 `precision` 列（0..15）：只影响该变量渲染为动作参数/捕获文本时的小数位，
+  不改变表达式内部的浮点计算；缺省仍使用 `.15g`。`precision` 必须是非负整数，非法值
+  在注册阶段报错。`@Alias` 不支持该列。
 - 这里的会话指**一次 `Robot.run`**：成功或失败退出时都会恢复进入前的标量覆盖层，
   不会重置 Lua 驱动状态或撤销设备动作，也不会把捕获值保留到下一次 `run`。
 - SQL 结构也支持 Alias/Vars（见 `references/structure-sql.md` 第 6 节），但它们属于

@@ -109,14 +109,16 @@ INSERT INTO Relay (name, controller, note) VALUES ('relay0', 'timer-0', 'hello-r
 不对应驱动文件，声明会话级标量：
 
 ```sql
-CREATE TABLE Vars (name String, value String);
-INSERT INTO Vars (name, value) VALUES ('base', '3');
+CREATE TABLE Vars (name String, value String, precision Number);
+INSERT INTO Vars (name, value, precision) VALUES ('base', '3', '-');
+INSERT INTO Vars (name, value, precision) VALUES ('ratio', '2.3456', 2);
 CREATE TABLE Alias (name String, alias String);
 INSERT INTO Alias (name, alias) VALUES ('out', 'relay0');
 ```
 
 - `Vars`：数字标量，值可为数字字面量或 `$(...)`（引用其他 `@Vars` 数字）；
-  供表达式与 Number 列引用。
+  供表达式与 Number 列引用。可选 `precision` 列（0..15）只影响渲染到动作参数
+  的小数位，不影响表达式内部的浮点计算；`-` 表示使用缺省的 `.15g` 格式。
 - `Alias`：文本别名，把设备名间接化（动作表头 `out.test` 实际派发给 `relay0`，一层间接）。
 
 ## 7. `proto='virt'`：无硬件验证

@@ -25,6 +25,25 @@ ACTION = "@Action\nrelay0.test dev.echo;\n7 9;\n@\n"
 PHYSICAL_SQL = "CREATE TABLE I2C(name String,path String); INSERT INTO I2C(name,path) VALUES('bus','/dev/i2c-99');"
 
 
+def test_version_flag_prints_the_package_version(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.parse_args(["--version"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out.strip() == f"pymybot {cli.__version__}"
+
+
+def test_doctor_reports_dependencies_and_assets(capsys):
+    code = cli.main(["doctor"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 0 and payload["ok"] is True and payload["command"] == "doctor"
+    assert payload["healthy"] is True
+    checks = {item["name"]: item["status"] for item in payload["checks"]}
+    assert checks["lupa.luajit21"] == "ok"
+    assert checks["sqlparse"] == "ok"
+    assert payload["assets"]["modules"]["files"] > 0
+    assert payload["assets"]["scripts"]["files"] > 0
+
+
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch):
     for key in list(os.environ):

@@ -95,9 +95,13 @@ class Alias(Variable):
 class Number(Variable):
     kind = "vars"
 
-    def __init__(self, name, value, resolver: Callable | None = None):
+    def __init__(self, name, value, resolver: Callable | None = None, precision=None):
         super().__init__(name)
+        if precision is not None and (isinstance(precision, bool) or not isinstance(precision, int)
+                                      or not 0 <= precision <= 15):
+            raise ScriptError(f"@Vars '{name}' precision must be an integer from 0 to 15")
         self.value = str(value)
+        self.precision = precision
         body = expr_body(self.value)
         self.expression = Expression(body) if body is not None else None
         self.resolver = resolver
@@ -114,8 +118,15 @@ class Number(Variable):
                 raise ScriptError(f"@Vars '{self.name}' must be a finite number")
             return float(value)
 
+    def format(self, value=None):
+        number = self.numeric() if value is None else float(value)
+        if self.precision is None:
+            return render(number)
+        text = format(number, f".{self.precision}f")
+        return text[1:] if text.startswith("-0") and float(text) == 0 else text
+
     def play(self, params):
-        return render(self.numeric())
+        return self.format()
 
 
 class Struct(Variable):

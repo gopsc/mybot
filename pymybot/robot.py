@@ -15,6 +15,7 @@ from .expr import Expression, expr_body
 from .hardware import Alias, Budget, FLOW, LuaVariable, Metadata, Number, Registry, Struct, safe_ident
 from .include import expand_includes
 from .matrix import Matrix, parse_matrices, struct_name
+from .paths import asset_path
 from .sql import apply_statement, load_structure, parse_sql
 
 MAX_SCRIPT_BYTES = 8 * 1024 * 1024
@@ -31,8 +32,7 @@ def module_roots(paths=None):
         configured = os.environ.get("BOT4CJ_MODULE_PATH", "")
         paths = [p for p in configured.split(os.pathsep) if p]
         if not paths:
-            packaged = Path(__file__).parent / "assets" / "modules"
-            paths = [packaged if packaged.is_dir() else Path(__file__).parent.parent / "modules"]
+            paths = [asset_path("modules")]
     if isinstance(paths, (str, Path)):
         paths = [paths]
     roots = list(dict.fromkeys(Path(p).resolve() for p in paths))
@@ -128,7 +128,8 @@ class Robot:
             if table.name == "Vars":
                 if "value" not in values:
                     raise ScriptError("Vars matrix has no 'value' column")
-                Number(name, values["value"], self.registry.resolve_number)
+                Number(name, values["value"], self.registry.resolve_number,
+                       precision=self._precision(table, row, name))
             seen = {"controller": set(), "trigger": set()}
             for col, value in values.items():
                 flow = FLOW.fullmatch(col)
@@ -187,6 +188,21 @@ class Robot:
             earlier.add(name)
         return rows
 
+    @staticmethod
+    def _precision(table, row, name):
+        if "precision" not in table.header:
+            return None
+        raw = table.inherited(row, table.header.index("precision"))
+        if raw.strip() in {"-", ""}:
+            return None
+        try:
+            value = int(raw)
+        except ValueError:
+            raise ScriptError(f"@Vars '{name}' precision must be an integer from 0 to 15") from None
+        if not 0 <= value <= 15:
+            raise ScriptError(f"@Vars '{name}' precision must be an integer from 0 to 15")
+        return value
+
     def _new_runtime(self, **kwargs):
         from .runtime import LuaState
         return LuaState(self.module_paths, self.hal, self.stop_event, allow_hardware=self.allow_hardware, **kwargs)
@@ -200,7 +216,8 @@ class Robot:
             if table.name == "Alias":
                 var = Alias(name, values["alias"])
             elif table.name == "Vars":
-                var = Number(name, values["value"], self.registry.resolve_number)
+                var = Number(name, values["value"], self.registry.resolve_number,
+                             precision=self._precision(table, row, name))
             elif table.name == "Daemon":
                 from .daemon import DaemonVariable
                 var = DaemonVariable(name, {k: v for k, v in values.items() if v != "-"}, self.registry, self._new_runtime, self.stop_event)
@@ -313,7 +330,22 @@ class Robot:
                         if matrix.name == "Vars" and name in self.registry:
                             raise ScriptError(f"@Vars '{name}' cannot override a structure variable")
                         value = matrix.inherited(i, matrix.header.index(field))
-                        var = Alias(name, value) if matrix.name == "Alias" else Number(name, value, self.registry.resolve_number)
+                        if matrix.name == "Alias":
+                            var = Alias(name, value)
+                        else:
+                            precision = None
+                            if "precision" in matrix.header:
+                                raw = matrix.inherited(i, matrix.header.index("precision"))
+                                if raw.strip() not in {"-", ""}:
+                                    try:
+                                        precision = int(raw)
+                                    except ValueError:
+                                        raise ScriptError(
+                                            f"@Vars '{name}' precision must be an integer from 0 to 15") from None
+                                    if not 0 <= precision <= 15:
+                                        raise ScriptError(
+                                            f"@Vars '{name}' precision must be an integer from 0 to 15")
+                            var = Number(name, value, self.registry.resolve_number, precision=precision)
                         self.registry.override(name, var)
                 for name, value in (vars or {}).items():
                     self.registry.override(name, Alias(name, value))

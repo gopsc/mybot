@@ -5,19 +5,24 @@ import argparse
 import asyncio
 from contextlib import redirect_stdout
 import faulthandler
+import importlib.metadata
+import importlib.util
 import math
 import os
 from pathlib import Path
+import platform
 import signal
 import sys
 import threading
 import time
 
+from . import __version__
 from .errors import AgentInterrupted, ScriptError
 from .hardware import Budget, ensure_ok, safe_ident
 from .include import expand_includes
 from .matrix import parse_matrices
-from .robot import Robot
+from .paths import asset_path
+from .robot import Robot, module_roots
 from .security import MAX_BODY, SecurityError, checked_text, dumps, read_file
 
 MAX_TIMEOUT = 3600
@@ -92,6 +97,7 @@ def parser():
         "agent": "PydanticAI task or interactive session on the terminal (see --no-gui)",
         "gui": "tkinter agent window (the default entry; no command required)",
         "serve": "Long-lived stdio JSON-RPC 2.0 server for IDE frontends (one JSON object per line)",
+        "doctor": "Check the interpreter, optional dependencies and bundled assets without touching hardware",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
@@ -122,7 +128,7 @@ def parser():
         if name == "scripts":
             command.add_argument("--scripts-dir", help="default: packaged assets/scripts, else source scripts")
             continue
-        if name == "serve":
+        if name in {"serve", "doctor"}:
             continue
         command.add_argument("--robot", required=True, metavar="FILE", help="structure SQL file (at most 8 MiB)")
         command.add_argument("--module-path", action="append", metavar="DIR", help="trusted Lua module root; repeatable")
@@ -174,7 +180,11 @@ def parser():
 
 def parse_args(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql", "agent", "gui", "serve"}
+    if arguments in (["--version"], ["-V"]):
+        print(f"pymybot {__version__}")
+        raise SystemExit(0)
+    commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql",
+                "agent", "gui", "serve", "doctor"}
     # --no-gui is a top-level switch: the GUI is the default entry, so drop it
     # before choosing a command, and let a subcommand keep its own semantics.
     no_gui = "--no-gui" in arguments
@@ -224,9 +234,68 @@ def parse_args(argv=None):
 
 
 def default_scripts_dir():
-    package = Path(__file__).resolve().parent
-    packaged = package / "assets" / "scripts"
-    return packaged if packaged.is_dir() else package.parent / "scripts"
+    return asset_path("scripts")
+
+
+def doctor():
+    """Report the interpreter, dependencies and assets without hardware I/O."""
+    required = [
+        ("lupa.luajit21", "lupa", "LuaJIT runtime"),
+        ("sqlparse", "sqlparse", "SQL tokenizer"),
+        ("serial", "pyserial", "UART"),
+        ("pyftdi", "pyftdi", "I2C/SPI"),
+        ("PIL", "pillow", "image codecs"),
+    ]
+    optional = [
+        ("av", "av", "camera capture", "pip install pymybot[camera]"),
+        ("pydantic_ai", "pydantic-ai-slim", "agent mode", "pip install pymybot[agent]"),
+        ("tkinter", None, "GUI", "install the Tk package for this Python"),
+    ]
+
+    def module_check(module, distribution, label, *, optional_check=False, hint=""):
+        entry = {"name": module, "label": label, "optional": optional_check}
+        try:
+            found = importlib.util.find_spec(module) is not None
+        except (ImportError, ValueError):
+            found = False
+        if not found:
+            entry["status"] = "warning" if optional_check else "missing"
+            if hint:
+                entry["hint"] = hint
+            return entry
+        entry["status"] = "ok"
+        if distribution:
+            try:
+                entry["version"] = importlib.metadata.version(distribution)
+            except importlib.metadata.PackageNotFoundError:
+                pass
+        return entry
+
+    checks = [module_check(module, distribution, label) for module, distribution, label in required]
+    checks.extend(module_check(module, distribution, label, optional_check=True, hint=hint)
+                  for module, distribution, label, hint in optional)
+
+    suffixes = {"modules": ".lua", "robots": ".sql", "scripts": ".mt", "skills": ".md"}
+    assets = {}
+    for name, suffix in suffixes.items():
+        path = asset_path(name)
+        files = list(path.rglob("*" + suffix)) if path.is_dir() else []
+        assets[name] = {"path": str(path), "exists": path.is_dir(), "files": len(files)}
+    assets_ok = all(item["exists"] and item["files"] for item in assets.values())
+
+    python_ok = sys.version_info >= (3, 11)
+    healthy = python_ok and assets_ok and all(
+        item["status"] == "ok" for item in checks if not item["optional"])
+    return {
+        "version": __version__,
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "healthy": healthy,
+        "python_supported": python_ok,
+        "assets": assets,
+        "module_paths": [str(path) for path in module_roots()],
+        "checks": checks,
+    }
 
 
 def list_scripts(directory):
@@ -280,9 +349,12 @@ def sample(robot, args, stop):
 
 
 def execute(args, stop):
+    if args.command == "doctor":
+        return doctor()
     if args.command == "scripts":
         return list_scripts(args.scripts_dir or default_scripts_dir())
     if args.command == "gui":
+        hide_console_window()
         from .gui import GuiUnavailable, run_gui
         try:
             return run_gui(args)
@@ -341,6 +413,19 @@ def execute(args, stop):
     finally:
         # Also required when active() fails after opening only some devices.
         robot.deactivate()
+
+
+def hide_console_window():
+    """A double-clicked frozen exe should show the GUI, not a console behind it."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    try:
+        import ctypes
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
+    except (AttributeError, OSError):
+        pass
 
 
 def disable_windows_faulthandler():

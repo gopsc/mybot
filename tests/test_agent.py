@@ -973,8 +973,9 @@ def test_provider_http_requests_do_not_follow_redirects(monkeypatch, provider, b
             request = requests[0]
             body = json.loads(request.content)
             assert body["model"] == "test" and prompt in request.content.decode("utf-8")
-            header = "x-api-key" if provider == "anthropic" else "authorization"
-            assert request.headers[header] == (key if provider == "anthropic" else f"Bearer {key}")
+            # anthropic 2.x authenticates with the same Bearer header as the
+            # OpenAI-compatible providers; 1.x used x-api-key.
+            assert request.headers["authorization"] == f"Bearer {key}"
             assert request.extensions["timeout"] == dict.fromkeys(
                 ("connect", "read", "write", "pool"), min(30, config.timeout))
             assert client.max_retries == 0
