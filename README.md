@@ -108,7 +108,7 @@ flowchart LR
 
 | 版本 | 目录 | 技术栈 | 版本 |
 | --- | --- | --- | --- |
-| Python（参考实现） | 仓库根目录 | Python 3.11+ · LuaJIT · PydanticAI | 0.2.x |
+| Python（参考实现） | 仓库根目录 | Python 3.11+ · LuaJIT · PydanticAI | 0.3.x |
 | Cangjie | [`implementations/cangjie/`](implementations/cangjie) | 仓颉 1.1.3 · LuaJIT | 0.3.3 |
 | C++17 + Rust Agent | [`implementations/cpp-rust/`](implementations/cpp-rust) | C++17 · Rust · LuaJIT | 1.x |
 

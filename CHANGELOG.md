@@ -9,6 +9,19 @@ Per-edition histories live next to each implementation:
 - Cangjie: [`implementations/cangjie/CHANGELOG.md`](implementations/cangjie/CHANGELOG.md)
 - C++17 + Rust agent: [`implementations/cpp-rust/docs/changelog.md`](implementations/cpp-rust/docs/changelog.md)
 
+## [0.3.0] – 2026-10-26
+
+### Added
+
+- `--max-history-bytes` for agent conversations (64 KiB–64 MiB, default 4 MiB).
+  The byte budget is provider-independent and prunes complete turns only, so a
+  context-length rejection no longer requires guessing a model’s window (closes
+  #10).
+
+### Changed
+
+- Documentation now describes context handling and the explicit history budget.
+
 ## [0.2.0] – 2026-10-26
 
 “Open-source ready” release. The Python reference edition, documentation,
@@ -87,5 +100,6 @@ Initial public Python edition.
 - Tkinter GUI with agent chat, tool approval dialogs, settings and logs.
 - Linux/Windows CI, wheel/sdist smoke tests and README quick-start checks.
 
+[0.3.0]: https://github.com/gopsc/mybot/releases/tag/v0.3.0
 [0.2.0]: https://github.com/gopsc/mybot/releases/tag/v0.2.0
 [0.1.0]: https://github.com/gopsc/mybot/releases/tag/v0.1.0

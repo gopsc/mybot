@@ -7,7 +7,7 @@ monorepo layout. Edition versions are independent:
 
 | Edition | Version source | Current |
 | --- | --- | --- |
-| Python | `pymybot/__init__.py`, `pyproject.toml` | 0.2.0 |
+| Python | `pymybot/__init__.py`, `pyproject.toml` | 0.3.0 |
 | Cangjie | `implementations/cangjie/cjpm.toml` | 0.3.3 |
 | C++17 + Rust | `implementations/cpp-rust/agent/Cargo.toml` | 0.1.0 |
 
@@ -46,6 +46,7 @@ than be silently ignored.
 | --- | --- |
 | `v0.0.1beta`–`v0.0.3beta` | Early Cangjie edition milestones |
 | `cangjie-final` | Archived Cangjie branch tip |
-| `gui-v1` | Withdrawn 2026-10-25 GUI binary release (do not use) |
-| `archive/cangjie`, `archive/cpp-rust-agent`, `archive/cangjie-new` | Preserved historical branch tips |
+| `gui-v1` | Withdrawn 2026-10-25 GUI binary release; release and tag removed |
+| `archive/cangjie`, `archive/cpp-rust-agent`, `archive/cangjie-new`, `archive/release-session-log` | Preserved historical branch tips |
 | `v0.2.0` | First reproducible monorepo release |
+| `v0.3.0` | Configurable history byte budget |

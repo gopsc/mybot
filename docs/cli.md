@@ -127,6 +127,6 @@ The important flags are:
 | `--allow-actions` | Pre-approve action scripts/reads/captures for this session. |
 | `--allow-file-writes` | Pre-approve file creation/editing. |
 | `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
-| `--max-requests`, `--max-tool-calls`, `--timeout` | Budgets. |
+| `--max-requests`, `--max-tool-calls`, `--max-history-bytes`, `--timeout` | Budgets. `--max-history-bytes` bounds retained conversation history (64 KiB–64 MiB, default 4 MiB). |
 
 See [`gui.md`](gui.md) for the graphical equivalent.

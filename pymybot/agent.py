@@ -85,6 +85,7 @@ class AgentConfig:
     request_limit: int = 8
     tool_calls_limit: int = 16
     history_turns: int = 6
+    history_bytes: int = MAX_HISTORY
     allow_actions: bool = False
     allow_shell: bool = False
     allow_file_writes: bool = False
@@ -93,7 +94,7 @@ class AgentConfig:
         if not math.isfinite(self.timeout) or not 0 < self.timeout <= 3600:
             raise AgentConfigurationError("Agent timeout must be in (0, 3600] seconds")
         for name, low, high in (("request_limit", 1, 100), ("tool_calls_limit", 1, 1000),
-                                ("history_turns", 1, 20)):
+                                ("history_turns", 1, 20), ("history_bytes", 64 * 1024, 64 * 1024 * 1024)):
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise AgentConfigurationError(f"{name} must be in {low}..{high}")
@@ -421,8 +422,10 @@ class AgentSession:
             checked_text(result.output, MAX_TEXT)
             self.turns.append(result.new_messages())
             # Prune complete turns only: never orphan a tool call from its receipt.
-            while self.turns and (len(self.turns) > self.config.history_turns or
-                                 sum(len(ModelMessagesTypeAdapter.dump_json(t)) for t in self.turns) > MAX_HISTORY):
+            while self.turns and (
+                    len(self.turns) > self.config.history_turns
+                    or sum(len(ModelMessagesTypeAdapter.dump_json(t)) for t in self.turns)
+                    > self.config.history_bytes):
                 self.turns.pop(0)
             return {"output": result.output, "usage": {
                 "requests": result.usage.requests, "tool_calls": result.usage.tool_calls,
@@ -576,6 +579,7 @@ async def run_cli_agent(args, stop):
                              base_url=args.base_url or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=args.api_key_env, timeout=args.timeout,
                              request_limit=args.max_requests, tool_calls_limit=args.max_tool_calls,
+                             history_bytes=args.max_history_bytes,
                              allow_actions=args.allow_actions, allow_shell=args.allow_shell,
                              allow_file_writes=args.allow_file_writes)
         model, client = create_model(config)

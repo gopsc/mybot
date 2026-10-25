@@ -48,6 +48,15 @@ configuration/skill files and restart the session; do not expose a
 real structure without `proto='virt'` activates the physical device. Use the
 provided `*_virt.sql` examples for hardware-free work.
 
+## A long conversation hits the model context limit
+
+The reference edition bounds history to six complete turns and a byte budget,
+and returns a structured JSON error instead of crashing when the provider
+rejects a request. Use `--max-history-bytes` (64 KiB–64 MiB, default 4 MiB),
+start a new conversation, or lower `--max-requests` / `--max-tool-calls` for a
+smaller working set. The runtime does not guess a model’s context window; the
+byte budget is an explicit, provider-independent guard.
+
 ## Where are logs and session history?
 
 Diagnostics go to stderr and the GUI “日志” tab. The reference edition does not
