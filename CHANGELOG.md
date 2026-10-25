@@ -9,7 +9,7 @@ Per-edition histories live next to each implementation:
 - Cangjie: [`implementations/cangjie/CHANGELOG.md`](implementations/cangjie/CHANGELOG.md)
 - C++17 + Rust agent: [`implementations/cpp-rust/docs/changelog.md`](implementations/cpp-rust/docs/changelog.md)
 
-## [0.2.1] – 2026-10-26
+## [0.3.0] – 2026-10-26
 
 ### Added
 
@@ -100,6 +100,6 @@ Initial public Python edition.
 - Tkinter GUI with agent chat, tool approval dialogs, settings and logs.
 - Linux/Windows CI, wheel/sdist smoke tests and README quick-start checks.
 
-[0.2.1]: https://github.com/gopsc/mybot/releases/tag/v0.2.1
+[0.3.0]: https://github.com/gopsc/mybot/releases/tag/v0.3.0
 [0.2.0]: https://github.com/gopsc/mybot/releases/tag/v0.2.0
 [0.1.0]: https://github.com/gopsc/mybot/releases/tag/v0.1.0

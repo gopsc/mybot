@@ -7,7 +7,7 @@ monorepo layout. Edition versions are independent:
 
 | Edition | Version source | Current |
 | --- | --- | --- |
-| Python | `pymybot/__init__.py`, `pyproject.toml` | 0.2.1 |
+| Python | `pymybot/__init__.py`, `pyproject.toml` | 0.3.0 |
 | Cangjie | `implementations/cangjie/cjpm.toml` | 0.3.3 |
 | C++17 + Rust | `implementations/cpp-rust/agent/Cargo.toml` | 0.1.0 |
 

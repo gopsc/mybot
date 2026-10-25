@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymybot"
-version = "0.2.1"
+version = "0.3.0"
 description = "Cross-platform robot controller with LuaJIT drivers, SQL structures and an approval-gated AI agent"
 readme = "README.md"
 requires-python = ">=3.11"
