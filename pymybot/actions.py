@@ -5,6 +5,7 @@ import re
 
 from .errors import ScriptError
 from .expr import Expression, Reference, evaluation_guard, expr_body, parse_number, render
+from .hardware import Number
 from .matrix import MAX_BLOCK_DEPTH, Matrix, is_control, split_action_column, struct_name
 from .security import MAX_BODY, dumps
 
@@ -105,7 +106,7 @@ class ActionRunner:
                 if not numeric:
                     raise ScriptError(f"Capture target @Vars '{var}' requires a numeric field")
                 render(value)
-                variable = Number(var, float(value))
+                variable = Number(var, float(value), precision=getattr(existing, "precision", None))
             elif existing.kind == "alias":
                 variable = Alias(var, render(value))
             else:
@@ -177,6 +178,12 @@ class ActionRunner:
                     value = self._value(cache[col][1])
                     if isinstance(value, bool):
                         raise ScriptError("@Action cell $(...) cannot produce a boolean result")
+                    # A bare @Vars reference keeps its operator-selected precision;
+                    # arithmetic expressions remain full-precision numbers.
+                    variable = self.registry.get(body.strip())
+                    if (isinstance(value, float) and isinstance(variable, Number)
+                            and variable.precision is not None):
+                        value = variable.format(value)
                 elif capture := self._capture(raw):
                     captures.setdefault(device, []).append(capture)
                     continue

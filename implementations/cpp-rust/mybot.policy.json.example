@@ -1,0 +1,6 @@
+{
+  "require_confirm": ["run_command", "apply_sql", "write_file"],
+  "confirm_command": "/path/to/confirm-REPLACE-ME",
+  "confirm_timeout_sec": 30,
+  "on_timeout": "deny"
+}

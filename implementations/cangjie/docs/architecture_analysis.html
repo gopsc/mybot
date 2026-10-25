@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bot4cj 架构分析与扩展开发路线图</title>
+<style>
+  :root{
+    --bg:#f8fafc;--card:#fff;--ink:#0f172a;--sub:#475569;--line:#e2e8f0;
+    --blue:#1e3a8a;--blue-bg:#eff6ff;--green:#065f46;--green-bg:#ecfdf5;
+    --orange:#9a3412;--orange-bg:#fff7ed;--red:#991b1b;--red-bg:#fef2f2;
+    --amber:#854d0e;--amber-bg:#fefce8;--indigo:#3730a3;--indigo-bg:#eef2ff;
+    --code:#1e293b;--code-bg:#f1f5f9;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Noto Sans CJK SC','WenQuanYi Micro Hei',-apple-system,'Segoe UI',sans-serif;
+    background:var(--bg);color:var(--ink);line-height:1.75;padding:0}
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 24px 80px}
+  header.hero{background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 60%,#3730a3 100%);
+    color:#fff;padding:44px 24px;margin:0}
+  header.hero .in{max-width:1080px;margin:0 auto}
+  header.hero h1{font-size:30px;font-weight:800;letter-spacing:.5px}
+  header.hero p{margin-top:10px;font-size:15px;color:#cbd5e1;max-width:820px}
+  header.hero .meta{margin-top:18px;font-size:13px;color:#94a3b8;
+    display:flex;flex-wrap:wrap;gap:14px}
+  header.hero .meta span{background:rgba(255,255,255,.08);padding:4px 12px;border-radius:20px}
+  nav.toc{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:18px 22px;margin:24px 0 32px}
+  nav.toc h2{font-size:14px;color:var(--sub);font-weight:700;letter-spacing:1px;margin-bottom:10px}
+  nav.toc ol{padding-left:20px;font-size:14.5px}
+  nav.toc li{margin:4px 0}
+  nav.toc a{color:var(--blue);text-decoration:none}
+  nav.toc a:hover{text-decoration:underline}
+  section{margin:44px 0}
+  h2.sec{font-size:23px;font-weight:800;color:var(--ink);padding-bottom:10px;
+    border-bottom:3px solid var(--blue);margin-bottom:18px}
+  h2.sec .no{color:var(--blue);font-family:monospace;font-size:18px;margin-right:10px;opacity:.5}
+  h3{font-size:17px;font-weight:700;color:var(--blue);margin:26px 0 10px}
+  p{margin:10px 0;color:var(--sub)}
+  strong{color:var(--ink);font-weight:700}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:20px 22px;margin:16px 0}
+  .card h4{font-size:15px;font-weight:700;margin-bottom:8px}
+  .grid{display:grid;gap:14px}
+  .grid-2{grid-template-columns:repeat(2,1fr)}
+  .grid-3{grid-template-columns:repeat(3,1fr)}
+  .grid-4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:720px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+  .tbl{width:100%;border-collapse:collapse;font-size:14px;margin:14px 0;background:var(--card);border-radius:10px;overflow:hidden}
+  .tbl th{background:#f1f5f9;color:var(--ink);font-weight:700;text-align:left;padding:11px 14px;border-bottom:2px solid var(--line)}
+  .tbl td{padding:10px 14px;border-bottom:1px solid var(--line);color:var(--sub);vertical-align:top}
+  .tbl td strong{color:var(--ink)}
+  .tbl tr:last-child td{border-bottom:none}
+  .tag{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 9px;border-radius:12px;margin-right:6px}
+  .t-blue{background:var(--blue-bg);color:var(--blue)}
+  .t-green{background:var(--green-bg);color:var(--green)}
+  .t-orange{background:var(--orange-bg);color:var(--orange)}
+  .t-red{background:var(--red-bg);color:var(--red)}
+  .t-amber{background:var(--amber-bg);color:var(--amber)}
+  .t-indigo{background:var(--indigo-bg);color:var(--indigo)}
+  code{font-family:'SFMono-Regular',Consolas,monospace;font-size:.88em;background:var(--code-bg);
+    color:var(--code);padding:2px 6px;border-radius:4px}
+  pre{background:#0f172a;color:#e2e8f0;padding:16px 18px;border-radius:10px;overflow-x:auto;
+    font-size:13px;line-height:1.6;margin:14px 0;font-family:'SFMono-Regular',Consolas,monospace}
+  pre .c{color:#64748b}pre .k{color:#7dd3fc}pre .s{color:#86efac}
+  .callout{border-left:4px solid var(--blue);background:var(--blue-bg);padding:14px 18px;border-radius:0 10px 10px 0;margin:14px 0}
+  .callout.warn{border-color:var(--red);background:var(--red-bg)}
+  .callout.info{border-color:var(--green);background:var(--green-bg)}
+  .callout.tip{border-color:#f59e0b;background:var(--amber-bg)}
+  .callout h4{font-size:14px;margin-bottom:6px}
+  .figure{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:16px;margin:18px 0;overflow-x:auto}
+  .figure figcaption{font-size:13px;color:var(--sub);text-align:center;margin-top:10px;font-weight:600}
+  .figure svg{max-width:100%;height:auto;display:block;margin:0 auto}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}
+  .legend span{font-size:12px;color:var(--sub);background:var(--code-bg);padding:3px 9px;border-radius:8px}
+  .ph{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);
+    border-radius:12px;padding:18px 20px;margin:14px 0}
+  .ph .num{flex-shrink:0;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-weight:800;font-size:20px;color:#fff}
+  .ph h4{font-size:15px;margin-bottom:4px}
+  .ph p{font-size:13.5px;margin:4px 0 0}
+  .pri{font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px}
+  .footer{margin-top:50px;padding-top:20px;border-top:1px solid var(--line);
+    font-size:12.5px;color:#94a3b8;text-align:center}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="in">
+    <h1>bot4cj 架构分析与扩展开发路线图</h1>
+    <p>基于仓颉（Cangjie）语言的硬件机器人控制框架 · 三脚本分治（结构 .sql / 驱动 .lua / 动作 .mt）+ LuaJIT 驱动层 + Linux HAL。不接任何硬件即可跑通「解析 → 构建 → 播放 → 落盘」全链路。</p>
+    <div class="meta">
+      <span>版本 v0.3.3</span><span>仓库 qingss0/bot4cj · dev 分支</span><span>53 个硬件驱动</span><span>回归 58 / 0</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<nav class="toc">
+  <h2>目录</h2>
+  <ol>
+    <li><a href="#s1">这是个什么项目</a></li>
+    <li><a href="#s2">架构全景（分层图）</a></li>
+    <li><a href="#s3">数据流 / 时序展开（play 动作）</a></li>
+    <li><a href="#s4">内容组合：六大核心机制</a></li>
+    <li><a href="#s5">架构体检：优势与边界</a></li>
+    <li><a href="#s6">扩展开发路线图（五阶段加码）</a></li>
+    <li><a href="#s7">落地检查清单</a></li>
+  </ol>
+</nav>
+
+<!-- ============ S1 ============ -->
+<section id="s1">
+  <h2 class="sec"><span class="no">01</span>这是个什么项目</h2>
+  <p><strong>bot4cj 是一个"用声明式脚本 + 脚本驱动"控制真实硬件的机器人控制框架。</strong>它把"硬件拓扑、驱动逻辑、动作编排"三者彻底解耦，分别用三种脚本来承载：</p>
+
+  <div class="grid grid-3">
+    <div class="card">
+      <h4><span class="tag t-indigo">结构</span>.sql（SQL4cj）</h4>
+      <p>用 <code>CREATE TABLE / INSERT</code> 声明机器人有哪些硬件、挂在哪条总线、什么地址、什么控制器。解析阶段零资源占用，只建立"硬件变量表"。</p>
+    </div>
+    <div class="card">
+      <h4><span class="tag t-green">驱动</span>.lua（LuaJIT）</h4>
+      <p>每个硬件一个 <code>modules/X.lua</code>，实现 <code>build / call / destroy / read</code> 生命周期。通过 <code>HAL.lua</code> 的 <code>ffi.C</code> 直调 glibc 落到内核设备文件。</p>
+    </div>
+    <div class="card">
+      <h4><span class="tag t-blue">动作</span>.mt（mt2）</h4>
+      <p>逐行 DSL：一帧 = 一行，列 <code>&lt;device.param&gt;</code> 是参数名。运行期 <code>RobotStruct.run()</code> 按列序逐行 <code>play()</code>，把参数发给硬件驱动。</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <h4>核心价值主张</h4>
+    <p style="margin:0">"不接任何硬件也能跑通全流程" —— 传感器桩替身（virtbus / dummy）与 Relay 转发链路，让 <code>cat action.mt | main --robot relay-test.sql</code> 在裸机即可自校验。这是它区别于"必须挂硬件才能调试"的传统固件的根本优势。</p>
+  </div>
+
+  <p>入口极薄（<code>src/main.cj</code> 约 180 行）：解析 <code>--robot</code> → <code>RobotStruct(file).active()</code> → <code>run(stdin)</code> → <code>finally deactivate()</code>。真正的复杂度集中在 <code>r.cj</code>（RobotStruct，519 行）与 <code>src/HV/</code> 四个硬件变量类。</p>
+</section>
+
+<!-- ============ S2 ============ -->
+<section id="s2">
+  <h2 class="sec"><span class="no">02</span>架构全景（分层图）</h2>
+  <p>自顶向下七层：<strong>L7 输入层（声明式脚本）→ 仓颉核心层（解析/构建/播放）→ L5 LuaJIT 状态机 → L4 驱动+库 → L1–L3 Linux 基座</strong>。右侧主干为主数据流，橙色虚线为 <code>@Daemon</code> 共享内存跨层引用。</p>
+
+  <div class="figure">
+    <figure style="text-align:center">
+      <object data="architecture_layers.svg" type="image/svg+xml" style="max-width:100%;height:auto"></object>
+      <figcaption>图 1 · bot4cj 架构全景（L1–L7 分层 + 主数据流 + 守护并发引用）</figcaption>
+    </figure>
+    <div class="legend">
+      <span><strong style="color:var(--indigo)">蓝/紫</strong> 输入层</span>
+      <span><strong style="color:var(--blue)">蓝</strong> 仓颉核心</span>
+      <span><strong style="color:var(--green)">绿</strong> Lua 状态机</span>
+      <span><strong style="color:var(--orange)">橙</strong> 驱动+库</span>
+      <span><strong style="color:var(--red)">红</strong> Linux 基座</span>
+      <span><strong style="color:#f59e0b">橙虚线</strong> @Daemon IPC</span>
+    </div>
+  </div>
+
+  <h3>各层职责</h3>
+  <table class="tbl">
+    <tr><th>层</th><th>内容</th><th>职责 / 关键设计</th></tr>
+    <tr><td><strong>L7</strong> 输入</td><td>.sql / .mt / .bot(废) / 环境变量</td><td>纯声明式，解析期零资源；<code>BOT4CJ_MODULE_PATH</code> / <code>BOT4CJ_DEBUG</code> 驱动行为</td></tr>
+    <tr><td><strong>仓颉核心</strong></td><td>main.cj · r.cj · src/HV/{Alias,Lua,MatrixVars,Daemon}.cj</td><td>两阶段构造；RobotStruct 的 C(矩阵)+M(变量表)+hwSeq；四个变量类承载不同硬件语义</td></tr>
+    <tr><td><strong>L5</strong> LuaJIT</td><td>独立 lua_State 状态机</td><td>build/call/destroy/read 生命周期 + controller 转发；halt-on-error 契约</td></tr>
+    <tr><td><strong>L4</strong> 驱动+库</td><td>53 驱动 + lib/(HAL,drv_common,virtbus,sensor_daemon,pthread,ema/kalman/fft,mpath,bitcompat)</td><td>驱动只做"读寄存器+换算"，公共逻辑下沉 lib；virtbus 让任意驱动无真机可测</td></tr>
+    <tr><td><strong>L1–L3</strong> 基座</td><td>glibc ffi.C · /dev 设备文件 · 内核 I2C/SPI/UART/PWM/GPIO</td><td>I2C_RDWR 原子事务；sysfs PWM；gpiod；路径白名单 + 数值校验</td></tr>
+  </table>
+</section>
+
+<!-- ============ S3 ============ -->
+<section id="s3">
+  <h2 class="sec"><span class="no">03</span>数据流 / 时序展开（一次 play 动作）</h2>
+  <p>把"管道输入一帧 .mt"到"内核设备文件落盘"的完整调用链展开成四个纵向阶段，并把 <code>@Daemon</code> 并发旁路（经 208B 共享槽）画在同一张图上。</p>
+
+  <div class="figure">
+    <figure style="text-align:center">
+      <object data="architecture_dataflow.svg" type="image/svg+xml" style="max-width:100%;height:auto"></object>
+      <figcaption>图 2 · 一次 play 动作的 4 阶段调用链 + @Daemon 并发分支（共享内存槽 IPC）</figcaption>
+    </figure>
+  </div>
+
+  <h3>主路径（串行）四阶段</h3>
+  <table class="tbl">
+    <tr><th>阶段</th><th>发生位置</th><th>做什么</th></tr>
+    <tr><td><strong>① 解析入栈</strong></td><td>main.cj → SQL4cj / mt2</td><td>stdin 读 .mt；.sql 解析建矩阵；每行 .mt 建一个 @Action 变量；按 hwSeq 序 <code>active()</code> 逐个 <code>build()</code></td></tr>
+    <tr><td><strong>② 逐帧播放</strong></td><td>r.cj · run_action</td><td>按列序收集设备名 → 取参数 Json → <code>hv.play(params)</code> → <code>ensureOk</code>（ERR 即中断）→ <code>$</code> 列 / controller 转发</td></tr>
+    <tr><td><strong>③ Lua 驱动</strong></td><td>MtVars_Lua · call_lua</td><td>元数据+参数合并进 obj → 注入 mode → Lua_pcall → 驱动局部变量 → HAL 全局函数 → <code>HAL.sys.*</code> 间接层（可 mock）</td></tr>
+    <tr><td><strong>④ 系统落盘</strong></td><td>glibc → /dev → 内核 → 硬件</td><td><code>ffi.C</code> open/ioctl（路径白名单+数值校验）→ 设备文件 → I2C_RDWR 原子事务 → 物理器件；返回 <code>{result,value}</code> 逆向校验</td></tr>
+  </table>
+
+  <div class="callout tip">
+    <h4>返回路径的"双出口"</h4>
+    <p style="margin:0">Lua 驱动返回的 table 经 <code>lua_value_to_json</code> 转 JsonValue：顶层设备直接出结果；带 <code>controller</code> 列的设备则把 <strong>{元数据 ∪ 自身返回表}</strong> 转发给下游控制器继续 <code>play()</code>。这是"传感器 → 滤波 → 执行器"链路的底层支撑。</p>
+  </div>
+</section>
+
+<!-- ============ S4 ============ -->
+<section id="s4">
+  <h2 class="sec"><span class="no">04</span>内容组合：六大核心机制</h2>
+  <p>架构的"骨架"由六条机制撑起来，理解它们 = 理解整个框架。这也是扩展开发时最该优先触碰的"杠杆点"。</p>
+
+  <div class="grid grid-2">
+    <div class="card">
+      <h4><span class="tag t-blue">M1</span>两阶段构造</h4>
+      <p>解析期<strong>零资源</strong>（不 open fd、不分配 lua_State）；<code>active()</code> 才按 <code>hwSeq</code> 声明序 build；<code>deactivate()</code> 反序 destroy。I2C 总线 → PCA9685 的 fd 依赖靠此顺序保证（先建总线再建挂在它上面的器件）。</p>
+    </div>
+    <div class="card">
+      <h4><span class="tag t-green">M2</span>驱动契约（halt-on-error）</h4>
+      <p>每个驱动返回 <code>{result="OK"/"ERR", message}</code>；基类 <code>MatrixVars_Hardware.ensureOk</code> 见到 ERR 直接 <code>throw</code>，中断整条动作序列。语义统一、故障传播明确。</p>
+    </div>
+    <div class="card">
+      <h4><span class="tag t-amber">M3</span>@Daemon 守护线程</h4>
+      <p>仓颉 <code>spawn</code> 绿色线程 + 独立 lua_State（jit.off），逐拍采样后写入 <strong>208B 共享内存槽</strong>（mutex@0, count@64, nvals@68, values[16]@72, stop@200）。主线程 <code>play()</code> 加锁读槽。拍间用仓颉 <code>sleep</code> 让出 worker，不做 ffi usleep 自旋。</p>
+    </div>
+    <div class="card">
+      <h4><span class="tag t-indigo">M4</span><code>$</code> 引用列 + controller</h4>
+      <p>元数据列以 <code>$</code> 开头（如 <code>$imu0</code>）= 引用另一硬件 <code>read()</code> 的实时快照；裸名=字面量。可串成 <code>imu0 → kf0 → mon0</code> 三级"采样→滤波→消费"链。controller 让任意矩阵把 {元数据∪返回} 转发给下游。</p>
+    </div>
+    <div class="card">
+      <h4><span class="tag t-orange">M5</span>HAL ffi.C 直调 + 可 mock 层</h4>
+      <p><code>HAL.lua</code> 用 <code>ffi.cdef</code> 声明 glibc 与 spidev ABI，布局自检（<code>sizeof(spi_ioc_transfer)==32</code>、<code>cj_i2c_msg==16</code>）。<code>HAL.sys.*</code> 间接层 + I2C_RDWR 原子事务，使桩替身可整体替换 12 个全局 i2c_*/spi_* 函数。</p>
+    </div>
+    <div class="card">
+      <h4><span class="tag t-red">M6</span>MetaProvider（元数据闭包）</h4>
+      <p>静态列在首次 collect 时<strong>冻结缓存</strong>；<code>$</code> 引用列每次 play 做实时 <code>read()</code> 快照。消除每调用 <strong>O(cols·rows)</strong> 的全表扫描，是播放性能的关键优化。</p>
+    </div>
+  </div>
+
+  <h3>可测试性资产（离线桩测试体系）</h3>
+  <p>测试约定：<code>test/test_&lt;driver&gt;.lua</code> 先 <code>dofile("modules/X.lua")</code> 加载真实 HAL，<strong>再</strong>覆盖全局 <code>i2c_*</code>/<code>spi_*</code>/<code>milli_sleep</code>；位运算/CRC 走 <code>modules/bitcompat.lua</code>（别名 <code>bitc</code>）。当前回归 <strong>58 通过 / 0 失败</strong>，覆盖 INA219/INA3221/SHT3X/LTC2944/MAX17043/TPL0501 等已补齐驱动的离线桩测试。</p>
+</section>
+
+<!-- ============ S5 ============ -->
+<section id="s5">
+  <h2 class="sec"><span class="no">05</span>架构体检：优势与边界</h2>
+
+  <div class="grid grid-2">
+    <div class="card" style="border-left:4px solid var(--green)">
+      <h4 style="color:var(--green)">✔ 优势（加码的底气）</h4>
+      <ul style="list-style:none;margin:6px 0">
+        <li>• 三脚本彻底解耦，加新硬件 = 加 1 张 .sql 表 + 1 个 .lua，零核心改动</li>
+        <li>• 不接硬件可跑全流程，CI/桩测试成本低</li>
+        <li>• halt-on-error + 反序 destroy，故障传播与资源回收干净</li>
+        <li>• <code>@Daemon</code> + <code>$</code> 引用链，原生支持"采样→滤波→消费"多传感器流水线</li>
+        <li>• HAL 可 mock 层 + virtbus，任意驱动无真机可验证</li>
+        <li>• 驱动层用 Lua，迭代快；核心层仓颉，编译型、类型安全</li>
+      </ul>
+    </div>
+    <div class="card" style="border-left:4px solid var(--red)">
+      <h4 style="color:var(--red)">✕ 边界 / 待补（加码的靶点）</h4>
+      <ul style="list-style:none;margin:6px 0">
+        <li>• 仅 Linux（glibc + /dev + sysfs + gpiod），无跨 OS 抽象</li>
+        <li>• 动作只走 stdin 管道（.mt），无网络/服务化传输</li>
+        <li>• 神经网络/DRL/CNN 动作生成仍是 README 里的 TODO（nn4cj 未接）</li>
+        <li>• 共享槽固定 16 值（SLOT_MAXVALS=16），复杂多路并发有上限</li>
+        <li>• 安全沙箱是"护栏非安全边界"（中和 os.execute 等，非强隔离）</li>
+        <li>• 驱动生态依赖人工逐器件编写，缺自动 codegen / 统一描述语言</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <h4>关键风险：共享槽 16 值上限 &amp; join 超时弃 join</h4>
+    <p style="margin:0"><code>daemon_slot_t</code> 的 <code>values[16]</code> 意味着单个守护最多并发暴露 16 个数值通道；<code>joinTimeout = max(5×interval, 2000ms)</code> 超时会<strong>放弃 join、保留 slot 指针</strong>以防 UAF —— 这是有意的安全取舍，但扩展时若做多路传感器聚合，需要把该上限参数化或改为定长数组 + 索引引用。</p>
+  </div>
+</section>
+
+<!-- ============ S6 ============ -->
+<section id="s6">
+  <h2 class="sec"><span class="no">06</span>扩展开发路线图（五阶段加码）</h2>
+  <p>按"低成本撬动最大收益"排序，五阶段自内向外：先加固<strong>已有的杠杆点</strong>（驱动扩展、并发扩展），再开<strong>新通道</strong>（网络、多 OS），最后接上 README 已点名的<strong>智能动作生成</strong>。</p>
+
+  <!-- Phase 1 -->
+  <div class="ph">
+    <div class="num" style="background:var(--green)">1</div>
+    <div style="flex:1">
+      <h4>驱动生态扩展 <span class="pri t-green">低成本 · 高收益</span></h4>
+      <p>新增硬件 = 1 张 .sql 表 + 1 个 modules/X.lua（build/call/destroy 三函数 + drv_common 复用）+ 1 个 test_&lt;driver&gt;.lua 离线桩测试。<strong>扩展动作：</strong>统一驱动描述语言（YAML/JSON 的"器件数据表"），配 <code>virtbus</code> 生成桩测试骨架，把"人工逐器件写"降为"填表 + 代码生成"。</p>
+    </div>
+  </div>
+
+  <!-- Phase 2 -->
+  <div class="ph">
+    <div class="num" style="background:var(--green)">2</div>
+    <div style="flex:1">
+      <h4>并发 / 多路传感器聚合 <span class="pri t-green">中成本 · 高收益</span></h4>
+      <p><code>@Daemon</code> 现有 16 值上限。扩展动作：把 <code>SLOT_MAXVALS</code> 参数化（定长数组 + 索引引用，或链表），<code>sensor_daemon.lua</code> 已支持任意 build/call/destroy 驱动的"万能采样 chunk"，可加<strong>多守护聚合器</strong>（一路守护聚合多路 sensor 输出到同一槽位组），支撑"多 IMU + 多气感 + 里程计"复杂流水线。</p>
+    </div>
+  </div>
+
+  <!-- Phase 3 -->
+  <div class="ph">
+    <div class="num" style="background:var(--blue)">3</div>
+    <div style="flex:1">
+      <h4>网络 / 服务化动作传输 <span class="pri t-blue">中成本 · 新通道</span></h4>
+      <p>README 点名的 <strong>TCP 动作传输</strong>：把"stdin 管道读 .mt"抽象成<strong>可替换的 ActionSource 接口</strong>（管道 / TCP / WebSocket / 文件），让上位机 / 手机 / 边缘网关可远程下发动作帧。核心改动集中在 <code>r.cj · run()</code> 的 input 读取处，驱动层零改动。配合 controller 转发可实现"远端遥操 + 本地滤波 + 本地执行"分级。</p>
+    </div>
+  </div>
+
+  <!-- Phase 4 -->
+  <div class="ph">
+    <div class="num" style="background:var(--blue)">4</div>
+    <div style="flex:1">
+      <h4>跨 OS 抽象（HAL 后端可插拔）<span class="pri t-blue">高成本 · 广覆盖</span></h4>
+      <p>HAL 已用 <code>ffi.C</code> 集中收敛系统调用，扩展动作：把 <code>HAL.sys.*</code> 间接层抽成<strong>后端接口</strong>（glibc / macOS libsystem / Windows winsock+cygwin / 仿真桩）。驱动层不变，只换 sys 后端 + 路径白名单规则即可移植到 RPi / 桌面 / 容器化仿真。仿真桩 = 现成的 <code>virtbus</code> 思路放大。</p>
+    </div>
+  </div>
+
+  <!-- Phase 5 -->
+  <div class="ph">
+    <div class="num" style="background:var(--indigo)">5</div>
+    <div style="flex:1">
+      <h4>神经网络动作生成（nn4cj）<span class="pri t-indigo">高成本 · 终极加码</span></h4>
+      <p>README 明确 TODO 的 <strong>DRL / CNN 动作生成</strong>：把"动作生成"从 .mt 手写脚本升级为<strong>模型在线推理</strong>。落地路径：在仓颉核心层新增 <code>MtVars_NN</code> 变量类（对标 MtVars_Lua），把 <code>main.cj</code> 里注释掉的 NN/DRL 代码接活；动作 = 模型输出经 <code>controller</code> 转发到执行器。可与阶段 2 的多传感器聚合（观测向量）+ 阶段 3 的网络下发（在线更新）组合成<strong>闭环强化学习机器人</strong>。</p>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <h4>阶段依赖关系</h4>
+    <p style="margin:0">1（驱动生态）→ 2（并发聚合）是"横向扩能力"，可先做且互相独立；3（网络）与 4（多 OS）是"通道与平台"，为 5（智能）铺路；5（NN）依赖 2（观测）+ 3（在线）。<strong>建议顺序：1 → 2 → 3 → 4 → 5</strong>，其中 1/2 可在当前 dev 分支独立开工，风险最低。</p>
+  </div>
+</section>
+
+<!-- ============ S7 ============ -->
+<section id="s7">
+  <h2 class="sec"><span class="no">07</span>落地检查清单</h2>
+  <table class="tbl">
+    <tr><th>阶段</th><th>关键改动点（文件）</th><th>验证方式</th><th>回归基线</th></tr>
+    <tr><td><strong>1</strong> 驱动生态</td><td><code>modules/X.lua</code> + <code>robots/*.sql</code> 新表 + <code>test/test_X.lua</code></td><td><code>bash test/run_all.sh</code> 离线桩</td><td>58/0 → 增 N 例 0 fail</td></tr>
+    <tr><td><strong>2</strong> 并发聚合</td><td><code>src/HV/Daemon.cj</code> SLOT_MAXVALS 参数化 + <code>lib/sensor_daemon.lua</code></td><td>多守护聚合桩测试（pthread.lua 布局自检）</td><td>布局自检保持绿</td></tr>
+    <tr><td><strong>3</strong> 网络传输</td><td><code>r.cj</code> input 抽象 + 新增 <code>ActionSource</code> 接口（TCP/WS）</td><td>管道/文件双源等价测试</td><td>relay-test 无硬件自校验</td></tr>
+    <tr><td><strong>4</strong> 跨 OS</td><td><code>lib/HAL.lua</code> sys 后端接口化 + 路径白名单规则表</td><td>仿真桩（virtbus）跨后端一致性</td><td>ffi 布局断言全平台</td></tr>
+    <tr><td><strong>5</strong> NN 动作</td><td>新增 <code>src/HV/NN.cj</code> + 接活 <code>main.cj</code> 注释 NN/DRL</td><td>模型输出 → controller 转发桩</td><td>与阶段 2/3 组合闭环</td></tr>
+  </table>
+
+  <div class="callout">
+    <h4>提交约定</h4>
+    <p style="margin:0">所有扩展提交到 <code>dev</code> 分支，走 Git Hooks（当前已 PASSED）后由项目作者合并。每阶段独立 PR，附 <code>test/run_all.sh</code> 回归结果与 CHANGELOG 更新。</p>
+  </div>
+</section>
+
+</div>
+
+<div class="footer">
+  bot4cj 架构分析与扩展路线图 · 基于 v0.3.3 源码（src/ · modules/ · robots/ · test/）· 配套图 1（分层）/ 图 2（数据流）
+</div>
+
+</body>
+</html>

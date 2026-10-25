@@ -1,0 +1,27 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      python-runtime:
+        patterns: ["*"]
+        exclude-patterns: ["pydantic-ai-*", "anthropic"]
+      agent:
+        patterns: ["pydantic-ai-*", "anthropic", "openai"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: cargo
+    directory: "/implementations/cpp-rust/agent"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3

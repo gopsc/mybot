@@ -4,27 +4,51 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymybot"
-version = "0.1.0"
-description = "Cross-platform Python robot controller with Lupa Lua drivers and sqlparse"
+version = "0.2.0"
+description = "Cross-platform robot controller with LuaJIT drivers, SQL structures and an approval-gated AI agent"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+authors = [{ name = "pymybot contributors" }]
+keywords = ["robotics", "hardware", "luajit", "sql", "ai-agent"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Software Development :: Embedded Systems",
+  "Typing :: Typed",
+]
 dependencies = [
-  "lupa>=2.6,<3",
-  "sqlparse>=0.5.3,<0.6",
+  "lupa>=2.8,<3",
+  "sqlparse>=0.6,<0.7",
   "pyserial>=3.5,<4",
-  "pyftdi>=0.55,<1",
-  "pillow>=11,<14",
+  "pyftdi>=0.57.2,<1",
+  "pillow>=13,<14",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10"]
-camera = ["av>=19,<20"]
+test = ["pytest>=9.1.1,<10", "ruff>=0.17,<1"]
+camera = ["av>=19.0.2,<20"]
 agent = [
-  "pydantic-ai-slim[openai,anthropic]==2.57.0",
-  "anthropic>=1.12.1,<2", # 2.x replaces the constructible BetaMessageParam expected by PydanticAI 2.57.
+  "pydantic-ai-slim[openai,anthropic]>=2.61,<3",
+  "anthropic>=2.3,<3",
 ]
 linux = ["smbus2>=0.5; sys_platform == 'linux'", "spidev>=3.6; sys_platform == 'linux'"]
+package = ["pyinstaller>=6.22,<7"]
+
+[project.urls]
+Homepage = "https://github.com/gopsc/mybot"
+Documentation = "https://github.com/gopsc/mybot/tree/main/docs"
+Changelog = "https://github.com/gopsc/mybot/blob/main/CHANGELOG.md"
+Issues = "https://github.com/gopsc/mybot/issues"
+Security = "https://github.com/gopsc/mybot/security/advisories/new"
 
 [project.scripts]
 pymybot = "pymybot.cli:main"
@@ -33,9 +57,21 @@ mybot-gui = "pymybot.gui.__main__:main"
 [tool.setuptools]
 packages = ["pymybot", "pymybot.gui"]
 
+[tool.setuptools.package-data]
+pymybot = ["py.typed"]
+
 [tool.setuptools.cmdclass]
 build_py = "build_support.BuildPy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+# Narrow, meaningful gate: syntax errors and undefined names only. The
+# repository predates a full formatter baseline; style churn belongs in its own PR.
+select = ["E9", "F63", "F7", "F82"]

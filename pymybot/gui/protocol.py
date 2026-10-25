@@ -55,6 +55,33 @@ def parse_result(stdout):
     return None
 
 
+def _frozen_sibling():
+    """Return the console CLI shipped next to a frozen GUI, if present."""
+    if not getattr(sys, "frozen", False):
+        return None
+    name = "pymybot.exe" if os.name == "nt" else "pymybot"
+    candidate = Path(sys.executable).with_name(name)
+    return candidate if candidate.is_file() else None
+
+
+def _spawn_options():
+    """Never flash a console window for children of a frozen GUI on Windows."""
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    return {}
+
+
+def _frozen_args(python, args):
+    """A frozen CLI takes ``serve`` directly, not ``-m pymybot serve``."""
+    sibling = _frozen_sibling()
+    if sibling is None or Path(python).resolve() != sibling.resolve():
+        return list(args)
+    values = list(args)
+    if values[:2] == ["-m", "pymybot"]:
+        return values[2:]
+    return values
+
+
 def cli_args(
     command,
     *,
@@ -135,7 +162,7 @@ class CliCall:
     """One one-shot ``python -m pymybot <command>`` process."""
 
     def __init__(self, python, args, cwd, on_stderr=None):
-        self.argv = [python, *args]
+        self.argv = [python, *_frozen_args(python, args)]
         self._on_stderr = on_stderr
         self._stderr: list[str] = []
         self._started = time.monotonic()
@@ -150,6 +177,7 @@ class CliCall:
             errors="replace",
             bufsize=1,
             env=_child_env(),
+            **_spawn_options(),
         )
         self._stderr_thread = threading.Thread(target=self._pump_stderr, name="gui-cli-stderr", daemon=True)
         self._stderr_thread.start()
@@ -218,7 +246,7 @@ class ServeClient:
         on_exit=None,
         python_args=("-m", "pymybot", "serve"),
     ):
-        self.argv = [python, *python_args]
+        self.argv = [python, *_frozen_args(python, python_args)]
         self._on_notify = on_notify
         self._on_request = on_request
         self._on_stderr = on_stderr
@@ -239,6 +267,7 @@ class ServeClient:
             errors="replace",
             bufsize=1,
             env=_child_env(),
+            **_spawn_options(),
         )
         threading.Thread(target=self._read_stdout, name="gui-serve-stdout", daemon=True).start()
         threading.Thread(target=self._read_stderr, name="gui-serve-stderr", daemon=True).start()
@@ -388,9 +417,12 @@ class ServeClient:
 
 
 def resolve_python(workspace, configured=""):
-    """Explicit setting, then the workspace venv, then this interpreter."""
+    """Explicit setting, frozen sibling CLI, workspace venv, this interpreter."""
     if str(configured).strip():
         return str(configured).strip()
+    sibling = _frozen_sibling()
+    if sibling is not None:
+        return str(sibling)
     root = Path(workspace) if str(workspace).strip() else None
     if root is not None:
         for parts in (

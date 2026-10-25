@@ -40,6 +40,10 @@ test:py3.13:
   extends: .pytest
   image: python:3.13-slim
 
+test:py3.14:
+  extends: .pytest
+  image: python:3.14-slim
+
 # 离线模型与回环服务验证最低 Python 版本；Windows 通道由 GitHub 覆盖。
 test:agent:py3.11:
   stage: test
@@ -49,6 +53,13 @@ test:agent:py3.11:
     - python -m pip install -e ".[agent,test]"
     - python -I scripts/ci_smoke.py agent
     - python -m pytest -q
+
+smoke:lint:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - python -m pip install "ruff>=0.17,<1"
+    - ruff check pymybot tests scripts build_support.py
 
 smoke:wheel:
   stage: test
@@ -65,5 +76,7 @@ smoke:quickstart:
   script:
     - python -m pip install -e ".[test]"
     - python -I scripts/ci_smoke.py base
+    - python -m pymybot --version
+    - python -m pymybot doctor
     - python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
     - python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10

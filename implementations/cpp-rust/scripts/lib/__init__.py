@@ -1,0 +1,1 @@
+"""scripts/lib —— 零编译守门脚本的共用底座（见 [protocol_sources.py](protocol_sources.py)）。"""

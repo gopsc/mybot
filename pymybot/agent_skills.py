@@ -14,6 +14,7 @@ import re
 from pathlib import Path, PureWindowsPath
 import stat
 
+from .paths import asset_path
 from .security import SecurityError, checked_text, read_file
 
 MAX_SKILL_FILE = 256 * 1024
@@ -24,9 +25,7 @@ _NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
 
 def default_skills_root():
     """Packaged assets first, else the source tree next to the package."""
-    package = Path(__file__).resolve().parent
-    packaged = package / "assets" / "skills"
-    return packaged if packaged.is_dir() else package.parent / "skills"
+    return asset_path("skills")
 
 
 def _relative_markdown(value):

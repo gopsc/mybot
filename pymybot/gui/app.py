@@ -25,11 +25,14 @@ TITLE = "mybot · 智能体"
 MAX_DIALOG_ARGS = 4000
 
 PALETTE = {
-    "bg": "#f5f6f8",
+    "bg": "#f3f5f8",
     "panel": "#ffffff",
+    "subtle": "#eef1f6",
+    "border": "#d9dee8",
     "ink": "#1f2328",
     "muted": "#6b7280",
     "accent": "#2563eb",
+    "accent_dark": "#1d4ed8",
     "user": "#1d4ed8",
     "assistant": "#111827",
     "tool": "#6b7280",
@@ -115,15 +118,44 @@ class App:
             if name in style.theme_names():
                 style.theme_use(name)
                 break
-        style.configure("Toolbar.TFrame", background=PALETTE["bg"])
-        style.configure("Side.TFrame", background=PALETTE["bg"])
-        style.configure("TLabel", font=self.font_ui)
-        style.configure("Muted.TLabel", foreground=PALETTE["muted"], font=self.font_ui)
+        bg, panel, subtle = PALETTE["bg"], PALETTE["panel"], PALETTE["subtle"]
+        border, ink, muted = PALETTE["border"], PALETTE["ink"], PALETTE["muted"]
+        style.configure(".", font=self.font_ui, background=bg, foreground=ink)
+        style.configure("TFrame", background=bg)
+        style.configure("Toolbar.TFrame", background=panel)
+        style.configure("Side.TFrame", background=bg)
+        style.configure("TLabel", background=bg, foreground=ink)
+        style.configure("Toolbar.TLabel", background=panel, foreground=ink)
+        style.configure("Muted.TLabel", background=bg, foreground=muted)
+        style.configure("ToolbarMuted.TLabel", background=panel, foreground=muted)
         style.configure("Head.TLabel", font=(self.font_ui[0], 10, "bold"))
-        style.configure("TButton", font=self.font_ui)
-        style.configure("Send.TButton", font=(self.font_ui[0], 10, "bold"))
-        style.configure("TLabelframe.Label", font=(self.font_ui[0], 9, "bold"))
-        self.root.configure(background=PALETTE["bg"])
+        style.configure("TLabelframe", background=bg, bordercolor=border, relief="solid", borderwidth=1)
+        style.configure("TLabelframe.Label", background=bg, foreground=ink, font=(self.font_ui[0], 9, "bold"))
+        style.configure("TButton", font=self.font_ui, padding=(10, 5), background=panel,
+                        foreground=ink, bordercolor=border, relief="flat")
+        style.map("TButton", background=[("active", subtle)], bordercolor=[("focus", PALETTE["accent"])])
+        style.configure("Send.TButton", font=(self.font_ui[0], 10, "bold"), padding=(14, 8),
+                        background=PALETTE["accent"], foreground="#ffffff", bordercolor=PALETTE["accent"])
+        style.map("Send.TButton", background=[("active", PALETTE["accent_dark"]), ("disabled", "#9aa8c7")],
+                  foreground=[("disabled", "#eef2ff")])
+        style.configure("TCheckbutton", background=bg, foreground=ink)
+        style.map("TCheckbutton", background=[("active", bg)])
+        style.configure("TEntry", fieldbackground=panel, bordercolor=border, padding=4)
+        style.configure("TSpinbox", fieldbackground=panel, bordercolor=border, padding=3)
+        style.configure("TCombobox", fieldbackground=panel, background=panel, bordercolor=border, padding=4)
+        style.map("TCombobox", fieldbackground=[("readonly", panel)])
+        style.configure("TNotebook", background=bg, borderwidth=0)
+        style.configure("TNotebook.Tab", padding=(14, 7), background=subtle, foreground=muted,
+                        font=(self.font_ui[0], 9, "bold"))
+        style.map("TNotebook.Tab", background=[("selected", panel)], foreground=[("selected", ink)])
+        style.configure("Treeview", background=panel, fieldbackground=panel, foreground=ink,
+                        rowheight=24, borderwidth=0, font=self.font_ui)
+        style.configure("Treeview.Heading", background=subtle, foreground=muted,
+                        font=(self.font_ui[0], 9, "bold"), relief="flat", padding=(4, 6))
+        style.map("Treeview", background=[("selected", "#dbe7ff")], foreground=[("selected", ink)])
+        style.configure("TScrollbar", background=subtle, troughcolor=bg, bordercolor=bg, arrowcolor=muted)
+        style.configure("TPanedwindow", background=bg)
+        self.root.configure(background=bg)
 
     def _build(self):
         self.root.title(TITLE)
@@ -133,9 +165,9 @@ class App:
         toolbar = ttk.Frame(self.root, style="Toolbar.TFrame", padding=(10, 8))
         toolbar.pack(side="top", fill="x")
         ttk.Button(toolbar, text="打开工作区", command=self.pick_workspace).pack(side="left")
-        self.workspace_label = ttk.Label(toolbar, text="", style="Muted.TLabel")
+        self.workspace_label = ttk.Label(toolbar, text="", style="ToolbarMuted.TLabel")
         self.workspace_label.pack(side="left", padx=(8, 16))
-        ttk.Label(toolbar, text="结构").pack(side="left")
+        ttk.Label(toolbar, text="结构", style="Toolbar.TLabel").pack(side="left")
         self.robot_box = ttk.Combobox(toolbar, width=34, state="readonly", values=[])
         self.robot_box.pack(side="left", padx=(6, 4))
         self.robot_box.bind("<<ComboboxSelected>>", lambda _event: self.on_robot_changed())

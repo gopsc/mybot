@@ -3,6 +3,7 @@
 Robot behaviour is not re-tested here: the window never executes robot code.
 """
 import json
+import os
 import sys
 import time
 import tkinter as tk
@@ -360,6 +361,20 @@ def test_permission_toggle_never_persists(monkeypatch, tk_root, tmp_path):
     app._save()
     stored = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
     assert "allow_hardware" not in stored and "allow_actions" not in stored
+
+
+def test_frozen_gui_uses_the_sibling_cli(monkeypatch, tmp_path):
+    gui = tmp_path / "mybot-gui"
+    cli = tmp_path / ("pymybot.exe" if os.name == "nt" else "pymybot")
+    gui.write_text("", encoding="utf-8")
+    cli.write_text("", encoding="utf-8")
+    monkeypatch.setattr(gui_protocol.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(gui_protocol.sys, "executable", str(gui))
+
+    assert gui_protocol.resolve_python(str(tmp_path), "") == str(cli)
+    assert gui_protocol._frozen_args(str(cli), ["-m", "pymybot", "serve"]) == ["serve"]
+    assert gui_protocol._frozen_args("/usr/bin/python", ["-m", "pymybot", "serve"]) == [
+        "-m", "pymybot", "serve"]
 
 
 def test_composer_sends_without_a_server_and_remembers_the_task(monkeypatch, tk_root, tmp_path):

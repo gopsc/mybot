@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+title: pymybot
+message: "If you use pymybot in academic work, please cite this repository."
+type: software
+authors:
+  - name: pymybot contributors
+repository-code: "https://github.com/gopsc/mybot"
+url: "https://github.com/gopsc/mybot"
+license: MIT
+version: 0.2.0
+date-released: 2026-10-26
+keywords:
+  - robotics
+  - LuaJIT
+  - hardware abstraction
+  - AI agent
+  - SQL

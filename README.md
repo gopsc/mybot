@@ -1,270 +1,148 @@
 # pymybot
 
-跨平台的 Python 机器人控制器：用 Lupa（LuaJIT）加载 Lua 硬件驱动，用 sqlparse 解析受限 SQL 结构文件，用 MT 动作脚本驱动设备。
+**把「结构 SQL + Lua 驱动 + MT 动作」三层脚本接到真实机器人；同一套代码提供 CLI、桌面 GUI 和 AI Agent。**
 
-兼容 bot4cj 的「模块 → 结构 → 动作」三层脚本模型，但不依赖原 C++ 运行器、TCP 服务或 MCP。
+[![CI](https://github.com/gopsc/mybot/actions/workflows/ci.yml/badge.svg)](https://github.com/gopsc/mybot/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/gopsc/mybot?include_prereleases&sort=semver)](https://github.com/gopsc/mybot/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%E2%80%933.14-3776AB)](pyproject.toml)
 
-## 两种使用模式
+![pymybot GUI](docs/screenshots/gui.png)
 
-pymybot 提供两种独立的使用方式，可按需选择或组合：
+> 截图来自本地回环演示端点：Agent 先调用 `list_hardware`，再解释得到的硬件上下文。
 
-- **机器人智能体**：PydanticAI 驱动的交互式 AI 助手，通过自然语言控制机器人
-- **机器人控制器**：直接执行 CLI 命令，无需模型依赖，适合自动化脚本和 CI/CD
+## 三种入口
 
-两种模式都有命令行入口；此外，**不带子命令运行 `pymybot` 会打开 tkinter 图形界面**
-（见「图形界面（GUI）」）。在脚本、CI 或没有显示器的环境里用 `--no-gui` 回到命令行：
-
-```sh
-pymybot                 # 图形界面（智能体为核心）
-pymybot --no-gui ...    # 命令行：智能体 REPL 或直接控制器命令
-```
-
-`--no-agent` 只对命令行有意义，写在子命令之前时会隐含 `--no-gui`，因此
-`pymybot --no-agent --robot x.sql --input a.mt` 仍是原来的直接执行路径。
-
----
-
-## 机器人智能体
-
-智能体模式使用 PydanticAI 将自然语言任务转换为机器人操作。支持 openai / openai-chat / anthropic / deepseek 四种模型提供商，密钥只经环境变量传入。
-
-### 快速开始
-
-**1. 安装智能体依赖**
-
-```sh
-python -m venv .venv
-.venv/bin/pip install -e ".[agent,test]"
-```
-
-**2. 配置模型与密钥**
-
-```sh
-# 选择模型（四选一）
-export MYBOT_MODEL="deepseek:deepseek-chat"
-# export MYBOT_MODEL="openai:gpt-4o"
-# export MYBOT_MODEL="openai-chat:gpt-4o"
-# export MYBOT_MODEL="anthropic:claude-sonnet-4-5"
-
-# 对应厂商的 API Key
-export DEEPSEEK_API_KEY="sk-..."
-# export OPENAI_API_KEY="sk-..."
-# export ANTHROPIC_API_KEY="sk-ant-..."
-```
-
-**3. 运行智能体**
-
-```sh
-# 一次性任务
-.venv/bin/python -m pymybot --no-gui --robot robots/relay-test.sql \
-  --task "列出硬件和可用动作脚本"
-
-# 交互会话（/exit 退出）
-.venv/bin/python -m pymybot --no-gui --robot robots/relay-test.sql
-```
-
-不带子命令的 `--robot` 入口默认打开图形界面；上面的终端用法需要 `--no-gui`。
-也可显式写 `agent` 子命令（子命令本身即命令行模式）。
-`--no-agent` 可让 agent 入口绕过模型直接执行脚本（需配合 `--input`）。
-
-### 工具集与能力
-
-第一版智能体提供 4 个默认工具：
-
-- `list_hardware`：列出声明的硬件及元数据
-- `list_action_scripts`：列出可用 `.mt` 动作脚本
-- `query_sql`：查询结构文件（`SHOW TABLES;` 或 `SELECT * FROM 表;`）
-- `run_action_script`：执行动作脚本；脚本内捕获的图片以二进制附件返回，回执用 `image_index` 标注对应关系，单次动作最多附带 16 张，超出部分在回执中标记为 `image_omitted`
-
-通过重复 `--read-var NAME` 开放指定变量读取，通过重复 `--camera-var NAME` 开放一个或多个 Camera 变量的图片输入。
-
-**参考技能**：`skills/` 目录下的每个技能是一个目录（`SKILL.md` + 可选 markdown 参考资料），
-属操作者信任内容。存在技能时，智能体获得 `list_skills` / `read_skill(name, file)` 两个只读工具，
-技能名与摘要进入系统提示词，正文按需查阅（如内置的 `pymybot-scripting` 三层脚本开发参考）。
-`--skills-dir DIR` 显式指定信任根（不存在即报错）；缺省依次取打包资产 `assets/skills` 或源码 `skills/`。
-
-`run_action_script` 仅执行 `--scripts-dir`（默认内置 scripts）下已有的相对 `.mt` 路径。默认不开启文件和 shell 工具，也不能热更新 SQL。文件图片仍需 `--camera-src-dir`，来源由 Camera 的结构配置决定。
-
-**文件与 shell 工具（显式启用）**：
-
-- `--workspace-dir DIR`：开放 `list_files(path=".")`、`read_file(path, offset=1, limit=200)`、`write_file(path, content, overwrite=False)`、`edit_file(path, old_string, new_string, replace_all=False)`。
-- 文件路径必须相对工作目录，拒绝路径穿越、符号链接和非普通文件；UTF-8 文本最大 1 MiB。列目录不递归，读取按行分页；创建文件需要父目录已存在，覆盖需显式 `overwrite=True`，精确编辑默认要求唯一匹配。文件读取内容可能发送给模型，请选择不含凭据的目录。
-- `--enable-shell`：在已指定工作目录时开放 `shell(command, cwd=".")`，支持平台 shell 语法（POSIX 为 `/bin/sh -c`，Windows 为 `cmd.exe /c`，后者只接受单行命令），返回退出码、标准输出、标准错误、截断标记及使用的解释器路径；非零退出码表示失败但不代表未执行。
-- `--allow-shell`：预授权宿主 shell 命令（需先 `--enable-shell`），跳过每次执行的确认提示；命令继承宿主用户权限和环境，请谨慎使用。
-- 文件创建/编辑和 shell 执行分别请求确认；`--allow-file-writes`、`--allow-shell` 分别预授权，`--allow-actions` 不授权这两类操作。非交互模式未预授权时拒绝调用。
-
-```sh
-# 交互使用文件和 shell 工具，每次写入/执行都确认
-.venv/bin/python -m pymybot --no-gui --robot robots/relay-test.sql \
-  --workspace-dir . --enable-shell
-
-# 非交互只读文件任务，不启用 shell 或预授权写入
-.venv/bin/python -m pymybot --no-gui --robot robots/relay-test.sql \
-  --workspace-dir . --task "读取并解释 scripts 目录中的动作脚本"
-```
-
-> 图形界面暂不开放文件 / shell 工具，这类会话请用 `--no-gui`。
-
-**Shell 不是沙箱**：工作目录只决定初始 cwd，不能阻止命令访问目录外文件、网络、环境变量或物理设备，`--allow-hardware` 也不能约束 shell。命令继承宿主用户权限和环境；只在可信环境启用，不支持后台任务。超时/取消会终止进程并尝试清理子进程，但不是操作系统隔离，也不撤销已发生的副作用。文件写入若修改脚本、驱动或技能，会影响后续执行的信任边界；修改 SQL 文件不会重载当前 Robot，需重启会话。
-
-### 安全机制
-
-**独立安全开关**：
-
-| 开关 | 作用 | 默认 |
+| 入口 | 适合谁 | 命令 |
 | --- | --- | --- |
-| `--allow-actions` | 预授权脚本执行/变量读取/拍照 | 否 |
-| `--allow-hardware` | 开放 Robot/HAL 的物理设备访问（不能限制 shell） | 否 |
-| `--allow-file-writes` | 预授权工作目录文件创建/编辑 | 否 |
-| `--allow-shell` | 预授权宿主 shell 命令 | 否 |
+| **GUI** | 桌面调试、演示、人工审批每一步 | `pymybot` |
+| **CLI 控制器** | CI/CD、脚本、无模型环境 | `pymybot check / run / sample / ...` |
+| **AI Agent** | 自然语言控制机器人 | `pymybot --no-gui --robot ... --task "..."` |
 
-脚本执行、读取和拍照都会请求确认，因为激活和读取也可能写硬件。非交互任务不能弹出确认，默认拒绝这些调用；操作者可显式 `--allow-actions` 预先授权该会话中的这些工具。
+另有一个长驻 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
 
-**不要对不可信脚本预授权。**
+## 为什么不是又一个“聊天壳”
 
-### 预算控制
+- **三层解耦**：结构、驱动、动作各写各的；换传感器不改剧本，换剧本不碰驱动。
+- **无硬件可跑通**：虚拟总线、寄存器模型、`loop://` 串口回环和逐驱动夹具，让 CI 不需要插板子。
+- **默认安全**：静态命令不激活设备；物理总线、非回环 HTTP 和 Shell 都要显式开关。
+- **可审计的动作**：动作脚本是矩阵数据，不是任意代码；每次派发、捕获和结果都有 JSON 回执。
+- **失败说清楚**：动作已派发后的异常锁存为“结果未知”，不假装回滚；非零退出码不是“未执行”。
+- **多语言同仓**：Python 参考实现、Cangjie 版、C++17 + Rust 版共用同一套脚本模型。
 
-| 参数 | 作用 | 默认 |
-| --- | --- | --- |
-| `--max-requests N` | 每任务模型请求上限 | 8 |
-| `--max-tool-calls N` | 每任务工具调用上限 | 16 |
-| `--timeout SECONDS` | 每任务墙钟预算 | 180 |
+## 快速开始
 
-Robot 创建、工具调用和销毁在同一专用线程串行执行；动作已开始后的异常锁存为结果不明，拒绝后续工具派发，不自动重试或声称回滚。取消/超时停止模型及新派发，但无法强杀阻塞的原生 I/O；清理需等待已下发调用退出，不是物理急停。
-
-交互历史按完整轮次裁剪（最多 6 轮、4 MiB），避免孤立工具回执。最终 JSON 的 `tool_events` 仅记录工具名与执行状态，不保存参数、密钥或图片。此版不提供跨进程常驻后端、会话落盘恢复、ICA 或持久化审计日志；agent 退出时会清理同进程 Robot，不能自动恢复未完成动作。
-
-### 流式输出
-
-回合进行期间，模型回复文本以增量实时写入 stderr，每次工具调用开始/结束各输出一行进度（`→ 工具名(参数摘要)` / `⇦ 工具名 状态`）；工具参数经转义并截断显示，防止终端控制序列注入。stdout 契约不变：整个回合结束后仍只输出一行最终 JSON，程序化调用方不受影响。超时/取消看护在流式期间保持不变（50ms 协作检查）。
-
-### 端点配置
-
-`--base-url`（或 `MYBOT_BASE_URL`）支持自定义端点，要求 HTTPS；本地回环服务允许 HTTP。地址中禁止凭据、查询参数和 fragment。兼容端点也需要配置 API Key 环境变量，本地无认证服务可使用非秘密占位值。
-
-可用 `--api-key-env NAME` 指定其他环境变量存储 API Key，命令行不直接接收密钥。
-
-各模型的工具调用和视觉能力不保证相同，需在部署时验证；默认 SDK 自动重试关闭。
-
----
-
-## 机器人控制器
-
-控制器模式直接执行 CLI 命令，不需要模型配置或 agent 依赖。适合自动化脚本、CI/CD 流水线和无交互环境。
-
-### 快速开始
-
-**1. 安装基础依赖**
+要求 Python 3.11+。
 
 ```sh
+git clone https://github.com/gopsc/mybot.git
+cd mybot
 python -m venv .venv
 .venv/bin/pip install -e ".[test]"
+
+.venv/bin/python -m pymybot --version
+.venv/bin/python -m pymybot doctor
 ```
 
-**2. 验证安装**
+Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
+
+### 1. 不接硬件，先跑通全链路
 
 ```sh
-.venv/bin/python -c "from lupa.luajit21 import LuaRuntime; import sqlparse, serial, pyftdi, PIL"
-.venv/bin/python -m pytest
+.venv/bin/python -m pymybot check \
+  --robot robots/relay-test.sql \
+  --input scripts/relay-test.mt
+
+.venv/bin/python -m pymybot run \
+  --robot robots/relay-test.sql \
+  --input scripts/relay-test.mt \
+  --timeout 10
 ```
 
-**3. 运行示例**
-
-```sh
-# 静态检查
-.venv/bin/python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
-
-# 执行动作（虚拟总线，不接触硬件）
-.venv/bin/python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10
-```
-
-输出：
+输出是一行 JSON：
 
 ```json
 {"ok":true,"command":"run","outputs":[{"slept":1,"result":"OK"}]}
 ```
 
-### CLI 命令
-
-| 命令 | 是否激活驱动 | 说明 |
-| --- | --- | --- |
-| `check --robot SQL [--input MT]` | 否 | 静态检查 SQL、模块存在性、引用及 MT/Include 语法 |
-| `hardware --robot SQL` | 否 | 列出声明的硬件及元数据 |
-| `scripts [--scripts-dir DIR]` | 否 | 列出 `.mt` 脚本 |
-| `query --robot SQL --sql "..."` | 否 | `SHOW TABLES;` 或 `SELECT * FROM 表 [WHERE ...];` |
-| `run --robot SQL --input MT` | 是 | 激活、执行动作、清理 |
-| `sample --robot SQL --name VAR` | 是 | 激活并读取命名变量，支持 `--count` / `--interval-ms` |
-| `apply-sql --robot SQL --sql "..."` | 是 | 对临时激活的会话应用受限 SQL，不改磁盘文件 |
-| `serve [--no-agent]` | 按需 | 长驻 stdio JSON-RPC 2.0 服务，供 IDE 前端保持会话（见下文） |
-| `gui` | 按需 | 打开图形界面（默认入口，见「图形界面（GUI）」） |
-
-`--sql` 采用严格语法：每条语句都必须以 `;` 结尾，单条语句也不例外，否则报 `SQL: unexpected end of script`。
-
-通用选项：`--module-path DIR`（可重复，显式指定时须同时包含 `modules`）、`--camera-src-dir DIR`、`--timeout SECONDS`、`--var NAME=VALUE`、`--allow-hardware`。
-
-退出码：0 成功，1 运行错误，2 用法错误，130 被中断。
-
-### 图形界面（GUI）
-
-`pymybot` 不带子命令时打开 tkinter 窗口，也可以用 `gui` 子命令显式打开。
-窗口**以智能体为核心**：中间是对话，工具调用逐条显示并逐次请求批准，
-左侧只保留机器人上下文（结构文件、硬件、路径与预算）。它不做任何机器人逻辑，
-而是启动一个 `python -m pymybot serve` 子进程，通过同一个 JSON-RPC 协议驱动：
-权限、预算、超时、工具确认全部由 pymybot 负责，和命令行完全一致。
+### 2. 打开 GUI
 
 ```sh
-pymybot --robot robots/relay-test.sql          # 打开窗口并预选结构
-pymybot gui --robot robots/relay-test.sql --task "列出硬件"   # 预填提示，不自动发送
-pymybot --no-gui --robot robots/relay-test.sql --task "列出硬件"   # 终端等价用法
+.venv/bin/python -m pymybot
 ```
 
-| 区域 | 内容 |
-| --- | --- |
-| 工具栏 | 工作区、结构（`.sql`）、刷新上下文、新对话、停止、设置 |
-| 左侧 | 脚本根目录 / 技能目录 / 模块路径 / 图片源；硬件列表（`hardware` 静态读取，不激活）；权限与预算；当前模型 |
-| 对话 | 模型增量文本、`→ 工具 参数` / `⇦ 工具 状态`、每轮 usage |
-| 日志 | `serve` 的 stderr、上下文读取的 stderr、窗口自身的诊断 |
-| 输入 | 多行任务，`Ctrl+Enter` 发送；`■ 停止` 取消当前轮 |
+首次使用在 **设置** 中选择 workspace、结构文件和模型；如果只想控制硬件，不需要模型配置。
 
-安全约定：
+### 3. 启用 AI Agent
 
-- 每个需要批准的工具调用都会弹出模态对话框，展示**完整**参数；参数过长（>4000 字符）直接拒绝，不截断审阅。
-- `允许硬件`（`--allow-hardware`）与`自动批准动作`（`--allow-actions`）是每次启动的开关，**不写入配置文件**；允许硬件在发送任务前还要再确认一次。
-- 设置只保存工作区、解释器、模型、端点、**密钥变量名**与路径；不保存 API Key，也不保存任何授权。
-  设置窗口显示配置文件位置；写入失败（只读目录、沙箱）会记到「日志」页并在状态栏提示，不会静默丢失。
-- 窗口退出时先发 `shutdown` 并等 `serve` 清理驱动；强制关闭只是兜底。
+```sh
+.venv/bin/pip install -e ".[agent,test]"
+export MYBOT_MODEL="deepseek:deepseek-chat"
+export DEEPSEEK_API_KEY="sk-..."
+.venv/bin/python -m pymybot --no-gui \
+  --robot robots/relay-test.sql \
+  --task "列出硬件并解释每个变量的作用"
+```
 
-限制（原型）：没有编辑器、文件树、采样曲线与会话热更新；智能体的文件 / shell 工具（`--workspace-dir`、`--enable-shell`）
-未接入窗口，需要时用 `--no-gui`。图形界面需要 tkinter（Debian/Ubuntu：`apt install python3-tk`），
-对话还需要 `pymybot[agent]`；解释器缺依赖时窗口会明确提示，而不是静默降级。
+支持的模型提供商：`openai`、`openai-chat`、`anthropic`、`deepseek`。密钥只从环境变量读取；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
 
-### serve 协议
+## 架构
 
-`python -m pymybot serve` 在 stdin/stdout 上逐行交换 JSON-RPC 2.0 消息（每行一个对象），诊断信息走 stderr；进程退出前 stdout 末尾还会有一行普通 CLI 结果，客户端忽略不含 `jsonrpc` 的行即可。stdin 关闭或收到 `shutdown` 时取消进行中的请求并清理驱动。
+```mermaid
+flowchart LR
+    SQL["结构 SQL<br/>robots/*.sql"] --> ROBOT["Robot<br/>变量 + 总线"]
+    LUA["Lua 驱动<br/>modules/*.lua"] --> ROBOT
+    MT["动作脚本<br/>scripts/*.mt"] --> RUNNER["Action runner"]
+    ROBOT --> RUNNER
+    RUNNER --> HAL["HAL"]
+    HAL --> DEV["I2C · SPI · UART · HTTP · Camera · Shell"]
+```
 
-| 方法 | 参数 | 说明 |
+- **结构 SQL** 声明机器人身上有哪些变量、接在哪条总线、谁引用谁。
+- **Lua 驱动** 实现一个器件的 `build / call / destroy / read`。
+- **MT 动作** 用矩阵描述“第几行对哪个变量发什么参数”，支持捕获、条件、循环和结构 JSON。
+
+完整分层、线程模型和包结构见 [docs/architecture.md](docs/architecture.md)。
+
+## 多语言实现
+
+| 版本 | 目录 | 技术栈 | 版本 |
+| --- | --- | --- | --- |
+| Python（参考实现） | 仓库根目录 | Python 3.11+ · LuaJIT · PydanticAI | 0.2.x |
+| Cangjie | [`implementations/cangjie/`](implementations/cangjie) | 仓颉 1.1.3 · LuaJIT | 0.3.3 |
+| C++17 + Rust Agent | [`implementations/cpp-rust/`](implementations/cpp-rust) | C++17 · Rust · LuaJIT | 1.x |
+
+三个版本共享同一套脚本模型，但 HAL ABI、构建系统和发布物各自独立。不要在版本之间直接复制驱动，先读各自 README 和 [`implementations/README.md`](implementations/README.md)。
+
+## CLI 一览
+
+| 命令 | 作用 | 激活硬件 |
 | --- | --- | --- |
-| `initialize` | — | 返回 `protocol`、`version`、`agent`（是否可用）、`status` |
-| `session.status` | — | `state`（`Active`/`Inactive`）、`robot`、`busy` 等 |
-| `session.activate` | `robot`，可选 `modulePaths`、`cameraSrcDir`、`allowHardware` | 加载并激活，会话保持到 `session.deactivate` |
-| `session.deactivate` | — | 取消进行中的操作并清理驱动 |
-| `run` | `input`，可选 `vars`、`timeout` | 在活动会话中执行动作脚本，返回 `outputs` |
-| `apply-sql` | `sql` | 对活动会话应用受限 SQL，改动保留到会话结束 |
-| `sample` | `name`，可选 `count`、`intervalMs`、`timeout` | 每个样本推送 `sample` 通知 `{id, index, value, t}` |
-| `agent.ask` | `task`、`robot`、`scriptsDir`，以及与 `agent` 子命令对应的可选项 | 配置不变时为多轮对话；流式事件以 `agent.event` 通知推送 |
-| `agent.reset` | — | 关闭当前对话并释放硬件 |
-| `cancel` | `id` | 取消指定请求（可作通知），被取消的请求返回错误码 `-32800` |
-| `shutdown` | — | 清理后退出 |
+| `check` | 静态检查 SQL、模块、引用和 MT/Include 语法 | 否 |
+| `hardware` | 列出声明的硬件和元数据 | 否 |
+| `scripts` | 列出动作脚本 | 否 |
+| `query` | `SHOW TABLES` / `SELECT *` | 否 |
+| `run` | 激活、执行一个动作、清理 | 是 |
+| `sample` | 采样一个命名变量 | 是 |
+| `apply-sql` | 对临时会话应用受限 SQL | 是 |
+| `agent` | PydanticAI 任务/REPL | 经审批 |
+| `serve` | 长驻 JSON-RPC 服务 | 经请求 |
+| `doctor` | 环境、依赖、资产诊断 | 否 |
 
-同一时刻只执行一个硬件操作，忙时返回 `-32001`；活动会话与智能体对话互斥，状态不符返回 `-32002`。取消单个请求不会停止 Daemon 采样线程。智能体需要批准工具调用时，服务端向客户端发起 `confirm` 请求（`{tool, arguments}`），客户端回复 `{"approved": true}` 才执行；请求失效时服务端发送 `cancel` 通知。
+退出码：`0` 成功，`1` 运行错误，`2` 用法错误，`130` 中断。完整参数、JSON 契约和 `serve` 协议见 [docs/cli.md](docs/cli.md)。
 
-### 三层脚本模型
+## GUI
 
-pymybot 使用「模块 → 结构 → 动作」三层脚本：
+- 左侧：workspace、脚本/技能/模块路径、硬件树、权限与预算、模型摘要。
+- 右侧：对话、工具调用、日志双标签页；底部输入框 `Ctrl+Enter` 发送。
+- 危险工具逐次弹窗确认；`允许硬件` 和 `自动批准动作` 每次启动都重新确认，不落盘。
+- GUI 只驱动一个 `serve` 子进程，不重复实现机器人逻辑；重启、取消和崩溃恢复都有测试覆盖。
 
-#### 结构文件（SQL）
+详见 [docs/gui.md](docs/gui.md)。
 
-每张普通表对应 `modules/<表名>.lua`，每个 INSERT 行创建一个变量。`$变量` 引用先前声明的总线，`-` 继承上一行同列。
+## 脚本示例
+
+结构文件：
 
 ```sql
 CREATE TABLE UART (name String, path String, baud Number);
@@ -273,9 +151,7 @@ CREATE TABLE LoopbackProbe (name String, UART String);
 INSERT INTO LoopbackProbe (name, UART) VALUES ('echo', '$bus');
 ```
 
-#### 动作脚本（MT）
-
-`@Action` 起始、单独 `@` 结束；表头为 `变量.参数`，每数据行是一帧。
+动作脚本：
 
 ```mt
 @Action
@@ -285,17 +161,11 @@ echo.value;
 @
 ```
 
-支持 `@Alias`、`@Vars`、`@Struct(name)`、`@if(...)`、`@while(...)`、`$(表达式)`、`capture` 捕获结果和 Include 片段复用。
-`@Struct(name)` 块体直接写标准 JSON，通过 `$(state.points[0].x)` 读取字段和零基数组元素，
-通过 `$state=payload` 或 `$state.points[0].x=x` 捕获赋值；变量仅在本次运行内有效，不隐式创建字段或扩展数组。
-完整规则与无硬件示例见 [MT 动作脚本参考](skills/pymybot-scripting/references/action-mt.md#9-json-结构变量-structname)。
-
-#### 驱动模块（Lua）
+驱动：
 
 ```lua
 local mpath = assert(__mpath)
 dofile(mpath.resolve("lib/drv_common.lua"))
-
 require_driver("uart", {
     name = "LoopbackProbe",
     build = function(ctx, data) return {result = "OK"} end,
@@ -308,130 +178,79 @@ require_driver("uart", {
 })
 ```
 
-`build` / `call` / `destroy` 返回非空表，推荐 `{result="OK", ...}` 或 `err("原因")`；可选 `read(data)` 提供快照。
+完整规则见 [skills/pymybot-scripting](skills/pymybot-scripting/SKILL.md)。
 
-### 在项目外目录使用
+## 安全边界
 
-`--robot` / `--input` 可以指向任意位置的文件，例如把驱动、结构和动作放在 `~/robots/<任务>/{modules,robots,scripts}`。显式 `--module-path` 会替换默认搜索路径，因此必须同时给出自定义目录和基础目录：
-
-```sh
-cd ~/robots/<任务>
-pymybot run --robot robots/<任务>.sql --input scripts/<任务>.mt \
-  --module-path modules --module-path /path/to/pymybot/modules --timeout 10
-```
-
-也可以用环境变量 `BOT4CJ_MODULE_PATH`（按系统路径分隔符连接多个目录）代替重复的 `--module-path`。`@Include` 只能引用动作脚本所在目录内的文件，`--camera-src-dir` 只允许读取该目录内的图片。
-
----
-
-## 通用部分
-
-### 特性
-
-- **双模式入口**：智能体模式（PydanticAI）与控制器模式（直接 CLI）独立可选
-- **默认图形界面**：`pymybot` 直接打开 tkinter 窗口（以智能体为核心），`--no-gui` 回到纯命令行；窗口只驱动 `serve` 子进程，不重复实现任何机器人逻辑
-- **三层脚本**：`modules/*.lua` 驱动、`robots/*.sql` 结构、`scripts/*.mt` 动作，一一对应
-- **默认安全**：静态命令不激活驱动；`run` / `sample` / `apply-sql` 默认只允许虚拟总线、串口回环、图片文件或回环 HTTP，必须显式 `--allow-hardware` 才打开物理设备、非回环网络端点或宿主命令执行（Shell 驱动）
-- **跨平台 HAL**：UART 走 pyserial，I2C/SPI 走 pyftdi（MPSSE），Camera 采集走 PyAV（可选）、图片编解码走 Pillow，HTTP 走标准库 urllib（零额外依赖）；Linux 可选 smbus2/spidev
-- **无硬件验证**：内置虚拟总线（`virtbus`）、寄存器映射模型、串口 `loop://` 回环，支持 NACK / 超时 / 短读等故障注入
-- **HTTP 总线与云端网关**：`HTTP` 表与 I2C/SPI/UART 同级声明服务端点（回环默认可用，非回环需 `--allow-hardware`）；`Qsont` 驱动接入 qsont iot-server（登录/推数据/拉指令/回执，传感器经 controller 链自动上云）
-- **宿主命令执行**：`Shell` 驱动输入一条命令字符串，经平台 shell（POSIX `/bin/sh -c`、Windows `cmd.exe /c`）执行并返回 `out`/`err`/`code`；非零退出码是正常完成，仅启动失败/超时返回 ERR。命令以宿主用户权限执行、不是沙箱，整个能力默认拒绝，需 `--allow-hardware` 才放开（命令 64 KiB、单流输出 1 MiB、超时默认 10 s 上限 60 s）
-- **后台采样**：Daemon 表基于 Python 线程和独立 Lua 状态做周期采样，支持单设备、多设备同总线和聚合
-- **预置驱动**：自带 45 个真实器件驱动（自 C++/Rust 版迁移，I2C/SPI/UART 三族）加 Qsont 云端网关与 Shell 宿主命令驱动，多数内嵌虚拟器件模型，无硬件即可端到端验证；未迁移的 GPIO / PWM / Speaker / Sim 及 V4L2 Camera 见下文说明
-
-### 目录结构
-
-```
-pymybot/                  Python 包：CLI、SQL 解析、动作执行、HAL、Daemon、智能体
-  gui/                    tkinter 图形界面（默认入口：协议客户端、配置、窗口与审批对话框）
-modules/                  Lua 基础资源与公共库
-  I2C.lua SPI.lua UART.lua Camera.lua     四种基础总线/设备资源
-  HTTP.lua                                HTTP 端点会话（回环默认可用）
-  Timer.lua Relay.lua dummy.lua           纯软件模块（Relay 仅转发参数，非物理继电器）
-  Shell.lua                               宿主命令执行（需 --allow-hardware）
-  Ema.lua Kalman.lua Monitor.lua          滤波与监视
-  bitcompat.lua                           LuaJIT 5.1 位运算兼容层
-  lib/drv_common.lua lib/HAL.lua          驱动框架与 HAL 桥接
-  lib/bus_contract.lua                    总线参数与引用契约
-  lib/sensor_daemon*.lua sensor_aggregate.lua  采样 chunk
-  lib/virtbus.lua lib/virtbus/regmap.lua  虚拟总线与寄存器模型
-  <芯片驱动>.lua                          45 个真实器件驱动 + Qsont.lua 云端网关 + Shell.lua 宿主命令（见下）
-robots/                   SQL 结构文件（示例：relay-test.sql、qsont.sql、camx.sql、shell.sql）
-scripts/                  MT 动作脚本（示例：relay-test.mt）
-skills/                   智能体参考技能（SKILL.md + references；示例：pymybot-scripting）
-docs/                     补充文档（如 Windows faulthandler 说明）
-tests/                    pytest 测试（fixtures/virt/ 为逐驱动无硬件端到端夹具；test_gui.py 覆盖窗口与进程边界）
-```
-
-#### 预置驱动（47 个）
-
-| 总线 | 数量 | 驱动 |
+| 能力 | 默认 | 打开方式 |
 | --- | --- | --- |
-| I2C | 36 | ADS1015、ADS1115、ADXL345、AMG8833、APDS9900、AS3935、AS7262、BH1745、BH1750、BME280、BME688、BMI270、BMM150、CHT8305、EMC2101、INA219、INA226、INA3221、LCD1206、LPS22HB、LSM6DSV、LTC2944、MAX17043、MAX17048、MAX30102、MCP3421、MCP4725、MLX90393、MPU6050、MS5611、PCA9685、PCF8574、SGP30、SHT3X、VL53L0X、VL53L4CD |
-| SPI | 4 | AD9833、ADS1256、MT6826S、TPL0501 |
-| UART | 3 | MHZ19、SCSCL、SDS011 |
-| 云端 | 1 | Qsont（qsont iot-server 网关，HTTP 总线原生实现） |
-| 控制器链 | 2 | Servo（经 controller 引用舵机控制板）、H03ARR（电机驱动） |
-| 宿主 | 1 | Shell（平台 shell 命令执行，返回 out/err/code，需 `--allow-hardware`；命令词间用 `\t` 转义分隔，MT 单元格不接受字面空格） |
+| 物理 I2C/SPI/UART | 关闭 | `--allow-hardware` |
+| 非回环 HTTP | 关闭 | `--allow-hardware` |
+| Shell 驱动 | 关闭 | `--allow-hardware` |
+| Agent 动作/读取/拍照 | 逐次确认 | `--allow-actions` 或弹窗 |
+| Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |
+| Agent Shell | 关闭 | `--enable-shell` + `--allow-shell` |
 
-芯片驱动中 43 个内嵌 `<驱动>_VIRT` 虚拟器件模型：结构脚本声明 `proto='virt'` 即可在无硬件下跑真实驱动的 build/call/destroy 全链路，`tests/fixtures/virt/` 为其中 40 个提供逐驱动端到端夹具（SQL + 动作脚本，与 C++ 版测试同源）。依赖原生 GPIO/PWM/ALSA/V4L2 或仿真器后端的 GPIO、PWM、Speaker、Sim 及旧版 Camera 驱动未迁移——可移植 HAL 不提供这些后端，相关调用会响亮报错而非静默降级。
+**Shell 不是沙箱，Lua 是可信代码。** 只运行审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
 
-### 安装
+## 兼容性
 
-要求 Python 3.11+。
+| 平台 | UART | I2C/SPI | Camera | GUI |
+| --- | --- | --- | --- | --- |
+| Linux | pyserial | pyftdi MPSSE / `smbus2` / `spidev` | PyAV V4L2 | Tk |
+| Windows | pyserial `COMn` | pyftdi MPSSE | PyAV DirectShow | Tk |
+| macOS | pyserial | pyftdi MPSSE | PyAV AVFoundation（14+） | Tk |
 
-```sh
-python -m venv .venv
-# Linux/macOS
-.venv/bin/pip install -e ".[test]"
-# Windows
-.venv\Scripts\pip install -e ".[test]"
+不提供 GPIO/PWM/Speaker 原生后端；这些外设请通过受支持总线写协议实现。无硬件时使用 `*_virt.sql` 或 `loop://`。
+
+## 目录结构
+
+```text
+pymybot/                  Python 包：CLI、SQL、动作执行、HAL、Daemon、Agent、GUI
+modules/                  Lua 总线、驱动和公共库
+robots/                   结构 SQL 示例（含虚拟设备）
+scripts/                  MT 动作示例
+skills/                   Agent 参考技能
+tests/                    pytest 与逐驱动虚拟夹具
+docs/                     架构、CLI、GUI、开发、测试、发布、安全文档
+implementations/          Cangjie 与 C++17 + Rust 版本
+tools/                    PyInstaller spec 等打包辅助
+.github/                  CI、发布工作流、Issue/PR 模板
 ```
 
-Linux 上需要原生 `/dev/i2c-*` / `/dev/spidev*` 时追加 `.[linux]`；需要从物理摄像头采集时追加 `.[camera]`（PyAV，自带 FFmpeg，约 30 MB）。只用文件图片源不需要它。安装后可用 `pymybot` 命令或 `python -m pymybot`。
+## 文档
 
-图形界面只用标准库 tkinter：Windows / macOS 官方解释器已自带，Debian/Ubuntu 需要 `apt install python3-tk`。
-除 `pymybot` 外还会安装等价的 `mybot-gui` 入口。
+| 想了解 | 从这里开始 |
+| --- | --- |
+| 架构与数据流 | [docs/architecture.md](docs/architecture.md) |
+| CLI / JSON / serve | [docs/cli.md](docs/cli.md) |
+| GUI | [docs/gui.md](docs/gui.md) |
+| 开发与打包 | [docs/development.md](docs/development.md) |
+| 测试与 CI 通道 | [docs/testing.md](docs/testing.md) |
+| 版本与发布 | [docs/release.md](docs/release.md) · [docs/versioning.md](docs/versioning.md) |
+| 安全模型 | [docs/security.md](docs/security.md) · [SECURITY.md](SECURITY.md) |
+| 常见问题 | [docs/faq.md](docs/faq.md) |
+| 分支历史 | [docs/history.md](docs/history.md) |
 
-启用智能体时，在虚拟环境内安装 `python -m pip install -e ".[agent,test]"`。仅直接执行可继续使用基础安装，不需要 PydanticAI、模型 API Key 或模型网络请求。智能体依赖锁定为已验证接口版本；缺少依赖时明确报错，不静默降级。
-
-验证依赖：
-
-```sh
-.venv/bin/python -c "from lupa.luajit21 import LuaRuntime; import sqlparse, serial, pyftdi, PIL"
-.venv/bin/python -m pytest
-```
-
-### 平台说明
-
-- UART：pyserial；Windows 使用确认过的 `COMn`，`loop://` 为无硬件回环
-- I2C/SPI：pyftdi；需要支持 MPSSE 的 FTDI 适配器和 libusb 驱动，地址形如 `ftdi://ftdi:232h/1`，SPI 可带 `?cs=0`
-- `/dev/i2c-*`、`/dev/spidev*`：仅 Linux，依赖可选 smbus2/spidev
-- Camera：物理设备经 PyAV（`.[camera]`）采集，Windows 走 DirectShow（设备序号按枚举顺序映射）、Linux 走 V4L2（序号或 `/dev/videoN`）、macOS 走 AVFoundation（需 macOS 14+，固定 30 fps）；`width`/`height` 必须是摄像头支持的模式，否则打开失败而不是静默改用其他分辨率；文件输入由 Pillow 完整解码校验，必须指定 `--camera-src-dir`
-- HTTP：标准库 urllib；回环主机（127.0.0.1 / localhost / [::1]）无需开关，非回环主机需要 `--allow-hardware`（URL 禁带凭据/query，不跟随重定向，请求路径强制相对）
-- 不提供 GPIO/PWM/Speaker 原生后端；相应外设通过受支持总线编写协议实现
-- Lua 指令预算和可取消等待不能中断阻塞的原生库调用；进程退出不等于执行器物理急停
-- Windows：LuaJIT 以 SEH 异常（`0xE24C4A02`）抛出每个 Lua 错误，CPython faulthandler 会误判为崩溃并可能导致进程段错误，因此 CLI 在 Windows 上会关闭 `-X faulthandler` / `PYTHONFAULTHANDLER`（stderr 提示一行），测试套件同样在 Windows 上关闭 pytest 的 faulthandler
-- 输出编码：stdout（JSON）与 stderr（诊断）固定为 UTF-8，不随控制台或管道的本地代码页（如 Windows 中文系统的 GBK）变化；调用方应按 UTF-8 解码两路输出
-
-### 安全边界
-
-- 只执行已审阅且可信的 Lua。Lupa 使用 LuaJIT 2.1，FFI 可用；路径与属性限制不是恶意代码隔离
-- Shell 驱动以宿主用户权限与环境在当前目录执行任意命令，**不是沙箱**，与物理设备和非回环 HTTP 同受 `--allow-hardware` 门控（agent 的 shell 工具另有独立开关，见上文）。超时会击杀进程树（POSIX 进程组、Windows taskkill /T），逃逸到新会话的后代不保证；输出超限截断并以 `truncated` 标注
-- `active` / `build` / `destroy` 以及 `sample` 都可能写硬件：初始化会配置器件，`read` 可能回退到驱动 `call`
-- 不把真实路径静默替换为虚拟路径，不把合成数据报告为真实测量；虚拟和真机使用分别命名的 SQL
-- HTTP 请求只指向结构文件声明的 base（相对路径强制、重定向不跟随），非回环主机与物理设备同受 `--allow-hardware` 约束
-- 结构文件、动作脚本和 SQL 文本上限 8 MiB，结果体同样受限
-
-### 构建
+## 开发与 CI
 
 ```sh
-.venv/bin/pip install build
-.venv/bin/python -m build
+python -m pytest -q
+python -I scripts/ci_smoke.py base
+python -I scripts/ci_smoke.py wheel
 ```
 
-`build_support.py` 会把 `modules/` `robots/` `scripts/` 复制到包内 `pymybot/assets/`，安装后无需源目录即可运行。
+CI 覆盖 Python 3.11–3.14、Windows、Agent（离线模型）、wheel/sdist 干净安装和 README 快速开始。发布由 tag 触发，产出 sdist、wheel、Windows GUI zip 和 `SHA256SUMS`。
 
-### 许可
+## 贡献
 
-[MIT](LICENSE)
+欢迎驱动、文档、测试和前端贡献。请先读 [CONTRIBUTING.md](CONTRIBUTING.md)：
+
+- Bug/功能先开 Issue；小修可直接提 PR。
+- Conventional Commits；`main` 是唯一长驻分支。
+- 不提交密钥、生成物或无关格式化。
+- 安全漏洞走私密渠道：[SECURITY.md](SECURITY.md)。
+
+## 许可证
+
+[MIT](LICENSE)。各语言版本保留自己的版权声明；见 `implementations/*/LICENSE`。
