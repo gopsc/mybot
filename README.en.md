@@ -84,7 +84,8 @@ guides live in [`docs/`](docs/README.md). Scripting references live in
 ## Contributing
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md). Use issues for bugs/features, keep
-`main` the only long-lived branch, and never commit credentials.
+the default branch (`gui-mybot`, intended to become `main`) the only long-lived
+branch, and never commit credentials.
 
 ## License
 

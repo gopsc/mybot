@@ -109,6 +109,7 @@ as the only place that knows about frozen paths.
 
 ## Branches and releases
 
-`main` is the only long-lived branch. Feature branches are short-lived.
+The default branch (`gui-mybot`; the owner may rename it to `main`) is the only
+long-lived branch. Feature branches are short-lived.
 Releases are tagged `vX.Y.Z`; the workflow builds and publishes artifacts from
 the tag. See [`release.md`](release.md).

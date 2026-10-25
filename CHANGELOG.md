@@ -34,7 +34,8 @@ packaging and automation were consolidated into a reproducible monorepo.
 
 ### Changed
 
-- Default branch renamed from `gui-mybot` to `main`.
+- Default branch remains `gui-mybot` for now; renaming it to `main` requires
+  repository-owner/admin access and is tracked as maintenance.
 - GUI is the default entry point; `--no-gui` keeps the terminal experience.
 - Python, GUI and agent dependencies updated to current compatible releases.
 - README rewritten around the three entry points, architecture and

@@ -16,7 +16,9 @@ contributor can find every edition in one place.
 
 ## After
 
-- `main` — Python reference edition and the monorepo root.
+- `gui-mybot` — Python reference edition and the monorepo root. Renaming it to
+  `main` requires repository-owner/admin access, so the name is unchanged for
+  now.
 - `implementations/cangjie/` — Cangjie edition, copied from `cangjie`.
 - `implementations/cpp-rust/` — C++17 + Rust edition, copied from
   `cpp_rust_agent`.
@@ -40,5 +42,6 @@ as a prototype, not part of the monorepo.
 
 ## Current branch model
 
-Only `main` is long-lived. Topic branches are short-lived and deleted after
-merge. See [`development.md`](development.md) and [`release.md`](release.md).
+Only the default branch is long-lived. Topic branches are short-lived and
+deleted after merge. See [`development.md`](development.md) and
+[`release.md`](release.md).
