@@ -1,138 +1,183 @@
-# pymybot CI：无 agent 的 base 回归 + agent 集成 + 独立 wheel/README 自检。
-#
-# 与 .gitlab-ci.yml 共用 scripts/ci_smoke.py：base 显式拒绝 pydantic_ai，agent
-# 必须先导入依赖和 pymybot.agent，wheel 从 sdist 构建并在源码树外的新 venv 验证。
-# 本文件是同一套守门在 GitHub Actions 上的落地件。托管方若同时识别两者，回归会跑两遍，
-# 属于预期重复，不是冲突；只保留一处时，删掉另一处即可。
-#
-# 相对 GitLab 版本的增量：新增 windows 作业。GitLab 托管方不提供 Windows runner，
-# 此前 Windows 上的行为只能靠本地手跑；GitHub 提供 windows-latest，于是补上。
-#
-# 版本矩阵的判据：
-# - 3.11 是 pyproject 里 requires-python 的下界，3.12/3.13 作为额外回归版本。
-#   任一版本红 ⇒ `requires-python = ">=3.11"` 的声明与实际不符。
-# - lupa（LuaJIT）、pillow 在 Linux/Windows 均有 wheel，pyftdi/pyserial
-#   为纯 Python，故直接用标准 runner 即可，不需要 gcc / luajit-dev。
-#   摄像头采集依赖 av（`.[camera]` 可选）不在 CI 安装，测试用假模块覆盖。
-
 name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [main, gui-mybot]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
-jobs:
-  test:
-    name: pytest / Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
-      - name: 确认 base 未安装 agent
-        run: python -I scripts/ci_smoke.py base
-      - name: Base 回归（agent 集成由独立通道覆盖）
-        run: python -m pytest -q
+permissions:
+  contents: read
 
-  # Windows 上的守门对象是文档记录过的两处平台差异，二者都只在 Windows 生效，
-  # Linux 矩阵覆盖不到：
-  #   docs/windows-faulthandler-luajit.md —— LuaJIT SEH 错误被 faulthandler 误判为崩溃；
-  #   同文档「后续：输出流固定 UTF-8」—— stdout/stderr 固定 UTF-8，不随本地代码页变化。
-  # 相关测试（含 test_faulthandler_cannot_break_json_on_lua_errors）在非 Windows 上
-  # 断言天然成立，真正验证它们跑在哪个平台，所以这条作业不能省。
-  # Python 版本取 3.12：与上述文档的验证环境一致。
-  windows:
-    name: pytest / Windows
-    runs-on: windows-latest
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: lint / syntax + undefined names
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
-      - name: 确认 base 未安装 agent
-        run: python -I scripts/ci_smoke.py base
-      - name: Base 回归（agent 集成由独立通道覆盖）
-        run: python -m pytest -q
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install "ruff>=0.17,<1"
+      - name: Ruff
+        run: ruff check pymybot tests scripts build_support.py
 
-  # 离线模型与回环服务验证最低 Python 版本及 Windows 智能体集成。
-  agent:
-    name: agent / ${{ matrix.os }} / Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: "3.11"
-          - os: windows-latest
-            python-version: "3.12"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: 安装 agent 与测试依赖
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[agent,test]"
-      - name: Agent 导入预检（不允许整模块静默 skip）
-        run: python -I scripts/ci_smoke.py agent
-      - name: 含 agent 的全量回归
-        run: python -m pytest -q
-
-  wheel:
-    name: wheel smoke / ${{ matrix.os }} / Python ${{ matrix.python-version }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: "3.11"
-          - os: windows-latest
-            python-version: "3.12"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: 仅安装构建前端（不安装 checkout）
-        run: python -m pip install build
-      - name: 构建 sdist/wheel 并隔离验证安装产物
-        run: python -I scripts/ci_smoke.py wheel
-
-  # README「快速开始」的两条命令：文档里的承诺由 CI 验证，而不是靠人工记得跑。
-  # 这两条命令不激活物理硬件、只走 Timer/Relay 纯软件模块，可在无硬件环境执行。
-  quickstart:
-    name: README 快速开始自检
+  test:
+    name: pytest / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Base dependency preflight
+        run: python -I scripts/ci_smoke.py base
+      - name: Tests
+        run: python -m pytest -q
+
+  windows:
+    name: pytest / Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: 安装依赖
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[test]"
-      - name: 确认 base 未安装 agent
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Base dependency preflight
         run: python -I scripts/ci_smoke.py base
+      - name: Tests
+        run: python -m pytest -q
+
+  agent:
+    name: agent / ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install agent and test dependencies
+        run: python -m pip install -e ".[agent,test]"
+      - name: Agent import preflight
+        run: python -I scripts/ci_smoke.py agent
+      - name: Offline model and full regression
+        run: python -m pytest -q
+
+  wheel:
+    name: wheel smoke / ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install build frontend
+        run: python -m pip install build
+      - name: Build and verify in a clean venv
+        run: python -I scripts/ci_smoke.py wheel
+
+  quickstart:
+    name: README quick start
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[test]"
+      - name: Version and diagnostics
+        run: |
+          python -m pymybot --version
+          python -m pymybot doctor
       - name: check
         run: python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
       - name: run
         run: python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10
+
+  cpp-rust:
+    name: C++17 host / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: build + tests
+            command: cmake -S . -B build-ci -DMYBOT_WERROR=ON && cmake --build build-ci -j"$(nproc)" && ./build-ci/mybot_tests
+          - target: Rust agent
+            command: cd agent && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings && cargo fmt --check
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install C++ prerequisites
+        if: matrix.target == 'build + tests'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake g++ libluajit-5.1-dev luajit
+      - uses: dtolnay/rust-toolchain@stable
+        if: matrix.target == 'Rust agent'
+        with:
+          components: clippy, rustfmt
+      - name: Build and test
+        working-directory: implementations/cpp-rust
+        run: ${{ matrix.command }}
+
+  docker:
+    name: docker / headless
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build headless image
+        run: docker build -t pymybot:ci .
+      - name: Run doctor in the image
+        run: docker run --rm pymybot:ci doctor

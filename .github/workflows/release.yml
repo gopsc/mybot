@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build artifacts without creating a release"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  source:
+    name: sdist + wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install build frontend
+        run: python -m pip install build
+      - name: Build
+        run: python -m build --outdir dist
+      - name: Verify wheel in a clean venv
+        run: python -I scripts/ci_smoke.py wheel
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-dist
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows GUI bundle
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install agent + packaging dependencies
+        run: python -m pip install -e ".[agent,package]"
+      - name: Doctor
+        run: python -m pymybot doctor
+      - name: Build bundle
+        run: python -m PyInstaller --noconfirm --clean tools/mybot.spec
+      - name: Smoke the bundle
+        run: |
+          dist\mybot\pymybot.exe --version
+          dist\mybot\pymybot.exe doctor
+          dist\mybot\pymybot.exe check --robot dist\mybot\robots\relay-test.sql --input dist\mybot\scripts\relay-test.mt
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          if (-not $version) { $version = "dev" }
+          $name = "pymybot-$version-windows-x64"
+          Compress-Archive -Path dist/mybot -DestinationPath "dist/$name.zip"
+          Get-FileHash "dist/$name.zip" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $name.zip" } |
+            Out-File "dist/SHA256SUMS" -Encoding ascii
+          Get-Content "dist/SHA256SUMS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-bundle
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: [source, windows]
+    if: startsWith(github.ref, 'refs/tags/') && github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*"
+          path: artifacts
+      - name: Flatten and checksum
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp {} release/ \;
+          cd release
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
