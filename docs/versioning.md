@@ -43,11 +43,18 @@ than be silently ignored.
 
 ## Historical tags
 
+Active archive tags (resolvable in the repository):
+
 | Tag | Meaning |
 | --- | --- |
 | `v0.0.1beta`–`v0.0.3beta` | Early Cangjie edition milestones |
-| `cangjie-final` | Archived Cangjie branch tip |
-| `gui-v1` | Withdrawn 2026-10-25 GUI binary release; release and tag removed |
 | `archive/cangjie`, `archive/cpp-rust-agent`, `archive/cangjie-new`, `archive/release-session-log` | Preserved historical branch tips |
 | `v0.2.0` | First reproducible monorepo release |
 | `v0.3.0` | Configurable history byte budget |
+
+Retired tags (removed from the remote, kept only as historical notes):
+
+| Tag | Reason |
+| --- | --- |
+| `cangjie-final` | Superseded by `archive/cangjie`; the commit is identical |
+| `gui-v1` | Withdrawn 2026-10-25 binary release; the release and tag were removed |
