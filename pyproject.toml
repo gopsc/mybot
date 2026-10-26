@@ -34,14 +34,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=9.1.1,<10", "ruff>=0.17,<1"]
+gui = ["PySide6>=6.10,<7"]
+test = ["pytest>=9.1.1,<10", "ruff>=0.17,<1", "PySide6>=6.10,<7"]
 camera = ["av>=19.0.2,<20"]
 agent = [
   "pydantic-ai-slim[openai,anthropic]>=2.61,<3",
   "anthropic>=2.3,<3",
 ]
 linux = ["smbus2>=0.5; sys_platform == 'linux'", "spidev>=3.6; sys_platform == 'linux'"]
-package = ["pyinstaller>=6.22,<7"]
+package = ["pyinstaller>=6.22,<7", "PySide6>=6.10,<7"]
 
 [project.urls]
 Homepage = "https://github.com/gopsc/mybot"

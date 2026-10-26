@@ -6,6 +6,7 @@
 | --- | --- |
 | Python | 3.11–3.14 |
 | LuaJIT | provided by the `lupa` wheel |
+| PySide6 | 6.10–6.x, included in `gui`, `test` and `package` extras |
 | Node/npm | not required for the Python edition |
 | PyInstaller | 6.x, only for frozen builds |
 
@@ -29,7 +30,7 @@ Use the platform paths under Windows (`.venv\Scripts\pip`).
 
 ```sh
 python -m pytest -q                       # full suite, no hardware
-python -m pytest tests/test_gui.py -q     # display tests skip on headless CI
+python -m pytest tests/test_gui.py -q     # Qt widgets tested offscreen, including headless CI
 python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
 python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10
 python -I tools/ci_smoke.py base        # fail if pydantic_ai leaked into base env
@@ -96,8 +97,10 @@ The spec produces `dist/mybot/` with:
 - the GUI launches `pymybot.exe serve` with `CREATE_NO_WINDOW`, so no console
   flashes behind the window.
 
-The `camera` extra keeps PyAV and its FFmpeg libraries in the bundle; omit it
-only for a build that will never capture images.
+The `package` extra includes PySide6; PyInstaller's Qt hooks collect the
+Widgets libraries and platform plugins. The `camera` extra keeps PyAV and its
+FFmpeg libraries in the bundle; omit it only for a build that will never capture
+images.
 
 `pymybot/paths.py` resolves assets via `sys._MEIPASS` in frozen builds. Keep it
 as the only place that knows about frozen paths; other modules call

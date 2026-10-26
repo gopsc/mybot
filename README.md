@@ -11,7 +11,7 @@
 
 ![pymybot GUI](docs/screenshots/gui.png)
 
-> 截图来自本地回环演示端点：Agent 先调用 `list_hardware`，再解释得到的硬件上下文。
+> 截图来自 PySide6 窗口与本地回环模拟模型：Agent 列出硬件，经审批执行虚拟动作，再返回结果。
 
 ## 三种入口
 
@@ -70,8 +70,11 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 ### 2. 打开 GUI
 
 ```sh
+.venv/bin/pip install -e ".[gui]"
 .venv/bin/python -m pymybot
 ```
+
+GUI 使用 PySide6（Qt 6）；纯命令行环境无需安装 `gui` 可选依赖。
 
 首次使用在 **设置** 中选择 workspace、结构文件和模型；如果只想控制硬件，不需要模型配置。
 
@@ -202,9 +205,9 @@ require_driver("uart", {
 
 | 平台 | UART | I2C/SPI | Camera | GUI |
 | --- | --- | --- | --- | --- |
-| Linux | pyserial | pyftdi MPSSE / `smbus2` / `spidev` | PyAV V4L2 | Tk |
-| Windows | pyserial `COMn` | pyftdi MPSSE | PyAV DirectShow | Tk |
-| macOS | pyserial | pyftdi MPSSE | PyAV AVFoundation（14+） | Tk |
+| Linux | pyserial | pyftdi MPSSE / `smbus2` / `spidev` | PyAV V4L2 | PySide6 |
+| Windows | pyserial `COMn` | pyftdi MPSSE | PyAV DirectShow | PySide6 |
+| macOS | pyserial | pyftdi MPSSE | PyAV AVFoundation（14+） | PySide6 |
 
 不提供 GPIO/PWM/Speaker 原生后端；这些外设请通过受支持总线写协议实现。无硬件时使用 `*_virt.sql` 或 `loop://`。
 

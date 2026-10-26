@@ -13,10 +13,10 @@
 | Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs |
 | Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
 
-The suite must run without physical hardware. Tests that need a display skip
-cleanly on headless CI; they are not allowed to be silently skipped when the
-agent dependencies are missing in the agent channel—`ci_smoke.py agent` fails
-instead.
+The suite must run without physical hardware. The `test` extra includes
+PySide6; GUI tests use Qt's offscreen platform and run on headless CI. Agent
+tests are not allowed to silently skip when dependencies are missing in the
+agent channel—`ci_smoke.py agent` fails instead.
 
 ## General commands
 
@@ -32,7 +32,7 @@ python -m pytest --durations=10 -q
 | Channel | OS / Python | Purpose |
 | --- | --- | --- |
 | base | Ubuntu 3.11, 3.12, 3.13, 3.14 | No `pydantic_ai` installed; controller regression |
-| windows | Windows / 3.13 | faulthandler, UTF-8 and Tk behaviour |
+| windows | Windows / 3.13 | faulthandler, UTF-8 and Qt behaviour |
 | agent | Ubuntu 3.11; Windows 3.13 | Offline model/agent integration |
 | wheel | Ubuntu 3.11; Windows 3.13 | Build from sdist, install into clean venv |
 | quickstart | Ubuntu 3.14 | README commands actually run |

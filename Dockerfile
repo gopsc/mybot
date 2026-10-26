@@ -1,4 +1,4 @@
-# Headless pymybot image. GUI/Tk is intentionally not installed.
+# Headless pymybot image. GUI/PySide6 is intentionally not installed.
 # Build with agent support: docker build --build-arg EXTRAS=agent -t pymybot:agent .
 FROM python:3.12-slim
 

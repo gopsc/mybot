@@ -1,10 +1,4 @@
-"""Process boundary for the tkinter GUI.
-
-The GUI never executes robot code itself: it either drives one long-lived
-``python -m pymybot serve`` over stdio JSON-RPC 2.0 (agent mode) or runs
-one-shot CLI commands (controller mode). This module owns those pipes so the
-Tk thread only ever touches widgets.
-"""
+"""Process boundary for the GUI's stdio JSON-RPC and one-shot CLI children."""
 from __future__ import annotations
 
 import json
@@ -234,7 +228,7 @@ class ServeClient:
 
     ``on_notify(method, params)``, ``on_request(ident, method, params)``,
     ``on_stderr(chunk)`` and ``on_exit(code)`` are called from reader threads:
-    the caller must marshal them onto the Tk thread itself.
+    the caller must marshal them onto the GUI thread itself.
     """
 
     def __init__(
@@ -340,7 +334,7 @@ class ServeClient:
                 if method != "cancel" and self._on_notify is not None:
                     self._on_notify(method, message.get("params") or {})
             elif self._on_request is not None:
-                # Server-initiated request; answered later from the Tk thread.
+                # Server-initiated request; answered later from the GUI thread.
                 self._on_request(ident, method, message.get("params") or {})
             return
         ident = message.get("id")

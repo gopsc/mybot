@@ -1,11 +1,4 @@
-"""Tkinter front end: an agent-centric window over ``pymybot serve``.
-
-The window owns no robot logic. It starts one long-lived ``python -m pymybot
-serve`` child, turns its JSON-RPC notifications into chat lines and asks the
-operator to approve each tool call the agent requests. Hardware access and
-automatic action approval are GUI toggles that must be confirmed every launch;
-they are never persisted.
-"""
+"""Native Qt window over the long-lived ``pymybot serve`` process."""
 from __future__ import annotations
 
 import json
@@ -13,45 +6,29 @@ import os
 import queue
 import sys
 import threading
-import tkinter as tk
+import time
 from pathlib import Path
-from tkinter import filedialog, font as tkfont, messagebox, ttk
-from tkinter.scrolledtext import ScrolledText
 
+from PySide6.QtCore import QEventLoop, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
+from PySide6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
+    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QVBoxLayout, QWidget,
+)
+
+from . import GuiUnavailable
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
 
 TITLE = "mybot · 智能体"
 MAX_DIALOG_ARGS = 4000
-
 PALETTE = {
-    "bg": "#f3f5f8",
-    "panel": "#ffffff",
-    "subtle": "#eef1f6",
-    "border": "#d9dee8",
-    "ink": "#1f2328",
-    "muted": "#6b7280",
-    "accent": "#2563eb",
-    "accent_dark": "#1d4ed8",
-    "user": "#1d4ed8",
-    "assistant": "#111827",
-    "tool": "#6b7280",
-    "toolerr": "#b91c1c",
-    "error": "#b91c1c",
-    "system": "#6b7280",
+    "user": "#1d4ed8", "assistant": "#111827", "tool": "#6b7280",
+    "toolerr": "#b91c1c", "error": "#b91c1c", "system": "#6b7280",
 }
-
-
-class GuiUnavailable(RuntimeError):
-    """Raised when no Tk display is available."""
-
-
-def _pick_font(root, candidates, size, fallback):
-    available = set(tkfont.families(root))
-    for name in candidates:
-        if name in available:
-            return (name, size)
-    return (fallback, size)
 
 
 def _brief(value, limit=160):
@@ -62,27 +39,49 @@ def _brief(value, limit=160):
     except (TypeError, ValueError):
         text = str(value)
     text = " ".join(text.split())
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
 def _absolute(path, root):
-    """GUI paths may be workspace-relative; the agent needs absolute ones."""
     text = str(path or "").strip()
     if not text:
         return ""
     candidate = Path(text)
-    return str(candidate if candidate.is_absolute() else Path(root or ".") / candidate)
+    return str(candidate if candidate.is_absolute() else Path(root or ".").absolute() / candidate)
 
 
-class App:
-    def __init__(self, root, config: GuiConfig, config_path: Path):
-        self.root = root
+def _label(text=""):
+    label = QLabel(text)
+    label.setTextFormat(Qt.TextFormat.PlainText)
+    label.setWordWrap(True)
+    return label
+
+
+def _button(text, callback):
+    button = QPushButton(text)
+    button.clicked.connect(callback)
+    return button
+
+
+def _spin(value, maximum, fractional=False):
+    box = QDoubleSpinBox() if fractional else QSpinBox()
+    box.setRange(0.01 if fractional else 1, maximum)
+    box.setValue(value)
+    return box
+
+
+class App(QMainWindow):
+    closed = Signal()
+
+    def __init__(self, config: GuiConfig, config_path: Path):
+        super().__init__()
         self.cfg = config
-        self.config_path = config_path
-        self.queue: "queue.Queue" = queue.Queue()
+        self.config_path = Path(config_path)
+        self.queue = queue.Queue()
         self.serve: ServeClient | None = None
         self.starting = False
         self._restart_pending = False
+        self._retiring = False
         self.generation = 0
         self.greeted = False
         self.serve_state = "未启动"
@@ -92,389 +91,344 @@ class App:
         self.turn_text = 0
         self.at_line_start = True
         self.pending_task = ""
-        self.hardware_job = None
-        self._notice_job = None
         self._stopping = False
+        self._lifecycle_lock = threading.Lock()
+        self._clients = {}
+        self._lifecycle_workers = []
+        self._hardware_calls = set()
+        self._hardware_generation = 0
+        self._dialogs = set()
+        self.font_mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
-        self.font_ui = _pick_font(root, ("Microsoft YaHei UI", "Segoe UI", "Noto Sans CJK SC", "DejaVu Sans"), 10, "TkDefaultFont")
-        self.font_mono = _pick_font(root, ("Cascadia Mono", "Consolas", "DejaVu Sans Mono", "Courier New"), 9, "TkFixedFont")
-
-        self._style()
         self._build()
+        self._notice_timer = QTimer(self)
+        self._notice_timer.setSingleShot(True)
+        self._notice_timer.timeout.connect(lambda: self.status_notice.setText(""))
+        self._pump_timer = QTimer(self)
+        self._pump_timer.timeout.connect(self._pump)
+        self._pump_timer.start(30)
+        self._start_timer = QTimer(self)
+        self._start_timer.setSingleShot(True)
+        self._start_timer.timeout.connect(self._start_server)
         self._load_robot_list()
         self._refresh_hardware()
-        root.after(60, self._pump)
-        root.protocol("WM_DELETE_WINDOW", self.on_close)
-        root.after(120, self._start_server)
-        if self.cfg.task.strip():
-            self.task_box.insert("1.0", self.cfg.task.strip())
-            self.task_box.focus_set()
+        self._start_timer.start(120)
+        self.task_box.setPlainText(self.cfg.task.strip())
         self._refresh_status()
 
-    # -- construction ------------------------------------------------------
-    def _style(self):
-        style = ttk.Style(self.root)
-        for name in ("vista", "winnative", "clam", "default"):
-            if name in style.theme_names():
-                style.theme_use(name)
-                break
-        bg, panel, subtle = PALETTE["bg"], PALETTE["panel"], PALETTE["subtle"]
-        border, ink, muted = PALETTE["border"], PALETTE["ink"], PALETTE["muted"]
-        style.configure(".", font=self.font_ui, background=bg, foreground=ink)
-        style.configure("TFrame", background=bg)
-        style.configure("Toolbar.TFrame", background=panel)
-        style.configure("Side.TFrame", background=bg)
-        style.configure("TLabel", background=bg, foreground=ink)
-        style.configure("Toolbar.TLabel", background=panel, foreground=ink)
-        style.configure("Muted.TLabel", background=bg, foreground=muted)
-        style.configure("ToolbarMuted.TLabel", background=panel, foreground=muted)
-        style.configure("Head.TLabel", font=(self.font_ui[0], 10, "bold"))
-        style.configure("TLabelframe", background=bg, bordercolor=border, relief="solid", borderwidth=1)
-        style.configure("TLabelframe.Label", background=bg, foreground=ink, font=(self.font_ui[0], 9, "bold"))
-        style.configure("TButton", font=self.font_ui, padding=(10, 5), background=panel,
-                        foreground=ink, bordercolor=border, relief="flat")
-        style.map("TButton", background=[("active", subtle)], bordercolor=[("focus", PALETTE["accent"])])
-        style.configure("Send.TButton", font=(self.font_ui[0], 10, "bold"), padding=(14, 8),
-                        background=PALETTE["accent"], foreground="#ffffff", bordercolor=PALETTE["accent"])
-        style.map("Send.TButton", background=[("active", PALETTE["accent_dark"]), ("disabled", "#9aa8c7")],
-                  foreground=[("disabled", "#eef2ff")])
-        style.configure("TCheckbutton", background=bg, foreground=ink)
-        style.map("TCheckbutton", background=[("active", bg)])
-        style.configure("TEntry", fieldbackground=panel, bordercolor=border, padding=4)
-        style.configure("TSpinbox", fieldbackground=panel, bordercolor=border, padding=3)
-        style.configure("TCombobox", fieldbackground=panel, background=panel, bordercolor=border, padding=4)
-        style.map("TCombobox", fieldbackground=[("readonly", panel)])
-        style.configure("TNotebook", background=bg, borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(14, 7), background=subtle, foreground=muted,
-                        font=(self.font_ui[0], 9, "bold"))
-        style.map("TNotebook.Tab", background=[("selected", panel)], foreground=[("selected", ink)])
-        style.configure("Treeview", background=panel, fieldbackground=panel, foreground=ink,
-                        rowheight=24, borderwidth=0, font=self.font_ui)
-        style.configure("Treeview.Heading", background=subtle, foreground=muted,
-                        font=(self.font_ui[0], 9, "bold"), relief="flat", padding=(4, 6))
-        style.map("Treeview", background=[("selected", "#dbe7ff")], foreground=[("selected", ink)])
-        style.configure("TScrollbar", background=subtle, troughcolor=bg, bordercolor=bg, arrowcolor=muted)
-        style.configure("TPanedwindow", background=bg)
-        self.root.configure(background=bg)
-
     def _build(self):
-        self.root.title(TITLE)
-        self.root.geometry("1180x780")
-        self.root.minsize(940, 620)
+        self.setWindowTitle(TITLE)
+        self.resize(1180, 780)
+        self.setMinimumSize(900, 600)
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        toolbar = QHBoxLayout()
+        layout.addLayout(toolbar)
+        toolbar.addWidget(_button("打开工作区", self.pick_workspace))
+        self.workspace_label = _label()
+        self.workspace_label.setMaximumWidth(220)
+        toolbar.addWidget(self.workspace_label)
+        toolbar.addWidget(_label("结构"))
+        self.robot_box = QComboBox()
+        self.robot_box.setMinimumWidth(180)
+        self.robot_box.activated.connect(self.on_robot_changed)
+        toolbar.addWidget(self.robot_box, 1)
+        toolbar.addWidget(_button("选择 SQL", self.pick_robot))
+        toolbar.addWidget(_button("刷新", self.refresh_context))
+        self.new_button = _button("新对话", self.new_conversation)
+        self.stop_button = _button("停止", self.stop_turn)
+        toolbar.addWidget(self.new_button)
+        toolbar.addWidget(self.stop_button)
+        toolbar.addWidget(_button("设置", self.open_settings))
 
-        toolbar = ttk.Frame(self.root, style="Toolbar.TFrame", padding=(10, 8))
-        toolbar.pack(side="top", fill="x")
-        ttk.Button(toolbar, text="打开工作区", command=self.pick_workspace).pack(side="left")
-        self.workspace_label = ttk.Label(toolbar, text="", style="ToolbarMuted.TLabel")
-        self.workspace_label.pack(side="left", padx=(8, 16))
-        ttk.Label(toolbar, text="结构", style="Toolbar.TLabel").pack(side="left")
-        self.robot_box = ttk.Combobox(toolbar, width=34, state="readonly", values=[])
-        self.robot_box.pack(side="left", padx=(6, 4))
-        self.robot_box.bind("<<ComboboxSelected>>", lambda _event: self.on_robot_changed())
-        ttk.Button(toolbar, text="⟳", width=3, command=self.refresh_context).pack(side="left")
-        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=12)
-        self.new_button = ttk.Button(toolbar, text="新对话", command=self.new_conversation)
-        self.new_button.pack(side="left")
-        self.stop_button = ttk.Button(toolbar, text="■ 停止", command=self.stop_turn)
-        self.stop_button.pack(side="left", padx=6)
-        ttk.Button(toolbar, text="设置", command=self.open_settings).pack(side="right")
-
-        # Reserve the status bar before the body: a tall side panel must never
-        # push it out of the window.
-        status = ttk.Frame(self.root, padding=(10, 4))
-        status.pack(side="bottom", fill="x")
-        self.status_state = ttk.Label(status, text="", style="Muted.TLabel")
-        self.status_state.pack(side="left")
-        self.status_agent = ttk.Label(status, text="", style="Muted.TLabel")
-        self.status_agent.pack(side="left", padx=(14, 0))
-        self.status_busy = ttk.Label(status, text="", style="Muted.TLabel")
-        self.status_busy.pack(side="left", padx=(14, 0))
-        self.status_notice = ttk.Label(status, text="", style="Muted.TLabel")
-        self.status_notice.pack(side="left", padx=(14, 0))
-
-        body = ttk.PanedWindow(self.root, orient="horizontal")
-        body.pack(side="top", fill="both", expand=True, padx=10, pady=(0, 6))
-
-        side = ttk.Frame(body, style="Side.TFrame", width=330)
-        body.add(side, weight=0)
+        body = QSplitter(Qt.Orientation.Horizontal)
+        layout.addWidget(body, 1)
+        side_scroll = QScrollArea()
+        side_scroll.setWidgetResizable(True)
+        side_scroll.setMinimumWidth(280)
+        side = QWidget()
+        side_scroll.setWidget(side)
         self._build_side(side)
-
-        right = ttk.Frame(body)
-        body.add(right, weight=1)
+        body.addWidget(side_scroll)
+        right = QWidget()
         self._build_chat(right)
+        body.addWidget(right)
+        body.setStretchFactor(0, 0)
+        body.setStretchFactor(1, 1)
+        body.setSizes([350, 810])
 
-    def _build_side(self, host):
-        # The context pane scrolls, so a long hardware list can never squeeze the
-        # chat or push the window past the screen.
-        canvas = tk.Canvas(host, highlightthickness=0, borderwidth=0,
-                           background=PALETTE["bg"], width=318)
-        scroll = ttk.Scrollbar(host, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=scroll.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        scroll.pack(side="right", fill="y")
-        side = ttk.Frame(canvas, style="Side.TFrame")
-        window = canvas.create_window((0, 0), window=side, anchor="nw")
+        self.status_state = _label()
+        self.status_agent = _label()
+        self.status_busy = _label()
+        self.status_notice = _label()
+        for label in (self.status_state, self.status_agent, self.status_busy, self.status_notice):
+            self.statusBar().addWidget(label)
 
-        def resize(_event=None):
-            canvas.configure(scrollregion=canvas.bbox("all"))
+    def _build_side(self, side):
+        layout = QVBoxLayout(side)
+        robot = QGroupBox("机器人上下文")
+        form = QFormLayout(robot)
+        self.context_entries = {}
+        fields = (
+            ("scripts_dir", "脚本根目录", True), ("skills_dir", "技能目录", True),
+            ("module_paths", "模块路径", False), ("camera_src_dir", "图片源目录", True),
+        )
+        for name, label, browse in fields:
+            row = QHBoxLayout()
+            value = getattr(self.cfg, name)
+            entry = QLineEdit(os.pathsep.join(value) if name == "module_paths" else value)
+            entry.editingFinished.connect(self._sync_config)
+            self.context_entries[name] = entry
+            row.addWidget(entry)
+            if browse:
+                row.addWidget(_button("…", lambda checked=False, e=entry: self._browse_into(e)))
+            form.addRow(label, row)
+        layout.addWidget(robot)
 
-        def fit(event):
-            canvas.itemconfigure(window, width=event.width)
+        hardware = QGroupBox("硬件")
+        hw_layout = QVBoxLayout(hardware)
+        self.hardware_tree = QTreeWidget()
+        self.hardware_tree.setHeaderLabels(["变量", "驱动", "配置"])
+        self.hardware_tree.setRootIsDecorated(False)
+        self.hardware_tree.setMinimumHeight(140)
+        self.hardware_tree.setColumnWidth(0, 90)
+        self.hardware_tree.setColumnWidth(1, 80)
+        hw_layout.addWidget(self.hardware_tree)
+        self.hardware_note = _label("选择结构后自动读取")
+        hw_layout.addWidget(self.hardware_note)
+        layout.addWidget(hardware)
 
-        side.bind("<Configure>", resize)
-        canvas.bind("<Configure>", fit)
-
-        def wheel(event):
-            canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
-
-        canvas.bind("<Enter>", lambda _event: canvas.bind_all("<MouseWheel>", wheel))
-        canvas.bind("<Leave>", lambda _event: canvas.unbind_all("<MouseWheel>"))
-
-        robot = ttk.Labelframe(side, text="机器人上下文", padding=8)
-        robot.pack(fill="x", padx=6, pady=(6, 6))
-        self._side_entry(robot, "脚本根目录", self.cfg.scripts_dir, self._set_scripts_dir, row=0, browse=True)
-        self._side_entry(robot, "技能目录", self.cfg.skills_dir, self._set_skills_dir, row=1, browse=True)
-        self._side_entry(robot, "模块路径", self.cfg.module_paths[0] if self.cfg.module_paths else "", self._set_module_path, row=2)
-        self._side_entry(robot, "图片源目录", self.cfg.camera_src_dir, self._set_camera_dir, row=3, browse=True)
-
-        hardware = ttk.Labelframe(side, text="硬件", padding=8)
-        hardware.pack(fill="x", padx=6, pady=(0, 6))
-        self.hardware_tree = ttk.Treeview(hardware, columns=("type", "meta"), show="tree headings", height=6)
-        self.hardware_tree.heading("#0", text="变量")
-        self.hardware_tree.heading("type", text="驱动")
-        self.hardware_tree.heading("meta", text="配置")
-        self.hardware_tree.column("#0", width=110, stretch=False)
-        self.hardware_tree.column("type", width=80, stretch=False)
-        self.hardware_tree.column("meta", width=140)
-        self.hardware_tree.pack(side="top", fill="both", expand=True)
-        self.hardware_note = ttk.Label(hardware, text="选择结构后自动读取", style="Muted.TLabel")
-        self.hardware_note.pack(side="top", anchor="w", pady=(4, 0))
-
-        guard = ttk.Labelframe(side, text="权限与预算（每次启动重新确认）", padding=8)
-        guard.pack(fill="x", padx=6, pady=(0, 6))
-        self.hardware_var = tk.BooleanVar(value=bool(self.cfg.allow_hardware))
-        self.actions_var = tk.BooleanVar(value=bool(self.cfg.allow_actions))
-        ttk.Checkbutton(guard, text="允许硬件（--allow-hardware）", variable=self.hardware_var,
-                        command=self.on_permission_toggle).grid(row=0, column=0, columnspan=2, sticky="w")
-        ttk.Checkbutton(guard, text="自动批准动作（不再逐次确认）", variable=self.actions_var,
-                        command=self.on_permission_toggle).grid(row=1, column=0, columnspan=2, sticky="w")
-        ttk.Label(guard, text="读取变量").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        self.read_vars_entry = ttk.Entry(guard, width=18)
-        self.read_vars_entry.insert(0, ",".join(self.cfg.read_vars))
-        self.read_vars_entry.grid(row=2, column=1, sticky="ew", pady=(6, 0))
-        ttk.Label(guard, text="相机变量").grid(row=3, column=0, sticky="w")
-        self.camera_vars_entry = ttk.Entry(guard, width=18)
-        self.camera_vars_entry.insert(0, ",".join(self.cfg.camera_vars))
-        self.camera_vars_entry.grid(row=3, column=1, sticky="ew")
-        ttk.Label(guard, text="超时 / 请求 / 工具").grid(row=4, column=0, sticky="w", pady=(6, 0))
-        budgets = ttk.Frame(guard)
-        budgets.grid(row=4, column=1, sticky="ew", pady=(6, 0))
-        self.timeout_box = ttk.Spinbox(budgets, from_=1, to=3600, width=5)
-        self.timeout_box.set(int(self.cfg.timeout))
-        self.timeout_box.pack(side="left")
-        self.requests_box = ttk.Spinbox(budgets, from_=1, to=100, width=4)
-        self.requests_box.set(self.cfg.max_requests)
-        self.requests_box.pack(side="left", padx=(6, 0))
-        self.tools_box = ttk.Spinbox(budgets, from_=1, to=1000, width=4)
-        self.tools_box.set(self.cfg.max_tool_calls)
-        self.tools_box.pack(side="left", padx=(6, 0))
-        guard.columnconfigure(1, weight=1)
-
-        model = ttk.Labelframe(side, text="模型（在设置中修改）", padding=8)
-        model.pack(fill="x", padx=6, pady=(0, 8))
-        self.model_label = ttk.Label(model, text="", style="Muted.TLabel", wraplength=270)
-        self.model_label.pack(anchor="w")
+        guard = QGroupBox("权限与预算（每次启动重新确认）")
+        form = QFormLayout(guard)
+        self.hardware_toggle = QCheckBox("允许硬件（--allow-hardware）")
+        self.hardware_toggle.setChecked(bool(self.cfg.allow_hardware))
+        self.actions_toggle = QCheckBox("自动批准动作（不再逐次确认）")
+        self.actions_toggle.setChecked(bool(self.cfg.allow_actions))
+        for toggle in (self.hardware_toggle, self.actions_toggle):
+            toggle.toggled.connect(self.on_permission_toggle)
+            form.addRow(toggle)
+        self.read_vars_entry = QLineEdit(",".join(self.cfg.read_vars))
+        self.camera_vars_entry = QLineEdit(",".join(self.cfg.camera_vars))
+        form.addRow("读取变量", self.read_vars_entry)
+        form.addRow("相机变量", self.camera_vars_entry)
+        self.timeout_box = _spin(self.cfg.timeout, 3600, fractional=True)
+        self.requests_box = _spin(self.cfg.max_requests, 100)
+        self.tools_box = _spin(self.cfg.max_tool_calls, 1000)
+        form.addRow("超时（秒）", self.timeout_box)
+        form.addRow("请求预算", self.requests_box)
+        form.addRow("工具预算", self.tools_box)
+        layout.addWidget(guard)
+        model = QGroupBox("模型（在设置中修改）")
+        model_layout = QVBoxLayout(model)
+        self.model_label = _label()
+        model_layout.addWidget(self.model_label)
+        layout.addWidget(model)
+        layout.addStretch()
         self._refresh_model_label()
 
-    def _side_entry(self, parent, label, value, setter, row, browse=False):
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=(0 if row == 0 else 4, 0))
-        frame = ttk.Frame(parent)
-        frame.grid(row=row, column=1, sticky="ew", pady=(0 if row == 0 else 4, 0), padx=(6, 0))
-        entry = ttk.Entry(frame, width=20)
-        entry.insert(0, value or "")
-        entry.pack(side="left", fill="x", expand=True)
-        entry.bind("<FocusOut>", lambda _event: setter(entry.get()))
-        if browse:
-            ttk.Button(frame, text="…", width=3, command=lambda: setter(self._browse_into(entry))).pack(side="left")
-        parent.columnconfigure(1, weight=1)
-        return entry
-
     def _build_chat(self, right):
-        # The composer is reserved at the bottom before the transcript grows.
-        composer = ttk.Frame(right, padding=(0, 6, 0, 0))
-        composer.pack(side="bottom", fill="x")
-        self.notebook = ttk.Notebook(right)
-        self.notebook.pack(side="top", fill="both", expand=True)
+        layout = QVBoxLayout(right)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.notebook = QTabWidget()
+        self.chat = QPlainTextEdit()
+        self.chat.setReadOnly(True)
+        self.chat.setStyleSheet("QPlainTextEdit { background: #ffffff; color: #111827; }")
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setFont(self.font_mono)
+        self.log.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.log.setStyleSheet("QPlainTextEdit { background: #111827; color: #d1d5db; }")
+        self.notebook.addTab(self.chat, "对话")
+        self.notebook.addTab(self.log, "日志")
+        layout.addWidget(self.notebook, 1)
+        composer = QHBoxLayout()
+        self.task_box = QPlainTextEdit()
+        self.task_box.setPlaceholderText("与机器人对话…")
+        self.task_box.setMaximumHeight(100)
+        composer.addWidget(self.task_box, 1)
+        buttons = QVBoxLayout()
+        self.send_button = _button("发送", self.send_task)
+        buttons.addWidget(self.send_button)
+        buttons.addWidget(_label("Ctrl+Enter"))
+        composer.addLayout(buttons)
+        layout.addLayout(composer)
+        self.send_shortcuts = []
+        for key in ("Ctrl+Return", "Ctrl+Enter"):
+            shortcut = QShortcut(QKeySequence(key), self.task_box)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(self.send_task)
+            self.send_shortcuts.append(shortcut)
 
-        chat_frame = ttk.Frame(self.notebook)
-        self.chat = ScrolledText(chat_frame, wrap="word", state="disabled", font=self.font_ui,
-                                 background=PALETTE["panel"], foreground=PALETTE["ink"], relief="flat", padx=10, pady=8)
-        self.chat.pack(side="top", fill="both", expand=True)
-        self.chat.tag_configure("user", foreground=PALETTE["user"], font=(self.font_ui[0], 10, "bold"),
-                                spacing1=6, spacing3=2)
-        self.chat.tag_configure("assistant", foreground=PALETTE["assistant"], spacing3=2)
-        self.chat.tag_configure("tool", foreground=PALETTE["tool"], font=self.font_mono, lmargin1=12, lmargin2=12)
-        self.chat.tag_configure("toolerr", foreground=PALETTE["toolerr"], font=self.font_mono, lmargin1=12, lmargin2=12)
-        self.chat.tag_configure("error", foreground=PALETTE["error"], spacing1=4)
-        self.chat.tag_configure("system", foreground=PALETTE["system"], font=(self.font_ui[0], 9, "italic"), spacing1=4)
-        self.notebook.add(chat_frame, text="对话")
-
-        log_frame = ttk.Frame(self.notebook)
-        self.log = ScrolledText(log_frame, wrap="none", state="disabled", font=self.font_mono,
-                                background="#111827", foreground="#d1d5db", relief="flat", padx=8, pady=6)
-        self.log.pack(side="top", fill="both", expand=True)
-        self.notebook.add(log_frame, text="日志")
-
-        self.task_box = tk.Text(composer, height=3, wrap="word", font=self.font_ui, relief="solid", borderwidth=1)
-        self.task_box.pack(side="left", fill="both", expand=True)
-        self.task_box.bind("<Control-Return>", self._send_shortcut)
-        buttons = ttk.Frame(composer)
-        buttons.pack(side="left", fill="y", padx=(6, 0))
-        self.send_button = ttk.Button(buttons, text="发送", style="Send.TButton", command=self.send_task)
-        self.send_button.pack(side="top", fill="x", ipady=6)
-        ttk.Label(buttons, text="Ctrl+Enter", style="Muted.TLabel").pack(side="top", pady=(4, 0))
-
-    # -- helpers -----------------------------------------------------------
     def post(self, callback):
-        """Queue a callable for the Tk thread; safe to call from any thread."""
-        self.queue.put(callback)
+        """Only the Qt timer consumes callbacks; cleanup never depends on it."""
+        if not self._stopping:
+            self.queue.put(callback)
 
     def _pump(self):
-        if self._stopping:
-            return
-        while True:
+        for _ in range(200):
+            if self._stopping:
+                return
             try:
                 callback = self.queue.get_nowait()
             except queue.Empty:
-                break
+                return
             try:
                 callback()
-            except tk.TclError:
-                return  # the window is going away
-            except Exception as exc:  # a broken callback must not kill the pump
+            except Exception as exc:
                 print(f"pymybot gui: {type(exc).__name__}: {exc}", file=sys.stderr)
-        self.root.after(60, self._pump)
 
-    def _background(self, fn, done):
+    def _background(self, fn, done=None, *, lifecycle=False):
         def run():
             try:
                 value = fn()
             except Exception as exc:
-                error = exc  # `exc` is cleared when the except block ends
-                self.post(lambda: done(None, error))
-                return
-            self.post(lambda: done(value, None))
+                if done is not None:
+                    self.post(lambda error=exc: done(None, error))
+            else:
+                if done is not None:
+                    self.post(lambda: done(value, None))
 
-        threading.Thread(target=run, daemon=True).start()
+        thread = threading.Thread(target=run, daemon=not lifecycle)
+        if lifecycle:
+            with self._lifecycle_lock:
+                self._lifecycle_workers = [worker for worker in self._lifecycle_workers if worker.is_alive()]
+                self._lifecycle_workers.append(thread)
+        thread.start()
 
     def _notice(self, text, seconds=8):
-        self.status_notice.configure(text=text)
-        if self._notice_job is not None:
-            self.root.after_cancel(self._notice_job)
-        self._notice_job = self.root.after(seconds * 1000, lambda: self.status_notice.configure(text=""))
+        if self._stopping:
+            return
+        self.status_notice.setText(text)
+        self._notice_timer.start(int(seconds * 1000))
+
+    def _insert_text(self, widget, text, tag=None):
+        cursor = widget.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        fmt = QTextCharFormat()
+        if tag:
+            fmt.setForeground(QColor(PALETTE[tag]))
+            if tag in {"tool", "toolerr"}:
+                fmt.setFont(self.font_mono)
+            if tag == "user":
+                fmt.setFontWeight(QFont.Weight.Bold)
+            if tag == "system":
+                fmt.setFontItalic(True)
+        cursor.insertText(text, fmt)
+        widget.setTextCursor(cursor)
+        widget.ensureCursorVisible()
 
     def _log(self, chunk):
-        if not chunk or self._stopping:
-            return
-        self.log.configure(state="normal")
-        self.log.insert("end", chunk if chunk.endswith("\n") else chunk + "\n")
-        self.log.see("end")
-        self.log.configure(state="disabled")
+        if chunk and not self._stopping:
+            self._insert_text(self.log, chunk if chunk.endswith("\n") else chunk + "\n")
 
     def _chat_line(self, text, tag=None):
         if self._stopping:
             return
-        prefix = "" if self.at_line_start else "\n"
-        self.chat.configure(state="normal")
-        self.chat.insert("end", prefix + text + "\n", tag or ())
-        self.chat.see("end")
-        self.chat.configure(state="disabled")
+        self._insert_text(self.chat, ("" if self.at_line_start else "\n") + text + "\n", tag)
         self.at_line_start = True
 
     def _chat_delta(self, text):
-        if not text or self._stopping:
-            return
-        self.chat.configure(state="normal")
-        self.chat.insert("end", text, "assistant")
-        self.chat.see("end")
-        self.chat.configure(state="disabled")
-        self.at_line_start = False
-        self.turn_text += len(text)
+        if text and not self._stopping:
+            self._insert_text(self.chat, text, "assistant")
+            self.at_line_start = text.endswith("\n")
+            self.turn_text += len(text)
 
-    # -- configuration -----------------------------------------------------
+    def _exec_dialog(self, dialog):
+        self._dialogs.add(dialog)
+        try:
+            return dialog.exec()
+        finally:
+            self._dialogs.discard(dialog)
+            dialog.deleteLater()
+
+    def _message(self, title, text, *, confirm=False):
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle(title)
+        dialog.setTextFormat(Qt.TextFormat.PlainText)
+        dialog.setText(text)
+        dialog.setIcon(QMessageBox.Icon.Warning)
+        buttons = QMessageBox.StandardButton.Ok
+        if confirm:
+            buttons |= QMessageBox.StandardButton.Cancel
+        dialog.setStandardButtons(buttons)
+        dialog.setDefaultButton(QMessageBox.StandardButton.Cancel if confirm else QMessageBox.StandardButton.Ok)
+        return self._exec_dialog(dialog) == QMessageBox.StandardButton.Ok
+
+    def _sync_config(self):
+        for name, entry in self.context_entries.items():
+            value = entry.text().strip()
+            setattr(self.cfg, name, [item.strip() for item in value.split(os.pathsep) if item.strip()]
+                    if name == "module_paths" else value)
+        self.cfg.read_vars = self._names(self.read_vars_entry.text())
+        self.cfg.camera_vars = self._names(self.camera_vars_entry.text())
+        self.cfg.timeout = self.timeout_box.value()
+        self.cfg.max_requests = self.requests_box.value()
+        self.cfg.max_tool_calls = self.tools_box.value()
+
+    def _sync_controls(self):
+        for name, entry in self.context_entries.items():
+            value = getattr(self.cfg, name)
+            entry.setText(os.pathsep.join(value) if name == "module_paths" else value)
+        self.read_vars_entry.setText(",".join(self.cfg.read_vars))
+        self.camera_vars_entry.setText(",".join(self.cfg.camera_vars))
+        self.timeout_box.setValue(self.cfg.timeout)
+        self.requests_box.setValue(self.cfg.max_requests)
+        self.tools_box.setValue(self.cfg.max_tool_calls)
+
     def _browse_into(self, entry):
-        chosen = filedialog.askdirectory(initialdir=self.cfg.workspace or default_workspace())
+        chosen = QFileDialog.getExistingDirectory(self, "选择目录", self.cfg.workspace or default_workspace())
         if chosen:
-            entry.delete(0, "end")
-            entry.insert(0, chosen)
-        return entry.get()
-
-    def _set_scripts_dir(self, value):
-        self.cfg.scripts_dir = value.strip()
-
-    def _set_skills_dir(self, value):
-        self.cfg.skills_dir = value.strip()
-
-    def _set_module_path(self, value):
-        self.cfg.module_paths = [item.strip() for item in value.split(os.pathsep) if item.strip()]
-
-    def _set_camera_dir(self, value):
-        self.cfg.camera_src_dir = value.strip()
+            entry.setText(chosen)
+            self._sync_config()
 
     def _refresh_model_label(self):
         model = self.cfg.model or os.environ.get("MYBOT_MODEL", "")
         key_env = self.cfg.api_key_env or "厂商默认变量"
         endpoint = self.cfg.base_url or "厂商默认"
-        self.model_label.configure(
-            text=f"模型：{model or '未设置（需 MYBOT_MODEL）'}\n端点：{endpoint}\n密钥变量：{key_env}"
-        )
+        self.model_label.setText(f"模型：{model or '未设置（需 MYBOT_MODEL）'}\n端点：{endpoint}\n密钥变量：{key_env}")
 
     def pick_workspace(self):
-        chosen = filedialog.askdirectory(initialdir=self.cfg.workspace or default_workspace())
-        if not chosen:
+        chosen = QFileDialog.getExistingDirectory(self, "打开工作区", self.cfg.workspace or default_workspace())
+        if not chosen or self._stopping:
             return
         self.cfg.workspace = chosen
         self.cfg.robot = ""
-        self._load_robot_list()
+        self.refresh_context()
         self._restart_server()
 
+    def pick_robot(self):
+        chosen, _ = QFileDialog.getOpenFileName(
+            self, "选择机器人结构", self.cfg.workspace or default_workspace(), "SQL (*.sql)")
+        if chosen and not self._stopping:
+            self.cfg.robot = chosen
+            self.refresh_context()
+
     def _load_robot_list(self):
-        self.workspace_label.configure(text=self.cfg.workspace or default_workspace())
-        root = Path(self.cfg.workspace or default_workspace())
+        root = Path(self.cfg.workspace or default_workspace()).absolute()
+        self.workspace_label.setText(str(root))
         found = []
         for base in (root / "robots", root):
             if base.is_dir():
-                found.extend(sorted(str(path) for path in base.glob("*.sql") if path.is_file()))
-        unique = []
-        for path in found:
-            if path not in unique:
-                unique.append(path)
-        try:
-            shown = [Path(os.path.relpath(path, root)).as_posix() for path in unique]
-        except ValueError:
-            shown = unique
-        self.robot_box.configure(values=shown)
-        current = self.cfg.robot
-        if current:
+                found.extend(str(path) for path in sorted(base.glob("*.sql")) if path.is_file())
+        current = self._robot_path()
+        if current and Path(current).is_file():
+            found.insert(0, current)
+        unique = list(dict.fromkeys(found))
+        self.robot_box.clear()
+        for path in unique:
             try:
-                current = Path(os.path.relpath(current, root)).as_posix()
+                shown = Path(os.path.relpath(path, root)).as_posix()
             except ValueError:
-                pass
-        if current in shown:
-            self.robot_box.set(current)
-        elif shown:
-            self.robot_box.set(shown[0])
-            self.cfg.robot = unique[0]
-        else:
-            self.robot_box.set("")
-            self.cfg.robot = ""
+                shown = path
+            self.robot_box.addItem(shown, path)
+        index = self.robot_box.findData(current)
+        self.robot_box.setCurrentIndex(index if index >= 0 else (0 if unique else -1))
+        self.cfg.robot = self.robot_box.currentData() or ""
 
     def on_robot_changed(self):
-        shown = self.robot_box.get()
-        if shown:
-            root = self.cfg.workspace or default_workspace()
-            self.cfg.robot = shown if os.path.isabs(shown) else os.path.join(root, shown)
-        self.refresh_context()
+        self.cfg.robot = self.robot_box.currentData() or ""
+        self._refresh_hardware()
 
     def _robot_path(self):
         return _absolute(self.cfg.robot, self.cfg.workspace or default_workspace())
@@ -484,18 +438,37 @@ class App:
         configured = _absolute(self.cfg.scripts_dir, root)
         if configured:
             return configured
-        candidate = Path(root) / "scripts"
-        return str(candidate if candidate.is_dir() else Path(root))
+        candidate = Path(root).absolute() / "scripts"
+        return str(candidate if candidate.is_dir() else Path(root).absolute())
 
     def _module_paths(self):
         root = self.cfg.workspace or default_workspace()
         return [_absolute(item, root) for item in self.cfg.module_paths if str(item).strip()]
 
-    # -- serve lifecycle ---------------------------------------------------
-    def _start_server(self):
-        if self.serve is not None or self.starting or self._stopping:
+    def _stop_client(self, client):
+        with self._lifecycle_lock:
+            event = self._clients.get(client)
+            owner = event is None
+            if owner:
+                event = self._clients[client] = threading.Event()
+        if not owner:
+            event.wait()
             return
+        try:
+            client.stop(grace=1)
+        except Exception as exc:
+            print(f"pymybot gui: stop failed: {exc}", file=sys.stderr)
+        finally:
+            with self._lifecycle_lock:
+                event.set()
+                self._clients.pop(client, None)
+
+    def _start_server(self):
+        if self.serve is not None or self.starting or self._retiring or self._stopping:
+            return
+        self._start_timer.stop()
         self.starting = True
+        self._restart_pending = False
         self.generation += 1
         generation = self.generation
         self.serve_state = "启动中…"
@@ -508,46 +481,53 @@ class App:
 
         def work():
             client = ServeClient(
-                python,
-                workspace,
-                python_args=tuple(serve_args),
+                python, workspace, python_args=tuple(serve_args),
                 on_notify=lambda method, params: self.post(lambda: self._on_notify(generation, method, params)),
                 on_request=lambda ident, method, params: self.post(
-                    lambda: self._on_request(generation, ident, method, params)
-                ),
-                on_stderr=lambda chunk: self.post(lambda: self._log(chunk)),
+                    lambda: self._on_request(generation, ident, method, params)),
+                on_stderr=lambda chunk: self.post(lambda: self._server_log(generation, chunk)),
                 on_exit=lambda code: self.post(lambda: self._on_serve_exit(generation, code)),
             )
+            with self._lifecycle_lock:
+                self._clients[client] = None
+                stopping = self._stopping
             try:
+                if stopping:
+                    raise RpcError("GUI closed during startup")
                 info = client.request("initialize", timeout=90)
+                if self._stopping:
+                    raise RpcError("GUI closed during startup")
+                return client, info
             except BaseException:
-                client.stop(grace=2)
+                self._stop_client(client)
                 raise
-            return client, info
 
-        self._background(work, lambda value, error: self._server_started(generation, value, error))
+        self._background(work, lambda value, error: self._server_started(generation, value, error), lifecycle=True)
 
     def _server_started(self, generation, value, error):
+        self.starting = False
+        if self._stopping:
+            if value is not None:
+                self._background(lambda: self._stop_client(value[0]), lifecycle=True)
+            return
         if generation != self.generation:
-            # A restart superseded this launch. Stop its client before starting
-            # the replacement, or the old process may still hold the hardware.
-            self.starting = False
-            if error is None:
-                client, _ = value
-                self._start_after_stop(client)
+            if value is not None:
+                self._start_after_stop(value[0])
             elif self._restart_pending:
                 self._schedule_start()
             return
-        self.starting = False
         if error is not None:
             self.serve = None
             self.serve_state = f"启动失败：{error}"
             self._log(f"[gui] serve 启动失败：{error}\n")
-            self._chat_line(f"✗ 无法启动 pymybot serve：{error}", "error")
+            self._chat_line(f"无法启动 pymybot serve：{error}", "error")
             self._chat_line("检查 Python 解释器与 pymybot 安装；也可以在设置里指定解释器。", "system")
             self._refresh_status()
             return
         client, info = value
+        if not client.alive:
+            self._on_serve_exit(generation, "启动时退出")
+            return
         self.serve = client
         self.agent_available = bool(info.get("agent"))
         self.serve_state = f"就绪（协议 {info.get('protocol')}）"
@@ -561,59 +541,69 @@ class App:
         self._refresh_status()
         if self.pending_task:
             task, self.pending_task = self.pending_task, ""
-            self._send(task)
+            self._submit_task(task)
+            self._refresh_status()
 
     def _schedule_start(self):
         self._restart_pending = False
-        self.root.after(150, self._start_server)
+        if not self._stopping:
+            self._start_timer.start(150)
 
     def _start_after_stop(self, client):
-        """Stop a stale client before launching its replacement."""
-        def stop_then_start():
-            try:
-                client.stop()
-            finally:
-                self.post(self._schedule_start)
-        threading.Thread(target=stop_then_start, daemon=True).start()
+        self._retiring = True
+        self._background(lambda: self._stop_client(client), self._retired, lifecycle=True)
+
+    def _retired(self, _value, _error):
+        self._retiring = False
+        if not self._stopping:
+            self._schedule_start()
+
+    def _dismiss_approvals(self):
+        for dialog in tuple(self._dialogs):
+            if isinstance(dialog, ToolDialog):
+                dialog.reject()
 
     def _restart_server(self):
+        if self._stopping:
+            return
+        self._start_timer.stop()
         client, self.serve = self.serve, None
         self.agent_available = False
-        self.generation += 1  # anything still arriving from the old child is stale
+        self.generation += 1
+        self._dismiss_approvals()
         self.serve_state = "重新启动…"
         if self.busy:
-            self._chat_line("✗ 服务重启；上一轮结果未知，检查机器人后再重试。", "error")
-        self.busy = False
+            self._chat_line("服务重启；上一轮结果未知，检查机器人后再重试。", "error")
         self.turn_id = None
         self.turn_text = 0
         self.at_line_start = True
         self._set_busy(False)
-        if self.starting:
-            # The in-flight launch will be discarded by generation; its
-            # callback stops the stale client and starts the replacement.
-            self._restart_pending = True
-        elif client is None:
+        self._restart_pending = True
+        if self.starting or self._retiring:
+            return
+        if client is None:
             self._schedule_start()
         else:
             self._start_after_stop(client)
-        self._refresh_status()
 
     def _on_serve_exit(self, generation, code):
-        if generation != self.generation:
+        if generation != self.generation or self._stopping:
             return
         self.serve = None
         self.agent_available = False
+        self._dismiss_approvals()
         self.serve_state = f"已退出（{code}）"
         if self.busy:
-            self.busy = False
-            self.turn_id = None
-            self._chat_line("✗ pymybot serve 已退出；本轮结果未知，检查机器人后再重试。", "error")
+            self._chat_line("pymybot serve 已退出；本轮结果未知，检查机器人后再重试。", "error")
+        self.turn_id = None
         self._set_busy(False)
-        self._refresh_status()
 
-    # -- notifications -----------------------------------------------------
+    def _server_log(self, generation, chunk):
+        if generation == self.generation:
+            self._log(chunk)
+
     def _on_notify(self, generation, method, params):
-        if generation != self.generation:
+        if generation != self.generation or self._stopping:
             return
         if method == "session":
             self.agent_available = bool(params.get("agent")) or self.agent_available
@@ -624,19 +614,14 @@ class App:
             self._log(f"[sample] {_brief(params)}\n")
 
     def _on_request(self, generation, ident, method, params):
-        if generation != self.generation:
+        client = self.serve
+        if generation != self.generation or client is None or self._stopping:
             return
-        if method != "confirm":
-            self.serve_respond(ident, None)
-            return
-        approved = self._ask_tool(params)
-        self.serve_respond(ident, {"approved": approved})
-
-    def serve_respond(self, ident, result):
-        if self.serve is None:
+        result = {"approved": self._ask_tool(params)} if method == "confirm" else None
+        if self._stopping or generation != self.generation or client is not self.serve:
             return
         try:
-            self.serve.respond(ident, result)
+            client.respond(ident, result)
         except RpcError as exc:
             self._log(f"[gui] 回复失败：{exc}\n")
 
@@ -650,21 +635,16 @@ class App:
         elif kind == "tool_call":
             self._chat_line(f"→ {event.get('tool')} {_brief(event.get('arguments'))}", "tool")
         elif kind == "tool_result":
-            tool = event.get("tool")
-            ok = event.get("ok")
-            state = event.get("state")
+            tool, ok, state = event.get("tool"), event.get("ok"), event.get("state")
             status = "" if ok is None else ("ok" if ok else "失败")
             if state:
                 status = f"{status} / {state}" if status else str(state)
             self._chat_line(f"⇦ {tool} {status}".rstrip(), "tool" if ok is not False else "toolerr")
 
-    # -- agent turn --------------------------------------------------------
-    def _send_shortcut(self, _event=None):
-        self.send_task()
-        return "break"
-
     def send_task(self):
-        task = self.task_box.get("1.0", "end").strip()
+        if self._stopping:
+            return
+        task = self.task_box.toPlainText().strip()
         if not task:
             return
         if self.busy:
@@ -674,125 +654,127 @@ class App:
             self.pending_task = task
             self._notice("正在启动 pymybot serve…")
             self._start_server()
+            self._refresh_status()
             return
+        self._submit_task(task)
+
+    def _submit_task(self, task):
         if not self.agent_available:
             self._notice("智能体不可用：缺少 PydanticAI 依赖")
             return
+        self._sync_config()
         robot = self._robot_path()
         if not robot or not Path(robot).is_file():
-            messagebox.showwarning("需要结构文件", "先选择机器人结构（.sql）文件。", parent=self.root)
+            self._message("需要结构文件", "先选择机器人结构（.sql）文件。")
             return
         scripts = self._scripts_root()
         if not Path(scripts).is_dir():
-            messagebox.showwarning("脚本目录不存在", f"脚本根目录不存在：\n{scripts}", parent=self.root)
+            self._message("脚本目录不存在", f"脚本根目录不存在：\n{scripts}")
             return
-        self.task_box.delete("1.0", "end")
-        self._send(task)
+        if self._send(task) and self.task_box.toPlainText().strip() == task:
+            self.task_box.clear()
 
     def _send(self, task):
-        if self.serve is None or not self.agent_available or self.busy:
-            return
-        if self.hardware_var.get() and not self._confirm_hardware():
-            return
+        client, generation = self.serve, self.generation
+        if self._stopping or client is None or not self.agent_available or self.busy:
+            return False
+        if self.hardware_toggle.isChecked() and not self._confirm_hardware():
+            return False
+        if self._stopping or client is not self.serve or generation != self.generation or self.busy:
+            return False
+        self._sync_config()
+        workspace = self.cfg.workspace or default_workspace()
         params = {
-            "task": task,
-            "robot": self._robot_path(),
-            "scriptsDir": self._scripts_root(),
-            "cameraSrcDir": _absolute(self.cfg.camera_src_dir, self.cfg.workspace),
-            "skillsDir": _absolute(self.cfg.skills_dir, self.cfg.workspace),
-            "readVars": self._names(self.read_vars_entry.get()),
-            "cameraVars": self._names(self.camera_vars_entry.get()),
-            "allowActions": bool(self.actions_var.get()),
-            "allowHardware": bool(self.hardware_var.get()),
-            "timeout": self._number(self.timeout_box, 180),
-            "maxRequests": int(self._number(self.requests_box, 8)),
-            "maxToolCalls": int(self._number(self.tools_box, 16)),
+            "task": task, "robot": self._robot_path(), "scriptsDir": self._scripts_root(),
+            "cameraSrcDir": _absolute(self.cfg.camera_src_dir, workspace),
+            "skillsDir": _absolute(self.cfg.skills_dir, workspace),
+            "readVars": self.cfg.read_vars, "cameraVars": self.cfg.camera_vars,
+            "allowActions": self.actions_toggle.isChecked(),
+            "allowHardware": self.hardware_toggle.isChecked(),
+            "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
+            "maxToolCalls": self.cfg.max_tool_calls, "modulePaths": self._module_paths(),
         }
-        params["modulePaths"] = self._module_paths()
-        for key in ("model", "baseUrl", "apiKeyEnv"):
-            value = getattr(self.cfg, {"model": "model", "baseUrl": "base_url", "apiKeyEnv": "api_key_env"}[key])
+        for key, name in (("model", "model"), ("baseUrl", "base_url"), ("apiKeyEnv", "api_key_env")):
+            value = getattr(self.cfg, name)
             if value:
                 params[key] = value
         params = {key: value for key, value in params.items() if value not in ("", [], None)}
         try:
-            ident, future = self.serve.start_request("agent.ask", params)
+            ident, future = client.start_request("agent.ask", params)
         except RpcError as exc:
-            self._chat_line(f"✗ {exc}", "error")
-            return
-
+            self._chat_line(str(exc), "error")
+            return False
         self._chat_line(f"你：{task}", "user")
         self.turn_id = ident
         self.turn_text = 0
         self.at_line_start = True
-        self.busy = True
         self._set_busy(True)
-        self._background(lambda: future.result(), lambda value, error: self._turn_done(ident, value, error))
+        self._background(lambda: future.result(),
+                         lambda value, error: self._turn_done(generation, ident, value, error))
+        return True
 
-    def _turn_done(self, ident, result, error):
-        if ident != self.turn_id:
+    def _turn_done(self, generation, ident, result, error):
+        if self._stopping or generation != self.generation or ident != self.turn_id:
             return
-        self.busy = False
         self.turn_id = None
+        self._dismiss_approvals()
         self._set_busy(False)
         if error is not None:
             if isinstance(error, RpcError) and error.code == CANCELLED:
                 self._chat_line("[已停止]", "system")
             else:
-                self._chat_line(f"✗ {error}", "error")
+                self._chat_line(str(error), "error")
                 for event in getattr(error, "tool_events", []):
                     self._chat_line(f"  {_brief(event, 200)}", "system")
-            self._refresh_status()
             return
+        result = result or {}
         if self.turn_text == 0 and result.get("output"):
             self._chat_delta(str(result["output"]))
         usage = result.get("usage") or {}
         self._chat_line(
             "[完成 · 请求 {requests} · 工具 {tool_calls} · tokens {input_tokens}/{output_tokens}]".format(
-                requests=usage.get("requests", "?"),
-                tool_calls=usage.get("tool_calls", "?"),
-                input_tokens=usage.get("input_tokens", "?"),
-                output_tokens=usage.get("output_tokens", "?"),
-            ),
-            "system",
-        )
-        self._refresh_status()
+                requests=usage.get("requests", "?"), tool_calls=usage.get("tool_calls", "?"),
+                input_tokens=usage.get("input_tokens", "?"), output_tokens=usage.get("output_tokens", "?")),
+            "system")
 
     def stop_turn(self):
-        if not self.busy or self.serve is None or self.turn_id is None:
-            return
-        self.serve.cancel(self.turn_id)
-        self._notice("已请求停止…")
+        self.pending_task = ""
+        if self.busy and self.serve is not None and self.turn_id is not None:
+            self.serve.cancel(self.turn_id)
+            self._dismiss_approvals()
+            self._notice("已请求停止…")
+        self._refresh_status()
 
     def new_conversation(self):
+        if self._stopping:
+            return
         if self.busy:
             self._notice("先停止当前这一轮")
             return
         if self.serve is None:
             self._start_server()
             return
-        ident, future = self.serve.start_request("agent.reset", {})
-        self._background(lambda: future.result(), lambda _value, error: self._on_reset(error))
-
-    def _on_reset(self, error):
-        if error is not None:
-            self._chat_line(f"✗ 重置失败：{error}", "error")
+        generation = self.generation
+        try:
+            _, future = self.serve.start_request("agent.reset", {})
+        except RpcError as exc:
+            self._on_reset(generation, exc)
             return
-        self._chat_line("[新对话，硬件已释放]", "system")
+        self._background(lambda: future.result(), lambda _value, error: self._on_reset(generation, error))
 
-    # -- approvals ---------------------------------------------------------
+    def _on_reset(self, generation, error):
+        if generation != self.generation or self._stopping:
+            return
+        self._chat_line(f"重置失败：{error}" if error else "[新对话，硬件已释放]", "error" if error else "system")
+
     def on_permission_toggle(self):
-        # The actual approval dialog is shown per turn, immediately before the
-        # agent may touch hardware; the checkbox only reflects the intent.
         self._refresh_status()
 
     def _confirm_hardware(self):
-        return messagebox.askokcancel(
+        return self._message(
             "确认硬件权限",
             "即将以 --allow-hardware 运行：会打开物理设备，激活本身就可能写硬件。\n\n"
-            "只对已审阅的可信结构文件与驱动授权。",
-            icon="warning",
-            parent=self.root,
-        )
+            "只对已审阅的可信结构文件与驱动授权。", confirm=True)
 
     def _ask_tool(self, params):
         tool = str(params.get("tool") or "?")
@@ -801,65 +783,73 @@ class App:
         except (TypeError, ValueError):
             arguments = repr(params.get("arguments"))
         if len(arguments) > MAX_DIALOG_ARGS:
-            messagebox.showwarning(
-                "拒绝：参数过长",
-                f"工具 {tool} 的参数超过 {MAX_DIALOG_ARGS} 字符，无法完整审阅，已拒绝。",
-                parent=self.root,
-            )
-            self._chat_line(f"⊘ {tool} 已拒绝（参数过长）", "toolerr")
+            self._message("拒绝：参数过长", f"工具 {tool} 的参数超过 {MAX_DIALOG_ARGS} 字符，无法完整审阅，已拒绝。")
+            self._chat_line(f"{tool} 已拒绝（参数过长）", "toolerr")
             return False
-        dialog = ToolDialog(self.root, tool, arguments)
-        self.root.wait_window(dialog.top)
-        self._chat_line(f"{'✓' if dialog.approved else '⊘'} {tool} {'已批准' if dialog.approved else '已拒绝'}", "tool")
-        return dialog.approved
+        dialog = ToolDialog(self, tool, arguments)
+        approved = self._exec_dialog(dialog) == QDialog.DialogCode.Accepted
+        self._chat_line(f"{tool} {'已批准' if approved else '已拒绝'}", "tool")
+        return approved
 
-    # -- context -----------------------------------------------------------
     def refresh_context(self):
-        self._refresh_hardware()
+        self._sync_config()
         self._load_robot_list()
+        self._refresh_hardware()
 
     def _refresh_hardware(self):
+        if self._stopping:
+            return
+        self._hardware_generation += 1
+        generation = self._hardware_generation
         robot = self._robot_path()
-        for row in self.hardware_tree.get_children():
-            self.hardware_tree.delete(row)
-        self.hardware_note.configure(text="读取中…")
+        self.hardware_tree.clear()
+        self.hardware_note.setText("读取中…")
         if not robot or not Path(robot).is_file():
-            self.hardware_note.configure(text="未选择结构文件")
+            self.hardware_note.setText("未选择结构文件")
             return
         workspace = self.cfg.workspace or default_workspace()
         python = resolve_python(workspace, self.cfg.python)
         try:
-            args = cli_args(
-                "hardware",
-                robot=robot,
-                module_paths=self._module_paths(),
-                camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace),
-            )
+            args = cli_args("hardware", robot=robot, module_paths=self._module_paths(),
+                            camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace))
         except ValueError as exc:
-            self.hardware_note.configure(text=str(exc))
+            self.hardware_note.setText(str(exc))
             return
 
         def work():
-            return CliCall(python, args, workspace, on_stderr=lambda line: self.post(lambda: self._log(line))).wait()
+            call = CliCall(python, args, workspace, on_stderr=lambda line: self.post(lambda: self._log(line)))
+            with self._lifecycle_lock:
+                self._hardware_calls.add(call)
+                stopping = self._stopping
+            try:
+                if stopping:
+                    call.kill()
+                return call.wait()
+            finally:
+                with self._lifecycle_lock:
+                    self._hardware_calls.discard(call)
 
         def done(result, error):
+            if self._stopping or generation != self._hardware_generation:
+                return
             if error is not None:
-                self.hardware_note.configure(text=f"读取失败：{error}")
+                self.hardware_note.setText(f"读取失败：{error}")
                 return
             payload = result.json or {}
             if not payload.get("ok"):
                 message = (payload.get("error") or {}).get("message") or result.stderr.strip() or "未知错误"
-                self.hardware_note.configure(text=f"读取失败：{message}")
+                self.hardware_note.setText(f"读取失败：{message}")
                 return
             items = payload.get("hardware") or []
             for item in items:
-                self.hardware_tree.insert("", "end", text=item.get("name", ""),
-                                          values=(item.get("type", ""), _brief(item.get("metadata"), 80)))
-            self.hardware_note.configure(text=f"{len(items)} 个变量（未激活）")
+                QTreeWidgetItem(self.hardware_tree, [str(item.get("name", "")), str(item.get("type", "")),
+                                                    _brief(item.get("metadata"), 80)])
+            self.hardware_note.setText(f"{len(items)} 个变量（未激活）")
 
-        self._background(work, done)
+        self._background(work, done, lifecycle=True)
 
-    def _names(self, text):
+    @staticmethod
+    def _names(text):
         names = []
         for item in str(text).replace("，", ",").split(","):
             name = item.strip()
@@ -867,249 +857,238 @@ class App:
                 names.append(name)
         return names
 
-    @staticmethod
-    def _number(box, default):
-        try:
-            return float(box.get())
-        except (TypeError, ValueError):
-            return float(default)
-
-    # -- settings ----------------------------------------------------------
     def open_settings(self):
-        dialog = SettingsDialog(self.root, self.cfg, self.cfg.workspace or default_workspace(),
-                                str(self.config_path))
-        self.root.wait_window(dialog.top)
-        if not dialog.result:
+        if self._stopping:
+            return
+        self._sync_config()
+        dialog = SettingsDialog(self, self.cfg, self.cfg.workspace or default_workspace(), str(self.config_path))
+        if self._exec_dialog(dialog) != QDialog.DialogCode.Accepted or self._stopping:
             return
         before = (self.cfg.workspace, self.cfg.python, self.cfg.session_log)
-        for name, value in dialog.result.items():
+        for name, value in dialog.values.items():
             setattr(self.cfg, name, value)
         self.cfg.task = ""
+        self._sync_controls()
         saved = self._save()
         self._refresh_model_label()
         self._load_robot_list()
         self._refresh_hardware()
-        after = (self.cfg.workspace, self.cfg.python, self.cfg.session_log)
-        if before != after:
+        if before != (self.cfg.workspace, self.cfg.python, self.cfg.session_log):
             self._restart_server()
         self._notice("设置已保存" if saved else "设置已应用，但配置文件写入失败（见日志）")
 
     def _save(self):
-        """Persist preferences; a read-only config dir must never break the window."""
+        self._sync_config()
         try:
             self.cfg.store(self.config_path)
         except OSError as exc:
             reason = f"设置保存失败（{self.config_path}）：{exc}"
             print(f"pymybot gui: {reason}", file=sys.stderr)
-            if not self._stopping:
-                self._log(f"[gui] {reason}\n")
-                self._notice("配置写入失败，详见日志")
+            self._log(f"[gui] {reason}\n")
+            self._notice("配置写入失败，详见日志")
             return False
-        if not self._stopping:
-            self._log(f"[gui] 设置已写入 {self.config_path}\n")
+        self._log(f"[gui] 设置已写入 {self.config_path}\n")
         return True
 
-    # -- status ------------------------------------------------------------
     def _refresh_status(self):
-        self.status_state.configure(text=f"服务：{self.serve_state}")
-        self.status_agent.configure(text="智能体：可用" if self.agent_available else "智能体：不可用")
+        self.status_state.setText(f"服务：{self.serve_state}")
+        self.status_agent.setText("智能体：可用" if self.agent_available else "智能体：不可用")
         flags = []
-        if self.hardware_var.get():
+        if self.hardware_toggle.isChecked():
             flags.append("允许硬件")
-        if self.actions_var.get():
+        if self.actions_toggle.isChecked():
             flags.append("自动批准动作")
         busy = "执行中…" if self.busy else "空闲"
-        self.status_busy.configure(text=busy + ("（" + "、".join(flags) + "）" if flags else ""))
+        self.status_busy.setText(busy + ("（" + "、".join(flags) + "）" if flags else ""))
+        self.stop_button.setEnabled(self.busy or bool(self.pending_task))
 
     def _set_busy(self, busy):
-        state = "disabled" if busy else "normal"
-        self.send_button.configure(state=state)
-        self.new_button.configure(state=state)
+        self.busy = busy
+        self.send_button.setEnabled(not busy)
+        self.new_button.setEnabled(not busy)
         self._refresh_status()
 
-    # -- shutdown ----------------------------------------------------------
-    def on_close(self):
-        if self.busy and not messagebox.askokcancel("退出", "本轮仍在执行：退出会取消它，且已派发的动作不会回滚。继续？", parent=self.root):
-            return
-        self._stopping = True
-        self._save()
-        client = self.serve
+    def shutdown(self):
+        with self._lifecycle_lock:
+            if self._stopping:
+                return
+            self._stopping = True
+            clients = [client for client, event in self._clients.items() if event is None]
+            if self.serve is not None and self.serve not in self._clients:
+                clients.append(self.serve)
+            calls = list(self._hardware_calls)
+        self.generation += 1
+        self._restart_pending = False
+        self.pending_task = ""
         self.serve = None
-        self.root.withdraw()
+        self._start_timer.stop()
+        self._notice_timer.stop()
+        self._pump_timer.stop()
+        for dialog in tuple(self._dialogs):
+            dialog.reject()
+        for call in calls:
+            call.kill()
+        for client in clients:
+            self._background(lambda c=client: self._stop_client(c), lifecycle=True)
+        self._save()
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+            except queue.Empty:
+                break
 
-        def stop():
-            if client is not None:
-                try:
-                    client.stop()
-                except Exception:
-                    pass
-            self.post(self.root.destroy)
+    def wait_for_shutdown(self, timeout=5):
+        deadline = time.monotonic() + timeout
+        with self._lifecycle_lock:
+            workers = list(self._lifecycle_workers)
+        for worker in workers:
+            worker.join(max(0, deadline - time.monotonic()))
 
-        threading.Thread(target=stop, daemon=True).start()
-        # Hard stop if the child refuses to exit; destroy() is idempotent here.
-        self.root.after(12000, self._force_destroy)
-
-    def _force_destroy(self):
-        try:
-            self.root.destroy()
-        except tk.TclError:
-            pass
+    def closeEvent(self, event):
+        if not self._stopping and self.busy and not self._message(
+                "退出", "本轮仍在执行：退出会取消它，且已派发的动作不会回滚。继续？", confirm=True):
+            event.ignore()
+            return
+        self.shutdown()
+        event.accept()
+        self.closed.emit()
 
 
-class ToolDialog:
-    """Modal approval dialog; close means deny."""
+class ToolDialog(QDialog):
+    """Native modal approval; reject, Escape and window close all deny."""
 
     def __init__(self, parent, tool, arguments):
-        self.approved = False
-        top = self.top = tk.Toplevel(parent)
-        top.title("智能体请求调用工具")
-        top.transient(parent)
-        top.resizable(True, True)
-        top.minsize(520, 320)
-        body = ttk.Frame(top, padding=12)
-        body.pack(fill="both", expand=True)
-        ttk.Label(body, text=f"工具：{tool}", style="Head.TLabel").pack(anchor="w")
-        ttk.Label(body, text="下面是模型给出的完整参数；批准后本次调用立即执行。", style="Muted.TLabel").pack(anchor="w", pady=(4, 8))
-        text = ScrolledText(body, wrap="none", font="TkFixedFont", height=12)
-        text.insert("1.0", arguments)
-        text.configure(state="disabled")
-        text.pack(fill="both", expand=True)
-        row = ttk.Frame(body)
-        row.pack(fill="x", pady=(10, 0))
-        ttk.Button(row, text="拒绝", command=self._deny).pack(side="right")
-        approve = ttk.Button(row, text="批准并执行", style="Send.TButton", command=self._approve)
-        approve.pack(side="right", padx=(0, 6))
-        top.protocol("WM_DELETE_WINDOW", self._deny)
-        top.bind("<Escape>", lambda _event: self._deny())
-        approve.focus_set()
-        top.wait_visibility()
-        top.grab_set()
-
-    def _approve(self):
-        self.approved = True
-        self.top.destroy()
-
-    def _deny(self):
-        self.approved = False
-        self.top.destroy()
+        super().__init__(parent)
+        self.setWindowTitle("智能体请求调用工具")
+        self.setModal(True)
+        self.resize(620, 400)
+        self.setMinimumSize(520, 320)
+        layout = QVBoxLayout(self)
+        layout.addWidget(_label(f"工具：{tool}"))
+        layout.addWidget(_label("下面是模型给出的完整参数；批准后本次调用立即执行。"))
+        self.arguments = QPlainTextEdit()
+        self.arguments.setReadOnly(True)
+        self.arguments.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        self.arguments.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.arguments.setPlainText(arguments)
+        layout.addWidget(self.arguments, 1)
+        row = QHBoxLayout()
+        row.addStretch()
+        self.approve_button = _button("批准并执行", self.accept)
+        self.deny_button = _button("拒绝", self.reject)
+        self.approve_button.setAutoDefault(False)
+        self.deny_button.setDefault(True)
+        row.addWidget(self.approve_button)
+        row.addWidget(self.deny_button)
+        layout.addLayout(row)
+        self.deny_button.setFocus()
 
 
-class SettingsDialog:
-    """Small form for the persisted preferences; returns a partial GuiConfig."""
-
+class SettingsDialog(QDialog):
     FIELDS = (
-        ("workspace", "工作区"),
-        ("python", "Python 解释器"),
-        ("model", "模型（provider:model）"),
-        ("base_url", "端点 Base URL"),
-        ("api_key_env", "API Key 环境变量名"),
-        ("scripts_dir", "脚本根目录"),
-        ("skills_dir", "技能目录"),
-        ("camera_src_dir", "图片源目录"),
+        ("workspace", "工作区"), ("python", "Python 解释器"),
+        ("model", "模型（provider:model）"), ("base_url", "端点 Base URL"),
+        ("api_key_env", "API Key 环境变量名"), ("scripts_dir", "脚本根目录"),
+        ("skills_dir", "技能目录"), ("camera_src_dir", "图片源目录"),
         ("module_paths", "模块路径（每行一个）"),
+        ("read_vars", "读取变量（逗号分隔）"), ("camera_vars", "相机变量（逗号分隔）"),
     )
 
     def __init__(self, parent, cfg: GuiConfig, workspace, config_path=""):
-        self.result = None
-        top = self.top = tk.Toplevel(parent)
-        top.title("设置")
-        top.transient(parent)
-        body = ttk.Frame(top, padding=12)
-        body.pack(fill="both", expand=True)
-        body.columnconfigure(1, weight=1)
+        super().__init__(parent)
+        self.setWindowTitle("设置")
+        self.setModal(True)
+        self.resize(640, 680)
+        self.values = None
+        layout = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        body = QWidget()
+        form = QFormLayout(body)
+        scroll.setWidget(body)
+        layout.addWidget(scroll, 1)
         self.entries = {}
-        row = 0
         for name, label in self.FIELDS:
-            ttk.Label(body, text=label).grid(row=row, column=0, sticky="nw", pady=3)
+            value = getattr(cfg, name)
             if name == "module_paths":
-                widget = tk.Text(body, height=3, width=46, font="TkFixedFont")
-                widget.insert("1.0", "\n".join(getattr(cfg, name)))
+                widget = QPlainTextEdit("\n".join(value))
+                widget.setMaximumHeight(85)
             else:
-                widget = ttk.Entry(body, width=50)
-                widget.insert(0, str(getattr(cfg, name) or ""))
-            widget.grid(row=row, column=1, sticky="ew", pady=3)
-            if name in {"workspace", "scripts_dir", "skills_dir", "camera_src_dir"}:
-                ttk.Button(body, text="…", width=3,
-                           command=lambda w=widget: self._browse(w, workspace)).grid(row=row, column=2, sticky="w", padx=(4, 0))
+                widget = QLineEdit(",".join(value) if isinstance(value, list) else str(value or ""))
             self.entries[name] = widget
-            row += 1
-        budgets = ttk.Frame(body)
-        budgets.grid(row=row, column=1, sticky="w", pady=6)
-        self.timeout = ttk.Spinbox(budgets, from_=1, to=3600, width=6)
-        self.timeout.set(int(cfg.timeout))
-        self.timeout.pack(side="left")
-        ttk.Label(budgets, text="秒").pack(side="left", padx=(2, 10))
-        self.requests = ttk.Spinbox(budgets, from_=1, to=100, width=4)
-        self.requests.set(cfg.max_requests)
-        self.requests.pack(side="left")
-        ttk.Label(budgets, text="请求").pack(side="left", padx=(2, 10))
-        self.tools = ttk.Spinbox(budgets, from_=1, to=1000, width=5)
-        self.tools.set(cfg.max_tool_calls)
-        self.tools.pack(side="left")
-        ttk.Label(budgets, text="工具调用").pack(side="left", padx=(2, 0))
-        ttk.Label(body, text="超时 / 预算", ).grid(row=row, column=0, sticky="w", pady=6)
-        row += 1
-        self.session_log = tk.BooleanVar(value=bool(cfg.session_log))
-        ttk.Checkbutton(body, text="保存会话转录（~/.mybot/sessions）",
-                        variable=self.session_log).grid(row=row, column=1, sticky="w", pady=(0, 4))
-        row += 1
-        ttk.Label(body, text="密钥只读取环境变量，窗口不保存也不显示它。", style="Muted.TLabel").grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(4, 0))
-        row += 1
-        ttk.Label(body, text=f"配置文件：{config_path or '（默认位置）'}", style="Muted.TLabel").grid(
-            row=row, column=0, columnspan=3, sticky="w", pady=(2, 0))
-        row += 1
-        buttons = ttk.Frame(body)
-        buttons.grid(row=row, column=0, columnspan=3, sticky="e", pady=(10, 0))
-        ttk.Button(buttons, text="取消", command=top.destroy).pack(side="right")
-        ttk.Button(buttons, text="保存", style="Send.TButton", command=self._save).pack(side="right", padx=(0, 6))
-        top.protocol("WM_DELETE_WINDOW", top.destroy)
-        top.bind("<Escape>", lambda _event: top.destroy())
-        top.wait_visibility()
-        top.grab_set()
+            if name in {"workspace", "scripts_dir", "skills_dir", "camera_src_dir"}:
+                row = QHBoxLayout()
+                row.addWidget(widget)
+                row.addWidget(_button("…", lambda checked=False, w=widget: self._browse(w, workspace)))
+                form.addRow(label, row)
+            else:
+                form.addRow(label, widget)
+        self.timeout = _spin(cfg.timeout, 3600, fractional=True)
+        self.requests = _spin(cfg.max_requests, 100)
+        self.tools = _spin(cfg.max_tool_calls, 1000)
+        form.addRow("超时（秒）", self.timeout)
+        form.addRow("请求预算", self.requests)
+        form.addRow("工具预算", self.tools)
+        self.session_log = QCheckBox("保存会话转录（~/.mybot/sessions）")
+        self.session_log.setChecked(bool(cfg.session_log))
+        form.addRow(self.session_log)
+        layout.addWidget(_label("密钥只读取环境变量，窗口不保存也不显示它。"))
+        layout.addWidget(_label(f"配置文件：{config_path or '（默认位置）'}"))
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
+        self.buttons.accepted.connect(self._save)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
 
     def _browse(self, widget, workspace):
-        chosen = filedialog.askdirectory(initialdir=workspace)
-        if not chosen:
-            return
-        widget.delete("0", "end")
-        widget.insert(0, chosen)
+        chosen = QFileDialog.getExistingDirectory(self, "选择目录", workspace)
+        if chosen:
+            widget.setText(chosen)
 
     def _save(self):
         values = {}
         for name, widget in self.entries.items():
             if name == "module_paths":
-                values[name] = [line.strip() for line in widget.get("1.0", "end").splitlines() if line.strip()]
+                values[name] = [line.strip() for line in widget.toPlainText().splitlines() if line.strip()]
+            elif name in {"read_vars", "camera_vars"}:
+                values[name] = App._names(widget.text())
             else:
-                values[name] = widget.get().strip()
-        try:
-            values["timeout"] = float(self.timeout.get())
-            values["max_requests"] = int(self.requests.get())
-            values["max_tool_calls"] = int(self.tools.get())
-        except ValueError:
-            messagebox.showwarning("设置无效", "超时与预算必须是数字。", parent=self.top)
-            return
-        values["session_log"] = bool(self.session_log.get())
-        self.result = values
-        self.top.destroy()
+                values[name] = widget.text().strip()
+        values.update(timeout=self.timeout.value(), max_requests=self.requests.value(),
+                      max_tool_calls=self.tools.value(), session_log=self.session_log.isChecked())
+        self.values = values
+        self.accept()
+
+
+def _check_display():
+    platform = os.environ.get("QT_QPA_PLATFORM", "").split(":", 1)[0].lower()
+    if (sys.platform.startswith("linux") and not os.environ.get("DISPLAY")
+            and not os.environ.get("WAYLAND_DISPLAY") and platform not in {"offscreen", "minimal"}):
+        raise GuiUnavailable(
+            "No graphical display: set DISPLAY/WAYLAND_DISPLAY, use --no-gui, "
+            "or explicitly set QT_QPA_PLATFORM=offscreen for headless testing.")
 
 
 def run_gui(args):
-    """Entry point from ``pymybot gui`` / the default (no subcommand) route."""
+    _check_display()
     path = config_home() / "settings.json"
-    config = merge_args(GuiConfig.load(path), args)
-    config = config.sanitized()
+    config = merge_args(GuiConfig.load(path), args).sanitized()
+    application = QApplication.instance()
+    owns_application = application is None
+    if owns_application:
+        application = QApplication([sys.argv[0]])
+    window = App(config, path)
+    loop = application if owns_application else QEventLoop()
+    window.closed.connect(loop.quit)
+    application.aboutToQuit.connect(window.shutdown)
+    window.show()
     try:
-        root = tk.Tk()
-    except tk.TclError as exc:
-        raise GuiUnavailable(str(exc)) from None
-    app = App(root, config, path)
-    try:
-        root.mainloop()
+        loop.exec()
     finally:
-        if app.serve is not None:
-            try:
-                app.serve.stop(grace=3)
-            except Exception:
-                pass
+        window.shutdown()
+        window.close()
+        window.wait_for_shutdown()
+        application.aboutToQuit.disconnect(window.shutdown)
+        window.deleteLater()
     return {"closed": True}

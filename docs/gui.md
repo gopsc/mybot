@@ -1,6 +1,6 @@
 # GUI guide
 
-The GUI is the default entry point for the Python reference edition:
+The PySide6 (Qt 6) GUI is the default entry point for the Python reference edition:
 
 ```sh
 pymybot            # opens the window
@@ -26,10 +26,10 @@ pymybot --no-gui   # terminal interface
 
 ## First run
 
-1. Install the agent dependencies:
+1. Install the GUI and agent dependencies (CLI-only environments can omit `gui`):
 
    ```sh
-   python -m pip install -e ".[agent,test]"
+   python -m pip install -e ".[gui,agent]"
    ```
 
 2. Open **设置** and choose:
@@ -83,8 +83,8 @@ bar instead of failing silently.
 
 The window owns no robot logic. It launches one long-lived
 `python -m pymybot serve` child and speaks stdio JSON-RPC 2.0 to it. All reader
-callbacks are marshalled onto the Tk thread through a queue. This keeps the UI
-responsive during model streaming and hardware work.
+callbacks are dispatched to the Qt GUI thread. This keeps the UI responsive
+during model streaming and hardware work.
 
 Frozen Windows builds prefer the sibling `pymybot.exe` for the `serve` child;
 the GUI executable itself has no console. See
@@ -98,7 +98,9 @@ the GUI executable itself has no console. See
 | Window opens but no model | Set `MYBOT_MODEL`/API key or configure them in settings. |
 | Camera fails on Windows | Close other apps using the camera; some devices require running the app as administrator. |
 | “启动中…” forever | Fixed in 0.2.0. On older builds, restart the window. |
-| No Tk display | Use `pymybot --no-gui` on headless Linux. |
+| Missing PySide6 | Install `pymybot[gui]` (source checkout: `pip install -e '.[gui]'`). |
+| No desktop display | Use `pymybot --no-gui` on headless Linux. |
+| Qt xcb platform plugin cannot load | Install your distribution's Qt/X11 runtime libraries, including `libxcb-cursor0` on Debian/Ubuntu. |
 
 ## Limitations
 

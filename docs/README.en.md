@@ -34,7 +34,8 @@ python -m venv .venv
   --robot robots/relay-test.sql \
   --input scripts/relay-test.mt --timeout 10
 
-# GUI:
+# GUI (PySide6 / Qt 6; optional for headless CLI use):
+.venv/bin/pip install -e ".[gui]"
 .venv/bin/python -m pymybot
 
 # Agent:

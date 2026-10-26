@@ -1,10 +1,10 @@
 # Experimental Windows Nuitka standalone build. Not used by release CI.
-# Prerequisites: .venv with ".[agent]" plus `pip install nuitka`.
+# Prerequisites: .venv with ".[agent,camera,gui]" plus `pip install nuitka`.
 .venv\Scripts\python.exe -m nuitka tools\entry_cli.py `
    --mode=standalone --msvc=latest --assume-yes-for-downloads `
    --output-dir=build-nuitka --output-folder-name=mybot --output-filename=pymybot.exe `
    --windows-console-mode=force --windows-icon-from-ico=tools\icon.ico `
-   --enable-plugins=tk-inter `
+   --enable-plugins=pyside6 `
    --include-module=lupa.luajit21 `
    --include-package=serial --include-package=pyftdi --include-package=PIL --include-package=av `
    --include-package-data=genai_prices `

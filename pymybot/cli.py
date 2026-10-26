@@ -74,7 +74,7 @@ def variable(value):
 def parser():
     p = ArgumentParser(
         prog="pymybot", allow_abbrev=False,
-        description="GUI-first robot controller. Without a command it opens the tkinter agent window; "
+        description="GUI-first robot controller. Without a command it opens the PySide6 agent window; "
                     "use --no-gui for the command-line interface (agent REPL or direct controller commands). "
                     "Command-line results are JSON on stdout.",
         epilog="Use only trusted Lua modules: LuaJIT FFI is not malicious-code isolation. "
@@ -95,7 +95,7 @@ def parser():
         "sample": "Activate and read a named variable; activation itself may write to devices",
         "apply-sql": "Apply SQL to a temporarily active robot; does not write the structure file",
         "agent": "PydanticAI task or interactive session on the terminal (see --no-gui)",
-        "gui": "tkinter agent window (the default entry; no command required)",
+        "gui": "PySide6 agent window (the default entry; no command required)",
         "serve": "Long-lived stdio JSON-RPC 2.0 server for IDE frontends (one JSON object per line)",
         "doctor": "Check the interpreter, optional dependencies and bundled assets without touching hardware",
         "sessions": "List or prune conversation transcripts under ~/.mybot/sessions",
@@ -268,7 +268,7 @@ def doctor():
     optional = [
         ("av", "av", "camera capture", "pip install pymybot[camera]"),
         ("pydantic_ai", "pydantic-ai-slim", "agent mode", "pip install pymybot[agent]"),
-        ("tkinter", None, "GUI", "install the Tk package for this Python"),
+        ("PySide6.QtWidgets", "PySide6", "GUI", "pip install pymybot[gui]"),
     ]
 
     def module_check(module, distribution, label, *, optional_check=False, hint=""):

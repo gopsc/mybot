@@ -11,6 +11,13 @@ Per-edition histories live next to each implementation:
 
 ## [Unreleased]
 
+### Changed
+
+- Migrate the desktop GUI from Tkinter to PySide6 (Qt 6), retaining the serve
+  protocol, streaming chat, settings and per-tool approvals. Install the `gui`
+  extra for desktop use; CLI-only installations do not require Qt.
+- GUI tests run offscreen; test and packaging extras include PySide6.
+
 ## [0.3.1] – 2026-10-26
 
 ### Added

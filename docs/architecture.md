@@ -84,7 +84,7 @@ Key invariants:
 | `pymybot/agent_executor.py` | Approval-gated tool implementations |
 | `pymybot/agent_workspace.py` | Bounded, link-safe workspace file tools and shell |
 | `pymybot/serve.py` | Long-lived stdio JSON-RPC 2.0 backend |
-| `pymybot/gui/` | Tkinter front-end: protocol client, settings, approvals |
+| `pymybot/gui/` | PySide6 front-end: protocol client, settings, approvals |
 | `pymybot/security.py` | Bounded reads and strict JSON output |
 | `pymybot/paths.py` | Source/frozen asset resolution |
 
@@ -106,7 +106,7 @@ flowchart TB
 ```
 
 - **GUI** never executes robot logic itself; it drives one `serve` child process
-  and marshals all callbacks onto the Tk thread.
+  and marshals all callbacks onto the Qt GUI thread.
 - **Agent modes** execute tools through `AgentExecutor`, which runs hardware
   work on a dedicated owner thread and asks for approval through a callback.
 - **CLI controller mode** skips the model entirely and is suitable for CI.

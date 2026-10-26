@@ -40,23 +40,56 @@ def test_doctor_reports_dependencies_and_assets(capsys):
     checks = {item["name"]: item["status"] for item in payload["checks"]}
     assert checks["lupa.luajit21"] == "ok"
     assert checks["sqlparse"] == "ok"
+    assert "PySide6.QtWidgets" in checks and "tkinter" not in checks
     assert payload["assets"]["modules"]["files"] > 0
     assert payload["assets"]["scripts"]["files"] > 0
 
 
-def test_doctor_reports_import_failure(monkeypatch, capsys):
+@pytest.mark.parametrize("module", ["av", "PySide6.QtWidgets"])
+def test_doctor_reports_import_failure(monkeypatch, capsys, module):
     real = cli.importlib.import_module
 
     def fake(name, package=None):
-        if name == "av":
-            raise ImportError("missing FFmpeg DLL")
+        if name == module:
+            raise ImportError("missing shared library")
         return real(name, package)
 
     monkeypatch.setattr(cli.importlib, "import_module", fake)
     code = cli.main(["doctor"])
     payload = json.loads(capsys.readouterr().out)
-    av = next(item for item in payload["checks"] if item["name"] == "av")
-    assert code == 0 and av["status"] == "warning" and av["error"] == "ImportError"
+    check = next(item for item in payload["checks"] if item["name"] == module)
+    assert code == 0 and check["status"] == "warning" and check["error"] == "ImportError"
+    assert payload["healthy"] is True
+    if module == "PySide6.QtWidgets":
+        assert "pymybot[gui]" in check["hint"]
+
+
+def test_cli_and_gui_diagnostic_without_qt():
+    script = r'''
+import importlib.abc
+import sys
+
+class NoQt(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "PySide6" or fullname.startswith("PySide6."):
+            raise ModuleNotFoundError("PySide6 unavailable", name=fullname)
+
+sys.meta_path.insert(0, NoQt())
+from pymybot import cli
+from pymybot.gui.config import GuiConfig
+from pymybot.gui.protocol import ServeClient
+assert cli.main(["scripts"]) == 0
+assert not any(name.startswith("PySide6") for name in sys.modules)
+assert cli.main(["gui"]) == 1
+'''
+    result = subprocess.run([sys.executable, "-c", script], cwd=ROOT,
+                            capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert result.returncode == 0, result.stderr
+    listing, failure = [json.loads(line) for line in result.stdout.splitlines()]
+    assert listing["ok"] is True and listing["command"] == "scripts"
+    assert failure["ok"] is False
+    assert "pymybot[gui]" in failure["error"]["message"]
+    assert "--no-gui" in failure["error"]["message"]
 
 
 @pytest.fixture(autouse=True)

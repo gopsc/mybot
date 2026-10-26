@@ -29,14 +29,14 @@ for extra in ("README.md", "LICENSE", "CHANGELOG.md"):
 for distribution in (
     "pydantic-ai-slim", "pydantic-graph", "pydantic", "openai", "anthropic",
     "genai-prices", "httpx2", "httpcore2", "griffelib", "truststore", "jiter",
-    "tiktoken", "lupa", "sqlparse", "pyserial", "pyftdi", "pillow", "av",
+    "tiktoken", "lupa", "sqlparse", "pyserial", "pyftdi", "pillow", "av", "PySide6",
 ):
     try:
         datas += copy_metadata(distribution)
     except Exception:
         pass
 
-hiddenimports = []
+hiddenimports = ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets"]
 for package in (
     "pydantic_ai", "pydantic_graph", "openai", "anthropic", "genai_prices",
     "httpx2", "httpcore2", "griffelib", "truststore", "jiter", "tiktoken",
@@ -55,7 +55,7 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=["pytest", "tests", "implementations"],
+    excludes=["pytest", "tests", "implementations", "tkinter", "_tkinter"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)
