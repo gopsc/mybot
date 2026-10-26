@@ -608,12 +608,19 @@ def test_settings_failure_notice_after_modal_save(app_factory, interact, monkeyp
     assert "已应用" in app.status_notice.text() and "写入失败" in app.status_notice.text()
 
 
-def test_permission_toggle_never_persists(ui, tmp_path):
+@pytest.mark.parametrize("wide", [False, True])
+def test_permission_toggle_never_persists(ui, tmp_path, wide):
     from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QStyle, QStyleOptionButton
 
     gui, app = ui
-    QTest.mouseClick(app.hardware_toggle, gui.Qt.MouseButton.LeftButton)
-    QTest.mouseClick(app.actions_toggle, gui.Qt.MouseButton.LeftButton)
+    for toggle in (app.hardware_toggle, app.actions_toggle):
+        if wide:
+            toggle.setFixedWidth(toggle.sizeHint().width() * 3)
+        option = QStyleOptionButton()
+        toggle.initStyleOption(option)
+        indicator = toggle.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, toggle)
+        QTest.mouseClick(toggle, gui.Qt.MouseButton.LeftButton, pos=indicator.center())
     assert app.hardware_toggle.isChecked() and app.actions_toggle.isChecked()
     assert "允许硬件" in app.status_busy.text() and "自动批准动作" in app.status_busy.text()
     app._save()
