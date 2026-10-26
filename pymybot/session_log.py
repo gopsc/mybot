@@ -10,6 +10,8 @@ import hashlib
 import json
 import math
 import os
+import re
+import shutil
 import sys
 import threading
 import uuid
@@ -26,6 +28,9 @@ MAX_DEPTH = 8
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_IMAGES = 256
 MAX_IMAGE_TOTAL = 128 * 1024 * 1024
+MAX_META_BYTES = 64 * 1024
+MAX_KEEP = 10_000
+_SESSION_NAME = re.compile(r"\d{8}-\d{6}-[0-9a-f]{8}")
 _DISABLED = {"0", "false", "no", "off"}
 
 
@@ -206,3 +211,161 @@ def create_session_log(*, enabled=True, robot="", model="", mode="cli"):
         return None
     print(f"mybot: session log: {log.path}", file=sys.stderr)
     return log
+
+
+def _terminated(path: Path):
+    """Whether the last complete transcript event is ``session_end``."""
+    transcript = path / "transcript.jsonl"
+    try:
+        size = transcript.stat().st_size
+        with transcript.open("rb") as stream:
+            stream.seek(max(0, size - 8192))
+            tail = stream.read().decode("utf-8", "replace")
+    except OSError:
+        return False
+    for line in reversed(tail.splitlines()):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return False
+        return isinstance(event, dict) and event.get("type") == "session_end"
+    return False
+
+
+def _active(meta, path: Path):
+    """Best-effort: a live process that has not written ``session_end``.
+
+    Windows has no safe signal-0 probe (``os.kill`` maps to TerminateProcess),
+    so active sessions are only detected on POSIX. Pruning on Windows must not
+    be run against a live session.
+    """
+    if os.name == "nt":
+        return False
+    pid = meta.get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        pass
+    return not _terminated(path)
+
+
+def _session_info(path: Path):
+    """Describe one session without following symlinks."""
+    meta = {}
+    meta_file = path / "meta.json"
+    try:
+        if meta_file.stat().st_size <= MAX_META_BYTES:
+            value = json.loads(meta_file.read_text(encoding="utf-8"))
+            if isinstance(value, dict):
+                meta = value
+    except (OSError, ValueError):
+        pass
+    total = images = 0
+    try:
+        modified = path.stat().st_mtime
+    except OSError:
+        modified = 0.0
+    for base, dirs, files in os.walk(path, followlinks=False, onerror=lambda _exc: None):
+        dirs[:] = [name for name in dirs if not (Path(base) / name).is_symlink()]
+        for name in files:
+            item = Path(base) / name
+            if item.is_symlink():
+                continue
+            try:
+                file_stat = item.stat()
+            except OSError:
+                continue
+            total += file_stat.st_size
+            modified = max(modified, file_stat.st_mtime)
+            if item.parent.name == "images":
+                images += 1
+    return {
+        "id": path.name,
+        "path": str(path),
+        "started_at": meta.get("started_at", ""),
+        "mode": meta.get("mode", ""),
+        "robot": meta.get("robot", ""),
+        "model": meta.get("model", ""),
+        "pid": meta.get("pid"),
+        "active": _active(meta, path),
+        "bytes": total,
+        "images": images,
+        "modified": modified,
+    }
+
+
+def list_sessions(root=None):
+    """Return transcripts newest-first; malformed directories are ignored."""
+    base = Path(root).expanduser() if root is not None else session_root()
+    if not base.is_dir():
+        return []
+    try:
+        children = list(base.iterdir())
+    except OSError:
+        return []
+    sessions = []
+    for child in children:
+        if (child.is_symlink() or not child.is_dir()
+                or not _SESSION_NAME.fullmatch(child.name)
+                or not (child / "meta.json").is_file()):
+            continue
+        sessions.append(_session_info(child))
+    return sorted(sessions, key=lambda item: (item["modified"], item["id"]), reverse=True)
+
+
+def prune_sessions(keep=20, older_than_days=None, dry_run=False, root=None):
+    """Delete sessions beyond the newest ``keep``, optionally only if old.
+
+    The newest ``keep`` sessions are always protected. ``older_than_days`` adds a
+    second condition: among the remaining sessions, only those whose newest file
+    is at least that old are removed. A session whose process is still alive and
+    has not written ``session_end`` is skipped. Deletion never follows symlinks.
+    """
+    if isinstance(keep, bool) or not isinstance(keep, int) or not 1 <= keep <= MAX_KEEP:
+        raise ValueError(f"keep must be in 1..{MAX_KEEP}")
+    if older_than_days is not None:
+        if isinstance(older_than_days, bool) or not isinstance(older_than_days, int) or not 0 <= older_than_days <= 3650:
+            raise ValueError("older_than_days must be in 0..3650")
+    base = Path(root).expanduser() if root is not None else session_root()
+    sessions = list_sessions(base)
+    candidates = sessions[keep:]
+    if older_than_days is not None:
+        cutoff = datetime.now().timestamp() - older_than_days * 86400
+        candidates = [item for item in candidates if item["modified"] <= cutoff]
+    deleted, freed, skipped, errors = [], 0, [], []
+    for item in candidates:
+        directory = Path(item["path"])
+        # Re-check every candidate immediately before removal.
+        if item["active"]:
+            skipped.append(item["id"])
+            continue
+        if (directory.parent != base or directory.is_symlink()
+                or not _SESSION_NAME.fullmatch(directory.name)
+                or not (directory / "meta.json").is_file()):
+            errors.append(item["id"])
+            continue
+        if not dry_run:
+            try:
+                shutil.rmtree(directory)
+            except OSError:
+                errors.append(item["id"])
+                continue
+        deleted.append(item["id"])
+        freed += item["bytes"]
+    return {
+        "root": str(base),
+        "keep": keep,
+        "older_than_days": older_than_days,
+        "dry_run": bool(dry_run),
+        "deleted": deleted,
+        "bytes_freed": freed,
+        "kept": len(sessions) - len(deleted),
+        "skipped": skipped,
+        "errors": errors,
+    }

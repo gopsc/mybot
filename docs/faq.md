@@ -61,9 +61,13 @@ byte budget is an explicit, provider-independent guard.
 
 Diagnostics go to stderr and the GUI “日志” tab. Agent conversations are also
 transcribed to `~/.mybot/sessions/` by default (tool arguments, bounded results
-and images, never API keys); disable with `--no-session-log` or
-`MYBOT_SESSION_LOG=0`. Transcripts are not resumable and the GUI has no history
-browser; see [`cli.md`](cli.md#session-transcripts).
+and images). API keys in environment variables are not read into the
+transcript, but tool output may contain other sensitive data. Disable with
+`--no-session-log`, `MYBOT_SESSION_LOG=0`, or the GUI settings toggle; list and
+prune old transcripts with `pymybot sessions` and
+`pymybot sessions --prune --keep 20 --yes`. Transcripts are not resumable and
+the GUI has no history browser; see
+[`cli.md`](cli.md#session-transcripts).
 
 ## Why is the Windows build unsigned?
 

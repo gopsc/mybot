@@ -5,8 +5,8 @@ import argparse
 import asyncio
 from contextlib import redirect_stdout
 import faulthandler
+import importlib
 import importlib.metadata
-import importlib.util
 import math
 import os
 from pathlib import Path
@@ -98,6 +98,7 @@ def parser():
         "gui": "tkinter agent window (the default entry; no command required)",
         "serve": "Long-lived stdio JSON-RPC 2.0 server for IDE frontends (one JSON object per line)",
         "doctor": "Check the interpreter, optional dependencies and bundled assets without touching hardware",
+        "sessions": "List or prune conversation transcripts under ~/.mybot/sessions",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
@@ -121,6 +122,18 @@ def parser():
             command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help="per-task wall-clock budget (default: 180)")
+            continue
+        if name == "sessions":
+            command.add_argument("--no-agent", action="store_true",
+                                 help="accepted for CLI consistency; sessions never uses a model")
+            command.add_argument("--prune", action="store_true",
+                                 help="delete old transcripts instead of listing them")
+            command.add_argument("--keep", type=bounded_int(1, 10_000), default=20,
+                                 help="keep the newest N sessions (default: 20)")
+            command.add_argument("--older-than", type=bounded_int(0, 3650), metavar="DAYS",
+                                 help="only prune sessions at least DAYS old")
+            command.add_argument("--dry-run", action="store_true", help="show what --prune would delete")
+            command.add_argument("--yes", action="store_true", help="confirm deletion (required with --prune)")
             continue
         command.add_argument("--no-agent", action="store_true",
                              help="disable agent.* methods" if name == "serve"
@@ -190,7 +203,7 @@ def parse_args(argv=None):
         print(f"pymybot {__version__}")
         raise SystemExit(0)
     commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql",
-                "agent", "gui", "serve", "doctor"}
+                "agent", "gui", "serve", "doctor", "sessions"}
     # --no-gui is a top-level switch: the GUI is the default entry, so drop it
     # before choosing a command, and let a subcommand keep its own semantics.
     no_gui = "--no-gui" in arguments
@@ -261,13 +274,12 @@ def doctor():
     def module_check(module, distribution, label, *, optional_check=False, hint=""):
         entry = {"name": module, "label": label, "optional": optional_check}
         try:
-            found = importlib.util.find_spec(module) is not None
-        except (ImportError, ValueError):
-            found = False
-        if not found:
+            importlib.import_module(module)
+        except Exception as exc:
             entry["status"] = "warning" if optional_check else "missing"
             if hint:
                 entry["hint"] = hint
+            entry["error"] = type(exc).__name__
             return entry
         entry["status"] = "ok"
         if distribution:
@@ -357,6 +369,22 @@ def sample(robot, args, stop):
 def execute(args, stop):
     if args.command == "doctor":
         return doctor()
+    if args.command == "sessions":
+        from .session_log import list_sessions, prune_sessions, session_root
+        if args.prune:
+            if args.dry_run and args.yes:
+                raise UsageError("choose --dry-run or --yes, not both")
+            if not args.yes and not args.dry_run:
+                raise UsageError("--prune requires --yes or --dry-run")
+            try:
+                return prune_sessions(keep=args.keep, older_than_days=args.older_than,
+                                      dry_run=args.dry_run)
+            except ValueError as exc:
+                raise UsageError(str(exc)) from None
+        if (args.keep != 20 or args.older_than is not None
+                or args.dry_run or args.yes):
+            raise UsageError("--keep/--older-than/--dry-run/--yes require --prune")
+        return {"root": str(session_root()), "sessions": list_sessions()}
     if args.command == "scripts":
         return list_scripts(args.scripts_dir or default_scripts_dir())
     if args.command == "gui":

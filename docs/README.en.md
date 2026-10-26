@@ -47,8 +47,10 @@ export DEEPSEEK_API_KEY="sk-..."
 
 Agent conversations are transcribed to `~/.mybot/sessions` by default (tool
 arguments, bounded results and images; API keys in environment variables are
-never read into the transcript). Disable with `--no-session-log` or
-`MYBOT_SESSION_LOG=0`; see [the CLI guide](cli.md#session-transcripts).
+never read into the transcript). Disable with `--no-session-log`,
+`MYBOT_SESSION_LOG=0`, or the GUI settings toggle; list and prune with
+`pymybot sessions [--prune --keep N --yes]`; see
+[the CLI guide](cli.md#session-transcripts).
 
 ## Design
 

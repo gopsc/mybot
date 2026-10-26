@@ -11,6 +11,8 @@ Per-edition histories live next to each implementation:
 
 ## [Unreleased]
 
+## [0.3.1] – 2026-10-26
+
 ### Added
 
 - Session transcripts for `agent` and `serve`: `~/.mybot/sessions/<id>/` holds
@@ -18,9 +20,18 @@ Per-edition histories live next to each implementation:
   and per-session size caps. Disable with `--no-session-log` or
   `MYBOT_SESSION_LOG=0`; `MYBOT_HOME` moves the root. Ported from the archived
   `release` prototype without its built-in endpoint.
+- `pymybot sessions` lists transcripts newest-first and can prune them with
+  `--keep N [--older-than DAYS]`; deletion requires `--yes`, and `--dry-run`
+  previews it. The newest N sessions are always protected and symlinks are
+  never followed.
+- GUI settings toggle for session transcripts; turning it off starts `serve`
+  with `--no-session-log`.
 - Nuitka standalone builds are recognised as frozen (`paths.frozen()` checks
   `__compiled__`), so asset lookup, console hiding and the GUI's `serve` child
   behave as in PyInstaller builds.
+- The Windows release bundle now installs `.[camera]` and collects PyAV, and the
+  release workflow verifies that `doctor` reports `av` as importable before
+  publishing.
 - Reference for the generic `scripts/Camera.mt` action and `robots/camwin.sql`.
 
 ### Changed
@@ -37,9 +48,21 @@ Per-edition histories live next to each implementation:
   `tools/`.
 - Packaging includes the moved docs and tools in the sdist; the Windows bundle
   and Docker image no longer carry community files they cannot display.
+- Release tags must now match both `pyproject.toml` and `pymybot.__version__`;
+  beta/RC tags are published as GitHub prereleases. This makes the manually
+  built `v0.3.1beta` asset superseded by a reproducible `v0.3.1` release.
 
 ### Fixed
 
+- `pymybot serve` no longer aborts at interpreter shutdown with
+  `_enter_buffered_busy` when a client sends `shutdown` but keeps stdin open.
+  The JSONL reader uses raw `os.read`, so a daemon thread never owns the
+  BufferedReader lock during finalization. A final request without a trailing
+  newline is still processed at EOF.
+- `pymybot sessions --prune` skips the newest `--keep` sessions, sessions whose
+  process is still alive on POSIX, symlinks and malformed directories.
+- Saving GUI settings no longer restarts `serve` unless the workspace,
+  interpreter or transcript preference actually changed.
 - DirectShow cameras listed as `(none)` by some FFmpeg builds are recognised via
   the video-input category GUID.
 - Windowed builds without console streams no longer fail on the first `print`.
@@ -140,6 +163,7 @@ Initial public Python edition.
 - Tkinter GUI with agent chat, tool approval dialogs, settings and logs.
 - Linux/Windows CI, wheel/sdist smoke tests and README quick-start checks.
 
+[0.3.1]: https://github.com/gopsc/mybot/releases/tag/v0.3.1
 [0.3.0]: https://github.com/gopsc/mybot/releases/tag/v0.3.0
 [0.2.0]: https://github.com/gopsc/mybot/releases/tag/v0.2.0
 [0.1.0]: https://github.com/gopsc/mybot/releases/tag/v0.1.0

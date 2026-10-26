@@ -88,7 +88,7 @@ export DEEPSEEK_API_KEY="sk-..."
 
 支持的模型提供商：`openai`、`openai-chat`、`anthropic`、`deepseek`。密钥只从环境变量读取；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
 
-对话默认转录到 `~/.mybot/sessions`（含工具参数、受限结果与图片；环境变量中的密钥不会被主动读取）。转录只用于回看，不能恢复会话；用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，详见 [docs/cli.md](docs/cli.md#session-transcripts)。
+对话默认转录到 `~/.mybot/sessions`（含工具参数、受限结果与图片；环境变量中的密钥不会被主动读取）。转录只用于回看，不能恢复会话；用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，用 `pymybot sessions` 查看或 `pymybot sessions --prune --keep 20 --yes` 清理，详见 [docs/cli.md](docs/cli.md#session-transcripts)。
 
 ## 架构
 
@@ -132,6 +132,7 @@ flowchart LR
 | `agent` | PydanticAI 任务/REPL | 经审批 |
 | `serve` | 长驻 JSON-RPC 服务 | 经请求 |
 | `doctor` | 环境、依赖、资产诊断 | 否 |
+| `sessions` | 列出或清理 `~/.mybot/sessions` 转录 | 否 |
 
 退出码：`0` 成功，`1` 运行错误，`2` 用法错误，`130` 中断。完整参数、JSON 契约和 `serve` 协议见 [docs/cli.md](docs/cli.md)。
 

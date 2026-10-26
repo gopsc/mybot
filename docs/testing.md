@@ -9,6 +9,7 @@
 | Virtual devices | `tests/fixtures/virt/*.sql` + `*.mt` | Real driver build/call/destroy paths without hardware |
 | Robot integration | `tests/test_robot.py`, `tests/test_daemon.py` | Activation, inheritance, controllers, sampling |
 | Agent | `tests/test_agent*.py` | Offline model loop, approval, budgets, cleanup |
+| Transcripts | `tests/test_session_log.py` | JSONL bounds, permissions, list/prune safety |
 | Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs |
 | Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
 

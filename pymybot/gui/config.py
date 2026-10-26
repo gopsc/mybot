@@ -70,6 +70,7 @@ class GuiConfig:
     timeout: float = 180.0
     max_requests: int = 8
     max_tool_calls: int = 16
+    session_log: bool = True
     # Runtime-only: initial toggle state for this launch, never written to disk.
     allow_hardware: bool = False
     allow_actions: bool = False
@@ -92,6 +93,7 @@ class GuiConfig:
             timeout=self.timeout if isinstance(self.timeout, (int, float)) and 0 < self.timeout <= 3600 else 180.0,
             max_requests=self.max_requests if isinstance(self.max_requests, int) and 1 <= self.max_requests <= 100 else 8,
             max_tool_calls=self.max_tool_calls if isinstance(self.max_tool_calls, int) and 1 <= self.max_tool_calls <= 1000 else 16,
+            session_log=self.session_log if isinstance(self.session_log, bool) else True,
             allow_hardware=bool(self.allow_hardware),
             allow_actions=bool(self.allow_actions),
         )

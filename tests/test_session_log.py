@@ -1,6 +1,7 @@
 """Conversation transcript storage under ~/.mybot/sessions."""
 import asyncio
 import json
+import os
 import stat
 import sys
 import threading
@@ -112,6 +113,106 @@ def test_posix_permissions_are_restricted(monkeypatch, tmp_path):
         assert stat.S_IMODE((log.path / "meta.json").stat().st_mode) == 0o600
     finally:
         log.close()
+
+
+def test_list_and_prune_sessions(monkeypatch, tmp_path):
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
+    created = []
+    for index in range(4):
+        log = SessionLog(robot=f"r{index}.sql", mode="test")
+        log.write("user", text=f"turn {index}")
+        log.close()
+        created.append(log.path)
+
+    sessions = session_log.list_sessions()
+    assert len(sessions) == 4
+    assert {item["id"] for item in sessions} == {path.name for path in created}
+    assert all(item["bytes"] > 0 for item in sessions)
+
+    dry = session_log.prune_sessions(keep=2, dry_run=True)
+    assert dry["dry_run"] is True and len(dry["deleted"]) == 2
+    assert all(path.exists() for path in created)
+
+    real = session_log.prune_sessions(keep=2)
+    assert len(real["deleted"]) == 2 and real["kept"] == 2 and real["bytes_freed"] > 0
+    remaining = {path.name for path in created if path.exists()}
+    assert len(remaining) == 2
+    assert {item["id"] for item in session_log.list_sessions()} == remaining
+
+
+def test_prune_ignores_unknown_directories_and_symlinks(monkeypatch, tmp_path):
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
+    log = SessionLog()
+    log.close()
+    root = tmp_path / "sessions"
+    (root / "notes").mkdir()
+    fake = root / "20260101-000000-deadbeef"
+    fake.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = root / "20250101-000000-deadbeef"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlinks unavailable")
+    result = session_log.prune_sessions(keep=1)
+    assert result["deleted"] == [] and fake.exists() and (root / "notes").exists()
+    assert outside.exists()
+
+
+def test_prune_older_than_days(monkeypatch, tmp_path):
+    import time
+
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
+    created = []
+    for index in range(3):
+        log = SessionLog(robot=f"r{index}.sql")
+        log.write("user", text="old")
+        log.close()
+        created.append(log.path)
+    old = time.time() - 40 * 86400
+    for path in created[:2]:
+        for item in [path, *path.rglob("*")]:
+            os.utime(item, (old, old))
+    result = session_log.prune_sessions(keep=1, older_than_days=30)
+    assert set(result["deleted"]) == {created[0].name, created[1].name}
+    assert len(session_log.list_sessions()) == 1
+
+
+@pytest.mark.skipif(os.name == "nt", reason="active-process probe is POSIX-only")
+def test_prune_skips_live_session(monkeypatch, tmp_path):
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
+    old = SessionLog(robot="old.sql")
+    old.write("user", text="still running")
+    old.close()
+    new = SessionLog(robot="new.sql")
+    new.write("user", text="newer")
+    new.close()
+
+    transcript = old.path / "transcript.jsonl"
+    lines = [line for line in transcript.read_text(encoding="utf-8").splitlines()
+             if '"type":"session_end"' not in line]
+    transcript.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    meta_path = old.path / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["pid"] = os.getpid()
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+    past = old.path.stat().st_mtime - 3600
+    for item in [old.path, *old.path.rglob("*")]:
+        os.utime(item, (past, past))
+
+    result = session_log.prune_sessions(keep=1)
+    assert old.path.exists()
+    assert old.path.name in result["skipped"]
+    assert new.path.exists()
+
+
+def test_prune_validates_arguments():
+    for keep in (0, -1, True, "2", session_log.MAX_KEEP + 1):
+        with pytest.raises(ValueError):
+            session_log.prune_sessions(keep=keep)
+    with pytest.raises(ValueError):
+        session_log.prune_sessions(older_than_days=-1)
 
 
 def test_agent_session_records_text_turn(monkeypatch, tmp_path):

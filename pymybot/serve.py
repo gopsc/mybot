@@ -645,21 +645,52 @@ class Server:
                 await asyncio.to_thread(self.worker.shutdown, wait=True)
 
 
-def _reader(stream, queue, loop):
+def _reader(fd, queue, loop):
+    """Read JSONL from a raw file descriptor without holding a buffered-I/O lock.
+
+    ``sys.stdin.buffer.readline`` keeps the BufferedReader lock while it waits
+    for the next line. The main thread may exit on ``shutdown`` while the parent
+    still holds the pipe open; finalizing the interpreter then aborts with
+    ``_enter_buffered_busy`` because a daemon thread owns that lock. Raw
+    ``os.read`` lets the daemon block in the kernel instead, so interpreter
+    shutdown stays quiet even when the client never closes stdin.
+    """
     def put(item):
         loop.call_soon_threadsafe(queue.put_nowait, item)
+
+    pending = b""
+    discarding = False
+
+    def emit(line):
+        nonlocal discarding
+        if discarding:
+            discarding = False
+            put(ValueError("Message exceeds the line limit"))
+            return
+        if len(line) > MAX_LINE:
+            put(ValueError("Message exceeds the line limit"))
+        elif line.strip():
+            put(line.decode("utf-8"))
+
     try:
         while True:
-            line = stream.readline(MAX_LINE + 1)
-            if not line:
+            chunk = os.read(fd, 64 * 1024)
+            if not chunk:
+                if discarding:
+                    put(ValueError("Message exceeds the line limit"))
+                elif pending:
+                    emit(pending)
                 break
-            if len(line) > MAX_LINE and not line.endswith(b"\n"):
-                while line and not line.endswith(b"\n"):
-                    line = stream.readline(MAX_LINE + 1)
-                put(ValueError("Message exceeds the line limit"))
-                continue
-            if line.strip():
-                put(line.decode("utf-8"))
+            pending += chunk
+            while True:
+                newline = pending.find(b"\n")
+                if newline < 0:
+                    break
+                line, pending = pending[:newline], pending[newline + 1:]
+                emit(line)
+            if len(pending) > MAX_LINE:
+                pending = b""
+                discarding = True
     except (OSError, ValueError, UnicodeDecodeError) as exc:
         print(f"pymybot serve: stdin: {exc}", file=sys.stderr)
     finally:
@@ -673,7 +704,7 @@ async def _main(out, stop, enable_agent, enable_session_log):
     loop = asyncio.get_running_loop()
     queue = asyncio.Queue()
     server = Server(out, stop, enable_agent=enable_agent, enable_session_log=enable_session_log)
-    threading.Thread(target=_reader, args=(sys.stdin.buffer, queue, loop), name="serve-stdin", daemon=True).start()
+    threading.Thread(target=_reader, args=(sys.stdin.fileno(), queue, loop), name="serve-stdin", daemon=True).start()
 
     async def watch_stop():
         while not stop.is_set() and not server.closing:

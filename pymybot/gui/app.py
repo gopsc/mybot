@@ -502,11 +502,15 @@ class App:
         self._refresh_status()
         workspace = self.cfg.workspace or default_workspace()
         python = resolve_python(workspace, self.cfg.python)
+        serve_args = ["-m", "pymybot", "serve"]
+        if not self.cfg.session_log:
+            serve_args.append("--no-session-log")
 
         def work():
             client = ServeClient(
                 python,
                 workspace,
+                python_args=tuple(serve_args),
                 on_notify=lambda method, params: self.post(lambda: self._on_notify(generation, method, params)),
                 on_request=lambda ident, method, params: self.post(
                     lambda: self._on_request(generation, ident, method, params)
@@ -877,7 +881,7 @@ class App:
         self.root.wait_window(dialog.top)
         if not dialog.result:
             return
-        before = (self.cfg.workspace, self.cfg.python)
+        before = (self.cfg.workspace, self.cfg.python, self.cfg.session_log)
         for name, value in dialog.result.items():
             setattr(self.cfg, name, value)
         self.cfg.task = ""
@@ -885,7 +889,8 @@ class App:
         self._refresh_model_label()
         self._load_robot_list()
         self._refresh_hardware()
-        if before != (self.cfg.workspace, self.cfg.python):
+        after = (self.cfg.workspace, self.cfg.python, self.cfg.session_log)
+        if before != after:
             self._restart_server()
         self._notice("设置已保存" if saved else "设置已应用，但配置文件写入失败（见日志）")
 
@@ -1044,6 +1049,10 @@ class SettingsDialog:
         ttk.Label(budgets, text="工具调用").pack(side="left", padx=(2, 0))
         ttk.Label(body, text="超时 / 预算", ).grid(row=row, column=0, sticky="w", pady=6)
         row += 1
+        self.session_log = tk.BooleanVar(value=bool(cfg.session_log))
+        ttk.Checkbutton(body, text="保存会话转录（~/.mybot/sessions）",
+                        variable=self.session_log).grid(row=row, column=1, sticky="w", pady=(0, 4))
+        row += 1
         ttk.Label(body, text="密钥只读取环境变量，窗口不保存也不显示它。", style="Muted.TLabel").grid(
             row=row, column=0, columnspan=3, sticky="w", pady=(4, 0))
         row += 1
@@ -1080,6 +1089,7 @@ class SettingsDialog:
         except ValueError:
             messagebox.showwarning("设置无效", "超时与预算必须是数字。", parent=self.top)
             return
+        values["session_log"] = bool(self.session_log.get())
         self.result = values
         self.top.destroy()
 

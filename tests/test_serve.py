@@ -291,6 +291,28 @@ def test_shutdown_with_eof_closes_active_session(workspace, client_factory):
     assert client.next() == {"ok": True, "command": "serve", "stopped": False}
 
 
+def test_shutdown_without_closing_stdin_exits_cleanly(workspace, client_factory):
+    """A parent may keep the pipe open after shutdown; the reader must not own a
+    buffered-I/O lock at interpreter finalization."""
+    client = client_factory(workspace, "--no-agent")
+    assert client.call("shutdown") == {}
+    assert client.proc.wait(20) == 0
+    time.sleep(0.2)
+    assert "Fatal Python error" not in "".join(client.stderr)
+    client.close()
+
+
+def test_eof_without_newline_processes_final_line(workspace, client_factory):
+    client = client_factory(workspace, "--no-agent")
+    client.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 99, "method": "initialize"}))
+    client.proc.stdin.flush()
+    client.proc.stdin.close()
+    reply = client.wait(99, timeout=5)
+    assert reply["result"]["protocol"] == 1
+    assert client.proc.wait(10) == 0
+    assert "Fatal Python error" not in "".join(client.stderr)
+
+
 class Out:
     def __init__(self):
         self.lines = queue.Queue()

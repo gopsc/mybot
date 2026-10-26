@@ -44,12 +44,57 @@ def test_doctor_reports_dependencies_and_assets(capsys):
     assert payload["assets"]["scripts"]["files"] > 0
 
 
+def test_doctor_reports_import_failure(monkeypatch, capsys):
+    real = cli.importlib.import_module
+
+    def fake(name, package=None):
+        if name == "av":
+            raise ImportError("missing FFmpeg DLL")
+        return real(name, package)
+
+    monkeypatch.setattr(cli.importlib, "import_module", fake)
+    code = cli.main(["doctor"])
+    payload = json.loads(capsys.readouterr().out)
+    av = next(item for item in payload["checks"] if item["name"] == "av")
+    assert code == 0 and av["status"] == "warning" and av["error"] == "ImportError"
+
+
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch):
     for key in list(os.environ):
         if key.startswith(("BOT4CJ_", "PYMYBOT_", "MYBOT_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
+
+
+def test_sessions_lists_and_prunes(monkeypatch, tmp_path, capsys):
+    from pymybot.session_log import SessionLog
+
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
+    for _ in range(3):
+        log = SessionLog()
+        log.close()
+
+    code, result, _ = invoke(capsys, "sessions")
+    assert code == 0 and len(result["sessions"]) == 3
+
+    code, result, _ = invoke(capsys, "sessions", "--keep", "2")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+    code, result, _ = invoke(capsys, "sessions", "--prune", "--keep", "1")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+    code, result, _ = invoke(capsys, "sessions", "--prune", "--keep", "1", "--dry-run", "--yes")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+    code, result, _ = invoke(capsys, "sessions", "--prune", "--keep", "1", "--dry-run")
+    assert code == 0 and result["dry_run"] is True and len(result["deleted"]) == 2
+
+    code, result, _ = invoke(capsys, "sessions", "--prune", "--keep", "1", "--yes")
+    assert code == 0 and result["kept"] == 1 and len(result["deleted"]) == 2
+
+    code, result, _ = invoke(capsys, "--no-agent", "sessions")
+    assert code == 0 and len(result["sessions"]) == 1
 
 
 @pytest.fixture

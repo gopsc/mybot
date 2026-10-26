@@ -34,6 +34,17 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          mod=$(python -c "import pymybot; print(pymybot.__version__)")
+          cit=$(sed -n 's/^version: //p' CITATION.cff | head -1)
+          test "$tag" = "$pkg" || { echo "tag $tag != pyproject $pkg"; exit 1; }
+          test "$tag" = "$mod" || { echo "tag $tag != pymybot $mod"; exit 1; }
+          test "$tag" = "$cit" || { echo "tag $tag != CITATION $cit"; exit 1; }
       - name: Install build frontend
         run: python -m pip install build
       - name: Build
@@ -64,8 +75,8 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - name: Install agent + packaging dependencies
-        run: python -m pip install -e ".[agent,package]"
+      - name: Install agent, camera and packaging dependencies
+        run: python -m pip install -e ".[agent,camera,package]"
       - name: Doctor
         run: python -m pymybot doctor
       - name: Build bundle
@@ -75,6 +86,14 @@ jobs:
           dist\mybot\pymybot.exe --version
           dist\mybot\pymybot.exe doctor
           dist\mybot\pymybot.exe check --robot dist\mybot\robots\relay-test.sql --input dist\mybot\scripts\relay-test.mt
+      - name: Verify camera support in the bundle
+        shell: pwsh
+        run: |
+          $doctor = & dist\mybot\pymybot.exe doctor | ConvertFrom-Json
+          $av = $doctor.checks | Where-Object { $_.name -eq "av" }
+          if ($null -eq $av -or $av.status -ne "ok") {
+            throw "PyAV is not importable in the Windows bundle (status: $($av.status))"
+          }
       - name: Package
         shell: pwsh
         run: |
@@ -116,3 +135,4 @@ jobs:
           files: release/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}

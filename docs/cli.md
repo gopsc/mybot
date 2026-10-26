@@ -27,6 +27,7 @@ python -m pymybot doctor
 | `pymybot agent ...` | PydanticAI task/REPL | Via approved tools |
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot doctor` | Environment/dependency/asset diagnostics | No |
+| `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
 
 ## Global options
 
@@ -152,5 +153,22 @@ which the GUI's `serve` child inherits. `MYBOT_HOME` overrides the root
 (default `~/.mybot`). Each event is capped at 64 KiB; each image at 8 MiB and
 each session at 256 images / 128 MiB, beyond which only an `omitted` marker is
 written. On POSIX, directories are `0700` and files `0600`.
+
+### List and prune
+
+```sh
+pymybot sessions                                  # JSON list, newest first
+pymybot sessions --prune --keep 20 --dry-run      # show what would go
+pymybot sessions --prune --keep 20 --yes          # delete older sessions
+pymybot sessions --prune --keep 20 --older-than 30 --yes
+```
+
+The newest `--keep` sessions are always protected. `--older-than DAYS` adds a
+second condition among the rest, so a recent overflow is not deleted before it
+ages out. Pruning never follows symlinks and ignores directories that do not
+look like a session. On POSIX, a live session whose transcript has no
+`session_end` is skipped; do not prune while a session is running on Windows.
+Deletion requires `--yes`; `--dry-run` previews the same list without touching
+disk.
 
 See [`gui.md`](gui.md) for the graphical equivalent.

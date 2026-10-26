@@ -2,7 +2,7 @@
 """One-directory Windows/Linux bundle built from a tagged public commit.
 
 Build:
-    pip install -e ".[agent,package]"
+    pip install -e ".[agent,camera,package]"
     python -m PyInstaller --noconfirm --clean tools/mybot.spec
 
 The console EXE hides its console when it starts the GUI. The GUI launches
@@ -29,7 +29,7 @@ for extra in ("README.md", "LICENSE", "CHANGELOG.md"):
 for distribution in (
     "pydantic-ai-slim", "pydantic-graph", "pydantic", "openai", "anthropic",
     "genai-prices", "httpx2", "httpcore2", "griffelib", "truststore", "jiter",
-    "tiktoken", "lupa", "sqlparse", "pyserial", "pyftdi", "pillow",
+    "tiktoken", "lupa", "sqlparse", "pyserial", "pyftdi", "pillow", "av",
 ):
     try:
         datas += copy_metadata(distribution)
@@ -40,7 +40,7 @@ hiddenimports = []
 for package in (
     "pydantic_ai", "pydantic_graph", "openai", "anthropic", "genai_prices",
     "httpx2", "httpcore2", "griffelib", "truststore", "jiter", "tiktoken",
-    "lupa", "PIL", "serial", "pyftdi",
+    "lupa", "PIL", "serial", "pyftdi", "av",
 ):
     try:
         hiddenimports += collect_submodules(package)

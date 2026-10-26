@@ -39,7 +39,11 @@ pymybot --no-gui   # terminal interface
      `anthropic:claude-sonnet-4-5` or `deepseek:deepseek-chat`;
    - the base URL only when using a self-hosted OpenAI-compatible endpoint;
    - the **name** of the environment variable holding the API key. The key
-     itself is never stored in the settings file.
+     itself is never stored in the settings file;
+   - whether **保存会话转录** is enabled. It is on by default; turning it off
+     starts `serve` with `--no-session-log`. `MYBOT_SESSION_LOG=0` in the
+     environment still disables transcripts regardless of this checkbox. Use
+     `pymybot sessions` to inspect or prune existing transcripts.
 
 3. Pick the workspace and a `robots/*.sql` structure. The hardware tree and
    model summary update immediately.

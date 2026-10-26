@@ -84,7 +84,7 @@ do not reformat unrelated files in a behaviour PR.
 ## Frozen builds
 
 ```sh
-python -m pip install -e ".[package]"
+python -m pip install -e ".[agent,camera,package]"
 python -m PyInstaller --noconfirm --clean tools/mybot.spec
 ```
 
@@ -95,6 +95,9 @@ The spec produces `dist/mybot/` with:
 - `robots/`, `scripts/`, `README.md`, `LICENSE` next to the executable;
 - the GUI launches `pymybot.exe serve` with `CREATE_NO_WINDOW`, so no console
   flashes behind the window.
+
+The `camera` extra keeps PyAV and its FFmpeg libraries in the bundle; omit it
+only for a build that will never capture images.
 
 `pymybot/paths.py` resolves assets via `sys._MEIPASS` in frozen builds. Keep it
 as the only place that knows about frozen paths; other modules call

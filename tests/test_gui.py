@@ -78,13 +78,15 @@ def test_config_roundtrip_drops_runtime_grants(tmp_path):
     path = tmp_path / "settings.json"
     cfg = GuiConfig(workspace=str(tmp_path), robot="robots/a.sql", task="hello",
                     module_paths=["a", "", 3], model="openai:gpt-4o", read_vars=["v0", "bad name"],
-                    allow_hardware=True, allow_actions=True, timeout=30)
+                    allow_hardware=True, allow_actions=True, timeout=30, session_log=False)
     cfg.store(path)
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert "task" not in stored and "allow_hardware" not in stored and "allow_actions" not in stored
     assert stored["module_paths"] == ["a"] and stored["read_vars"] == ["v0"]
+    assert stored["session_log"] is False
     loaded = GuiConfig.load(path)
     assert loaded.workspace == str(tmp_path) and loaded.timeout == 30
+    assert loaded.session_log is False
     assert loaded.allow_hardware is False and loaded.allow_actions is False
 
 
