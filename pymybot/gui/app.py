@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QEventLoop, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QShortcut, QTextCharFormat, QTextCursor
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QPalette, QShortcut, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
@@ -26,9 +26,108 @@ from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resol
 TITLE = "mybot · 智能体"
 MAX_DIALOG_ARGS = 4000
 PALETTE = {
-    "user": "#1d4ed8", "assistant": "#111827", "tool": "#6b7280",
-    "toolerr": "#b91c1c", "error": "#b91c1c", "system": "#6b7280",
+    "user": "#245cc5", "assistant": "#243247", "tool": "#536277",
+    "toolerr": "#b42332", "error": "#b42332", "system": "#59677a",
 }
+STYLESHEET = """
+QWidget { color: #243247; }
+QMainWindow, QDialog, QScrollArea > QWidget > QWidget { background: #f3f5f8; }
+QGroupBox {
+    background: #ffffff; border: 1px solid #d4dbe5; border-radius: 8px;
+    margin-top: 10px; padding: 12px 8px 8px; font-weight: 600;
+}
+QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #34445a; }
+QLabel#secondaryText { color: #59677a; }
+QScrollArea { border: none; }
+QLineEdit, QPlainTextEdit, QTreeWidget {
+    background: #ffffff; color: #243247; border: 1px solid #b8c3d2;
+    border-radius: 5px; padding: 4px 6px; placeholder-text-color: #59677a;
+    selection-background-color: #245cc5; selection-color: #ffffff;
+}
+QComboBox, QAbstractSpinBox {
+    background: #ffffff; color: #243247; min-height: 1.8em;
+    selection-background-color: #245cc5; selection-color: #ffffff;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTreeWidget:focus {
+    border: 1px solid #245cc5;
+}
+QLineEdit:disabled, QPlainTextEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
+    color: #606d7e; background: #edf0f4; border-color: #d4dbe5;
+}
+QComboBox QAbstractItemView {
+    background: #ffffff; color: #243247;
+    selection-background-color: #245cc5; selection-color: #ffffff;
+}
+QPlainTextEdit#chatTranscript { padding: 10px; border: none; }
+QPlainTextEdit#eventLog { background: #f8fafc; padding: 10px; border: none; }
+QPushButton {
+    background: #ffffff; color: #34445a; border: 1px solid #b8c3d2;
+    border-radius: 5px; padding: 5px 10px;
+}
+QPushButton:hover { background: #edf3fc; border-color: #829ac0; }
+QPushButton:pressed { background: #dfe9f8; }
+QPushButton:default, QPushButton:focus { border: 2px solid #245cc5; padding: 4px 9px; }
+QPushButton[role="primary"] { background: #245cc5; color: #ffffff; border-color: #245cc5; }
+QPushButton[role="primary"]:hover { background: #1d4fae; border-color: #1d4fae; }
+QPushButton[role="primary"]:pressed { background: #193f8a; border-color: #193f8a; }
+QPushButton[role="primary"]:focus { border-color: #142e60; }
+QPushButton[role="danger"] { color: #b42332; }
+QPushButton[role="danger"]:hover { background: #fff1f2; border-color: #b42332; }
+QPushButton:disabled, QPushButton[role="primary"]:disabled, QPushButton[role="danger"]:disabled {
+    background: #edf0f4; color: #606d7e; border: 1px solid #d4dbe5; padding: 5px 10px;
+}
+QCheckBox { color: #34445a; spacing: 6px; padding: 3px 0; }
+QCheckBox:disabled { color: #606d7e; }
+QTabWidget::pane { background: #ffffff; border: 1px solid #d4dbe5; border-radius: 5px; }
+QTabBar::tab {
+    background: #edf0f4; color: #59677a; padding: 7px 18px;
+    border-bottom: 2px solid transparent; margin-right: 3px;
+}
+QTabBar::tab:selected { background: #ffffff; color: #245cc5; border-bottom-color: #245cc5; }
+QTabBar::tab:hover:!selected { background: #e5ebf4; color: #34445a; }
+QTreeWidget { alternate-background-color: #f3f6fa; }
+QTreeWidget::item { padding: 3px 0; }
+QHeaderView::section {
+    background: #edf2f8; color: #34445a; border: none;
+    border-bottom: 1px solid #d4dbe5; padding: 5px; font-weight: 600;
+}
+QSplitter::handle { background: #e3e8ef; }
+QSplitter::handle:hover { background: #b8c9e4; }
+QScrollBar:vertical { background: #edf2f8; width: 14px; margin: 0; }
+QScrollBar:horizontal { background: #edf2f8; height: 14px; margin: 0; }
+QScrollBar::handle { background: #b8c3d2; border: 3px solid #edf2f8; border-radius: 6px; }
+QScrollBar::handle:vertical { min-height: 28px; }
+QScrollBar::handle:horizontal { min-width: 28px; }
+QScrollBar::handle:hover { background: #829ac0; }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: none; }
+QStatusBar { background: #edf2f8; color: #34445a; border-top: 1px solid #d4dbe5; }
+QStatusBar::item { border: none; }
+QStatusBar QLabel { padding: 3px 6px; }
+QToolTip { background: #243247; color: #ffffff; border: none; padding: 5px 8px; }
+"""
+
+
+def _apply_theme(window):
+    palette = QPalette()
+    for role, color in {
+        "Window": "#f3f5f8", "WindowText": "#243247", "Base": "#ffffff",
+        "AlternateBase": "#f3f6fa", "Text": "#243247", "Button": "#ffffff",
+        "ButtonText": "#34445a", "BrightText": "#ffffff", "Highlight": "#245cc5",
+        "Accent": "#245cc5", "HighlightedText": "#ffffff", "PlaceholderText": "#59677a",
+        "ToolTipBase": "#243247", "ToolTipText": "#ffffff",
+        "Link": "#245cc5", "LinkVisited": "#6547a3",
+        "Light": "#ffffff", "Midlight": "#edf0f4", "Mid": "#b8c3d2",
+        "Dark": "#606d7e", "Shadow": "#34445a",
+    }.items():
+        palette.setColor(getattr(QPalette.ColorRole, role), QColor(color))
+    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
+        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor("#606d7e"))
+    window.setPalette(palette)
+    window.setStyleSheet(STYLESHEET)
+    font = window.font()
+    font.setPointSizeF(max(font.pointSizeF(), 10))
+    window.setFont(font)
 
 
 def _brief(value, limit=160):
@@ -50,15 +149,19 @@ def _absolute(path, root):
     return str(candidate if candidate.is_absolute() else Path(root or ".").absolute() / candidate)
 
 
-def _label(text=""):
+def _label(text="", *, secondary=False):
     label = QLabel(text)
     label.setTextFormat(Qt.TextFormat.PlainText)
     label.setWordWrap(True)
+    if secondary:
+        label.setObjectName("secondaryText")
     return label
 
 
-def _button(text, callback):
+def _button(text, callback, *, role=None):
     button = QPushButton(text)
+    if role:
+        button.setProperty("role", role)
     button.clicked.connect(callback)
     return button
 
@@ -100,6 +203,7 @@ class App(QMainWindow):
         self._dialogs = set()
         self.font_mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
+        _apply_theme(self)
         self._build()
         self._notice_timer = QTimer(self)
         self._notice_timer.setSingleShot(True)
@@ -137,7 +241,7 @@ class App(QMainWindow):
         toolbar.addWidget(_button("选择 SQL", self.pick_robot))
         toolbar.addWidget(_button("刷新", self.refresh_context))
         self.new_button = _button("新对话", self.new_conversation)
-        self.stop_button = _button("停止", self.stop_turn)
+        self.stop_button = _button("停止", self.stop_turn, role="danger")
         toolbar.addWidget(self.new_button)
         toolbar.addWidget(self.stop_button)
         toolbar.addWidget(_button("设置", self.open_settings))
@@ -191,11 +295,12 @@ class App(QMainWindow):
         self.hardware_tree = QTreeWidget()
         self.hardware_tree.setHeaderLabels(["变量", "驱动", "配置"])
         self.hardware_tree.setRootIsDecorated(False)
+        self.hardware_tree.setAlternatingRowColors(True)
         self.hardware_tree.setMinimumHeight(140)
         self.hardware_tree.setColumnWidth(0, 90)
         self.hardware_tree.setColumnWidth(1, 80)
         hw_layout.addWidget(self.hardware_tree)
-        self.hardware_note = _label("选择结构后自动读取")
+        self.hardware_note = _label("选择结构后自动读取", secondary=True)
         hw_layout.addWidget(self.hardware_note)
         layout.addWidget(hardware)
 
@@ -233,12 +338,12 @@ class App(QMainWindow):
         self.notebook = QTabWidget()
         self.chat = QPlainTextEdit()
         self.chat.setReadOnly(True)
-        self.chat.setStyleSheet("QPlainTextEdit { background: #ffffff; color: #111827; }")
+        self.chat.setObjectName("chatTranscript")
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setFont(self.font_mono)
         self.log.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.log.setStyleSheet("QPlainTextEdit { background: #111827; color: #d1d5db; }")
+        self.log.setObjectName("eventLog")
         self.notebook.addTab(self.chat, "对话")
         self.notebook.addTab(self.log, "日志")
         layout.addWidget(self.notebook, 1)
@@ -248,9 +353,9 @@ class App(QMainWindow):
         self.task_box.setMaximumHeight(100)
         composer.addWidget(self.task_box, 1)
         buttons = QVBoxLayout()
-        self.send_button = _button("发送", self.send_task)
+        self.send_button = _button("发送", self.send_task, role="primary")
         buttons.addWidget(self.send_button)
-        buttons.addWidget(_label("Ctrl+Enter"))
+        buttons.addWidget(_label("Ctrl+Enter", secondary=True))
         composer.addLayout(buttons)
         layout.addLayout(composer)
         self.send_shortcuts = []
@@ -344,6 +449,7 @@ class App(QMainWindow):
 
     def _message(self, title, text, *, confirm=False):
         dialog = QMessageBox(self)
+        _apply_theme(dialog)
         dialog.setWindowTitle(title)
         dialog.setTextFormat(Qt.TextFormat.PlainText)
         dialog.setText(text)
@@ -959,13 +1065,14 @@ class ToolDialog(QDialog):
 
     def __init__(self, parent, tool, arguments):
         super().__init__(parent)
+        _apply_theme(self)
         self.setWindowTitle("智能体请求调用工具")
         self.setModal(True)
         self.resize(620, 400)
         self.setMinimumSize(520, 320)
         layout = QVBoxLayout(self)
         layout.addWidget(_label(f"工具：{tool}"))
-        layout.addWidget(_label("下面是模型给出的完整参数；批准后本次调用立即执行。"))
+        layout.addWidget(_label("下面是模型给出的完整参数；批准后本次调用立即执行。", secondary=True))
         self.arguments = QPlainTextEdit()
         self.arguments.setReadOnly(True)
         self.arguments.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
@@ -996,6 +1103,7 @@ class SettingsDialog(QDialog):
 
     def __init__(self, parent, cfg: GuiConfig, workspace, config_path=""):
         super().__init__(parent)
+        _apply_theme(self)
         self.setWindowTitle("设置")
         self.setModal(True)
         self.resize(640, 680)
@@ -1032,10 +1140,11 @@ class SettingsDialog(QDialog):
         self.session_log = QCheckBox("保存会话转录（~/.mybot/sessions）")
         self.session_log.setChecked(bool(cfg.session_log))
         form.addRow(self.session_log)
-        layout.addWidget(_label("密钥只读取环境变量，窗口不保存也不显示它。"))
-        layout.addWidget(_label(f"配置文件：{config_path or '（默认位置）'}"))
+        layout.addWidget(_label("密钥只读取环境变量，窗口不保存也不显示它。", secondary=True))
+        layout.addWidget(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
+        self.buttons.button(QDialogButtonBox.StandardButton.Save).setProperty("role", "primary")
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)

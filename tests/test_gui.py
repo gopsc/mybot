@@ -445,6 +445,72 @@ def test_window_builds_with_robot_context(ui):
     assert [app.notebook.tabText(i) for i in range(2)] == ["对话", "日志"]
 
 
+def color_contrast(first, second):
+    def luminance(color):
+        rgb = (color.redF(), color.greenF(), color.blueF())
+        linear = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in rgb]
+        return sum(c * weight for c, weight in zip(linear, (0.2126, 0.7152, 0.0722)))
+
+    values = sorted((luminance(first), luminance(second)))
+    return (values[1] + 0.05) / (values[0] + 0.05)
+
+
+@pytest.mark.parametrize("dark_system", [False, True])
+def test_theme_is_readable_without_changing_system_palette(app_factory, qapp, dark_system):
+    from PySide6.QtGui import QColor, QPalette
+
+    original = qapp.palette()
+    system = QPalette(original)
+    if dark_system:
+        for role in (QPalette.ColorRole.Window, QPalette.ColorRole.Base, QPalette.ColorRole.Button):
+            system.setColor(role, QColor("#202020"))
+        for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
+            system.setColor(role, QColor("#eeeeee"))
+    qapp.setPalette(system)
+    dialogs = []
+    try:
+        gui, app = app_factory()
+        dialogs = [gui.SettingsDialog(app, app.cfg, str(ROOT)), gui.ToolDialog(app, "run", "{}")]
+        for dialog in dialogs:
+            dialog.show()
+        qapp.processEvents()
+        assert qapp.palette() == system
+        assert app.font().pointSizeF() >= 10
+        for widget in [app, *dialogs]:
+            palette = widget.palette()
+            assert palette.color(QPalette.ColorRole.Window).lightnessF() > 0.9
+            assert color_contrast(palette.windowText().color(), palette.window().color()) >= 4.5
+        for widget in (app.chat, app.log, app.task_box, app.robot_box, app.timeout_box,
+                       app.hardware_tree, dialogs[0].entries["model"], dialogs[1].arguments):
+            for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+                palette = widget.palette()
+                assert color_contrast(palette.color(group, QPalette.ColorRole.Text),
+                                      palette.color(group, QPalette.ColorRole.Base)) >= 4.5
+                assert color_contrast(palette.color(group, QPalette.ColorRole.HighlightedText),
+                                      palette.color(group, QPalette.ColorRole.Highlight)) >= 4.5
+        for color in gui.PALETTE.values():
+            assert color_contrast(QColor(color), app.chat.palette().base().color()) >= 4.5
+        assert app.task_box.palette().placeholderText().color().alpha() == 255
+        assert color_contrast(app.task_box.palette().placeholderText().color(),
+                              app.task_box.palette().base().color()) >= 4.5
+        for label in app.findChildren(gui.QLabel):
+            assert color_contrast(label.palette().windowText().color(), QColor("#f3f5f8")) >= 4.5
+        for enabled in (True, False):
+            app.send_button.setEnabled(enabled)
+            app.stop_button.setEnabled(enabled)
+            qapp.processEvents()
+            for button in (app.send_button, app.stop_button):
+                palette = button.palette()
+                assert color_contrast(palette.buttonText().color(), palette.button().color()) >= 4.5
+        assert dialogs[1].deny_button.isDefault()
+        assert not dialogs[1].approve_button.autoDefault()
+    finally:
+        for dialog in dialogs:
+            dialog.close()
+            dialog.deleteLater()
+        qapp.setPalette(original)
+
+
 def test_chat_lines_and_deltas_form_one_transcript(ui):
     _, app = ui
     app._chat_line("你：你好", "user")
