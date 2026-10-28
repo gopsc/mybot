@@ -7,6 +7,7 @@
 -- build 里静默注册账号或创建设备（那会向服务端写隐藏状态）。
 --
 -- op 分派（mode/result/message 是宿主保留键，动作列只能叫 op）：
+--   create   在本账号名下创建设备：device_name → device(数字 ID) + key(机器码)
 --   push     推单条数据（key 列给出时可为缺省动作）：key + value
 --   batch    批量推送：items = "k=v|k2=v2"
 --   pull     拉取待执行指令 → {count, commands=JSON 数组串}
@@ -14,9 +15,13 @@
 --   online   上报在线状态：online 缺省 1（0 = 离线）
 --   devices  列出本账号设备 → {count, devices=JSON 数组串}
 --   latest   读回最新数据点：key 可选（按 data_key 过滤）
+--   bind     用 device_key 绑定他人设备，本会话后续动作改用返回的 device ID
+--   unbind   解除绑定（只能解绑绑定来的设备）
 --   （缺省）  autopush：把 controller 转发来的结果表剔除框架/结构键后整批
 --            上推 /data/batch——传感器行写 controller1='<本变量>' 即可让
 --            每次采样自动上云（T=25.3 之类数值字段原样成为数据点）
+--
+-- device=0 表示尚未创建设备：允许 create/bind，其余需要设备 ID 的动作会报错。
 --
 -- 错误口径：传输失败透传 http_request 的 {result="ERR"}；HTTP >= 400 →
 -- err("HTTP <status>: <body 前 200 字>")。destroy 是空操作（不在销毁路径
@@ -59,6 +64,7 @@ local OK_STATUS = {
 	online  = { [200] = true, [204] = true },
 	devices = { [200] = true },
 	latest  = { [200] = true },
+	create  = { [200] = true, [201] = true },
 }
 
 local function api(ctx, method, path, payload)
@@ -136,10 +142,11 @@ require_driver("http", {
 		if data.user == nil or data.pass == nil or data.user == "" or data.pass == "" then
 			return err("Invalid Arguments: user, pass")
 		end
-		-- ID 必须精确（int_or 是钳制语义：0 会被吸成 1，故走 finite_of 显式拒绝）
+		-- ID 必须精确（int_or 是钳制语义：0 会被吸成 1，故走 finite_of 显式拒绝）；
+		-- 0 保留为“尚未创建设备”，供 create/bind 使用。
 		local dev = finite_of(data.device)
-		if dev == nil or dev ~= math.floor(dev) or dev < 1 then
-			return err("Invalid Arguments: device (registered device id)")
+		if dev == nil or dev ~= math.floor(dev) or dev < 0 then
+			return err("Invalid Arguments: device (registered device id, 0 = create/bind later)")
 		end
 		dev = math.floor(dev)
 		local failure = login(ctx, data)
@@ -154,7 +161,36 @@ require_driver("http", {
 		local op = data.op
 		if op == nil and data.key ~= nil then op = "push" end
 
-		if op == "push" then
+		-- 需要已绑定设备的 op；device=0 时明确报错，避免请求打到 /data/0
+		local device_ops = { push = true, batch = true, online = true, unbind = true, latest = true }
+		if op == nil or device_ops[op] then
+			if device_id == nil or device_id < 1 then
+				return err("No device assigned: run op=create or op=bind first")
+			end
+		end
+
+		if op == "create" then
+			local name = data.device_name
+			if name == nil or name == "" then
+				return err("Invalid Arguments: device_name")
+			end
+			local resp, decoded = call_api(ctx, data, "POST", "/devices",
+				{ device_name = tostring(name) }, OK_STATUS.create)
+			if resp.result ~= "OK" then return resp end
+			local id = nil
+			if type(decoded) == "table" then id = finite_of(decoded.id) end
+			if id == nil or id ~= math.floor(id) or id < 1 or decoded.device_key == nil then
+				return err("Invalid create response")
+			end
+			device_id = math.floor(id)
+			return {
+				result = "OK",
+				device = device_id,
+				key    = tostring(decoded.device_key),
+				name   = decoded.device_name,
+			}
+
+		elseif op == "push" then
 			if data.key == nil or data.key == "" then
 				return err("Invalid Arguments: key")
 			end
@@ -322,6 +358,9 @@ function read(data)
 	local fd = tonumber(data.fd)
 	if fd == nil or fd < 0 then
 		return err("Invalid Argument: fd (does the HTTP column reference an @HTTP variable?)")
+	end
+	if device_id == nil or device_id < 1 then
+		return err("No device assigned: run op=create or op=bind first")
 	end
 	local resp, decoded = call_api({ fd = fd }, data, "GET", latest_path(data.key), nil, OK_STATUS.latest)
 	if resp.result ~= "OK" then return resp end

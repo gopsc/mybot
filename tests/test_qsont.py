@@ -60,6 +60,14 @@ class FakeIotApi:
                 return 401, {"detail": "bad credentials"}
             if auth != f"Bearer {self.token}":
                 return 401, {"detail": "Invalid or expired token"}
+            if path == "/api/v1/devices" and method == "POST":
+                data = json.loads(body)
+                did = max(self.devices) + 1
+                self.devices[did] = {"key": f"key-{did}", "owner": "iot",
+                                     "name": data["device_name"]}
+                return 200, {"id": did, "user_id": 1,
+                             "device_name": data["device_name"],
+                             "device_key": f"key-{did}", "is_online": False}
             if path == "/api/v1/devices/bind" and method == "POST":
                 entry = next((d for d in self.devices.values()
                               if d["key"] == json.loads(body).get("device_key")), None)
@@ -160,12 +168,27 @@ def iot_server():
         thread.join(timeout=5)
 
 
-def qsont_sql(base, user=USER, password=PASSWORD):
+def qsont_sql(base, user=USER, password=PASSWORD, device=DEVICE_ID):
     return f"""
 CREATE TABLE HTTP (name String, base String, timeout Number);
 INSERT INTO HTTP (name, base, timeout) VALUES ('cloud', '{base}', 3000);
 CREATE TABLE Qsont (name String, HTTP String, user String, pass String, device Number);
-INSERT INTO Qsont (name, HTTP, user, pass, device) VALUES ('qs', '$cloud', '{user}', '{password}', {DEVICE_ID});
+INSERT INTO Qsont (name, HTTP, user, pass, device) VALUES ('qs', '$cloud', '{user}', '{password}', {device});
+"""
+
+
+def qsont_bound_sql(base):
+    """Credentials and device id come from Alias/Vars rows overridden at activation."""
+    return f"""
+CREATE TABLE Alias (name String, alias String);
+INSERT INTO Alias (name, alias) VALUES ('user', 'COVER_ME');
+INSERT INTO Alias (name, alias) VALUES ('pass', 'COVER_ME');
+CREATE TABLE Vars (name String, value String);
+INSERT INTO Vars (name, value) VALUES ('device', 0);
+CREATE TABLE HTTP (name String, base String, timeout Number);
+INSERT INTO HTTP (name, base, timeout) VALUES ('cloud', '{base}', 3000);
+CREATE TABLE Qsont (name String, HTTP String, user String, pass String, device Number);
+INSERT INTO Qsont (name, HTTP, user, pass, device) VALUES ('qs', '$cloud', '$user', '$pass', '$(device)');
 """
 
 
@@ -274,6 +297,66 @@ def test_qsont_bind_unbind_foreign_device(iot_server):
         with pytest.raises(DriverError, match="404"):
             robot.run('@Action\nqs.op      qs.key     qs.value;\n$("push")  $("soil") 43;\n@',
                       timeout=30)
+
+
+def test_qsont_create_device_then_push(iot_server):
+    base, api = iot_server
+    with Robot(qsont_sql(base, device=0), module_paths=[MODULES]) as robot:
+        outputs = robot.run('@Action\nqs.op         qs.device_name;\n$("create")   $("new-pot");\n@',
+                            timeout=30)
+        created = outputs[0]
+        assert created == {"result": "OK", "device": 9, "key": "key-9", "name": "new-pot"}
+        assert api.devices[9]["owner"] == "iot"
+        # 创建后同一会话直接推数据，无需重新 activate
+        outputs = robot.run('@Action\nqs.op      qs.key     qs.value;\n$("push")  $("soil") 42;\n@',
+                            timeout=30)
+        assert outputs[0]["result"] == "OK"
+        assert api.points[-1] == (9, "soil", "42")
+
+
+def test_qsont_device_ops_require_create_or_bind(iot_server):
+    base, _ = iot_server
+    with Robot(qsont_sql(base, device=0), module_paths=[MODULES]) as robot:
+        with pytest.raises(DriverError, match="No device assigned"):
+            robot.run('@Action\nqs.op      qs.key     qs.value;\n$("push")  $("soil") 42;\n@',
+                      timeout=30)
+
+
+def test_qsont_create_requires_contract_fields(iot_server):
+    base, api = iot_server
+    with Robot(qsont_sql(base, device=0), module_paths=[MODULES]) as robot:
+        api.responder = lambda m, p, q, a, b: (
+            (200, {"id": 5}) if m == "POST" and p == "/api/v1/devices" else None)
+        with pytest.raises(DriverError, match="create response"):
+            robot.run('@Action\nqs.op        qs.device_name;\n$("create")  $("pot");\n@',
+                      timeout=30)
+
+
+def test_qsont_alias_and_vars_bindings_apply_before_build(iot_server):
+    base, api = iot_server
+    bindings = {"user": USER, "pass": PASSWORD, "device": str(DEVICE_ID)}
+    with Robot(qsont_bound_sql(base), module_paths=[MODULES], vars=bindings) as robot:
+        outputs = robot.run('@Action\nqs.op      qs.key     qs.value;\n$("push")  $("soil") 42;\n@',
+                            timeout=30)
+    assert outputs[0]["result"] == "OK"
+    assert api.points[-1] == (DEVICE_ID, "soil", "42")
+
+
+def test_qsont_structure_bindings_are_required_at_activation(iot_server):
+    base, _ = iot_server
+    with pytest.raises(DriverError, match="login failed"):
+        Robot(qsont_bound_sql(base), module_paths=[MODULES]).active()
+
+
+def test_qsont_vars_binding_stays_numeric_in_run_session(iot_server):
+    base, api = iot_server
+    bindings = {"user": USER, "pass": PASSWORD, "device": str(DEVICE_ID)}
+    with Robot(qsont_bound_sql(base), module_paths=[MODULES], vars=bindings) as robot:
+        # run() re-applies bindings; $(device) must still resolve as a number.
+        outputs = robot.run('@Action\nqs.op      qs.key     qs.value;\n$("push")  $("air") 7;\n@',
+                            vars=bindings, timeout=30)
+    assert outputs[0]["result"] == "OK"
+    assert api.points[-1] == (DEVICE_ID, "air", "7")
 
 
 def test_qsont_3xx_is_not_reported_as_success(iot_server):

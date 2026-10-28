@@ -19,6 +19,9 @@ Per-edition histories live next to each implementation:
   a structure and to agent mode (operator bindings also reach every
   `run_action_script` call). `serve` accepts `vars` in `session.activate` and
   `agent.ask`, and the GUI exposes a runtime-only “变量覆盖” settings field.
+- Qsont supports `op=create` with `device=0`, and the register, create-device
+  and push/pull samples now share `robots/qsont.sql`. First-time account
+  registration stays manual because activation logs in before any action runs.
 
 ### Changed
 
