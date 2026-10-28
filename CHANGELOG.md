@@ -13,6 +13,18 @@ Per-edition histories live next to each implementation:
 
 ### Added
 
+- Standard MCP over stdio (`pip install pymybot[mcp]`): `pymybot mcp` exposes
+  the controller to Claude Desktop, Cursor and other MCP clients. It is
+  read-only by default, reuses `RobotExecutor` receipts and fault latching, and
+  publishes trusted `.mt` scripts and skills as resources. Physical hardware
+  still requires `--allow-hardware` plus `--allow-execution`.
+- The agent can call operator-configured external MCP servers via
+  `--mcp-config` (Claude Desktop/Cursor `mcpServers` shape), with per-call
+  approval, bounded results and `unknown` receipts on transport failures;
+  `--allow-mcp-tools` pre-approves a session. `agent.ask` accepts `mcpConfig`,
+  `allowMcpTools` and `historyTurns`, and the GUI stores an MCP config path.
+- `--history-turns` exposes the retained-turn budget (1–20) instead of the
+  previously fixed 6.
 - Structure `Alias`/`Vars` rows can be overridden with `--var`/`--var-env`
   before activation, so drivers that authenticate during `build()` receive
   values supplied at run time. `--var` now applies to every command that loads

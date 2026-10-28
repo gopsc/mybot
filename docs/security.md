@@ -30,6 +30,8 @@ flowchart LR
 | Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded. |
 | Model → shell | Shell is opt-in, runs with host privileges, and is **not** a sandbox. |
 | Model → network | Non-loopback HTTP requires `--allow-hardware`; redirects are refused; URL credentials/query/fragment are rejected. |
+| MCP client → host | A stdio MCP server is operator-configured host code, not a sandbox. Every external tool call is approval-gated unless `--allow-mcp-tools`; results are bounded and failures are reported as unknown. |
+| MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware`, `--read-var` and `--camera-var` stay separate gates. Resources never grant execution. |
 | Scripts → Lua | Lua is trusted code. LuaJIT FFI is available; only run reviewed drivers. |
 | Driver → device | `active`/`build`/`destroy`/`sample` may write hardware even when they appear read-only. |
 | Agent → logs | Final JSON excludes arguments, secrets and images; diagnostics are escaped. Session transcripts under `~/.mybot/sessions` do contain tool arguments, bounded results and images; API keys in environment variables are not read into them. See [`cli.md`](cli.md#session-transcripts). |

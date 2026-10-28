@@ -7,6 +7,7 @@
 | Python | 3.11–3.14 |
 | LuaJIT | provided by the `lupa` wheel |
 | PySide6 | 6.10–6.x, included in `gui`, `test` and `package` extras |
+| MCP SDK | 1.30–1.x, included in `mcp` and `agent` extras |
 | Node/npm | not required for the Python edition |
 | PyInstaller | 6.x, only for frozen builds |
 
@@ -20,8 +21,8 @@ git clone https://github.com/gopsc/mybot.git
 cd mybot
 python -m venv .venv
 .venv/bin/pip install -e ".[test]"
-# agent and GUI:
-.venv/bin/pip install -e ".[agent,test]"
+# agent, MCP and GUI:
+.venv/bin/pip install -e ".[agent,mcp,test]"
 ```
 
 Use the platform paths under Windows (`.venv\Scripts\pip`).

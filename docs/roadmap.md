@@ -26,6 +26,9 @@ release; security and reproducibility work takes precedence.
 
 ## 0.4.x — runtime and scale
 
+- [x] Standard MCP over stdio: `pymybot mcp` exposes the read-only controller,
+  and the agent can call operator-configured external MCP servers.
+- [ ] Remote MCP transports (HTTP/SSE), after a network threat-model review.
 - [ ] Pluggable model providers beyond the current four, without duplicating
   HTTP code.
 - [ ] Streaming tool results for long-running actions.
