@@ -322,9 +322,12 @@ def run_server(stop, *, robot_path, scripts_dir, module_paths=None, camera_src_r
                              vars=vars, allow_hardware=allow_hardware, read_vars=read_vars,
                              camera_vars=camera_vars, skills=skills))
     except KeyboardInterrupt:
-        pass
+        # The CLI installs SIGINT/SIGTERM handlers that set stop; a direct or
+        # embedded Ctrl+C still reaches this branch after asyncio has cleaned up.
+        return {"stopped": True}
     except SystemExit:
         raise
     except BaseException as exc:
         print(f"pymybot mcp: {type(exc).__name__}: {exc}", file=sys.stderr)
         raise SystemExit(1) from None
+    return {"stopped": stop.is_set()}

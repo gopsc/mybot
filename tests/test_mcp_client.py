@@ -96,7 +96,9 @@ def test_load_servers_expands_environment_and_normalizes(tmp_path, monkeypatch):
     path = write_config(tmp_path, {"demo": {
         "command": "python", "args": ["-m", "demo", "${DEMO_TOKEN}", "${MISSING:-fallback}"],
         "env": {"TOKEN": "${DEMO_TOKEN}"}, "cwd": "."}})
-    (servers,) = load_servers(path)
+    loaded = load_servers(path)
+    assert len(loaded) == 1
+    servers = loaded[0]
     assert servers.name == "demo" and servers.command == "python"
     assert servers.args == ("-m", "demo", "s3cret", "fallback")
     assert servers.env == {"TOKEN": "s3cret"}
