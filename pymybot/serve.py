@@ -306,7 +306,9 @@ class Server:
 
     async def m_initialize(self, ident, params, cancel):
         return {"protocol": PROTOCOL, "version": __version__,
-                "agent": self.enable_agent and agent_available(), "status": self.status()}
+                "agent": self.enable_agent and agent_available(),
+                "mcp": importlib.util.find_spec("mcp") is not None,
+                "status": self.status()}
 
     async def m_session_status(self, ident, params, cancel):
         return self.status()
@@ -498,6 +500,8 @@ class Server:
             "vars": params.bindings("vars"),
             "timeout": params.seconds("timeout", 180), "maxRequests": params.integer("maxRequests", 1, 100, 8),
             "maxToolCalls": params.integer("maxToolCalls", 1, 1000, 16),
+            "historyTurns": params.integer("historyTurns", 1, 20, 6),
+            "mcpConfig": params.text("mcpConfig", cap=4096), "allowMcpTools": params.flag("allowMcpTools"),
         }
         self.require_owner("agent")
         if self.agent_lock.locked():
@@ -549,7 +553,16 @@ class Server:
                              base_url=key["baseUrl"] or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=key["apiKeyEnv"], timeout=key["timeout"],
                              request_limit=key["maxRequests"], tool_calls_limit=key["maxToolCalls"],
-                             allow_actions=key["allowActions"])
+                             history_turns=key["historyTurns"],
+                             allow_actions=key["allowActions"],
+                             mcp_config=key["mcpConfig"] or None,
+                             allow_mcp_tools=key["allowMcpTools"])
+        from .mcp_client import load_servers
+        try:
+            mcp_servers = load_servers(config.mcp_config)
+        except Exception as exc:
+            raise AgentConfigurationError(
+                f"Cannot load MCP configuration: {exc}; no model request was sent") from None
         model, client = create_model(config)
         executor = None
         session_log = None
@@ -567,7 +580,8 @@ class Server:
                 return isinstance(reply, dict) and reply.get("approved") is True
 
             session = AgentSession(executor, model, config, confirm=confirm, read_vars=key["readVars"],
-                                   camera_vars=key["cameraVars"], skills=skills, session_log=session_log)
+                                   camera_vars=key["cameraVars"], skills=skills, session_log=session_log,
+                                   mcp_servers=mcp_servers)
             return {"session": session, "client": client}
         except BaseException as exc:
             try:

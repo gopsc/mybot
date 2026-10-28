@@ -564,7 +564,8 @@ def test_help_errors_and_module_entrypoint(workspace):
     assert help_result.returncode == 0 and "FFI" in help_result.stdout
     assert "malicious-code isolation" in help_result.stdout
     assert "--no-gui" in help_result.stdout
-    assert "MCP" not in help_result.stdout
+    assert "mcp" in help_result.stdout
+    assert "--mcp-backend" not in help_result.stdout
     sample_help = run_cli(workspace, "sample", "--help")
     assert "activation itself may write" in sample_help.stdout
     # The GUI is the default entry, so a bare invocation is not a usage error.

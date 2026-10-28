@@ -286,6 +286,7 @@ class App(QMainWindow):
         fields = (
             ("scripts_dir", "脚本根目录", True), ("skills_dir", "技能目录", True),
             ("module_paths", "模块路径", False), ("camera_src_dir", "图片源目录", True),
+            ("mcp_config", "MCP 配置（mcpServers JSON）", False),
         )
         for name, label, browse in fields:
             row = QHBoxLayout()
@@ -803,6 +804,7 @@ class App(QMainWindow):
             "task": task, "robot": self._robot_path(), "scriptsDir": self._scripts_root(),
             "cameraSrcDir": _absolute(self.cfg.camera_src_dir, workspace),
             "skillsDir": _absolute(self.cfg.skills_dir, workspace),
+            "mcpConfig": _absolute(self.cfg.mcp_config, workspace),
             "readVars": self.cfg.read_vars, "cameraVars": self.cfg.camera_vars,
             "vars": self.cfg.vars or None,
             "allowActions": self.actions_toggle.isChecked(),
@@ -1107,6 +1109,7 @@ class SettingsDialog(QDialog):
         ("model", "模型（provider:model）"), ("base_url", "端点 Base URL"),
         ("api_key_env", "API Key 环境变量名"), ("scripts_dir", "脚本根目录"),
         ("skills_dir", "技能目录"), ("camera_src_dir", "图片源目录"),
+        ("mcp_config", "MCP 配置（mcpServers JSON）"),
         ("module_paths", "模块路径（每行一个）"),
         ("read_vars", "读取变量（逗号分隔）"), ("camera_vars", "相机变量（逗号分隔）"),
         ("vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）"),

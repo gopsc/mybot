@@ -73,6 +73,7 @@ class GuiConfig:
     skills_dir: str = ""
     module_paths: list[str] = field(default_factory=list)
     camera_src_dir: str = ""
+    mcp_config: str = ""
     model: str = ""
     base_url: str = ""
     api_key_env: str = ""
@@ -97,6 +98,7 @@ class GuiConfig:
             skills_dir=_text(self.skills_dir),
             module_paths=_paths(self.module_paths),
             camera_src_dir=_text(self.camera_src_dir),
+            mcp_config=_text(self.mcp_config),
             model=_text(self.model, 1024),
             base_url=_text(self.base_url, 2048),
             api_key_env=_key_env(self.api_key_env),
@@ -154,6 +156,7 @@ def merge_args(cfg, args):
         "scripts_dir": getattr(args, "scripts_dir", None),
         "skills_dir": getattr(args, "skills_dir", None),
         "camera_src_dir": getattr(args, "camera_src_dir", None),
+        "mcp_config": getattr(args, "mcp_config", None),
         "model": getattr(args, "model", None),
         "base_url": getattr(args, "base_url", None),
         "api_key_env": getattr(args, "api_key_env", None),

@@ -31,6 +31,9 @@ from .security import SecurityError, checked_text, dumps
 from .session_log import SessionLog, create_session_log
 
 MAX_TEXT = 64 * 1024
+MAX_MCP_TEXT = 32 * 1024
+MAX_MCP_TOTAL = 64 * 1024
+MAX_MCP_IMAGE = 2 * 1024 * 1024
 _TERMINAL_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
@@ -90,6 +93,8 @@ class AgentConfig:
     allow_actions: bool = False
     allow_shell: bool = False
     allow_file_writes: bool = False
+    mcp_config: str | None = None
+    allow_mcp_tools: bool = False
 
     def __post_init__(self):
         if not math.isfinite(self.timeout) or not 0 < self.timeout <= 3600:
@@ -191,7 +196,8 @@ def _attachments(images):
     return [BinaryContent(data=item["data"], media_type=item["media_type"]) for item in images]
 
 
-def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=False, enable_shell=False):
+def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=False, enable_shell=False,
+               mcp_servers=(), mcp_timeout=180):
     if enable_shell and not workspace:
         raise AgentConfigurationError("Shell tools require a workspace")
 
@@ -270,6 +276,18 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         lines.append("Consult them with read_skill(name, file) before writing or diagnosing")
         lines.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
         instructions = SYSTEM_PROMPT + "\n".join(lines) + "\n"
+    toolsets = None
+    if mcp_servers:
+        from .mcp_client import build_toolsets, describe
+        instructions += describe(mcp_servers)
+
+        def make_process(server):
+            async def mcp_process(ctx, call_tool, name, arguments):
+                return await ctx.deps.mcp_tool(f"{server.name}_{name}", name, arguments, call_tool)
+            return mcp_process
+
+        toolsets = build_toolsets(mcp_servers, make_process, timeout=mcp_timeout)
+
     async def before_model_request(ctx, request_context):
         ctx.deps._check()
         return request_context
@@ -280,6 +298,7 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
     # that would disappear when its complete turn is pruned from history.
     return Agent(model, deps_type=AgentSession, instructions=instructions, retries=0,
                  tools=[Tool(fn, sequential=True, max_retries=0) for fn in functions],
+                 toolsets=list(toolsets) if toolsets else None,
                  model_settings={"parallel_tool_calls": False, "max_tokens": 4096},
                  capabilities=[Caching(), Hooks(before_model_request=before_model_request)], name="mybot")
 
@@ -312,9 +331,50 @@ def _stream_event_dict(event):
     return None
 
 
+def _bounded_mcp(value, budget=None, depth=0):
+    """Bound one external MCP result like a tool receipt, never the raw stream."""
+    if budget is None:
+        budget = [MAX_MCP_TOTAL]
+    if depth > 8:
+        return "<depth limit>"
+    if isinstance(value, str):
+        room = max(0, min(MAX_MCP_TEXT, budget[0]))
+        text = value if len(value) <= room else value[:room] + f"...[{len(value)} chars]"
+        budget[0] -= len(text)
+        return text
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"<{len(value)} bytes>"
+    data = getattr(value, "data", None)
+    if isinstance(data, (bytes, bytearray)) and hasattr(value, "media_type"):
+        # PydanticAI surfaces MCP images as binary content; keep small images.
+        if len(data) > MAX_MCP_IMAGE or len(data) > max(0, budget[0]):
+            return f"<image omitted: {len(data)} bytes>"
+        budget[0] -= len(data)
+        return value
+    if isinstance(value, dict):
+        result = {}
+        for index, (key, item) in enumerate(value.items()):
+            if index >= 200:
+                result["..."] = f"{len(value) - 200} more keys"
+                break
+            result[str(key)] = _bounded_mcp(item, budget, depth + 1)
+        return result
+    if isinstance(value, (list, tuple)):
+        result = [_bounded_mcp(item, budget, depth + 1) for item in value[:200]]
+        if len(value) > 200:
+            result.append(f"... {len(value) - 200} more items")
+        return result
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    return _bounded_mcp(str(value), budget, depth + 1)
+
+
 class AgentSession:
     def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(), camera_vars=(),
-                 on_event=None, skills=None, workspace=False, enable_shell=False, session_log=None):
+                 on_event=None, skills=None, workspace=False, enable_shell=False, session_log=None,
+                 mcp_servers=()):
         self.executor = executor
         self.config = config or AgentConfig()
         self.confirm = confirm
@@ -322,7 +382,8 @@ class AgentSession:
         self.session_log: SessionLog | None = session_log
         self._turn = 0
         self.agent = make_agent(model, read_vars=read_vars, camera_vars=camera_vars, skills=skills,
-                                workspace=workspace, enable_shell=enable_shell)
+                                workspace=workspace, enable_shell=enable_shell,
+                                mcp_servers=mcp_servers, mcp_timeout=self.config.timeout)
         self.context = None
         self.turns = []
         self.events = []
@@ -396,6 +457,39 @@ class AgentSession:
                              "Actions are not rolled back or automatically retried")
         self._check()  # Preserve the receipt, but never request another model after stop.
         return result
+
+    async def mcp_tool(self, display, name, arguments, call_tool):
+        """Approval-gated external MCP call; results are bounded like receipts."""
+        self._check()
+        self._log("tool_call", tool=display, arguments=arguments)
+        if not self.config.allow_mcp_tools:
+            approved = self.confirm is not None and await self.confirm("mcp:" + display, arguments)
+            self._check()
+            if not approved:
+                result = {"ok": False, "executed": False, "state": "not_executed",
+                          "error": "Operator approval denied or unavailable; do not retry or bypass"}
+                self.events.append({"tool": display, **result})
+                self._log("tool_result", tool=display, **result)
+                return result
+        self._check()
+        try:
+            value = await call_tool(name, arguments)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Transport or server failures may follow side effects; never claim
+            # the call did not run and never replay it automatically.
+            self.events.append({"tool": display, "ok": False, "executed": True, "state": "unknown"})
+            self._log("tool_result", tool=display, ok=False, executed=True, state="unknown",
+                      error={"type": type(exc).__name__})
+            return {"ok": False, "executed": True, "state": "unknown",
+                    "error": {"type": type(exc).__name__,
+                              "message": "MCP tool failed; outcome is unknown. Do not retry without operator inspection"}}
+        value = _bounded_mcp(value)
+        self.events.append({"tool": display, "ok": True, "executed": True, "state": "completed"})
+        self._log("tool_result", tool=display, ok=True, executed=True, state="completed", data=value)
+        self._check()
+        return value
 
     async def ask(self, prompt):
         checked_text(prompt, MAX_PROMPT)
@@ -525,7 +619,10 @@ async def confirm_console(name, arguments, stop):
     if len(description) > 2000:
         print("Approval denied: arguments too long to display completely; reduce the request.", file=sys.stderr)
         return False
-    if name == "shell":
+    if name.startswith("mcp:"):
+        warning = ("This calls an operator-configured MCP server with host-user permissions, "
+                   "NOT in a sandbox; it may act on the host or network.")
+    elif name == "shell":
         warning = "Host shell is NOT sandboxed; it can access files, network and physical devices."
     elif name in FILE_WRITE_TOOLS:
         warning = "This changes workspace files, potentially including executable scripts or drivers."
@@ -617,9 +714,18 @@ async def run_cli_agent(args, stop):
                              base_url=args.base_url or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=args.api_key_env, timeout=args.timeout,
                              request_limit=args.max_requests, tool_calls_limit=args.max_tool_calls,
+                             history_turns=getattr(args, "history_turns", 6),
                              history_bytes=args.max_history_bytes,
                              allow_actions=args.allow_actions, allow_shell=args.allow_shell,
-                             allow_file_writes=args.allow_file_writes)
+                             allow_file_writes=args.allow_file_writes,
+                             mcp_config=getattr(args, "mcp_config", None),
+                             allow_mcp_tools=getattr(args, "allow_mcp_tools", False))
+        try:
+            from .mcp_client import load_servers
+            mcp_servers = load_servers(config.mcp_config)
+        except Exception as exc:
+            raise AgentConfigurationError(
+                f"Cannot load MCP configuration: {exc}; no model request was sent") from None
         model, client = create_model(config)
         session_log = create_session_log(enabled=not getattr(args, "no_session_log", False),
                                          robot=args.robot, model=config.model, mode="cli")
@@ -645,7 +751,8 @@ async def run_cli_agent(args, stop):
         session = AgentSession(executor, model, config, confirm=confirm,
                                read_vars=args.read_var, camera_vars=args.camera_var,
                                on_event=renderer, skills=skills, workspace=args.workspace_dir is not None,
-                               enable_shell=args.enable_shell, session_log=session_log)
+                               enable_shell=args.enable_shell, session_log=session_log,
+                               mcp_servers=mcp_servers)
         result = await _conversation(session, args, stop, renderer)
     except BaseException as exc:
         failure = exc
