@@ -1,8 +1,8 @@
 """Persisted GUI configuration.
 
-Only operator preferences are stored: no API key, no approval decision and no
-hardware permission outlives the process, so a saved file can never pre-authorize
-a risky run.
+Only operator preferences are stored: no API key, no variable value, no approval
+decision and no hardware permission outlives the process, so a saved file can
+never pre-authorize a risky run or leak a credential.
 """
 from __future__ import annotations
 
@@ -50,6 +50,17 @@ def _key_env(value):
     return text if text.isidentifier() else ""
 
 
+def _bindings(value, cap=64):
+    if not isinstance(value, dict):
+        return {}
+    checked = {}
+    for name, text in list(value.items())[:cap]:
+        if (isinstance(name, str) and name.isidentifier()
+                and isinstance(text, str) and len(text) <= MAX_TEXT and "\x00" not in text):
+            checked[name] = text
+    return checked
+
+
 @dataclass
 class GuiConfig:
     """Everything the window needs; CLI flags override the stored values."""
@@ -67,6 +78,7 @@ class GuiConfig:
     api_key_env: str = ""
     read_vars: list[str] = field(default_factory=list)
     camera_vars: list[str] = field(default_factory=list)
+    vars: dict[str, str] = field(default_factory=dict)
     timeout: float = 180.0
     max_requests: int = 8
     max_tool_calls: int = 16
@@ -90,6 +102,7 @@ class GuiConfig:
             api_key_env=_key_env(self.api_key_env),
             read_vars=_names(self.read_vars),
             camera_vars=_names(self.camera_vars),
+            vars=_bindings(self.vars),
             timeout=self.timeout if isinstance(self.timeout, (int, float)) and 0 < self.timeout <= 3600 else 180.0,
             max_requests=self.max_requests if isinstance(self.max_requests, int) and 1 <= self.max_requests <= 100 else 8,
             max_tool_calls=self.max_tool_calls if isinstance(self.max_tool_calls, int) and 1 <= self.max_tool_calls <= 1000 else 16,
@@ -102,8 +115,9 @@ class GuiConfig:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = asdict(self.sanitized())
-        # A one-shot prompt hint and per-launch approvals are not preferences.
-        for key in ("task", "allow_hardware", "allow_actions"):
+        # A one-shot prompt hint, per-launch approvals and variable values are not
+        # preferences; variable values may hold credentials, so they never reach disk.
+        for key in ("task", "allow_hardware", "allow_actions", "vars"):
             data.pop(key, None)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 

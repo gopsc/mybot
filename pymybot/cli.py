@@ -22,7 +22,7 @@ from .hardware import Budget, ensure_ok, safe_ident
 from .include import expand_includes
 from .matrix import parse_matrices
 from .paths import asset_path, frozen
-from .robot import Robot, module_roots
+from .robot import MAX_BINDING_BYTES, Robot, module_roots
 from .security import MAX_BODY, SecurityError, checked_text, dumps, read_file
 
 MAX_TIMEOUT = 3600
@@ -66,9 +66,40 @@ def variable(value):
     try:
         if not separator:
             raise ValueError("expected NAME=VALUE")
-        return safe_ident(name), checked_text(text)
+        return safe_ident(name), checked_text(text, MAX_BINDING_BYTES)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def variable_env(value):
+    name, separator, env_name = value.partition("=")
+    try:
+        if not separator:
+            raise ValueError("expected NAME=ENVVAR")
+        if not env_name or env_name.strip() != env_name or "=" in env_name:
+            raise ValueError("environment variable name must be non-empty without whitespace or '='")
+        return safe_ident(name), env_name
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def session_bindings(args):
+    """Merge --var/--var-env once, before any robot is constructed."""
+    bindings = {}
+    for name, value in getattr(args, "var", None) or []:
+        if name in bindings:
+            raise UsageError("--var/--var-env names must be distinct")
+        bindings[name] = value
+    for name, env_name in getattr(args, "var_env", None) or []:
+        if name in bindings:
+            raise UsageError("--var/--var-env names must be distinct")
+        if env_name not in os.environ:
+            raise UsageError(f"--var-env {name}: environment variable {env_name} is not set")
+        try:
+            bindings[name] = checked_text(os.environ[env_name], MAX_BINDING_BYTES)
+        except SecurityError as exc:
+            raise UsageError(f"--var-env {name}: {exc}") from None
+    return bindings
 
 
 def parser():
@@ -159,9 +190,12 @@ def parser():
         if name in {"run", "sample", "agent"}:
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help=f"cooperative execution/task budget, >0 and <={MAX_TIMEOUT} (default: 180)")
-        if name in {"run", "agent"}:
-            command.add_argument("--var", type=variable, action="append", default=[], metavar="NAME=VALUE",
-                                 help="session alias binding (text); repeat with distinct names")
+        command.add_argument("--var", type=variable, action="append", default=[], metavar="NAME=VALUE",
+                             help="session alias binding (text) and Alias/Vars structure override;"
+                                  " repeat with distinct names")
+        command.add_argument("--var-env", type=variable_env, action="append", default=[], metavar="NAME=ENVVAR",
+                             help="session alias binding read from an environment variable at run time;"
+                                  " repeat with distinct names")
         if name == "sample":
             command.add_argument("--name", required=True, help="declared variable name")
             command.add_argument("--count", type=bounded_int(1, MAX_SAMPLES), default=1,
@@ -238,8 +272,8 @@ def parse_args(argv=None):
         raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir")
     if args.allow_shell and not args.enable_shell:
         raise UsageError("--allow-shell requires --enable-shell")
-    if args.input or args.var:
-        raise UsageError("--input/--var require --no-agent or the run command; use --task for an agent")
+    if args.input:
+        raise UsageError("--input requires --no-agent or the run command; use --task for an agent")
     if args.task is None and not sys.stdin.isatty():
         raise UsageError("Non-interactive agent mode requires --task; use --no-agent --input for direct execution")
     if args.task is not None:
@@ -399,6 +433,7 @@ def execute(args, stop):
     if args.command == "serve":
         from .serve import run_server
         return run_server(stop, enable_agent=not args.no_agent, enable_session_log=not args.no_session_log)
+    bindings = session_bindings(args)
     if args.command == "agent":
         try:
             from .agent import run_cli_agent
@@ -406,6 +441,7 @@ def execute(args, stop):
             raise RuntimeError(f"Agent dependencies unavailable ({exc}); install pymybot[agent] "
                                "(source checkout: pip install -e '.[agent]'), "
                                "or use --no-agent --input MT") from exc
+        args.bindings = bindings
         return asyncio.run(run_cli_agent(args, stop))
     action, base_dir, matrices = None, None, None
     if getattr(args, "input", None):
@@ -414,15 +450,13 @@ def execute(args, stop):
         matrices = expand_includes(parse_matrices(action), base_dir)
     if hasattr(args, "sql"):
         checked_text(args.sql)
-    if args.command == "run" and len(dict(args.var)) != len(args.var):
-        raise UsageError("--var names must be distinct")
     if args.command == "sample":
         safe_ident(args.name)
         if (args.count - 1) * args.interval_ms / 1000 >= args.timeout:
             raise UsageError("Sample intervals exhaust --timeout; reduce count/interval or increase timeout")
     robot = Robot(read_file(args.robot), module_paths=args.module_path,
                   camera_src_root=args.camera_src_dir, stop_event=stop,
-                  allow_hardware=getattr(args, "allow_hardware", False))
+                  allow_hardware=getattr(args, "allow_hardware", False), vars=bindings)
     robot._validate(robot.tables)
     if args.command == "check":
         return {"valid": True, "activated": False, "tables": list(robot.tables),
@@ -440,7 +474,7 @@ def execute(args, stop):
     try:
         robot.active()
         if args.command == "run":
-            return {"outputs": robot.run(action, base_dir=str(base_dir), vars=dict(args.var), timeout=args.timeout)}
+            return {"outputs": robot.run(action, base_dir=str(base_dir), vars=bindings, timeout=args.timeout)}
         if args.command == "sample":
             return sample(robot, args, stop)
         return {"output": robot.apply_sql(args.sql)}

@@ -26,7 +26,7 @@ from .hal import HALManager
 from .hardware import Budget, ensure_ok, safe_ident
 from .include import MAX_INCLUDE_BYTES, _Expander, expand_includes
 from .matrix import parse_matrices
-from .robot import Robot
+from .robot import MAX_BINDING_BYTES, Robot
 from .security import MAX_BODY, SecurityError, checked_text, dumps
 from .sql import parse_sql
 
@@ -47,6 +47,14 @@ _TOOLS = {
     "read_skill": ({"name"}, {"name", "file"}),
     **WORKSPACE_TOOLS,
 }
+
+
+def _session_vars(values):
+    if values is None:
+        return {}
+    if type(values) is not dict or len(values) > MAX_LIST:
+        raise SecurityError("Invalid session bindings")
+    return {safe_ident(name): checked_text(text, MAX_BINDING_BYTES) for name, text in values.items()}
 
 
 def _identity(info):
@@ -324,9 +332,11 @@ class RobotExecutor:
 
     def __init__(self, robot_path, *, module_paths=None, camera_src_root=None,
                  scripts_dir, allow_hardware=False, read_vars=(), camera_vars=(),
-                 stop_event=None, robot_factory=Robot, skills=None, workspace_dir=None, enable_shell=False):
+                 stop_event=None, robot_factory=Robot, skills=None, workspace_dir=None, enable_shell=False,
+                 vars=None):
         if enable_shell and workspace_dir is None:
             raise ValueError("Shell tools require a workspace directory")
+        self._vars = _session_vars(vars)
         self._workspace_dir = Path(workspace_dir).absolute() if workspace_dir is not None else None
         self._enable_shell = enable_shell is True
         self._workspace = None
@@ -440,7 +450,8 @@ class RobotExecutor:
         if self._robot is None:
             self._robot = self._factory(sql, module_paths=self._module_paths,
                                         camera_src_root=self._camera_src_root,
-                                        stop_event=self._stop, allow_hardware=self._allow_hardware)
+                                        stop_event=self._stop, allow_hardware=self._allow_hardware,
+                                        vars=self._vars)
         # Construction may already have consumed the whole budget; do not
         # enumerate metadata or validate a robot once the turn has expired.
         self._check(deadline)
@@ -624,8 +635,10 @@ class RobotExecutor:
                 self._check(deadline)
                 if name == "run_action_script":
                     self._scripts.check()
+                    # Operator-provided bindings win over model-supplied ones.
+                    bindings = {**arguments.get("vars", {}), **self._vars}
                     outputs, images, omitted = _lift_images(self._robot.run(
-                        script, base_dir=str(base), vars=arguments.get("vars", {}),
+                        script, base_dir=str(base), vars=bindings,
                         timeout=self._remaining(deadline)))
                     data = {"outputs": outputs}
                     if omitted:

@@ -62,11 +62,23 @@ def test_missing_optional_dependency_is_actionable_not_fallback(files, capsys, n
 @pytest.mark.parametrize("extra", [
     ["--no-agent"], ["--no-agent", "--task", "hello"],
     ["--task", ""], ["--max-requests", "0"], ["--max-tool-calls", "0"],
-    ["--timeout", "nan"], ["--var", "name=value"],
+    ["--timeout", "nan"],
 ])
 def test_invalid_mode_options_fail_before_optional_import(files, capsys, no_agent_import, extra):
     code, result, _ = invoke(capsys, "--robot", files[0], *extra)
     assert code == 2 and result["error"]["type"] == "UsageError"
+
+
+def test_agent_accepts_session_bindings(files, capsys, monkeypatch):
+    called = []
+    async def run_cli_agent(args, stop):
+        called.append(args)
+        return {"mode": "agent", "output": "offline mock", "tool_events": []}
+    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
+    monkeypatch.setenv("PYMYBOT_TEST_PASS", "from-env")
+    code, _, _ = invoke(capsys, "--robot", files[0], "--task", "t", "--var", "user=alice",
+                        "--var-env", "pass=PYMYBOT_TEST_PASS")
+    assert code == 0 and called[0].bindings == {"user": "alice", "pass": "from-env"}
 
 
 def test_input_is_not_implicitly_a_model_task(files, capsys, no_agent_import):

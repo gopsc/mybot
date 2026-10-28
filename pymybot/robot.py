@@ -19,12 +19,30 @@ from .paths import asset_path
 from .sql import apply_statement, load_structure, parse_sql
 
 MAX_SCRIPT_BYTES = 8 * 1024 * 1024
+MAX_BINDING_BYTES = 64 * 1024
 
 
 def check_script(text):
     if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_SCRIPT_BYTES or "\x00" in text:
         raise ScriptError("Script must be UTF-8 text without NUL and at most 8 MiB")
     return text
+
+
+def check_bindings(values):
+    """Validate structure overrides: name → text, applied to Alias/Vars rows."""
+    if values is None:
+        return {}
+    if not isinstance(values, dict):
+        raise ScriptError("Variable bindings must be a name→text mapping")
+    result = {}
+    for name, value in values.items():
+        safe_ident(name)
+        if not isinstance(value, str) or "\x00" in value:
+            raise ScriptError(f"Binding for '{name}' must be text without NUL")
+        if len(value.encode("utf-8")) > MAX_BINDING_BYTES:
+            raise ScriptError(f"Binding for '{name}' exceeds {MAX_BINDING_BYTES} bytes")
+        result[name] = value
+    return result
 
 
 def module_roots(paths=None):
@@ -42,9 +60,11 @@ def module_roots(paths=None):
 
 
 class Robot:
-    def __init__(self, sql_text, *, module_paths=None, camera_src_root=None, stop_event=None, allow_hardware=False):
+    def __init__(self, sql_text, *, module_paths=None, camera_src_root=None, stop_event=None, allow_hardware=False,
+                 vars=None):
         from .hal import HALManager
         self.tables = load_structure(check_script(sql_text))
+        self.bindings = check_bindings(vars)
         self.module_paths = module_roots(module_paths)
         self.registry = Registry()
         self.stop_event = stop_event if stop_event is not None else threading.Event()
@@ -99,6 +119,10 @@ class Robot:
                 result[name] = (table, row)
         return result
 
+    def _bound(self, name, value):
+        """Structure Alias/Vars rows may be overridden before build; other tables may not."""
+        return self.bindings.get(name, value)
+
     def _validate(self, tables):
         rows = self._rows(tables)
         earlier = set()
@@ -128,7 +152,7 @@ class Robot:
             if table.name == "Vars":
                 if "value" not in values:
                     raise ScriptError("Vars matrix has no 'value' column")
-                Number(name, values["value"], self.registry.resolve_number,
+                Number(name, self._bound(name, values["value"]), self.registry.resolve_number,
                        precision=self._precision(table, row, name))
             seen = {"controller": set(), "trigger": set()}
             for col, value in values.items():
@@ -214,9 +238,9 @@ class Robot:
                 continue
             values = {col: table.inherited(row, j) for j, col in enumerate(table.header)}
             if table.name == "Alias":
-                var = Alias(name, values["alias"])
+                var = Alias(name, self._bound(name, values["alias"]))
             elif table.name == "Vars":
-                var = Number(name, values["value"], self.registry.resolve_number,
+                var = Number(name, self._bound(name, values["value"]), self.registry.resolve_number,
                              precision=self._precision(table, row, name))
             elif table.name == "Daemon":
                 from .daemon import DaemonVariable
@@ -348,7 +372,14 @@ class Robot:
                             var = Number(name, value, self.registry.resolve_number, precision=precision)
                         self.registry.override(name, var)
                 for name, value in (vars or {}).items():
-                    self.registry.override(name, Alias(name, value))
+                    existing = self.registry.get(name)
+                    # Keep numeric variables numeric: metadata $(name) resolves
+                    # through resolve_number, which rejects an Alias.
+                    if existing is not None and existing.kind == "vars":
+                        var = Number(name, str(value), self.registry.resolve_number, precision=existing.precision)
+                    else:
+                        var = Alias(name, value)
+                    self.registry.override(name, var)
                 lua_vars = [var for var in self.registry.values() if var.kind == "lua"]
                 for var in lua_vars:
                     var.budget = budget

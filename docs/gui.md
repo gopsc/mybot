@@ -40,6 +40,10 @@ pymybot --no-gui   # terminal interface
    - the base URL only when using a self-hosted OpenAI-compatible endpoint;
    - the **name** of the environment variable holding the API key. The key
      itself is never stored in the settings file;
+   - optional **变量覆盖** (`NAME=VALUE`, one per line) for structure
+     `Alias`/`Vars` rows. They are applied before activation, passed to every
+     agent action, kept in memory for this launch only, and never written to
+     the settings file;
    - whether **保存会话转录** is enabled. It is on by default; turning it off
      starts `serve` with `--no-session-log`. `MYBOT_SESSION_LOG=0` in the
      environment still disables transcripts regardless of this checkbox. Use
@@ -75,8 +79,8 @@ file (see below).
 | macOS | `~/Library/Application Support/pymybot-gui/settings.json` |
 | Linux | `$XDG_CONFIG_HOME/pymybot-gui/settings.json` or `~/.config/pymybot-gui/settings.json` |
 
-Only preferences are stored. API keys, approval decisions and hardware
-permissions are never written. A failed write is reported in the log and status
+Only preferences are stored. API keys, variable override values, approval
+decisions and hardware permissions are never written. A failed write is reported in the log and status
 bar instead of failing silently.
 
 ## Architecture

@@ -632,6 +632,7 @@ async def run_cli_agent(args, stop):
         executor = RobotExecutor(args.robot, module_paths=args.module_path, camera_src_root=args.camera_src_dir,
                                  scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
                                  read_vars=args.read_var, camera_vars=args.camera_var, stop_event=stop,
+                                 vars=getattr(args, "bindings", None),
                                  skills=skills, workspace_dir=args.workspace_dir, enable_shell=args.enable_shell)
         if args.enable_shell:
             print("Shell enabled: host-user permissions, NOT sandboxed; --allow-hardware does not restrict it.",

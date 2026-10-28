@@ -271,12 +271,12 @@ class Metadata:
                 try:
                     target = self.registry.require(name)
                     value = target.read()
-                    if target.kind == "vars":
+                    if target.kind in {"vars", "alias"}:
                         result[column] = value
                     elif isinstance(value, dict):
                         result.update(ensure_ok(value, f"read {name}"))
                     else:
-                        raise ScriptError(f"'${name}' returned a scalar; only @Vars can fill a column")
+                        raise ScriptError(f"'${name}' returned a scalar; only @Vars/@Alias can fill a column")
                 except DriverNotReady:
                     # Snapshot consumers can initialize before the first sample exists.
                     if not for_build and not for_destroy:

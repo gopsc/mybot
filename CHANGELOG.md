@@ -11,12 +11,23 @@ Per-edition histories live next to each implementation:
 
 ## [Unreleased]
 
+### Added
+
+- Structure `Alias`/`Vars` rows can be overridden with `--var`/`--var-env`
+  before activation, so drivers that authenticate during `build()` receive
+  values supplied at run time. `--var` now applies to every command that loads
+  a structure and to agent mode (operator bindings also reach every
+  `run_action_script` call). `serve` accepts `vars` in `session.activate` and
+  `agent.ask`, and the GUI exposes a runtime-only “变量覆盖” settings field.
+
 ### Changed
 
 - Migrate the desktop GUI from Tkinter to PySide6 (Qt 6), retaining the serve
   protocol, streaming chat, settings and per-tool approvals. Install the `gui`
   extra for desktop use; CLI-only installations do not require Qt.
 - GUI tests run offscreen; test and packaging extras include PySide6.
+- `$alias` cells may now fill structure columns; previously only `$vars`
+  scalars were accepted, which blocked Alias-based credential injection.
 
 ## [0.3.1] – 2026-10-26
 

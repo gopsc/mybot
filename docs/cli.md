@@ -36,13 +36,50 @@ python -m pymybot doctor
 | `--module-path DIR` | Replace default module search path; repeatable. Must include a `modules` directory. |
 | `--camera-src-dir DIR` | Allow file-backed Camera sources inside this directory. |
 | `--timeout SECONDS` | Wall-clock budget for the command/action (where applicable). |
-| `--var NAME=VALUE` | Bind a session variable; repeatable. |
+| `--var NAME=VALUE` | Override a structure `Alias`/`Vars` row before activation, and bind a session alias for action scripts; repeatable. |
+| `--var-env NAME=ENVVAR` | Same, but read the value from an environment variable at run time; repeatable, values stay out of argv. |
 | `--allow-hardware` | Open physical devices, non-loopback HTTP or the Shell driver. |
 | `--no-gui` | Keep the terminal interface. |
 | `--no-agent` | Bypass the model; with `--robot` and `--input`, run directly. |
 
 `BOT4CJ_MODULE_PATH` is the environment-variable equivalent of repeated
 `--module-path` (use the platform path separator).
+
+### Structure variable overrides
+
+`--var`/`--var-env` apply to every command that loads a structure (`check`,
+`hardware`, `query`, `run`, `sample`, `apply-sql`, `agent`). A binding whose
+name matches an `Alias` or `Vars` row replaces that row's value *before*
+`build()`, so drivers that log in during activation receive the injected
+value. Other rows are never overridden.
+
+Reference the rows from ordinary structure cells with `$name` (Alias) or
+`$(name)` (Vars, numeric):
+
+```sql
+CREATE TABLE Alias (name String, alias String);
+INSERT INTO Alias (name, alias) VALUES ('user', 'COVER_ME');
+INSERT INTO Alias (name, alias) VALUES ('pass', 'COVER_ME');
+CREATE TABLE Vars (name String, value String);
+INSERT INTO Vars (name, value) VALUES ('device', 1);
+-- ... HTTP bus ...
+CREATE TABLE Qsont (name String, HTTP String, user String, pass String, device Number);
+INSERT INTO Qsont (name, HTTP, user, pass, device)
+VALUES ('qs', '$cloud', '$user', '$pass', '$(device)');
+```
+
+```sh
+export QS_USER=iot_01 QS_PASS=pass123
+pymybot run --robot robots/qsont.sql --input scripts/qsont.mt \
+  --timeout 30 --allow-hardware \
+  --var-env user=QS_USER --var-env pass=QS_PASS --var device=1
+```
+
+The declared defaults stay in the tables, so `pymybot hardware`/`query` keep
+showing them rather than injected values. Agent mode passes the same bindings
+into activation and into every `run_action_script` call; operator bindings win
+over model-supplied `vars`. In the GUI, enter them under **设置 → 变量覆盖**;
+they stay in memory for this launch and are never written to `settings.json`.
 
 ## Examples
 
@@ -97,12 +134,12 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | --- | --- | --- |
 | `initialize` | — | `protocol`, `version`, `agent`, `status` |
 | `session.status` | — | `state`, `robot`, `busy`, ... |
-| `session.activate` | `robot`, optional `modulePaths`, `cameraSrcDir`, `allowHardware` | session state |
+| `session.activate` | `robot`, optional `modulePaths`, `cameraSrcDir`, `allowHardware`, `vars` | session state |
 | `session.deactivate` | — | cancels work and cleans drivers |
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `robot`, `scriptsDir`, agent options | multi-turn result and `agent.event` notifications |
+| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, agent options | multi-turn result and `agent.event` notifications |
 | `agent.reset` | — | closes the conversation and releases hardware |
 | `cancel` | `id` | cancels a request (`-32800` for the cancelled request) |
 | `shutdown` | — | cleanup and exit |
@@ -130,6 +167,7 @@ The important flags are:
 | `--allow-file-writes` | Pre-approve file creation/editing. |
 | `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
 | `--max-requests`, `--max-tool-calls`, `--max-history-bytes`, `--timeout` | Budgets. `--max-history-bytes` bounds retained conversation history (64 KiB–64 MiB, default 4 MiB). |
+| `--var`, `--var-env` | Structure `Alias`/`Vars` overrides and action-script bindings, as described above. |
 | `--no-session-log` | Do not write a session transcript (also accepted by `serve`). |
 
 ## Session transcripts

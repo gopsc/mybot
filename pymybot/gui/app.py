@@ -149,6 +149,15 @@ def _absolute(path, root):
     return str(candidate if candidate.is_absolute() else Path(root or ".").absolute() / candidate)
 
 
+def _parse_bindings(text):
+    bindings = {}
+    for line in str(text).splitlines():
+        name, separator, value = line.strip().partition("=")
+        if separator and name.strip().isidentifier():
+            bindings[name.strip()] = value
+    return bindings
+
+
 def _label(text="", *, secondary=False):
     label = QLabel(text)
     label.setTextFormat(Qt.TextFormat.PlainText)
@@ -795,6 +804,7 @@ class App(QMainWindow):
             "cameraSrcDir": _absolute(self.cfg.camera_src_dir, workspace),
             "skillsDir": _absolute(self.cfg.skills_dir, workspace),
             "readVars": self.cfg.read_vars, "cameraVars": self.cfg.camera_vars,
+            "vars": self.cfg.vars or None,
             "allowActions": self.actions_toggle.isChecked(),
             "allowHardware": self.hardware_toggle.isChecked(),
             "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
@@ -1099,6 +1109,7 @@ class SettingsDialog(QDialog):
         ("skills_dir", "技能目录"), ("camera_src_dir", "图片源目录"),
         ("module_paths", "模块路径（每行一个）"),
         ("read_vars", "读取变量（逗号分隔）"), ("camera_vars", "相机变量（逗号分隔）"),
+        ("vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）"),
     )
 
     def __init__(self, parent, cfg: GuiConfig, workspace, config_path=""):
@@ -1120,6 +1131,9 @@ class SettingsDialog(QDialog):
             value = getattr(cfg, name)
             if name == "module_paths":
                 widget = QPlainTextEdit("\n".join(value))
+                widget.setMaximumHeight(85)
+            elif name == "vars":
+                widget = QPlainTextEdit("\n".join(f"{key}={text}" for key, text in value.items()))
                 widget.setMaximumHeight(85)
             else:
                 widget = QLineEdit(",".join(value) if isinstance(value, list) else str(value or ""))
@@ -1160,6 +1174,8 @@ class SettingsDialog(QDialog):
         for name, widget in self.entries.items():
             if name == "module_paths":
                 values[name] = [line.strip() for line in widget.toPlainText().splitlines() if line.strip()]
+            elif name == "vars":
+                values[name] = _parse_bindings(widget.toPlainText())
             elif name in {"read_vars", "camera_vars"}:
                 values[name] = App._names(widget.text())
             else:

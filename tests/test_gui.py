@@ -80,15 +80,18 @@ def test_config_roundtrip_drops_runtime_grants(tmp_path):
     path = tmp_path / "settings.json"
     cfg = GuiConfig(workspace=str(tmp_path), robot="robots/a.sql", task="hello",
                     module_paths=["a", "", 3], model="openai:gpt-4o", read_vars=["v0", "bad name"],
-                    allow_hardware=True, allow_actions=True, timeout=30, session_log=False)
+                    vars={"user": "alice"}, allow_hardware=True, allow_actions=True, timeout=30,
+                    session_log=False)
     cfg.store(path)
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert "task" not in stored and "allow_hardware" not in stored and "allow_actions" not in stored
+    assert "vars" not in stored
     assert stored["module_paths"] == ["a"] and stored["read_vars"] == ["v0"]
     assert stored["session_log"] is False
     loaded = GuiConfig.load(path)
     assert loaded.workspace == str(tmp_path) and loaded.timeout == 30
     assert loaded.session_log is False
+    assert loaded.vars == {}
     assert loaded.allow_hardware is False and loaded.allow_actions is False
 
 
@@ -624,6 +627,7 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
         dialog.entries["module_paths"].setPlainText("modules\n extra \n")
         dialog.entries["read_vars"].setText("v0,v0,bad name,v1")
         dialog.entries["camera_vars"].setText("camera0")
+        dialog.entries["vars"].setPlainText("user=alice\npass=secret\nbad line")
         dialog.entries["scripts_dir"].setText("scripts")
         dialog.timeout.setValue(12.5)
         dialog.requests.setValue(3)
@@ -637,10 +641,12 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     assert app.cfg.model == "openai:test" and app.cfg.module_paths == ["modules", "extra"]
     assert app.timeout_box.value() == 12.5 and app.requests_box.value() == 3 and app.tools_box.value() == 5
     assert app.read_vars_entry.text() == "v0,v1" and app.camera_vars_entry.text() == "camera0"
+    assert app.cfg.vars == {"user": "alice", "pass": "secret"}
     assert app.context_entries["scripts_dir"].text() == "scripts"
     assert "openai:test" in app.model_label.text()
     stored = json.loads((tmp_path / "settings.json").read_text())
     assert stored["session_log"] is False and stored["timeout"] == 12.5
+    assert "vars" not in stored
     assert "设置已保存" in app.status_notice.text()
 
 
@@ -770,6 +776,7 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     app.timeout_box.setValue(2.5)
     app.requests_box.setValue(2)
     app.tools_box.setValue(4)
+    app.cfg.vars = {"user": "alice"}
     app.task_box.setPlainText("hello")
     app.send_button.click()
     params = client.requests[0][1]
@@ -777,6 +784,7 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     assert params["cameraSrcDir"] == str(ROOT / "images")
     assert params["modulePaths"] == [str(ROOT / "modules"), str(ROOT / "other")]
     assert params["readVars"] == ["v0", "v1"] and params["cameraVars"] == ["cam"]
+    assert params["vars"] == {"user": "alice"}
     assert (params["timeout"], params["maxRequests"], params["maxToolCalls"]) == (2.5, 2, 4)
 
 

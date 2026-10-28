@@ -351,6 +351,47 @@ def test_vars_are_repeated_text_bindings(workspace, capsys):
     assert code == 0 and result["outputs"][0]["echo"] == "hello=世界"
 
 
+def test_var_env_reads_environment_at_run_time(workspace, capsys, monkeypatch):
+    (workspace / "action.mt").write_text("@Action\ntarget.param;\n$(word);\n@\n", encoding="utf-8")
+    monkeypatch.setenv("PYMYBOT_TEST_WORD", "hello from env")
+    code, result, _ = invoke(capsys, "run", "--robot", workspace / "robot.sql", "--input", workspace / "action.mt",
+                             "--var", "target=dev", "--var", "param=echo",
+                             "--var-env", "word=PYMYBOT_TEST_WORD")
+    assert code == 0 and result["outputs"][0]["echo"] == "hello from env"
+
+
+def test_var_env_requires_the_named_environment_variable(workspace, capsys, monkeypatch):
+    monkeypatch.delenv("PYMYBOT_TEST_ABSENT", raising=False)
+    code, result, _ = invoke(capsys, "run", "--robot", workspace / "robot.sql", "--input", workspace / "action.mt",
+                             "--var-env", "word=PYMYBOT_TEST_ABSENT")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+    assert "PYMYBOT_TEST_ABSENT" in result["error"]["message"]
+
+
+def test_var_and_var_env_names_must_be_distinct(workspace, capsys, monkeypatch):
+    monkeypatch.setenv("PYMYBOT_TEST_WORD", "other")
+    code, result, _ = invoke(capsys, "run", "--robot", workspace / "robot.sql", "--input", workspace / "action.mt",
+                             "--var", "word=first", "--var-env", "word=PYMYBOT_TEST_WORD")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+
+@pytest.mark.parametrize("binding", ["word", "word=BAD NAME", "word=B=C", "bad.name=OK"])
+def test_invalid_var_env_bindings_are_usage_errors(workspace, capsys, binding):
+    code, result, _ = invoke(capsys, "run", "--robot", workspace / "robot.sql", "--input", workspace / "action.mt",
+                             "--var-env", binding)
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+
+def test_var_overrides_vars_row_during_validation(workspace, capsys):
+    (workspace / "vars.sql").write_text(
+        "CREATE TABLE Vars(name String, value String); INSERT INTO Vars(name, value) VALUES('n','');",
+        encoding="utf-8")
+    code, result, _ = invoke(capsys, "check", "--robot", workspace / "vars.sql")
+    assert code == 1 and result["error"]["type"] == "ScriptError"
+    code, result, _ = invoke(capsys, "check", "--robot", workspace / "vars.sql", "--var", "n=3")
+    assert code == 0 and result["valid"] is True
+
+
 @pytest.mark.parametrize("binding", ["missing-equals", "bad.name=value", "=value"])
 def test_invalid_vars_are_usage_errors(workspace, capsys, binding):
     code, result, _ = invoke(capsys, "run", "--robot", workspace / "robot.sql", "--input", workspace / "action.mt", "--var", binding)

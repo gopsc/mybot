@@ -15,7 +15,7 @@ import pytest
 
 import pymybot.agent_executor as executor_module
 from pymybot.agent_executor import MAX_IMAGE_BASE64, MAX_IMAGES, MAX_TEXT, RobotExecutor
-from pymybot.errors import BudgetExceeded
+from pymybot.errors import BudgetExceeded, ScriptError
 from pymybot.hardware import Budget, Registry
 from pymybot.hal import HALManager
 from pymybot.matrix import parse_matrices
@@ -689,6 +689,27 @@ def test_queue_deadline_and_argument_snapshot(setup, monkeypatch):
             release.set()
             await ex.close()
     asyncio.run(scenario())
+
+
+def test_operator_bindings_reach_activation_and_win_over_model_vars(setup):
+    async def scenario():
+        ex = setup.factory(vars={"word": "operator", "n": "3"})
+        try:
+            await ex.start()
+            result = await ex.call("run_action_script",
+                                   {"script": "action.mt", "vars": {"word": "model", "extra": "x"}},
+                                   timeout=5)
+            assert result["ok"], result
+            assert setup.made[0].bindings == {"word": "operator", "n": "3"}
+            assert setup.made[0].last_run[2] == {"word": "operator", "n": "3", "extra": "x"}
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
+def test_operator_bindings_are_validated(setup):
+    with pytest.raises(ScriptError):
+        setup.factory(vars={"bad.name": "x"})
 
 
 def test_cancelled_call_waits_for_native_io_and_cleanup(setup):

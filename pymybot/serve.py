@@ -316,6 +316,7 @@ class Server:
         module_paths = params.strings("modulePaths") or None
         camera = params.text("cameraSrcDir")
         allow_hardware = params.flag("allowHardware")
+        bindings = params.bindings("vars")
         self.require_owner("session")
         if self.deactivating is not None:
             raise RpcError(BUSY, "Session is deactivating")
@@ -329,7 +330,7 @@ class Server:
         def activate():
             path = Path(robot_path).absolute()
             robot = Robot(read_file(path), module_paths=module_paths, camera_src_root=camera,
-                          allow_hardware=allow_hardware)
+                          allow_hardware=allow_hardware, vars=bindings)
             robot.structure_path = str(path)
             holder["robot"] = robot
             if cancel.is_set():
@@ -494,6 +495,7 @@ class Server:
             "baseUrl": params.text("baseUrl", cap=2048), "apiKeyEnv": params.text("apiKeyEnv", cap=256),
             "readVars": params.strings("readVars", ident=True), "cameraVars": params.strings("cameraVars", ident=True),
             "allowActions": params.flag("allowActions"), "allowHardware": params.flag("allowHardware"),
+            "vars": params.bindings("vars"),
             "timeout": params.seconds("timeout", 180), "maxRequests": params.integer("maxRequests", 1, 100, 8),
             "maxToolCalls": params.integer("maxToolCalls", 1, 1000, 16),
         }
@@ -558,7 +560,7 @@ class Server:
             executor = RobotExecutor(key["robot"], module_paths=key["modulePaths"] or None,
                                      camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"],
                                      allow_hardware=key["allowHardware"], read_vars=key["readVars"],
-                                     camera_vars=key["cameraVars"], skills=skills)
+                                     camera_vars=key["cameraVars"], vars=key["vars"], skills=skills)
 
             async def confirm(name, arguments):
                 reply = await self.ask_client("confirm", {"tool": name, "arguments": arguments})

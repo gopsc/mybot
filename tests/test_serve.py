@@ -167,6 +167,37 @@ def test_session_persists_hot_sql_until_deactivate(workspace, client_factory):
     assert client.close() == 0
 
 
+def test_session_activate_applies_var_bindings(workspace, client_factory):
+    modules = workspace / "probe-modules"
+    modules.mkdir()
+    (modules / "Probe.lua").write_text('''
+local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
+dofile(mpath.resolve("lib/drv_common.lua"))
+function build(data)
+    if data.word ~= "bound" then return err("unbound word") end
+    return {result = "OK"}
+end
+function call(data)
+    return {result = "OK", word = data.word}
+end
+''', encoding="utf-8")
+    structure = workspace / "bound.sql"
+    structure.write_text("CREATE TABLE Alias(name String, alias String);"
+                         "INSERT INTO Alias(name, alias) VALUES('word','default');"
+                         "CREATE TABLE Probe(name String, word String);"
+                         "INSERT INTO Probe(name, word) VALUES('p','$word');", encoding="utf-8")
+    paths = [str(modules), str(ROOT / "modules")]
+    client = client_factory(workspace)
+    active = client.call("session.activate",
+                         {"robot": str(structure), "modulePaths": paths, "vars": {"word": "bound"}})
+    assert active["state"] == "Active"
+    assert client.call("session.deactivate")["state"] == "Inactive"
+    assert client.error("session.activate",
+                        {"robot": str(structure), "modulePaths": paths, "vars": {"word": "other"}}
+                        )["code"] == serve.EXECUTION_ERROR
+    assert client.close() == 0
+
+
 def test_sample_streams_and_cancel_keeps_daemons_alive(workspace, client_factory):
     client = client_factory(workspace)
     client.call("session.activate", {"robot": str(workspace / "bh1750.sql")})
