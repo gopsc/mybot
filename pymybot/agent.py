@@ -24,7 +24,9 @@ from pydantic_ai.messages import (FunctionToolCallEvent, FunctionToolResultEvent
                                   TextPart, TextPartDelta)
 from pydantic_ai.usage import UsageLimits
 
+from .agent_context import build_project_context
 from .agent_executor import RobotExecutor
+from .agent_prompt import DEFAULT_CONTEXT_BYTES, build_instructions, read_operator_prompt
 from .agent_skills import SkillsLibrary, default_skills_root
 from .errors import AgentInterrupted
 from .security import SecurityError, checked_text, dumps
@@ -95,15 +97,21 @@ class AgentConfig:
     allow_file_writes: bool = False
     mcp_config: str | None = None
     allow_mcp_tools: bool = False
+    prompt_file: str | None = None
+    context_bytes: int = DEFAULT_CONTEXT_BYTES
 
     def __post_init__(self):
         if not math.isfinite(self.timeout) or not 0 < self.timeout <= 3600:
             raise AgentConfigurationError("Agent timeout must be in (0, 3600] seconds")
         for name, low, high in (("request_limit", 1, 100), ("tool_calls_limit", 1, 1000),
-                                ("history_turns", 1, 20), ("history_bytes", 64 * 1024, 64 * 1024 * 1024)):
+                                ("history_turns", 1, 20), ("history_bytes", 64 * 1024, 64 * 1024 * 1024),
+                                ("context_bytes", 0, 64 * 1024)):
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise AgentConfigurationError(f"{name} must be in {low}..{high}")
+        if self.prompt_file is not None and (not isinstance(self.prompt_file, str)
+                                             or not self.prompt_file.strip()):
+            raise AgentConfigurationError("prompt_file must be a non-empty path or None")
 
 
 def create_model(config):
@@ -197,7 +205,7 @@ def _attachments(images):
 
 
 def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=False, enable_shell=False,
-               mcp_servers=(), mcp_timeout=180):
+               mcp_servers=(), mcp_timeout=180, operator_prompt="", project_context=""):
     if enable_shell and not workspace:
         raise AgentConfigurationError("Shell tools require a workspace")
 
@@ -267,19 +275,20 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         functions.extend((list_files, read_file, write_file, edit_file))
     if enable_shell:
         functions.append(shell)
-    instructions = SYSTEM_PROMPT
+    guide = []
     if skills is not None and skills.enabled:
         functions.extend((list_skills, read_skill))
         index = skills.index()["skills"]
-        lines = ["", "Operator-provided reference skills (trusted, curated documentation):"]
-        lines.extend(f"- {skill['name']}: {skill['description']}" for skill in index)
-        lines.append("Consult them with read_skill(name, file) before writing or diagnosing")
-        lines.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
-        instructions = SYSTEM_PROMPT + "\n".join(lines) + "\n"
+        guide.append("Operator-provided reference skills (trusted, curated documentation):")
+        guide.extend(f"- {skill['name']}: {skill['description']}" for skill in index)
+        guide.append("Consult them with read_skill(name, file) before writing or diagnosing")
+        guide.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
+    guide.append(f"Runtime gates: workspace={'enabled' if workspace else 'disabled'}, "
+                 f"shell={'enabled' if enable_shell else 'disabled'}.")
     toolsets = None
     if mcp_servers:
         from .mcp_client import build_toolsets, describe
-        instructions += describe(mcp_servers)
+        guide.append(describe(mcp_servers).strip())
 
         def make_process(server):
             async def mcp_process(ctx, call_tool, name, arguments):
@@ -287,6 +296,8 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
             return mcp_process
 
         toolsets = build_toolsets(mcp_servers, make_process, timeout=mcp_timeout)
+    instructions = build_instructions(SYSTEM_PROMPT, operator=operator_prompt,
+                                      project=project_context, guide="\n".join(guide)).text
 
     async def before_model_request(ctx, request_context):
         ctx.deps._check()
@@ -381,9 +392,17 @@ class AgentSession:
         self.on_event = on_event
         self.session_log: SessionLog | None = session_log
         self._turn = 0
+        try:
+            operator_prompt = read_operator_prompt(self.config.prompt_file)
+        except SecurityError as exc:
+            raise AgentConfigurationError(
+                f"Cannot load prompt file: {exc}; no model request was sent") from None
+        self.project_context = build_project_context(self.executor, budget=self.config.context_bytes)
         self.agent = make_agent(model, read_vars=read_vars, camera_vars=camera_vars, skills=skills,
                                 workspace=workspace, enable_shell=enable_shell,
-                                mcp_servers=mcp_servers, mcp_timeout=self.config.timeout)
+                                mcp_servers=mcp_servers, mcp_timeout=self.config.timeout,
+                                operator_prompt=operator_prompt,
+                                project_context=self.project_context.text)
         self.context = None
         self.turns = []
         self.events = []
@@ -719,7 +738,9 @@ async def run_cli_agent(args, stop):
                              allow_actions=args.allow_actions, allow_shell=args.allow_shell,
                              allow_file_writes=args.allow_file_writes,
                              mcp_config=getattr(args, "mcp_config", None),
-                             allow_mcp_tools=getattr(args, "allow_mcp_tools", False))
+                             allow_mcp_tools=getattr(args, "allow_mcp_tools", False),
+                             prompt_file=getattr(args, "prompt_file", None),
+                             context_bytes=getattr(args, "context_bytes", DEFAULT_CONTEXT_BYTES))
         try:
             from .mcp_client import load_servers
             mcp_servers = load_servers(config.mcp_config)

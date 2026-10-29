@@ -33,6 +33,14 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   progress and an `进入控制台` button (Enter/Escape shortcuts, fade-out into
   the main window). Set `--no-splash` or `MYBOT_GUI_SPLASH=0` to skip it; the
   main window and About dialog share the same branding asset.
+- Agent prompts are layered (`pymybot/agent_prompt.py`): the immutable `SOUL`
+  safety contract, an optional operator `--prompt-file`, a generated and
+  explicitly untrusted project inventory, and runtime guidance. Only optional
+  layers are truncated to the 16 KiB budget. The inventory
+  (`pymybot/agent_context.py`) lists workspace entries, structures, scripts,
+  drivers and skills, is mtime-cached and bounded by `--context-bytes`
+  (default 4096, 0 disables). `serve.agent.ask` accepts `promptFile` and
+  `contextBytes`, and the GUI exposes both under 设置.
 - The resource browser indexes structures (`robots/*.sql`) and Lua drivers
   (`modules/**/*.lua`) alongside scripts, skills and docs, watches roots with
   `QFileSystemWatcher` and reloads after a 400 ms debounce.
