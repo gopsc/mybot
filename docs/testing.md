@@ -13,6 +13,7 @@
 | Transcripts | `tests/test_session_log.py` | JSONL bounds, permissions, list/prune safety |
 | Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs |
 | Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
+| Docs/skill sync | `tests/test_docs_skill_sync.py`, `tools/check_docs_skill_sync.py` | Skill links/paths resolve, references declare and register their authority |
 
 The suite must run without physical hardware. The `test` extra includes
 PySide6; GUI tests use Qt's offscreen platform and run on headless CI. Agent
@@ -38,7 +39,7 @@ python -m pytest --durations=10 -q
 | agent | Ubuntu 3.11; Windows 3.13 | Offline model/agent integration + MCP server/client |
 | wheel | Ubuntu 3.11; Windows 3.13 | Build from sdist, install into clean venv |
 | quickstart | Ubuntu 3.14 | README commands actually run |
-| lint | Ubuntu | syntax/undefined names; no style churn |
+| lint | Ubuntu | syntax/undefined names and docs/skill sync; no style churn |
 | docker | Ubuntu | headless image builds and `doctor` runs inside it |
 
 ## Virtual device fixtures

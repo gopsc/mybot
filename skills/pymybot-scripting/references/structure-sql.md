@@ -1,7 +1,7 @@
 # 结构脚本（.sql）
 
-技能 `pymybot-scripting` 参考文件。仓库根为 `mybot/`（Python 主线）。
-实现：`pymybot/sql.py`（文法与校验）、`pymybot/robot.py`（`_validate`，跨表规则）。
+Source: 本文件是结构 SQL 文法的书面来源（实现 `pymybot/sql.py` 与 `pymybot/robot.py` 的 `_validate`）；
+分层见 [docs/architecture.md](../../../docs/architecture.md)，命令与开关见 [docs/cli.md](../../../docs/cli.md)。
 
 ## 1. 基本文法
 
@@ -37,8 +37,9 @@ INSERT INTO CHT8305 (name, I2C, address) VALUES ('th-0', 'i2c-1', '0x40');
   （表达式语法在解析期校验，求值发生在激活时）。
 - `INSERT` 必须按名字列出**全部**声明列，且每列恰好一次。
 - 同一批里 `CREATE TABLE` 不得重名；表一旦 DROP，本批内不能再改。
-- **每张普通表名对应 `modules/<表名>.lua` 驱动文件**，加载期校验存在性
-  （`Alias` / `Vars` / `Daemon` 三张内建表除外）。
+- **每张普通表名对应一个驱动文件 `modules/<表名>.py` 或 `modules/<表名>.lua`**，
+  加载期校验存在性（`Alias` / `Vars` / `Daemon` 三张内建表除外）；逐根查找、同根 Python
+  优先，详见 `references/driver-lua.md`。
 - 每张表必须有 `name` 列；变量名（name 列的值）须匹配 `[A-Za-z_][A-Za-z0-9_-]*`
   （**允许连字符**，如 `timer-0`），且全局唯一。
 - `INSERT` 行序即声明序；引用必须**先声明后使用**（见第 4 节）。
@@ -93,8 +94,9 @@ INSERT INTO Relay (name, controller, note) VALUES ('relay0', 'timer-0', 'hello-r
 
 | 规则 | 报错示例 |
 | --- | --- |
-| 表名对应的 `modules/<表名>.lua` 必须存在 | `Lua module not found: CHT8305.lua` |
+| 表名对应的 `modules/<表名>.py` 或 `.lua` 必须存在 | `Driver module not found: CHT8305.py or CHT8305.lua` |
 | 模块路径不得绝对 / 含 `..` / 反斜杠 / 冒号 / 软链 | `Module path escapes root` |
+| Daemon 的 `chunk`、`driver`、`devices` 只能选中 Lua | `Lua daemon requires a Lua driver, not Python` |
 | 所有 `$` / `$(...)` 引用必须指向**先前**声明的变量 | `'x' references undefined variable 'y'` |
 | 变量名全局唯一 | `Duplicate hardware variable name` |
 | 同一 UART 路径不得被两个变量独立打开（`proto='virt'` 除外） | `UART path '...' has multiple independent consumers` |
@@ -171,9 +173,8 @@ INSERT INTO Qsont (name, HTTP, user, pass, device) VALUES ('qs', '$cloud', 'iot_
 | `devices` / `latest` | `latest` 可带 `key` | GET 设备列表（含绑定设备）/ 最新数据点 |
 | （缺省，无 key 无 op） | 整个 payload | **autopush**：controller 转发来的结果表剔除框架/结构键后整批上推——传感器行写 `controller1='qs'` 即可让每次采样自动上云 |
 
-**mobile ↔ iot 跨账号关联**靠设备绑定：mobile 账号建设备（拿到 device_key）→
-机器人 `op='bind'` 输入 device_key → 绑定后机器人可对该设备推数据/拉指令，
-mobile 可对其发指令/查数据（`pull` 能拉到 mobile 发来的指令，执行后 `ack`）。
+**mobile ↔ iot 跨账号关联**靠绑定：mobile 账号建设备给出 device_key → 机器人 `op='bind'` 绑定
+→ 之后机器人推数据/`pull` 拉 mobile 发来的指令并 `ack`，mobile 查数据。
 
 `HTTP` 总线也可脱离驱动独立使用：动作行直接给 `method`/`path`（如
 `cloud.method cloud.path; $("GET") $("/devices");`）即透传执行一次请求，
@@ -203,20 +204,22 @@ $("exit\t3");         # → result="OK", code=3
 
 硬纪律：
 
-- **整个能力默认拒绝，激活需要 `--allow-hardware`**（与物理设备、非回环
-  HTTP 同门）；命令以宿主用户权限与环境在当前目录执行，不是沙箱。
+- **整个能力默认拒绝，激活需要 `--allow-hardware`**（与物理设备、非回环 HTTP 同门）；
+  命令以宿主用户权限与环境在当前目录执行，不是沙箱，边界见 docs/security.md。
 - MT 单元格按空白切分、不接受字面空格——命令词间用 `$("a\tb")` 的 `\t`
   转义；含字面空格的复杂命令用 `--var CMD="..."` 传入后写 `$(CMD)`。
 - 上限：命令 64 KiB、单流输出 1 MiB（超限截断并 `truncated=true`）、
   超时 1..60000 ms（逐次可用 `timeout` 参数覆盖 build 缺省）。
-- 超时/取消击杀整个进程树（POSIX 进程组、Windows taskkill /T）。
+- 超时/取消**尽力**击杀进程树（POSIX 进程组、Windows `taskkill /T`）；
+  逃到新会话的子孙进程不保证被杀。
 - 无 virt 模型：`proto='virt'` 写在 Shell 行上会因找不到 `SHELL_VIRT`
   响亮报错。范本：`robots/shell.sql` + `scripts/shell.mt`。
 
 ## 10. query 与 apply-sql
 
-**`query --sql`** 只接受 `SHOW TABLES;` 和 `SELECT * FROM 表 [WHERE 列=值 AND ...];`
-（WHERE 只支持字符串等值匹配，配合 `-` 继承语义）。
+**`query --sql`** 只接受 `SHOW TABLES;` 和 `SELECT * FROM 表 [WHERE 列=值 AND ...];`——
+WHERE 只支持字符串等值匹配，配合 `-` 继承语义；命令形态见
+[docs/cli.md](../../../docs/cli.md)。
 
 **`apply-sql --sql`** 热应用（对已激活会话；不改磁盘文件）：
 

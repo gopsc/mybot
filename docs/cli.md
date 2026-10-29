@@ -104,7 +104,10 @@ python -m pymybot serve
 ```
 
 Every SQL statement must end with `;`, including a single statement. A missing
-semicolon is `SQL: unexpected end of script`.
+semicolon is `SQL: unexpected end of script`. The structure SQL and MT action
+grammars are documented in
+[`structure-sql.md`](../skills/pymybot-scripting/references/structure-sql.md) and
+[`action-mt.md`](../skills/pymybot-scripting/references/action-mt.md).
 
 ## JSON contract
 
@@ -152,9 +155,7 @@ state is wrong). The server may send a `confirm` request to the client; only
 
 ## Agent options
 
-Agent mode is documented in the README and
-[`../skills/pymybot-scripting/references/action-mt.md`](../skills/pymybot-scripting/references/action-mt.md).
-The important flags are:
+Agent mode is documented in the README. The important flags are:
 
 | Option | Meaning |
 | --- | --- |

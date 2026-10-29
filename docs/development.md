@@ -34,6 +34,7 @@ python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.m
 python -I tools/ci_smoke.py base        # fail if pydantic_ai leaked into base env
 python -I tools/ci_smoke.py agent       # fail if agent imports are missing
 python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
+python -I tools/check_docs_skill_sync.py  # skill links/paths resolve, references declare a Source
 ```
 
 `--no-gui` is required for terminal use; without it, `pymybot` opens the GUI.
@@ -42,7 +43,7 @@ python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
 
 ```text
 pymybot/            Python package
-modules/            Lua bus/driver modules and shared libraries
+modules/            Python and Lua bus/driver modules and shared libraries
 robots/             structure SQL examples
 scripts/            MT action examples
 skills/             operator-trusted agent reference skills
@@ -67,10 +68,17 @@ A narrow lint gate runs in CI (`ruff` with syntax/undefined-name rules). Full
 `ruff` output is advisory because the repository predates a formatter baseline;
 do not reformat unrelated files in a behaviour PR.
 
+Behaviour changes belong in `docs/` first; the agent-facing files under
+`skills/` then summarise and link instead of restating them. The same lint job
+runs [`tools/check_docs_skill_sync.py`](../tools/check_docs_skill_sync.py),
+which fails on dead skill links, missing repository paths, a reference without a
+`Source:` line and references that
+[`skills/README.md`](../skills/README.md) does not register.
+
 ## Adding a driver
 
-1. Add `modules/<Name>.lua` using `lib/drv_common.lua` and
-   `lib/bus_contract.lua`.
+1. Add `modules/<Name>.py` implementing `Driver(context)`, or `modules/<Name>.lua`
+   using `lib/drv_common.lua` and `lib/bus_contract.lua`.
 2. Add a `robots/<name>_virt.sql` and `scripts/<name>_virt.mt` fixture; register
    the virtual device model in `modules/lib/virtbus/regmap.lua` when applicable.
 3. Run `tests/test_virtual_drivers.py` and the fixture directly.

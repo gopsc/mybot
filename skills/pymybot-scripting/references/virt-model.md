@@ -1,8 +1,7 @@
 # 虚拟器件模型（\*_VIRT）
 
-技能 `pymybot-scripting` 参考文件。仓库根为 `mybot/`（Python 主线）。
-实现：`modules/lib/virtbus.lua`（内存总线与寄存器模型）、
-`modules/lib/drv_common.lua` 的 `virt_prepare`（发现/挂载/注入）。
+Source: 夹具要求与测试分层的权威是 [docs/testing.md](../../../docs/testing.md)；本文件只写模型机制与
+编写约定，实现见 `modules/lib/virtbus.lua` 与 `modules/lib/drv_common.lua` 的 `virt_prepare`。
 
 ## 1. 机制
 

@@ -1,32 +1,30 @@
 # 驱动模块（Python / Lua）
 
-技能 `pymybot-scripting` 参考文件。仓库根为 `mybot/`（Python 主线）。
-实现：`pymybot/native.py`（Python 模块与 `Driver(context)`）、`pymybot/runtime.py`
-（共享 HAL 桥与 LuaState）、`pymybot/hardware.py`（生命周期与 controller/trigger 转发）、
-`modules/lib/`（Lua 驱动框架与 HAL）。
+Source: 驱动契约与信任边界的权威是 [docs/architecture.md](../../../docs/architecture.md) 与
+[docs/security.md](../../../docs/security.md)；实现见 `pymybot/native.py`、`pymybot/runtime.py`、
+`pymybot/hardware.py` 与 `modules/lib/`，本文件只留写驱动的硬规则与 HAL 接口表。
 
 ## Python 原生入口与 SQL 选择
 
 - 普通表名选择 `<表名>.py` / `<表名>.lua`，`Alias` / `Vars` / `Daemon` 除外。
   按模块根顺序逐根查找（`--module-path` 可重复），**每根内 `.py` 优先于 `.lua`**；
   较早根的 Lua 优先于较晚根的 Python。无需新增 SQL 语言列。
-- 每个 SQL 行在激活时独立执行模块源码、创建 `Driver(context)`，模块全局与实例状态隔离；
-  不隔离进程，普通 Python 导入仍可共享包状态。
 - 必须实现 `build(self, data)`、`call(self, data)`；可选 `read(self, data)`（缺省回退到
   `call`）和 `destroy(self, data)`（尽力清理）。`data` 是已解析元数据、动作参数、触发结果
   合成的字典，`mode` 是本次入口名。返回非空、可转 JSON 的字典；`result` 可省略，或以
   `"OK"` 表示成功、`"ERR"` + `message` 表示失败；不要返回裸标量、空字典或 `None`。
 - `context.call(operation, *args)` 使用宿主 HAL 操作名，例如 `uart_write` / `uart_read`、
   `i2c_transfer` / `spi_transfer`、`close_handle` / `sleep_ms`；不是下文的 Lua 便利函数名。
-  字节数组使用 Python list（索引从 0 起）；保留既有权限、句柄归属/释放和取消检查。
-- `context.check()` 检查协作预算，长循环应主动调用。Python 驱动是可信进程内代码，
-  **不是沙箱**：导入、直接原生 I/O 不受限制；超时/取消不能硬中断阻塞原生调用或不协作的
-  Python 循环。`--allow-hardware` 只约束 HAL 路径，不限制直接宿主访问。
-- `check` 只编译 Python 源码，不执行模块、导入、构造器或生命周期方法；入口是否齐全在激活时检查。
-- I2C/SPI/UART/HTTP/Camera/Shell 普通表已迁为 Python；HAL 总线句柄仍与 Lua 器件驱动共享。
-  I2C/SPI/UART 通过 `LUA_VIRTUAL_DRIVER` 声明保留的 Lua 虚拟实现：`proto=virt` 或 `virt-*`
-  路径显式走该实现并禁止物理访问；不是 Python 失败后的兜底。其他原生模块不会自动获得 Lua 虚拟模型。
-  **既有 Daemon chunk 仍只加载 Lua 驱动**；若 `driver` / `devices` 按根顺序选中 Python，静态检查直接拒绝。
+  字节数组使用 Python list（索引从 0 起）。长循环要主动调用 `context.check()`——
+  超时/取消不能硬中断阻塞的原生调用或不协作的循环。
+- 每个 SQL 行有独立的模块命名空间与 `Driver(context)` 实例，但**不是沙箱、也不是进程隔离**；
+  `check` 只编译源码，不执行导入、构造器或生命周期方法，入口是否齐全在激活时才检查。
+  权限边界与 `--allow-hardware` 的作用范围见 docs/security.md 的 Native driver trust 一节。
+- 内置 I2C/SPI/UART/TCP/HTTP/Camera/Shell 普通表已是 Python，HAL 总线句柄仍与 Lua 器件驱动共享。
+  I2C/SPI/UART 用 `LUA_VIRTUAL_DRIVER` 指向保留的 Lua 虚拟实现：`proto=virt` 或 `virt-*`
+  路径显式选中并禁止物理访问，不是 Python 失败后的兜底；其他原生模块没有自动虚拟模型。
+  **Daemon chunk 仍只加载 Lua 驱动**，按根顺序选中 Python 时静态检查报
+  `Lua daemon requires a Lua driver, not Python: <驱动>`。
 
 可运行的 Python + SQL + MT 回环示例见 [README](../../../README.md#写一个驱动)。
 
@@ -63,10 +61,9 @@ TCP 是字节流：接收最多读取 `num_recv` 字节，不保证填满或返�
 `status` 为 `data` / `timeout` / `eof`；超时不是断连，EOF 后关闭连接。
 UTF-8 跨次接收的未完整字符会暂存，切换到 `recv_hex` 时先返回这些原始字节；
 非法 UTF-8 或 EOF 时仍有不完整字符会报错，不替换乱码。
-发送回执的 `sent` 只表示 socket 接受的字节数，不代表设备已经执行。
-发送失败或取消后关闭连接，不自动重连或重放；现有上层故障回执仍可能只给出“结果未知”。
-去激活会兜底关闭未显式关闭的连接。样例 [robots/tcp.sql](../../../robots/tcp.sql) 和
-[scripts/tcp.mt](../../../scripts/tcp.mt) 需要先在本机对应端口启动 TCP 回显服务，示例本身不会启动服务。
+发送回执的 `sent` 只表示 socket 接受的字节数，不代表设备已执行；发送失败或取消后关闭连接，
+不自动重连或重放，去激活会兜底关闭未显式关闭的连接。样例 [robots/tcp.sql](../../../robots/tcp.sql)
+和 [scripts/tcp.mt](../../../scripts/tcp.mt) 需要先在本机对应端口启动 TCP 回显服务。
 
 以下章节专述保留的 **Lua** 驱动协议与工具。
 
@@ -79,16 +76,12 @@ UTF-8 跨次接收的未完整字符会暂存，切换到 `recv_hex` 时先返�
   单文件 ≤8 MiB；指令计数钩子 + JIT 开关实现协作预算（阻塞的原生 I/O 不可中断）。
 - 文件加载：宿主注入 `__mpath`，`__mpath.resolve("lib/xxx.lua")` 把模块相对路径解析为
   实际文件；驱动内 `dofile` / `loadfile` 受同一解析器约束。
-- 三个入口全局函数（框架按序调用）：
-  - `build(data)`：激活时初始化（打开/配置器件）；
-  - `call(data)`：每次动作派发；
-  - `destroy(data)`：去激活收尾（**尽力释放**：资源不可用就跳过动作、仍返回 OK）；
-  - `read(data)`：可选快照（`sample` 命令与守护采样用；缺省回退到 `call`）。
-- `data` 表的构成：**结构元数据 ∪ 本次动作参数 ∪ trigger 结果**
-  （trigger 结果以触发器变量名为键注入）。
-- **返回值契约**：非空 Lua 表；若含 `result` 键必须恰为 `"OK"`。
-  推荐成功 `{ result="OK", ...字段 }`，失败 `err("原因")`（生成
-  `{result="ERR", message=...}`）。无 `result` 键的非空表也合法，但推荐显式带 OK。
+- 入口是全局函数而非方法：`build(data)` 激活初始化（打开/配置器件）、`call(data)` 每次动作派发、
+  `read(data)` 可选快照（`sample` 与守护采样用，缺省回退 `call`）、`destroy(data)` 去激活收尾
+  （**尽力释放**：资源不可用就跳过动作、仍返回 OK）。
+- `data` 表 = **结构元数据 ∪ 本次动作参数 ∪ trigger 结果**（trigger 结果以触发器变量名为键注入）。
+- **返回值契约**同上面的 Python 节：非空 Lua 表，含 `result` 键时必须恰为 `"OK"`；
+  失败用 `err("原因")` 生成 `{result="ERR", message=...}`。
 - **引用读取失败会阻断下游执行**，不能把 ERR 合并后继续派发。快照尚未产生时可返回
   `{result="ERR", code="NOT_READY", message="no sample yet"}`：仅下游初始化时省略这份
   未就绪元数据，不制造样本；动作和采样仍报错。其他读取错误即使在初始化时也会传播。
@@ -202,7 +195,7 @@ HTTP（标准库 urllib；`modules/HTTP.lua` 是总线范本、`modules/Qsont.lu
 | --- | --- |
 | `http_open(base, timeout_ms)` | 只校验不建连：base 须为无凭据/无 query/无 fragment 的 `http(s)://` URL（`bus.http_url_ok`），超时上限 `HTTP_TIMEOUT_MAX_MS`；fd ≥0 成功 |
 | `http_close(fd)` | 注销会话句柄 |
-| `http_request(fd, method, path, headers, body)` | method ∈ GET/POST/PUT/DELETE/PATCH；**path 只允许相对路径**（绝对/scheme-relative 一律拒绝）、ASCII 且无空格；返回表 `{result, status, body, headers}`——**HTTP 4xx/5xx 也是 `result="OK"` 的合法响应**（status 携带状态码，3xx 不跟随重定向），仅传输层失败返回 `result="ERR"`；请求体/响应体上限 4 MiB |
+| `http_request(fd, method, path, headers, body)` | method ∈ GET/POST/PUT/DELETE/PATCH；**path 只允许相对路径**、ASCII 且无空格；返回 `{result, status, body, headers}`——**4xx/5xx 也是 `result="OK"` 的合法响应**（`status` 携带状态码，3xx 不跟随），仅传输层失败返回 `result="ERR"`；请求体/响应体上限 4 MiB |
 
 其他：
 
@@ -212,9 +205,8 @@ HTTP（标准库 urllib；`modules/HTTP.lua` 是总线范本、`modules/Qsont.lu
 - **不支持的后端会响亮报错**（`HAL: xxx is not supported by the portable backend`）：
   `gpio_*`、`pwm_*`、`speaker_*`、原生 `open/ioctl/read/write/termios` 族。
   需要这些外设时用受支持总线写协议实现。
-- 未加 `--allow-hardware` 时：物理 `i2c_open` / `spi_open`、非 `loop://` 的 `uart_open`、
-  非文件的 camera 采集、**非回环主机的 `http_open`** 一律拒绝
-  （回环 = `127.0.0.1` / `localhost` / `[::1]`，与串口 `loop://` 同一口径）。
+- 未加 `--allow-hardware` 时，物理 `i2c_open` / `spi_open`、非 `loop://` 的 `uart_open`、
+  非文件的 camera 采集与非回环 `http_open` 一律拒绝（口径见 docs/security.md）。
 
 ## 5. drv_common 工具函数
 

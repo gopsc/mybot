@@ -1,8 +1,8 @@
 # Daemon 后台采样
 
-技能 `pymybot-scripting` 参考文件。仓库根为 `mybot/`（Python 主线）。
-实现：`pymybot/daemon.py`（Python 工作线程 + 独立 Lua 状态 + 槽位桥）、
-`modules/lib/sensor_daemon.lua`（采样 chunk）、`modules/lib/sensor_aggregate.lua`（聚合）。
+Source: 线程模型与分层的权威是 [docs/architecture.md](../../../docs/architecture.md)；本文件只写
+Daemon 表字段与消费者写法，实现见 `pymybot/daemon.py`、`modules/lib/sensor_daemon.lua`（采样
+chunk）与 `modules/lib/sensor_aggregate.lua`（聚合）。
 
 ## 1. Daemon 表（结构 SQL）
 

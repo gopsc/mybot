@@ -88,6 +88,24 @@ prune old transcripts with `pymybot sessions` and
 the GUI has no history browser; see
 [`cli.md`](cli.md#session-transcripts).
 
+## Should I document a change in `docs/` or in `skills/`?
+
+In `docs/` first. It is the authoritative operator documentation; the files under
+`skills/` are the agent's working reference and may only keep the hard rules it
+gets wrong without help — exact error strings, limits, worked examples — plus a
+link to the docs page that owns the behaviour. The scripting grammars (structure
+SQL, MT actions) are the exception: they have no prose authority outside the
+implementation, so the reference *is* their written source and docs link to it.
+
+Each `references/*.md` declares its authority in a `Source:` line and is
+registered in [`../skills/README.md`](../skills/README.md).
+`tools/check_docs_skill_sync.py` runs in the CI lint job and fails on dead
+links, missing repository paths, a missing `Source:` line or an unregistered
+reference; long verbatim runs shared with a docs page are reported as warnings,
+because a shared code block is legitimate. The agent cannot read `docs/` — only
+`read_skill` — so a reference that merely links must still leave the scripting
+rules usable on their own.
+
 ## Why is the Windows build unsigned?
 
 Code signing requires a certificate owned by the maintainer. Verify the

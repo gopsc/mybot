@@ -1,6 +1,7 @@
 # 开发工作流、常见错误与速查表
 
-技能 `pymybot-scripting` 参考文件。仓库根为 `mybot/`（Python 主线）。
+Source: 命令与开关的权威是 [docs/cli.md](../../../docs/cli.md)，测试与 CI 见
+[docs/testing.md](../../../docs/testing.md)，环境排查见 [docs/faq.md](../../../docs/faq.md)。
 
 ## 1. 推荐路径：从虚拟到真机
 
@@ -24,27 +25,24 @@
 ## 2. 在项目外目录开发
 
 ```sh
-cd ~/robots/<任务>
 pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
   --module-path modules --module-path /path/to/pymybot/modules
 ```
 
-显式 `--module-path` 会**替换**默认搜索路径，自定义目录与基础 `modules` 都要给出；
-或用环境变量 `BOT4CJ_MODULE_PATH`（按系统路径分隔符连接）。
+`--module-path` **替换**默认搜索路径——自定义目录与基础 `modules` 都要给出，等价环境变量
+`BOT4CJ_MODULE_PATH`（按系统路径分隔符连接），细节见 docs/cli.md。
 `@Include` 只能引用动作脚本所在目录内的文件；图片只能来自 `--camera-src-dir`。
 
 ## 3. 平台要点
 
-- I2C/SPI 真机：pyftdi 需要 MPSSE 型 FTDI 适配器（`ftdi://ftdi:232h/1`，SPI 可带 `?cs=0`）；
-  Linux 原生 `/dev/i2c-*` / `/dev/spidev*` 需装 `.[linux]`。
-- UART：Windows 用 `COMn`；`loop://` 回环不需要硬件。
-- Camera：真机采集用 PyAV（需装 `.[camera]`），分辨率必须是摄像头支持的模式，否则打开失败；
-  文件输入用 Pillow 校验，必须 `--camera-src-dir`。
-- HTTP：标准库 urllib，无额外依赖；回环主机（127.0.0.1/localhost/[::1]）默认可用，
-  其余主机需要 `--allow-hardware`。
-- Windows：CLI 自动关闭 faulthandler（LuaJIT SEH 与 CPython 冲突，详见
-  `docs/history/windows-faulthandler.md`）；stdout/stderr 固定 UTF-8。
-- Lua 指令预算与可取消等待**不能中断阻塞的原生库调用**；进程退出不是物理急停。
+写结构时用得到的路径形态：I2C/SPI 真机是 `ftdi://ftdi:232h/1`（SPI 可带 `?cs=0`）或 Linux
+原生 `/dev/i2c-*` / `/dev/spidev*`；UART 在 Windows 是 `COMn`，`loop://` 是无硬件回环；
+Camera 的文件输入必须落在 `--camera-src-dir` 内，真机采集的分辨率必须是摄像头支持的模式。
+HTTP/TCP 的回环主机（`127.0.0.1` / `localhost` / `[::1]`）默认可用，其余主机要 `--allow-hardware`。
+
+- 可选依赖（`.[linux]` / `.[camera]`）、设备权限与「检测不到硬件」的排查见 docs/faq.md；
+  Windows 的 faulthandler 与 UTF-8 行为见 docs/testing.md。
+- 指令预算与可取消等待**不能中断阻塞的原生库调用**；进程退出不是物理急停。
 
 ## 4. 常见错误对照
 
@@ -54,7 +52,8 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 | `Expected a literal value (quote text containing punctuation)` | 值含标点未加引号 |
 | `Reserved name must be quoted` | 表/列名撞保留字 |
 | `INSERT into 'X': missing columns [...]` | INSERT 必须列全所有声明列 |
-| `Lua module not found: X.lua` | 表名没有对应 `modules/X.lua`，或 `--module-path` 不含基础 modules |
+| `Driver module not found: X.py or X.lua` | 表名没有对应驱动文件，或 `--module-path` 不含基础 modules |
+| `Lua daemon requires a Lua driver, not Python: X` | Daemon 的 driver/devices 选中了 Python 文件；Daemon chunk 只加载 Lua |
 | `'x' references undefined variable 'y'` | `$y` / 流向列引用了后面才声明的变量；调整声明顺序 |
 | `UART path '...' has multiple independent consumers` | 同一串口被两个变量打开；合并为一个或改共享结构 |
 | `Single-consumer conflict` | 带 `SINGLE_CONSUMER` 标记的驱动同 `(总线,地址)` 被声明两次 |
@@ -126,5 +125,4 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 | HAL 桥接 | `modules/lib/HAL.lua`、`modules/lib/hal/{i2c,spi}.lua` |
 | 虚拟总线 | `modules/lib/virtbus.lua`、`modules/lib/virtbus/regmap.lua` |
 | 采样 chunk | `modules/lib/sensor_daemon.lua`、`modules/lib/sensor_aggregate.lua` |
-| 文法实现 | `pymybot/{sql,matrix,expr,actions,include}.py` |
 | 逐驱动无硬件夹具（40 对） | `tests/fixtures/virt/`（机制见 `tests/test_migrated_drivers.py`） |

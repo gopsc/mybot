@@ -1,6 +1,6 @@
 ---
 name: pymybot-scripting
-description: Reference for the pymybot three-layer robot scripting stack — SQL structure files, .mt action scripts, and Lua chip drivers with embedded *_VIRT virtual device models and Daemon sampling. Consult before writing, reviewing or diagnosing 结构脚本、动作脚本、驱动、.sql/.mt 文本、modules/*.lua、proto=virt 或传感器/舵机/继电器接入方案；文法细节、错误对照与硬纪律都在本技能的 references 里。
+description: Reference for the pymybot three-layer robot scripting stack — SQL structure files, .mt action scripts, and Python/Lua chip drivers with embedded *_VIRT virtual device models and Daemon sampling. Consult before writing, reviewing or diagnosing 结构脚本、动作脚本、驱动、.sql/.mt 文本、modules/*.py、modules/*.lua、proto=virt 或传感器/舵机/继电器接入方案；文法细节、错误对照与硬纪律都在本技能的 references 里。
 ---
 
 # pymybot 三层脚本开发
@@ -9,9 +9,11 @@ description: Reference for the pymybot three-layer robot scripting stack — SQL
 
 ## 项目定位
 
-- 仓库根 ＝ Python 主线，包名 pymybot（分支 `pymybot`）。**一切开发以它为准。**
-- 三层模型：`robots/*.sql` 结构（舞台：声明零件与接线）→ `modules/*.lua` 驱动
+- 仓库根 ＝ Python 主线，包名 pymybot。**一切开发以它为准。**
+- 三层模型：`robots/*.sql` 结构（舞台：声明零件与接线）→ `modules/*.py` 或 `*.lua` 驱动
   （演员：build/call/destroy）→ `scripts/*.mt` 动作（剧本：一行一拍）。
+- 操作者文档 `docs/` 是架构、CLI、安全、测试的权威来源，本技能只写脚本层的硬规则；
+  agent 读不到 docs，因此每个 reference 开头的 `Source:` 行标明了它对应的权威位置。
 
 ## 按任务先读参考文件
 
@@ -58,7 +60,5 @@ references 内的相对路径均以仓库根 `mybot/` 为基准。
 
 ## 兜底：以源码为准
 
-references 按 2026-10 源码整理，pymybot 在活跃开发，行为存疑时读源码裁定：
-文法 `pymybot/{sql,matrix,expr,actions,include}.py`；生命周期与校验
-`pymybot/{robot,hardware,daemon,runtime}.py`；驱动框架 `modules/lib/drv_common.lua`；
-HAL `modules/lib/HAL.lua` 与 `modules/lib/hal/`。
+references 按 2026-10 源码整理，pymybot 在活跃开发；行为存疑时读各 reference 开头 `Source:`
+指向的实现裁定，HAL 细节见 `modules/lib/HAL.lua` 与 `modules/lib/hal/`。
