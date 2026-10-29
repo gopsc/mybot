@@ -6,8 +6,11 @@ import threading
 
 import pytest
 
-from pymybot.agent import AgentConfig, AgentSession, AgentConfigurationError
 from pymybot.agent_intent import INTENTS, TOOLS_BY_INTENT, classify_intent
+
+pytest.importorskip("pydantic_ai")
+
+from pymybot.agent import AgentConfig, AgentConfigurationError, AgentSession  # noqa: E402
 
 
 class _Executor:
