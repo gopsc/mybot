@@ -85,6 +85,7 @@ Key invariants:
 | `pymybot/agent_intent.py` | Deterministic bilingual intent routing, tool allowlists and budgets |
 | `pymybot/agent_executor.py` | Approval-gated tool implementations |
 | `pymybot/agent_workspace.py` | Bounded, link-safe workspace file tools and shell |
+| `pymybot/sandbox.py` | Shell sandbox backend probe and bubblewrap command builder |
 | `pymybot/serve.py` | Long-lived stdio JSON-RPC 2.0 backend |
 | `pymybot/mcp_server.py` | Standard MCP stdio server over the same executor (read-only by default) |
 | `pymybot/mcp_client.py` | Operator `mcpServers` configuration for external agent tools |

@@ -547,7 +547,7 @@ def test_console_approval_never_hides_arguments(monkeypatch, capsys, long):
 
 
 @pytest.mark.parametrize("name,args,warning", [
-    ("shell", {"command": "exit 0"}, "NOT sandboxed"),
+    ("shell", {"command": "exit 0"}, "sandbox"),
     ("write_file", {"path": "note.txt", "content": "text"}, "changes workspace files"),
     ("edit_file", {"path": "note.txt", "old_string": "a", "new_string": "b"}, "changes workspace files"),
 ])
@@ -841,7 +841,7 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
     assert receipts[2]["data"]["content"] == "after\n"
     assert receipts[3]["data"]["exit_code"] == 0
     assert "shell-ok" in receipts[3]["data"]["stdout"]
-    assert "NOT sandboxed" in captured.err
+    assert "Shell enabled:" in captured.err
 
 
 def test_provider_error_is_sanitized_and_not_retried(tmp_path, monkeypatch, capsys):

@@ -1,4 +1,8 @@
-"""Bounded workspace file tools and an explicitly enabled, unsandboxed shell."""
+"""Bounded workspace file tools and an approval-gated shell.
+
+The shell uses the workspace jail by default; `sandbox="auto"` upgrades to a
+bubblewrap namespace when one can actually be created.
+"""
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -10,6 +14,7 @@ import subprocess
 import time
 
 from .process import kill_tree, read_pipe, shell_command
+from .sandbox import SANDBOX_MODES, wrap_shell
 from .security import SecurityError, dumps
 
 MAX_FILE_BYTES = 1024 * 1024
@@ -102,9 +107,11 @@ def _unlink_at(parent, fd, name):
 
 
 class Workspace:
-    def __init__(self, directory, *, enable_shell=False):
+    def __init__(self, directory, *, enable_shell=False, sandbox="off"):
         if type(enable_shell) is not bool:
             raise SecurityError("enable_shell must be a boolean")
+        if sandbox not in SANDBOX_MODES:
+            raise SecurityError("sandbox must be one of off, auto or bwrap")
         # Check before resolving: resolve() alone would hide linked ancestors.
         candidate = Path(directory).absolute()
         _no_links(candidate)
@@ -114,6 +121,7 @@ class Workspace:
             raise SecurityError("Workspace must be an existing directory")
         self._identity = _identity(info)
         self.enable_shell = enable_shell
+        self.sandbox = sandbox
 
     @staticmethod
     def validate(name, arguments):
@@ -212,7 +220,8 @@ class Workspace:
         parts = _relative(relative, directory=directory)
         with self._directory(parts if directory else parts[:-1], check) as (parent, fd, guard):
             if name == "shell":
-                result = self._shell(arguments["command"], parent, fd, guard, check, started)
+                result = self._shell(arguments["command"], parent, fd, guard, check, started,
+                                     sandbox=self.sandbox, workspace=self.path)
             elif name == "list_files":
                 result = self._listing(relative, parent, fd, check)
             elif name == "read_file":
@@ -381,15 +390,20 @@ class Workspace:
                     pass  # Successful replace/Windows rename consumed the staging name.
 
     @staticmethod
-    def _shell(command, cwd, fd, guard, check, started):
+    def _shell(command, cwd, fd, guard, check, started, sandbox="off", workspace=None):
         argv, options, interpreter = shell_command(command)
+        backend = "workspace"
+        if sandbox != "off":
+            argv, backend = wrap_shell(argv, mode=sandbox, workspace=workspace, cwd=cwd)
         # Linux procfs provides descriptor-pinned cwd without preexec_fn (unsafe
         # in the executor's multithreaded process). Other platforms use checks.
-        if fd is not None and Path("/proc/self/fd").is_dir():
+        if backend == "workspace" and fd is not None and Path("/proc/self/fd").is_dir():
             options["pass_fds"] = (fd,)
             launch_cwd = f"/proc/self/fd/{fd}"
         else:
-            launch_cwd = cwd
+            # A bubblewrap child gets a private /proc, so fd paths do not survive;
+            # bwrap itself chdirs into the pinned path after mounting.
+            launch_cwd = cwd if backend == "workspace" else str(workspace)
         check()
         guard()
         tree_killed = False
@@ -438,7 +452,7 @@ class Workspace:
             check()
             result = {"exit_code": exit_code, "stdout": buffers[0].decode("utf-8", errors="replace"),
                       "stderr": buffers[1].decode("utf-8", errors="replace"),
-                      "truncated": truncated, "interpreter": interpreter}
+                      "truncated": truncated, "interpreter": interpreter, "sandbox": backend}
             # JSON escaping must not force the executor to discard structured exit status.
             while len(dumps(result).encode("utf-8")) > 48 * 1024:
                 for key in ("stdout", "stderr"):

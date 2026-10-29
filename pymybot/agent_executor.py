@@ -21,6 +21,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 
 from .agent_skills import SkillsLibrary
 from .agent_workspace import WORKSPACE_TOOLS, Workspace
+from .sandbox import SANDBOX_MODES, describe_backend
 from .errors import BudgetExceeded
 from .hal import HALManager
 from .hardware import Budget, ensure_ok, safe_ident
@@ -335,9 +336,12 @@ class RobotExecutor:
     def __init__(self, robot_path, *, module_paths=None, camera_src_root=None,
                  scripts_dir, allow_hardware=False, read_vars=(), camera_vars=(),
                  stop_event=None, robot_factory=Robot, skills=None, workspace_dir=None, enable_shell=False,
-                 vars=None):
+                 vars=None, sandbox="off"):
         if enable_shell and workspace_dir is None:
             raise ValueError("Shell tools require a workspace directory")
+        if sandbox not in SANDBOX_MODES:
+            raise ValueError("sandbox must be one of off, auto or bwrap")
+        self._sandbox = sandbox
         self._vars = _session_vars(vars)
         self._workspace_dir = Path(workspace_dir).absolute() if workspace_dir is not None else None
         self._enable_shell = enable_shell is True
@@ -380,6 +384,14 @@ class RobotExecutor:
     @property
     def workspace_dir(self):
         return self._workspace_dir
+
+    @property
+    def sandbox_mode(self):
+        return self._sandbox
+
+    @property
+    def sandbox_label(self):
+        return describe_backend(self._sandbox)
 
     @property
     def skills(self):
@@ -466,7 +478,8 @@ class RobotExecutor:
             return
         scripts = _Scripts(self._scripts_dir)
         if self._workspace_dir is not None and self._workspace is None:
-            self._workspace = Workspace(self._workspace_dir, enable_shell=self._enable_shell)
+            self._workspace = Workspace(self._workspace_dir, enable_shell=self._enable_shell,
+                                        sandbox=self._sandbox)
         sql = _read_stable(self._robot_path, lambda: _no_links(self._robot_path))
         self._check(deadline)
         # Keep even a partially validated robot available for owner-thread close.

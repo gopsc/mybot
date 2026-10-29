@@ -40,6 +40,8 @@ INTENT_LABELS = {"auto": "自动", "off": "关闭", "chat": "闲聊", "inspect":
 INTENT_CHOICES = (("auto", "自动（推荐）"), ("off", "关闭"), ("chat", "闲聊（只读）"),
                   ("inspect", "查看（只读）"), ("control", "控制（硬件动作）"),
                   ("author", "编写（文件）"), ("diagnose", "诊断（含 Shell）"))
+SANDBOX_CHOICES = (("auto", "自动（bubblewrap 可用时）"), ("off", "关闭（仅工作区牢笼）"),
+                   ("bwrap", "强制 bubblewrap"))
 
 
 def _brief(value, limit=160):
@@ -896,6 +898,7 @@ class App(QMainWindow):
             "promptFile": _absolute(self.cfg.prompt_file, workspace),
             "contextBytes": self.cfg.context_bytes,
             "intent": self.cfg.intent_mode,
+            "sandbox": self.cfg.sandbox_mode,
             "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
             "maxToolCalls": self.cfg.max_tool_calls, "modulePaths": self._module_paths(),
         }
@@ -1389,6 +1392,12 @@ class SettingsDialog(QDialog):
         index = self.intent_box.findData(cfg.intent_mode)
         self.intent_box.setCurrentIndex(max(0, index))
         model_form.addRow("意图路由", self.intent_box)
+        self.sandbox_box = QComboBox()
+        for value, label in SANDBOX_CHOICES:
+            self.sandbox_box.addItem(label, value)
+        sandbox_index = self.sandbox_box.findData(cfg.sandbox_mode)
+        self.sandbox_box.setCurrentIndex(max(0, sandbox_index))
+        model_form.addRow("Shell 沙箱", self.sandbox_box)
         self.session_log = QCheckBox("保存会话转录（~/.mybot/sessions）")
         self.session_log.setChecked(bool(cfg.session_log))
         model_form.addRow(self.session_log)
@@ -1399,7 +1408,7 @@ class SettingsDialog(QDialog):
         permission_form = QFormLayout(permissions)
         self.file_tools = QCheckBox("启用文件工具（工作区只读）")
         self.file_writes = QCheckBox("允许文件写入（逐次确认）")
-        self.shell_tools = QCheckBox("启用 Shell 工具（不是沙箱）")
+        self.shell_tools = QCheckBox("启用 Shell 工具（沙箱可配置）")
         self.shell_grant = QCheckBox("自动批准 Shell")
         self.mcp_grant = QCheckBox("自动批准 MCP 工具")
         for toggle, value in ((self.file_tools, cfg.enable_file_tools),
@@ -1411,8 +1420,8 @@ class SettingsDialog(QDialog):
             toggle.toggled.connect(self._permissions_changed)
             permission_form.addRow(toggle)
         permission_form.addRow(_label(
-            "Shell/MCP 以宿主用户权限运行，不是沙箱；自动批准只在本次启动有效。\n"
-            "文件写入、Shell 和 MCP 自动批准在首次发送时仍会弹窗确认。", secondary=True))
+            "Shell 使用设置中的沙箱后端（bubblewrap 或工作区牢笼）；MCP 仍是宿主用户权限进程。\n"
+            "自动批准只在本次启动有效；文件写入、Shell 和 MCP 自动批准在首次发送时仍会弹窗确认。", secondary=True))
         tabs.addTab(permissions, "权限")
 
         advanced = QWidget()
@@ -1515,6 +1524,7 @@ class SettingsDialog(QDialog):
                       context_bytes=(max(1, self.context_kib.value()) * 1024
                                      if self.context_enabled.isChecked() else 0),
                       intent_mode=self.intent_box.currentData(),
+                      sandbox_mode=self.sandbox_box.currentData(),
                       session_log=self.session_log.isChecked(),
                       enable_file_tools=self.file_tools.isChecked(),
                       enable_shell=self.shell_tools.isChecked(),

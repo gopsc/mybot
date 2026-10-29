@@ -163,7 +163,7 @@ The important flags are:
 | `--api-key-env NAME` | Environment variable holding the key; never pass the key itself. |
 | `--task TEXT` | One-shot task; without it, start the REPL. |
 | `--workspace-dir DIR` | Enable bounded file tools inside `DIR`. |
-| `--enable-shell` | Enable the shell tool inside the workspace; still not a sandbox. |
+| `--enable-shell` | Enable the shell tool inside the workspace; `--sandbox` selects bubblewrap or the workspace jail. |
 | `--allow-actions` | Pre-approve action scripts/reads/captures for this session. |
 | `--allow-file-writes` | Pre-approve file creation/editing. |
 | `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
@@ -172,6 +172,7 @@ The important flags are:
 | `--prompt-file FILE` | Operator-owned UTF-8 prompt appended as the USER layer (max 8 KiB); the safety SOUL layer stays first and cannot be replaced. |
 | `--context-bytes N` | Budget for the generated project inventory (workspace top level, structures, scripts, drivers, skills); 0 disables it (0–64 KiB, default 4096). |
 | `--intent MODE` | `auto` (default), `off`, `chat`, `inspect`, `control`, `author` or `diagnose`. Auto narrows the tool allowlist and budget when the request clearly matches an intent; mixed requests union their tools; messages with no keywords stay unrestricted. |
+| `--sandbox MODE` | `auto` (default), `off` or `bwrap`. Auto probes bubblewrap and falls back to the workspace jail; `bwrap` fails instead of running unsandboxed. The sandbox mounts the host read-only, gives the workspace a read-write overlay, clears the environment and unshares network/PID/IPC/UTS namespaces. |
 | `--mcp-config FILE` | Operator `mcpServers` JSON; exposes external MCP tools to the model. See [mcp.md](mcp.md). |
 | `--allow-mcp-tools` | Pre-approve external MCP tool calls (requires `--mcp-config`). |
 | `--var`, `--var-env` | Structure `Alias`/`Vars` overrides and action-script bindings, as described above. |

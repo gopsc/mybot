@@ -30,6 +30,7 @@ from .agent_intent import MODES, classify_intent
 from .agent_prompt import DEFAULT_CONTEXT_BYTES, build_instructions, read_operator_prompt
 from .agent_skills import SkillsLibrary, default_skills_root
 from .errors import AgentInterrupted
+from .sandbox import SANDBOX_MODES, describe_backend
 from .security import SecurityError, checked_text, dumps
 from .session_log import SessionLog, create_session_log
 
@@ -101,6 +102,7 @@ class AgentConfig:
     prompt_file: str | None = None
     context_bytes: int = DEFAULT_CONTEXT_BYTES
     intent_mode: str = "auto"
+    sandbox_mode: str = "auto"
 
     def __post_init__(self):
         if not math.isfinite(self.timeout) or not 0 < self.timeout <= 3600:
@@ -118,6 +120,10 @@ class AgentConfig:
         if mode not in MODES:
             raise AgentConfigurationError(f"intent_mode must be one of {', '.join(MODES)}")
         object.__setattr__(self, "intent_mode", mode)
+        sandbox = str(self.sandbox_mode or "auto").strip().lower()
+        if sandbox not in SANDBOX_MODES:
+            raise AgentConfigurationError(f"sandbox_mode must be one of {', '.join(SANDBOX_MODES)}")
+        object.__setattr__(self, "sandbox_mode", sandbox)
 
 
 def create_model(config):
@@ -211,7 +217,7 @@ def _attachments(images):
 
 
 def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=False, enable_shell=False,
-               mcp_servers=(), mcp_timeout=180, operator_prompt="", project_context=""):
+               mcp_servers=(), mcp_timeout=180, operator_prompt="", project_context="", sandbox_label=""):
     if enable_shell and not workspace:
         raise AgentConfigurationError("Shell tools require a workspace")
 
@@ -269,7 +275,7 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
                                                "new_string": new_string, "replace_all": replace_all})
 
     async def shell(ctx: RunContext[AgentSession], command: str, cwd: str = ".") -> dict:
-        """Run a host shell command after approval; cwd is workspace-relative. NOT sandboxed. No background jobs."""
+        """Run a host shell command after approval inside the configured sandbox; cwd is workspace-relative. No background jobs."""
         return await ctx.deps.dispatch("shell", {"command": command, "cwd": cwd})
 
     functions = [list_hardware, list_action_scripts, query_sql, run_action_script]
@@ -291,6 +297,8 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         guide.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
     guide.append(f"Runtime gates: workspace={'enabled' if workspace else 'disabled'}, "
                  f"shell={'enabled' if enable_shell else 'disabled'}.")
+    if enable_shell:
+        guide.append(f"Shell sandbox: {sandbox_label or 'workspace jail only'}.")
     toolsets = None
     if mcp_servers:
         from .mcp_client import build_toolsets, describe
@@ -412,11 +420,14 @@ class AgentSession:
             raise AgentConfigurationError(
                 f"Cannot load prompt file: {exc}; no model request was sent") from None
         self.project_context = build_project_context(self.executor, budget=self.config.context_bytes)
+        sandbox_label = (describe_backend(self.config.sandbox_mode)
+                         if enable_shell else "")
         self.agent = make_agent(model, read_vars=read_vars, camera_vars=camera_vars, skills=skills,
                                 workspace=workspace, enable_shell=enable_shell,
                                 mcp_servers=mcp_servers, mcp_timeout=self.config.timeout,
                                 operator_prompt=operator_prompt,
-                                project_context=self.project_context.text)
+                                project_context=self.project_context.text,
+                                sandbox_label=sandbox_label)
         self.context = None
         self.intent = None
         self.turns = []
@@ -672,7 +683,8 @@ async def confirm_console(name, arguments, stop):
         warning = ("This calls an operator-configured MCP server with host-user permissions, "
                    "NOT in a sandbox; it may act on the host or network.")
     elif name == "shell":
-        warning = "Host shell is NOT sandboxed; it can access files, network and physical devices."
+        warning = ("Host shell runs inside the configured sandbox; a workspace jail alone is not "
+                   "an OS boundary, and hardware access is not limited by --allow-hardware.")
     elif name in FILE_WRITE_TOOLS:
         warning = "This changes workspace files, potentially including executable scripts or drivers."
     else:
@@ -771,7 +783,8 @@ async def run_cli_agent(args, stop):
                              allow_mcp_tools=getattr(args, "allow_mcp_tools", False),
                              prompt_file=getattr(args, "prompt_file", None),
                              context_bytes=getattr(args, "context_bytes", DEFAULT_CONTEXT_BYTES),
-                             intent_mode=getattr(args, "intent", "auto"))
+                             intent_mode=getattr(args, "intent", "auto"),
+                             sandbox_mode=getattr(args, "sandbox", "auto"))
         try:
             from .mcp_client import load_servers
             mcp_servers = load_servers(config.mcp_config)
@@ -791,10 +804,11 @@ async def run_cli_agent(args, stop):
                                  scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
                                  read_vars=args.read_var, camera_vars=args.camera_var, stop_event=stop,
                                  vars=getattr(args, "bindings", None),
-                                 skills=skills, workspace_dir=args.workspace_dir, enable_shell=args.enable_shell)
+                                 skills=skills, workspace_dir=args.workspace_dir, enable_shell=args.enable_shell,
+                                 sandbox=config.sandbox_mode)
         if args.enable_shell:
-            print("Shell enabled: host-user permissions, NOT sandboxed; --allow-hardware does not restrict it.",
-                  file=sys.stderr)
+            print(f"Shell enabled: {describe_backend(config.sandbox_mode)}; "
+                  f"approval is still separate.", file=sys.stderr)
 
         async def confirm(name, arguments):
             return await confirm_console(name, arguments, stop)

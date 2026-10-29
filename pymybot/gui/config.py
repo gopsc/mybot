@@ -88,6 +88,7 @@ class GuiConfig:
     prompt_file: str = ""
     context_bytes: int = 4 * 1024
     intent_mode: str = "auto"
+    sandbox_mode: str = "auto"
     session_log: bool = True
     # Tool availability is a preference; approval grants stay runtime-only.
     enable_file_tools: bool = False
@@ -129,6 +130,8 @@ class GuiConfig:
             intent_mode=(self.intent_mode if self.intent_mode in
                          {"auto", "off", "chat", "inspect", "control", "author", "diagnose"}
                          else "auto"),
+            sandbox_mode=(self.sandbox_mode if self.sandbox_mode in {"auto", "off", "bwrap"}
+                          else "auto"),
             session_log=self.session_log if isinstance(self.session_log, bool) else True,
             enable_file_tools=bool(self.enable_file_tools or self.enable_shell),
             enable_shell=bool(self.enable_shell),
@@ -193,6 +196,7 @@ def merge_args(cfg, args):
         "prompt_file": getattr(args, "prompt_file", None),
         "context_bytes": getattr(args, "context_bytes", None),
         "intent_mode": getattr(args, "intent", None),
+        "sandbox_mode": getattr(args, "sandbox", None),
         "allow_hardware": getattr(args, "allow_hardware", None) or None,
         "allow_actions": getattr(args, "allow_actions", None) or None,
     }
