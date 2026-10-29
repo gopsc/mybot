@@ -83,10 +83,18 @@ class GuiConfig:
     timeout: float = 180.0
     max_requests: int = 8
     max_tool_calls: int = 16
+    history_turns: int = 6
+    max_history_bytes: int = 4 * 1024 * 1024
     session_log: bool = True
+    # Tool availability is a preference; approval grants stay runtime-only.
+    enable_file_tools: bool = False
+    enable_shell: bool = False
     # Runtime-only: initial toggle state for this launch, never written to disk.
     allow_hardware: bool = False
     allow_actions: bool = False
+    allow_file_writes: bool = False
+    allow_shell: bool = False
+    allow_mcp_tools: bool = False
 
     def sanitized(self):
         return GuiConfig(
@@ -108,9 +116,18 @@ class GuiConfig:
             timeout=self.timeout if isinstance(self.timeout, (int, float)) and 0 < self.timeout <= 3600 else 180.0,
             max_requests=self.max_requests if isinstance(self.max_requests, int) and 1 <= self.max_requests <= 100 else 8,
             max_tool_calls=self.max_tool_calls if isinstance(self.max_tool_calls, int) and 1 <= self.max_tool_calls <= 1000 else 16,
+            history_turns=self.history_turns if isinstance(self.history_turns, int) and 1 <= self.history_turns <= 20 else 6,
+            max_history_bytes=(self.max_history_bytes if isinstance(self.max_history_bytes, int)
+                               and 64 * 1024 <= self.max_history_bytes <= 64 * 1024 * 1024
+                               else 4 * 1024 * 1024),
             session_log=self.session_log if isinstance(self.session_log, bool) else True,
+            enable_file_tools=bool(self.enable_file_tools or self.enable_shell),
+            enable_shell=bool(self.enable_shell),
             allow_hardware=bool(self.allow_hardware),
             allow_actions=bool(self.allow_actions),
+            allow_file_writes=bool(self.allow_file_writes and (self.enable_file_tools or self.enable_shell)),
+            allow_shell=bool(self.allow_shell and self.enable_shell),
+            allow_mcp_tools=bool(self.allow_mcp_tools and self.mcp_config),
         )
 
     def store(self, path):
@@ -119,7 +136,8 @@ class GuiConfig:
         data = asdict(self.sanitized())
         # A one-shot prompt hint, per-launch approvals and variable values are not
         # preferences; variable values may hold credentials, so they never reach disk.
-        for key in ("task", "allow_hardware", "allow_actions", "vars"):
+        for key in ("task", "allow_hardware", "allow_actions", "allow_file_writes",
+                    "allow_shell", "allow_mcp_tools", "vars"):
             data.pop(key, None)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 

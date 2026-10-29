@@ -130,6 +130,31 @@ def test_sessions_lists_and_prunes(monkeypatch, tmp_path, capsys):
     assert code == 0 and len(result["sessions"]) == 1
 
 
+def test_sessions_deletes_named_ids(monkeypatch, tmp_path, capsys):
+    from pymybot.session_log import SessionLog, list_sessions
+
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
+    created = []
+    for _ in range(2):
+        log = SessionLog()
+        log.close()
+        created.append(log.path.name)
+
+    code, result, _ = invoke(capsys, "sessions", "--delete", created[0])
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+    code, result, _ = invoke(capsys, "sessions", "--delete", created[0], "--dry-run")
+    assert code == 0 and result["deleted"] == [created[0]]
+
+    code, result, _ = invoke(capsys, "sessions", "--delete", created[0], "--yes")
+    assert code == 0 and result["deleted"] == [created[0]]
+    assert [item["id"] for item in list_sessions()] == [created[1]]
+
+    code, result, _ = invoke(capsys, "sessions", "--delete", created[1],
+                             "--prune", "--yes")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+
 @pytest.fixture
 def workspace(tmp_path):
     (tmp_path / "robot.sql").write_text(VIRTUAL_SQL, encoding="utf-8")

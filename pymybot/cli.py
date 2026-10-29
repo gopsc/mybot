@@ -188,12 +188,16 @@ def parser():
                                  help="accepted for CLI consistency; sessions never uses a model")
             command.add_argument("--prune", action="store_true",
                                  help="delete old transcripts instead of listing them")
+            command.add_argument("--delete", action="append", default=[], metavar="ID",
+                                 help="delete one session directory by id; repeatable")
             command.add_argument("--keep", type=bounded_int(1, 10_000), default=20,
                                  help="keep the newest N sessions (default: 20)")
             command.add_argument("--older-than", type=bounded_int(0, 3650), metavar="DAYS",
                                  help="only prune sessions at least DAYS old")
-            command.add_argument("--dry-run", action="store_true", help="show what --prune would delete")
-            command.add_argument("--yes", action="store_true", help="confirm deletion (required with --prune)")
+            command.add_argument("--dry-run", action="store_true",
+                                 help="show what --prune/--delete would remove")
+            command.add_argument("--yes", action="store_true",
+                                 help="confirm deletion (required with --prune/--delete)")
             continue
         command.add_argument("--no-agent", action="store_true",
                              help="disable agent.* methods" if name == "serve"
@@ -447,20 +451,26 @@ def execute(args, stop):
     if args.command == "doctor":
         return doctor()
     if args.command == "sessions":
-        from .session_log import list_sessions, prune_sessions, session_root
-        if args.prune:
+        from .session_log import delete_sessions, list_sessions, prune_sessions, session_root
+        if args.prune and args.delete:
+            raise UsageError("--prune and --delete are mutually exclusive")
+        if args.delete or args.prune:
             if args.dry_run and args.yes:
                 raise UsageError("choose --dry-run or --yes, not both")
             if not args.yes and not args.dry_run:
-                raise UsageError("--prune requires --yes or --dry-run")
+                raise UsageError("--prune/--delete require --yes or --dry-run")
+            if args.delete and (args.keep != 20 or args.older_than is not None):
+                raise UsageError("--keep/--older-than require --prune")
             try:
+                if args.delete:
+                    return delete_sessions(args.delete, dry_run=args.dry_run)
                 return prune_sessions(keep=args.keep, older_than_days=args.older_than,
                                       dry_run=args.dry_run)
             except ValueError as exc:
                 raise UsageError(str(exc)) from None
         if (args.keep != 20 or args.older_than is not None
                 or args.dry_run or args.yes):
-            raise UsageError("--keep/--older-than/--dry-run/--yes require --prune")
+            raise UsageError("--keep/--older-than/--dry-run/--yes require --prune/--delete")
         return {"root": str(session_root()), "sessions": list_sessions()}
     if args.command == "scripts":
         return list_scripts(args.scripts_dir or default_scripts_dir())

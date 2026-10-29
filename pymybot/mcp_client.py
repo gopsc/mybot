@@ -114,17 +114,8 @@ def _entry(name, value, base):
     return McpServer(name=name, command=command, args=args, env=env, cwd=cwd)
 
 
-def load_servers(path):
-    """Read and strictly validate one operator MCP configuration file."""
-    if path is None:
-        return ()
-    target = Path(path).expanduser()
-    try:
-        text = read_file(target, MAX_CONFIG_BYTES)
-    except SecurityError as exc:
-        raise McpConfigError(f"Cannot read MCP configuration: {exc}") from None
-    except OSError as exc:
-        raise McpConfigError(f"Cannot read MCP configuration: {type(exc).__name__}") from None
+def parse_servers(text, base):
+    """Validate in-memory configuration; ``base`` resolves relative ``cwd``."""
     try:
         document = json.loads(text, parse_constant=_reject_constant)
     except ValueError as exc:
@@ -136,7 +127,6 @@ def load_servers(path):
         raise McpConfigError("MCP configuration requires an mcpServers object")
     if not 0 < len(entries) <= MAX_SERVERS:
         raise McpConfigError(f"mcpServers must contain 1..{MAX_SERVERS} servers")
-    base = target.absolute().parent
     servers, seen = [], set()
     for name in sorted(entries):
         if not isinstance(name, str) or not _NAME.fullmatch(name):
@@ -145,8 +135,22 @@ def load_servers(path):
         if key in seen:
             raise McpConfigError(f"Duplicate MCP server name (case-insensitive): {name}")
         seen.add(key)
-        servers.append(_entry(name, entries[name], base))
+        servers.append(_entry(name, entries[name], Path(base)))
     return tuple(servers)
+
+
+def load_servers(path):
+    """Read and strictly validate one operator MCP configuration file."""
+    if path is None:
+        return ()
+    target = Path(path).expanduser()
+    try:
+        text = read_file(target, MAX_CONFIG_BYTES)
+    except SecurityError as exc:
+        raise McpConfigError(f"Cannot read MCP configuration: {exc}") from None
+    except OSError as exc:
+        raise McpConfigError(f"Cannot read MCP configuration: {type(exc).__name__}") from None
+    return parse_servers(text, target.absolute().parent)
 
 
 def describe(servers):

@@ -140,6 +140,30 @@ def test_list_and_prune_sessions(monkeypatch, tmp_path):
     assert {item["id"] for item in session_log.list_sessions()} == remaining
 
 
+def test_delete_sessions_by_id(monkeypatch, tmp_path):
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
+    created = []
+    for _ in range(3):
+        log = SessionLog()
+        log.close()
+        created.append(log.path)
+
+    dry = session_log.delete_sessions([created[0].name, "missing"], dry_run=True)
+    assert dry["dry_run"] is True and dry["deleted"] == [created[0].name]
+    assert dry["errors"] == ["missing"] and created[0].exists()
+
+    real = session_log.delete_sessions([created[0].name, created[1].name])
+    assert set(real["deleted"]) == {created[0].name, created[1].name}
+    assert real["bytes_freed"] > 0 and real["errors"] == []
+    assert not created[0].exists() and not created[1].exists() and created[2].exists()
+
+    invalid = session_log.delete_sessions(["../escape"])
+    assert invalid["deleted"] == [] and invalid["errors"] == ["../escape"]
+    for ids in ([], None, ["x"] * (session_log.MAX_KEEP + 1)):
+        with pytest.raises(ValueError):
+            session_log.delete_sessions(ids)
+
+
 def test_prune_ignores_unknown_directories_and_symlinks(monkeypatch, tmp_path):
     monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
     log = SessionLog()

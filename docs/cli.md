@@ -140,7 +140,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, agent options | multi-turn result and `agent.event` notifications |
+| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result and `agent.event` notifications |
 | `agent.reset` | — | closes the conversation and releases hardware |
 | `cancel` | `id` | cancels a request (`-32800` for the cancelled request) |
 | `shutdown` | — | cleanup and exit |
@@ -208,10 +208,17 @@ written. On POSIX, directories are `0700` and files `0600`.
 
 ```sh
 pymybot sessions                                  # JSON list, newest first
+pymybot sessions --delete ID --dry-run            # preview one deletion
+pymybot sessions --delete ID --yes                # delete one session
+pymybot sessions --delete ID --delete ID2 --yes   # repeatable
 pymybot sessions --prune --keep 20 --dry-run      # show what would go
 pymybot sessions --prune --keep 20 --yes          # delete older sessions
 pymybot sessions --prune --keep 20 --older-than 30 --yes
 ```
+
+`--prune` and `--delete` are mutually exclusive; both require `--yes` or
+`--dry-run`. The GUI's **工具 → 会话管理** uses the same functions with
+filtering, preview, delete and prune controls.
 
 The newest `--keep` sessions are always protected. `--older-than DAYS` adds a
 second condition among the rest, so a recent overflow is not deleted before it
