@@ -41,6 +41,12 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   drivers and skills, is mtime-cached and bounded by `--context-bytes`
   (default 4096, 0 disables). `serve.agent.ask` accepts `promptFile` and
   `contextBytes`, and the GUI exposes both under 设置.
+- Intent routing (`pymybot/agent_intent.py`) classifies Chinese/English requests
+  as chat, inspect, control, author or diagnose before each model request. It
+  narrows the tool allowlist and request/tool budgets, unions tools for mixed
+  requests, leaves keyword-free messages unrestricted, and rejects out-of-intent
+  tool calls with a structured not-executed receipt. `--intent`, the GUI
+  dropdown and `serve.agent.ask` expose the mode; results carry intent metadata.
 - The resource browser indexes structures (`robots/*.sql`) and Lua drivers
   (`modules/**/*.lua`) alongside scripts, skills and docs, watches roots with
   `QFileSystemWatcher` and reloads after a 400 ms debounce.

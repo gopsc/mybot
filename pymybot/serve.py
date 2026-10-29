@@ -505,6 +505,7 @@ class Server:
                                               4 * 1024 * 1024),
             "promptFile": params.text("promptFile", cap=4096),
             "contextBytes": params.integer("contextBytes", 0, 64 * 1024, 4 * 1024),
+            "intent": params.text("intent", cap=32),
             "mcpConfig": params.text("mcpConfig", cap=4096), "allowMcpTools": params.flag("allowMcpTools"),
             "workspaceDir": params.text("workspaceDir", cap=4096),
             "enableShell": params.flag("enableShell"), "allowShell": params.flag("allowShell"),
@@ -573,7 +574,8 @@ class Server:
                              mcp_config=key["mcpConfig"] or None,
                              allow_mcp_tools=key["allowMcpTools"],
                              prompt_file=key.get("promptFile") or None,
-                             context_bytes=key.get("contextBytes", 4 * 1024))
+                             context_bytes=key.get("contextBytes", 4 * 1024),
+                             intent_mode=key.get("intent") or "auto")
         from .mcp_client import load_servers
         try:
             mcp_servers = load_servers(config.mcp_config)

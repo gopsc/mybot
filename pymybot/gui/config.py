@@ -87,6 +87,7 @@ class GuiConfig:
     max_history_bytes: int = 4 * 1024 * 1024
     prompt_file: str = ""
     context_bytes: int = 4 * 1024
+    intent_mode: str = "auto"
     session_log: bool = True
     # Tool availability is a preference; approval grants stay runtime-only.
     enable_file_tools: bool = False
@@ -125,6 +126,9 @@ class GuiConfig:
             prompt_file=_text(self.prompt_file),
             context_bytes=(self.context_bytes if isinstance(self.context_bytes, int)
                            and 0 <= self.context_bytes <= 64 * 1024 else 4 * 1024),
+            intent_mode=(self.intent_mode if self.intent_mode in
+                         {"auto", "off", "chat", "inspect", "control", "author", "diagnose"}
+                         else "auto"),
             session_log=self.session_log if isinstance(self.session_log, bool) else True,
             enable_file_tools=bool(self.enable_file_tools or self.enable_shell),
             enable_shell=bool(self.enable_shell),
@@ -188,6 +192,7 @@ def merge_args(cfg, args):
         "max_tool_calls": getattr(args, "max_tool_calls", None),
         "prompt_file": getattr(args, "prompt_file", None),
         "context_bytes": getattr(args, "context_bytes", None),
+        "intent_mode": getattr(args, "intent", None),
         "allow_hardware": getattr(args, "allow_hardware", None) or None,
         "allow_actions": getattr(args, "allow_actions", None) or None,
     }
