@@ -506,6 +506,7 @@ class Server:
             "promptFile": params.text("promptFile", cap=4096),
             "contextBytes": params.integer("contextBytes", 0, 64 * 1024, 4 * 1024),
             "intent": params.text("intent", cap=32),
+            "sandbox": params.text("sandbox", cap=16),
             "mcpConfig": params.text("mcpConfig", cap=4096), "allowMcpTools": params.flag("allowMcpTools"),
             "workspaceDir": params.text("workspaceDir", cap=4096),
             "enableShell": params.flag("enableShell"), "allowShell": params.flag("allowShell"),
@@ -575,7 +576,8 @@ class Server:
                              allow_mcp_tools=key["allowMcpTools"],
                              prompt_file=key.get("promptFile") or None,
                              context_bytes=key.get("contextBytes", 4 * 1024),
-                             intent_mode=key.get("intent") or "auto")
+                             intent_mode=key.get("intent") or "auto",
+                             sandbox_mode=key.get("sandbox") or "auto")
         from .mcp_client import load_servers
         try:
             mcp_servers = load_servers(config.mcp_config)
@@ -593,7 +595,8 @@ class Server:
                                      camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"],
                                      allow_hardware=key["allowHardware"], read_vars=key["readVars"],
                                      camera_vars=key["cameraVars"], vars=key["vars"], skills=skills,
-                                     workspace_dir=workspace, enable_shell=key["enableShell"])
+                                     workspace_dir=workspace, enable_shell=key["enableShell"],
+                                     sandbox=config.sandbox_mode)
 
             async def confirm(name, arguments):
                 reply = await self.ask_client("confirm", {"tool": name, "arguments": arguments})

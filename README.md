@@ -224,7 +224,7 @@ require_driver("uart", {
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
 | Agent 外部 MCP 工具 | 逐次确认 | `--allow-mcp-tools`（外部服务不是沙箱） |
 
-**Shell 不是沙箱，Lua 是可信代码。** 只运行审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
+**Shell 默认尝试 bubblewrap（可用时）；不可用时退回工作区牢笼，且两者都需显式启用与审批。** Lua 是可信代码；只运行审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
 
 ## 兼容性
 

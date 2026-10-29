@@ -28,7 +28,7 @@ flowchart LR
 | --- | --- |
 | Model → tools | Every action/read/capture is approval-gated unless the operator pre-authorised the session. File writes and shell have separate switches. |
 | Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded. |
-| Model → shell | Shell is opt-in, runs with host privileges, and is **not** a sandbox. |
+| Model → shell | Shell is opt-in and uses a configurable sandbox: bubblewrap (read-only host, private `/tmp`, network/PID namespaces) when usable, otherwise a workspace jail that is **not** an OS boundary. |
 | Model → network | Non-loopback HTTP requires `--allow-hardware`; redirects are refused; URL credentials/query/fragment are rejected. |
 | MCP client → host | A stdio MCP server is operator-configured host code, not a sandbox. Every external tool call is approval-gated unless `--allow-mcp-tools`; results are bounded and failures are reported as unknown. |
 | MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware`, `--read-var` and `--camera-var` stay separate gates. Resources never grant execution. |

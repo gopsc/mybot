@@ -47,6 +47,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requests, leaves keyword-free messages unrestricted, and rejects out-of-intent
   tool calls with a structured not-executed receipt. `--intent`, the GUI
   dropdown and `serve.agent.ask` expose the mode; results carry intent metadata.
+- Shell sandbox (`pymybot/sandbox.py`): `--sandbox auto` probes bubblewrap and
+  falls back to the workspace jail; `bwrap` fails instead of running
+  unsandboxed. The bubblewrap profile mounts the host read-only, gives the
+  workspace a read-write overlay, clears the environment, and unshares network,
+  PID, IPC and UTS namespaces. `doctor` reports the active backend, Shell
+  receipts include `sandbox`, and the GUI/serve/CLI expose the mode. The
+  workspace jail remains the honest Windows fallback.
 - The resource browser indexes structures (`robots/*.sql`) and Lua drivers
   (`modules/**/*.lua`) alongside scripts, skills and docs, watches roots with
   `QFileSystemWatcher` and reloads after a 400 ms debounce.

@@ -54,7 +54,7 @@ The GUI exposes the backend surface described in [cli.md](cli.md) and
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 权限 / 高级·MCP: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, transcript switch, tool permissions, MCP file and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
+| 设置 | Tabs for 通用 / 模型与预算 / 权限 / 高级·MCP: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, tool permissions, MCP file and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
@@ -114,7 +114,7 @@ is not interrupted by new tokens.
 | 自动批准动作 | Pre-approves action scripts, variable reads and captures for this session. |
 | 文件工具 | Exposes `list_files`/`read_file`/`write_file`/`edit_file` inside the workspace. Off by default. |
 | 允许文件写入 | Pre-approves file creation/edits; confirmed once per launch. |
-| Shell 工具 | Exposes the shell tool; requires file tools. **Not a sandbox.** |
+| Shell 工具 | Exposes the shell tool; requires file tools. Uses the settings sandbox backend; the workspace jail is **not** an OS boundary. |
 | 自动批准 Shell | Pre-approves shell commands; confirmed once per launch. |
 | 自动批准 MCP 工具 | Pre-approves external MCP calls; requires an MCP file and is confirmed once per launch. |
 

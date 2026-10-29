@@ -163,6 +163,8 @@ def parser():
             command.add_argument("--intent", choices=("auto", "off", "chat", "inspect", "control",
                                                       "author", "diagnose"), default="auto",
                                  help="intent routing: auto restricts tools by the request; off disables it")
+            command.add_argument("--sandbox", choices=("off", "auto", "bwrap"), default="auto",
+                                 help="shell sandbox: auto uses bubblewrap when usable; off keeps the workspace jail")
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help="per-task wall-clock budget (default: 180)")
             continue
@@ -260,7 +262,7 @@ def parser():
             command.add_argument("--workspace-dir", metavar="DIR",
                                  help="enable file tools in this existing directory; file contents may be sent to the model")
             command.add_argument("--enable-shell", action="store_true",
-                                 help="enable host shell execution (requires --workspace-dir); NOT sandboxed or limited by --allow-hardware")
+                                 help="enable host shell execution (requires --workspace-dir); uses the --sandbox backend")
             command.add_argument("--allow-shell", action="store_true",
                                  help="preapprove shell commands; requires --enable-shell; grants host-user permissions")
             command.add_argument("--allow-file-writes", action="store_true",
@@ -279,6 +281,8 @@ def parser():
             command.add_argument("--intent", choices=("auto", "off", "chat", "inspect", "control",
                                                       "author", "diagnose"), default="auto",
                                  help="intent routing: auto restricts tools by the request; off disables it")
+            command.add_argument("--sandbox", choices=("off", "auto", "bwrap"), default="auto",
+                                 help="shell sandbox: auto uses bubblewrap when usable; off keeps the workspace jail")
             command.add_argument("--mcp-config", metavar="FILE",
                                  help="operator mcpServers JSON file; exposes external MCP tools to the model")
             command.add_argument("--allow-mcp-tools", action="store_true",
@@ -390,6 +394,8 @@ def doctor():
     checks = [module_check(module, distribution, label) for module, distribution, label in required]
     checks.extend(module_check(module, distribution, label, optional_check=True, hint=hint)
                   for module, distribution, label, hint in optional)
+    from .sandbox import backend_status
+    checks.append(backend_status())
 
     suffixes = {"modules": ".lua", "robots": ".sql", "scripts": ".mt", "skills": ".md"}
     assets = {}
