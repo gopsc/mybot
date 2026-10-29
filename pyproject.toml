@@ -37,7 +37,8 @@ dependencies = [
 gui = ["PySide6>=6.10,<7"]
 test = ["pytest>=9.1.1,<10", "ruff>=0.17,<1", "PySide6>=6.10,<7"]
 camera = ["av>=19.0.2,<20"]
-mcp = ["mcp>=1.30,<3"]
+# MCP 2 renamed the low-level Server API; the server targets the 1.x contract.
+mcp = ["mcp>=1.30,<2"]
 agent = [
   "pydantic-ai-slim[openai,anthropic,mcp]>=2.61,<3",
   "anthropic>=2.3,<3",

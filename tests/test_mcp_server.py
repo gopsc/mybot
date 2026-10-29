@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import timedelta
+import importlib.metadata
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,17 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _read_timeout(seconds):
+    """MCP SDK 2.x takes seconds; 1.x takes a timedelta."""
+    try:
+        major = int(importlib.metadata.version("mcp").split(".", 1)[0])
+    except (importlib.metadata.PackageNotFoundError, ValueError):
+        major = 1
+    return seconds if major >= 2 else timedelta(seconds=seconds)
+
+
 TOOLS = {"get_status", "list_hardware", "list_action_scripts", "read_action_script",
          "query_sql", "run_action_script", "read_variables", "capture_image", "deactivate"}
 
@@ -34,7 +46,7 @@ async def client(tmp_path, *, robot=None, scripts=None, extra=(), env=None):
                                    cwd=tmp_path, env={"PYTHONPATH": str(ROOT), **(env or {})})
     with tempfile.TemporaryFile(mode="w+t") as errors:
         async with stdio_client(params, errlog=errors) as streams:
-            async with ClientSession(*streams, read_timeout_seconds=timedelta(seconds=20)) as session:
+            async with ClientSession(*streams, read_timeout_seconds=_read_timeout(20)) as session:
                 await session.initialize()
                 yield session
 

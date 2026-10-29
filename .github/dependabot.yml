@@ -6,6 +6,10 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # The low-level MCP server targets the 1.x API; a major bump breaks it.
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
     groups:
       python-runtime:
         patterns: ["*"]
