@@ -181,6 +181,10 @@ The important flags are:
 | `--var`, `--var-env` | Structure `Alias`/`Vars` overrides and action-script bindings, as described above. |
 | `--no-session-log` | Do not write a session transcript (also accepted by `serve`). |
 
+A turn blocks the fourth identical tool call with a structured `not_executed`
+receipt instead of replaying a stuck loop; the transcript records `intent` and
+`loop_guard` events.
+
 ## `mcp` server
 
 `pymybot mcp --robot SQL` speaks standard MCP over stdio and reserves stdout for
