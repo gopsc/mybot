@@ -1124,6 +1124,7 @@ def test_missing_display_fails_before_qapplication(ui, monkeypatch):
 
 def test_run_gui_uses_existing_qapplication_and_returns_closed(ui, monkeypatch, qapp, tmp_path):
     gui, _ = ui
+    monkeypatch.setenv("MYBOT_GUI_SPLASH", "0")
     monkeypatch.setattr(gui, "config_home", lambda: tmp_path)
     monkeypatch.setattr(gui.App, "_refresh_hardware", lambda self: None)
 
@@ -1379,3 +1380,52 @@ def test_command_dialog_builds_argv_and_renders_contract(qapp, tmp_path):
         assert calls and "--name=v0" in calls[0]
     finally:
         dialog.deleteLater()
+
+
+# -- entry screen and branding ---------------------------------------------
+def test_logo_renders_from_svg(qapp):
+    from pymybot.gui.branding import logo_icon, logo_pixmap
+
+    pixmap = logo_pixmap(64)
+    assert not pixmap.isNull() and pixmap.width() == 64
+    assert not logo_icon().isNull()
+
+
+def test_splash_shows_real_status_and_waits_for_entry(qapp):
+    from pymybot.gui.splash import SplashScreen
+
+    events = []
+    splash = SplashScreen(lambda: ("初始化：启动中", "提示文字"))
+    splash.entered.connect(lambda: events.append("entered"))
+    splash.cancelled.connect(lambda: events.append("cancelled"))
+    try:
+        assert not splash.logo.pixmap().isNull()
+        assert "启动中" in splash.status.text()
+        splash.refresh_status()
+        assert splash.hint.text() == "提示文字"
+        splash.enter()
+        splash.enter()
+        assert events == ["entered"]
+    finally:
+        splash.close()
+
+    cancelled = []
+    splash = SplashScreen()
+    splash.cancelled.connect(lambda: cancelled.append(True))
+    try:
+        splash.close()
+        assert cancelled == [True]
+    finally:
+        splash.deleteLater()
+
+
+def test_splash_can_be_disabled(monkeypatch):
+    from types import SimpleNamespace
+
+    from pymybot.gui import app as gui_app
+
+    monkeypatch.delenv("MYBOT_GUI_SPLASH", raising=False)
+    assert gui_app._splash_enabled(SimpleNamespace()) is True
+    assert gui_app._splash_enabled(SimpleNamespace(no_splash=True)) is False
+    monkeypatch.setenv("MYBOT_GUI_SPLASH", "0")
+    assert gui_app._splash_enabled(SimpleNamespace()) is False

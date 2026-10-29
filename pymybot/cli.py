@@ -138,6 +138,8 @@ def parser():
             # The window is always agent-centric: no agent/controller mode switch.
             command.add_argument("--robot", metavar="FILE", help="structure SQL file to open with")
             command.add_argument("--task", help="pre-fill the prompt box (not sent automatically)")
+            command.add_argument("--no-splash", action="store_true",
+                                 help="skip the entry screen and open the main window immediately")
             command.add_argument("--workspace-dir", metavar="DIR", help="workspace root (default: current directory)")
             command.add_argument("--module-path", action="append", metavar="DIR", help="trusted Lua module root; repeatable")
             command.add_argument("--camera-src-dir", metavar="DIR", help="local camera image root")

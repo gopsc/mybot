@@ -17,7 +17,7 @@ from ..security import SecurityError, read_file
 
 MAX_PREVIEW = 1024 * 1024
 MAX_DOCS = 200
-GROUPS = ("脚本", "技能", "文档")
+GROUPS = ("结构", "驱动", "脚本", "技能", "文档")
 
 
 @dataclass(frozen=True)
@@ -47,10 +47,13 @@ def _walk_markdown(root):
 class ResourceIndex:
     """Snapshot of scripts, skills and source-tree docs plus a read-through cache."""
 
-    def __init__(self, scripts_root, skills_root=None, docs_root=None):
+    def __init__(self, scripts_root, skills_root=None, docs_root=None,
+                 robots_root=None, module_paths=()):
         self.scripts_root = Path(scripts_root).absolute() if scripts_root else None
         self.skills_root = Path(skills_root).absolute() if skills_root else None
         self.docs_root = Path(docs_root).absolute() if docs_root else (source_root() / "docs")
+        self.robots_root = Path(robots_root).absolute() if robots_root else None
+        self.module_paths = tuple(Path(path).absolute() for path in module_paths if str(path).strip())
         self._cache: dict[str, tuple[float, int, str]] = {}
         self.items: list[Resource] = []
         self.errors: list[str] = []
@@ -58,10 +61,40 @@ class ResourceIndex:
     def refresh(self):
         self.items, self.errors = [], []
         self._cache.clear()
+        self._add_robots()
+        self._add_modules()
         self._add_scripts()
         self._add_skills()
         self._add_docs()
         return self.items
+
+    def _add_robots(self):
+        root = self.robots_root
+        if root is None or not root.is_dir():
+            return
+        try:
+            for path in sorted(root.glob("*.sql")):
+                if not path.is_symlink() and stat.S_ISREG(path.stat().st_mode):
+                    self._append("结构", path, Path(path.name), "sql")
+        except OSError as exc:
+            self.errors.append(f"结构目录：{exc}")
+
+    def _add_modules(self):
+        for root in self.module_paths:
+            if not root.is_dir():
+                continue
+            try:
+                for base, dirs, files in os.walk(root, followlinks=False):
+                    dirs[:] = sorted(name for name in dirs if not (Path(base) / name).is_symlink())
+                    for name in sorted(files):
+                        path = Path(base) / name
+                        if (path.suffix == ".lua" and not path.is_symlink()
+                                and stat.S_ISREG(path.stat().st_mode)):
+                            self._append("驱动", path, path.relative_to(root), "lua")
+                        if len(self.items) >= MAX_DOCS:
+                            return
+            except OSError as exc:
+                self.errors.append(f"模块目录：{exc}")
 
     def _add_scripts(self):
         root = self.scripts_root

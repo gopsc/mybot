@@ -9,6 +9,23 @@ pymybot --no-gui   # terminal interface
 
 ![pymybot GUI](screenshots/gui.png)
 
+## Entry screen
+
+The default launch shows a frameless retro entry screen while the window and
+its `serve` child initialise:
+
+- SVG robot logo, monospace wordmark, moving scan line and an indeterminate
+  progress bar (Qt animations, no video or timer-only fake stages);
+- live status from the real `serve` lifecycle (`启动中…`, `就绪（协议 1）`,
+  `启动失败…`), not a scripted percentage;
+- **进入控制台** button, `Enter` shortcut and `Escape` cancel; the main window
+  fades in with a 280 ms `windowOpacity` animation;
+- `pymybot --no-splash` or `MYBOT_GUI_SPLASH=0` opens the window immediately
+  (used by automated GUI tests).
+
+The main window's logo is the same SVG; it is also the window icon and the
+About dialog mark.
+
 ## What the window contains
 
 - **Menu bar** — 文件 (workspace, structure, refresh, settings, quit),
@@ -42,7 +59,7 @@ The GUI exposes the backend surface described in [cli.md](cli.md) and
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
 | 工具 → 环境诊断 | Renders `pymybot doctor`: interpreter, assets and optional dependencies, colour-coded by status, with copy-JSON. |
-| 资源 tab | Scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, scripts use a keyword/comment highlighter. Content is cached by mtime and reloaded only on demand. |
+| 资源 tab | Structures (`*.sql`), Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
 | 重试 | Re-sends the last task after an error, cancellation or timeout, disabled while a turn is running. |
 | 清空 / 复制对话 | Clear the window transcript (after confirmation) or copy it to the clipboard. |
 | 打开会话目录 | Opens `~/.mybot/sessions` in the file manager. |
@@ -153,6 +170,7 @@ the GUI executable itself has no console. See
 
 | View | Image |
 | --- | --- |
+| Entry screen | ![splash](screenshots/gui-splash.png) |
 | Main window (streaming chat, permissions, hardware) | ![main](screenshots/gui.png) |
 | Command panel (`query` example) | ![command](screenshots/gui-command.png) |
 | Settings (model/budgets, permissions) | ![settings](screenshots/gui-settings.png) |
