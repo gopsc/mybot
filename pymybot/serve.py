@@ -507,6 +507,8 @@ class Server:
             "contextBytes": params.integer("contextBytes", 0, 64 * 1024, 4 * 1024),
             "intent": params.text("intent", cap=32),
             "sandbox": params.text("sandbox", cap=16),
+            "enableWeb": params.flag("enableWeb"), "allowWeb": params.flag("allowWeb"),
+            "searchEndpoint": params.text("searchEndpoint", cap=4096),
             "mcpConfig": params.text("mcpConfig", cap=4096), "allowMcpTools": params.flag("allowMcpTools"),
             "workspaceDir": params.text("workspaceDir", cap=4096),
             "enableShell": params.flag("enableShell"), "allowShell": params.flag("allowShell"),
@@ -577,7 +579,10 @@ class Server:
                              prompt_file=key.get("promptFile") or None,
                              context_bytes=key.get("contextBytes", 4 * 1024),
                              intent_mode=key.get("intent") or "auto",
-                             sandbox_mode=key.get("sandbox") or "auto")
+                             sandbox_mode=key.get("sandbox") or "auto",
+                             enable_web=key.get("enableWeb", False),
+                             allow_web=key.get("allowWeb", False),
+                             search_endpoint=key.get("searchEndpoint") or "")
         from .mcp_client import load_servers
         try:
             mcp_servers = load_servers(config.mcp_config)

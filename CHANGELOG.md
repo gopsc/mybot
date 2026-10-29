@@ -54,6 +54,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   PID, IPC and UTS namespaces. `doctor` reports the active backend, Shell
   receipts include `sandbox`, and the GUI/serve/CLI expose the mode. The
   workspace jail remains the honest Windows fallback.
+- Opt-in web tools (`pymybot/agent_web.py`, `pip install pymybot[web]`):
+  `--web` adds `web_fetch` (HTTPS, SSRF private/loopback/link-local checks,
+  three re-validated redirects, text-only content, 512 KiB/16k-char caps) and
+  `web_search` when `--search-endpoint` names a SearXNG instance. Approval is
+  per call unless `--allow-web`; `serve.agent.ask` accepts `enableWeb`,
+  `allowWeb` and `searchEndpoint`; the GUI exposes all three. No provider means
+  no search tool, and results are never fabricated.
 - The resource browser indexes structures (`robots/*.sql`) and Lua drivers
   (`modules/**/*.lua`) alongside scripts, skills and docs, watches roots with
   `QFileSystemWatcher` and reloads after a 400 ms debounce.

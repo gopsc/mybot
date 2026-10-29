@@ -33,7 +33,7 @@ for distribution in (
     "pydantic-ai-slim", "pydantic-graph", "pydantic", "openai", "anthropic",
     "genai-prices", "httpx2", "httpcore2", "griffelib", "truststore", "jiter",
     "tiktoken", "lupa", "sqlparse", "pyserial", "pyftdi", "pillow", "av", "PySide6",
-    "mcp",
+    "mcp", "httpx", "beautifulsoup4",
 ):
     try:
         datas += copy_metadata(distribution)
@@ -44,7 +44,7 @@ hiddenimports = ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide
 for package in (
     "pydantic_ai", "pydantic_graph", "openai", "anthropic", "genai_prices",
     "httpx2", "httpcore2", "griffelib", "truststore", "jiter", "tiktoken",
-    "lupa", "PIL", "serial", "pyftdi", "av", "mcp",
+    "lupa", "PIL", "serial", "pyftdi", "av", "mcp", "httpx", "bs4",
 ):
     try:
         hiddenimports += collect_submodules(package)

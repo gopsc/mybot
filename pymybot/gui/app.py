@@ -340,17 +340,23 @@ class App(QMainWindow):
         self.file_tools_toggle.setChecked(bool(self.cfg.enable_file_tools))
         self.file_writes_toggle = QCheckBox("允许文件写入（逐次确认）")
         self.file_writes_toggle.setChecked(bool(self.cfg.allow_file_writes))
-        self.shell_tools_toggle = QCheckBox("Shell 工具（不是沙箱）")
+        self.shell_tools_toggle = QCheckBox("Shell 工具（沙箱可配置）")
         self.shell_tools_toggle.setChecked(bool(self.cfg.enable_shell))
         self.shell_grant_toggle = QCheckBox("自动批准 Shell")
         self.shell_grant_toggle.setChecked(bool(self.cfg.allow_shell))
+        self.web_tools_toggle = QCheckBox("联网工具（抓取/搜索）")
+        self.web_tools_toggle.setChecked(bool(self.cfg.enable_web))
+        self.web_grant_toggle = QCheckBox("自动批准联网请求")
+        self.web_grant_toggle.setChecked(bool(self.cfg.allow_web))
         self.mcp_tools_toggle = QCheckBox("自动批准 MCP 工具")
         self.mcp_tools_toggle.setChecked(bool(self.cfg.allow_mcp_tools))
         for toggle in (self.file_tools_toggle, self.file_writes_toggle,
-                       self.shell_tools_toggle, self.shell_grant_toggle, self.mcp_tools_toggle):
+                       self.shell_tools_toggle, self.shell_grant_toggle,
+                       self.web_tools_toggle, self.web_grant_toggle, self.mcp_tools_toggle):
             toggle.toggled.connect(self.on_permission_toggle)
             advanced_form.addRow(toggle)
-        advanced_form.addRow(_label("Shell/MCP 拥有宿主用户权限，不是沙箱；默认逐次确认。", secondary=True))
+        advanced_form.addRow(_label(
+            "Shell 使用设置中的沙箱后端；MCP 是宿主用户权限进程；联网请求默认逐次确认。", secondary=True))
         layout.addWidget(advanced)
 
         model = QGroupBox("模型（在设置中修改）")
@@ -537,6 +543,8 @@ class App(QMainWindow):
         self.cfg.enable_shell = self.shell_tools_toggle.isChecked()
         self.cfg.allow_file_writes = self.file_writes_toggle.isChecked()
         self.cfg.allow_shell = self.shell_grant_toggle.isChecked()
+        self.cfg.enable_web = self.web_tools_toggle.isChecked()
+        self.cfg.allow_web = self.web_grant_toggle.isChecked()
         self.cfg.allow_mcp_tools = self.mcp_tools_toggle.isChecked()
 
     def _sync_controls(self):
@@ -553,6 +561,8 @@ class App(QMainWindow):
         self.shell_tools_toggle.setChecked(bool(self.cfg.enable_shell))
         self.file_writes_toggle.setChecked(bool(self.cfg.allow_file_writes))
         self.shell_grant_toggle.setChecked(bool(self.cfg.allow_shell))
+        self.web_tools_toggle.setChecked(bool(self.cfg.enable_web))
+        self.web_grant_toggle.setChecked(bool(self.cfg.allow_web))
         self.mcp_tools_toggle.setChecked(bool(self.cfg.allow_mcp_tools))
         self.on_permission_toggle()
 
@@ -869,6 +879,7 @@ class App(QMainWindow):
             return False
         for kind, toggle in (("file_writes", self.file_writes_toggle),
                              ("shell", self.shell_grant_toggle),
+                             ("web", self.web_grant_toggle),
                              ("mcp", self.mcp_tools_toggle)):
             if toggle.isChecked() and kind not in self._confirmed_grants:
                 if not self._confirm_grant(kind):
@@ -899,6 +910,9 @@ class App(QMainWindow):
             "contextBytes": self.cfg.context_bytes,
             "intent": self.cfg.intent_mode,
             "sandbox": self.cfg.sandbox_mode,
+            "enableWeb": self.cfg.enable_web,
+            "allowWeb": self.cfg.allow_web,
+            "searchEndpoint": self.cfg.search_endpoint if self.cfg.enable_web else "",
             "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
             "maxToolCalls": self.cfg.max_tool_calls, "modulePaths": self._module_paths(),
         }
@@ -1086,6 +1100,10 @@ class App(QMainWindow):
             self.shell_grant_toggle.setEnabled(shell)
             if not shell:
                 self.shell_grant_toggle.setChecked(False)
+            web = self.web_tools_toggle.isChecked()
+            self.web_grant_toggle.setEnabled(web)
+            if not web:
+                self.web_grant_toggle.setChecked(False)
             has_mcp = bool(self.context_entries["mcp_config"].text().strip())
             self.mcp_tools_toggle.setEnabled(has_mcp)
             if not has_mcp:
@@ -1104,8 +1122,11 @@ class App(QMainWindow):
         messages = {
             "file_writes": ("允许文件写入", "模型可以创建或修改工作区文件（含脚本/驱动），仍会逐次弹出审批。"),
             "shell": ("允许 Shell 自动批准",
-                      "Shell 会以宿主用户权限运行，不是沙箱；可访问文件、网络和物理设备。\n"
+                      "Shell 使用设置中的沙箱后端；工作区牢笼不是 OS 边界。\n"
                       "只对当前启动授权，关闭窗口即失效。"),
+            "web": ("允许联网自动批准",
+                    "模型可以抓取 HTTPS 页面并查询已配置的 SearXNG；私网/回环地址会被拒绝。\n"
+                    "只对当前启动授权，关闭窗口即失效。"),
             "mcp": ("允许 MCP 工具自动批准",
                     "外部 MCP 服务以宿主用户权限运行，不是沙箱；其输出是不可信数据。\n"
                     "只对当前启动授权，关闭窗口即失效。"),
@@ -1410,11 +1431,15 @@ class SettingsDialog(QDialog):
         self.file_writes = QCheckBox("允许文件写入（逐次确认）")
         self.shell_tools = QCheckBox("启用 Shell 工具（沙箱可配置）")
         self.shell_grant = QCheckBox("自动批准 Shell")
+        self.web_tools = QCheckBox("启用联网工具（抓取/搜索）")
+        self.web_grant = QCheckBox("自动批准联网请求")
         self.mcp_grant = QCheckBox("自动批准 MCP 工具")
         for toggle, value in ((self.file_tools, cfg.enable_file_tools),
                               (self.file_writes, cfg.allow_file_writes),
                               (self.shell_tools, cfg.enable_shell),
                               (self.shell_grant, cfg.allow_shell),
+                              (self.web_tools, cfg.enable_web),
+                              (self.web_grant, cfg.allow_web),
                               (self.mcp_grant, cfg.allow_mcp_tools)):
             toggle.setChecked(bool(value))
             toggle.toggled.connect(self._permissions_changed)
@@ -1430,6 +1455,7 @@ class SettingsDialog(QDialog):
         self._field(advanced_form, cfg, "prompt_file", "提示词文件（USER 层，≤8 KiB）",
                     browse_file=True, caption="选择提示词文件",
                     file_filter="Markdown/文本 (*.md *.txt);;所有文件 (*)")
+        self._field(advanced_form, cfg, "search_endpoint", "SearXNG 搜索端点（留空仅抓取）")
         self._field(advanced_form, cfg, "vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）", kind="lines")
         advanced_form.addRow(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
         tabs.addTab(advanced, "高级 / MCP")
@@ -1491,6 +1517,10 @@ class SettingsDialog(QDialog):
         self.shell_grant.setEnabled(shell)
         if not shell:
             self.shell_grant.setChecked(False)
+        web = self.web_tools.isChecked()
+        self.web_grant.setEnabled(web)
+        if not web:
+            self.web_grant.setChecked(False)
         entry = self.entries.get("mcp_config")
         has_mcp = bool(entry is not None and entry.text().strip())
         self.mcp_grant.setEnabled(has_mcp)
@@ -1528,8 +1558,10 @@ class SettingsDialog(QDialog):
                       session_log=self.session_log.isChecked(),
                       enable_file_tools=self.file_tools.isChecked(),
                       enable_shell=self.shell_tools.isChecked(),
+                      enable_web=self.web_tools.isChecked(),
                       allow_file_writes=self.file_writes.isChecked(),
                       allow_shell=self.shell_grant.isChecked(),
+                      allow_web=self.web_grant.isChecked(),
                       allow_mcp_tools=self.mcp_grant.isChecked())
         self.values = values
         self.accept()

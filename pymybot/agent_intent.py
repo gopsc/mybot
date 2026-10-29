@@ -16,7 +16,8 @@ INTENTS = ("chat", "inspect", "control", "author", "diagnose")
 MODES = ("auto", "off", *INTENTS)
 
 READ_TOOLS = frozenset({"list_hardware", "list_action_scripts", "query_sql",
-                        "list_skills", "read_skill", "list_files", "read_file"})
+                        "list_skills", "read_skill", "list_files", "read_file",
+                        "web_fetch", "web_search"})
 TOOLS_BY_INTENT = {
     "chat": READ_TOOLS,
     "inspect": READ_TOOLS,

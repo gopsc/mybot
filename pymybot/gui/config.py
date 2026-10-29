@@ -89,6 +89,8 @@ class GuiConfig:
     context_bytes: int = 4 * 1024
     intent_mode: str = "auto"
     sandbox_mode: str = "auto"
+    enable_web: bool = False
+    search_endpoint: str = ""
     session_log: bool = True
     # Tool availability is a preference; approval grants stay runtime-only.
     enable_file_tools: bool = False
@@ -98,6 +100,7 @@ class GuiConfig:
     allow_actions: bool = False
     allow_file_writes: bool = False
     allow_shell: bool = False
+    allow_web: bool = False
     allow_mcp_tools: bool = False
 
     def sanitized(self):
@@ -132,6 +135,9 @@ class GuiConfig:
                          else "auto"),
             sandbox_mode=(self.sandbox_mode if self.sandbox_mode in {"auto", "off", "bwrap"}
                           else "auto"),
+            enable_web=bool(self.enable_web),
+            search_endpoint=_text(self.search_endpoint, 2048),
+            allow_web=bool(self.allow_web and self.enable_web),
             session_log=self.session_log if isinstance(self.session_log, bool) else True,
             enable_file_tools=bool(self.enable_file_tools or self.enable_shell),
             enable_shell=bool(self.enable_shell),
@@ -149,7 +155,7 @@ class GuiConfig:
         # A one-shot prompt hint, per-launch approvals and variable values are not
         # preferences; variable values may hold credentials, so they never reach disk.
         for key in ("task", "allow_hardware", "allow_actions", "allow_file_writes",
-                    "allow_shell", "allow_mcp_tools", "vars"):
+                    "allow_shell", "allow_mcp_tools", "allow_web", "vars"):
             data.pop(key, None)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
@@ -197,6 +203,9 @@ def merge_args(cfg, args):
         "context_bytes": getattr(args, "context_bytes", None),
         "intent_mode": getattr(args, "intent", None),
         "sandbox_mode": getattr(args, "sandbox", None),
+        "enable_web": getattr(args, "web", None) or None,
+        "allow_web": getattr(args, "allow_web", None) or None,
+        "search_endpoint": getattr(args, "search_endpoint", None),
         "allow_hardware": getattr(args, "allow_hardware", None) or None,
         "allow_actions": getattr(args, "allow_actions", None) or None,
     }
