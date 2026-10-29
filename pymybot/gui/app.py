@@ -35,6 +35,11 @@ from .theme import PALETTE, apply_theme as _apply_theme
 
 TITLE = "mybot · 智能体"
 MAX_DIALOG_ARGS = 4000
+INTENT_LABELS = {"auto": "自动", "off": "关闭", "chat": "闲聊", "inspect": "查看",
+                 "control": "控制", "author": "编写", "diagnose": "诊断"}
+INTENT_CHOICES = (("auto", "自动（推荐）"), ("off", "关闭"), ("chat", "闲聊（只读）"),
+                  ("inspect", "查看（只读）"), ("control", "控制（硬件动作）"),
+                  ("author", "编写（文件）"), ("diagnose", "诊断（含 Shell）"))
 
 
 def _brief(value, limit=160):
@@ -890,6 +895,7 @@ class App(QMainWindow):
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "promptFile": _absolute(self.cfg.prompt_file, workspace),
             "contextBytes": self.cfg.context_bytes,
+            "intent": self.cfg.intent_mode,
             "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
             "maxToolCalls": self.cfg.max_tool_calls, "modulePaths": self._module_paths(),
         }
@@ -934,6 +940,11 @@ class App(QMainWindow):
         if self.turn_text == 0 and result.get("output"):
             self._chat_delta(str(result["output"]))
         usage = result.get("usage") or {}
+        intent = result.get("intent") or {}
+        if intent.get("name") not in (None, "off"):
+            label = INTENT_LABELS.get(intent["name"], intent["name"])
+            self._notice(f"意图：{label} · 置信度 {float(intent.get('confidence') or 0):.0%}",
+                         seconds=4)
         self._chat_line(
             "[完成 · 请求 {requests} · 工具 {tool_calls} · tokens {input_tokens}/{output_tokens}]".format(
                 requests=usage.get("requests", "?"), tool_calls=usage.get("tool_calls", "?"),
@@ -1372,6 +1383,12 @@ class SettingsDialog(QDialog):
         context_row.addWidget(self.context_kib)
         context_row.addWidget(_label("KiB"))
         model_form.addRow("工程上下文", context_row)
+        self.intent_box = QComboBox()
+        for value, label in INTENT_CHOICES:
+            self.intent_box.addItem(label, value)
+        index = self.intent_box.findData(cfg.intent_mode)
+        self.intent_box.setCurrentIndex(max(0, index))
+        model_form.addRow("意图路由", self.intent_box)
         self.session_log = QCheckBox("保存会话转录（~/.mybot/sessions）")
         self.session_log.setChecked(bool(cfg.session_log))
         model_form.addRow(self.session_log)
@@ -1497,6 +1514,7 @@ class SettingsDialog(QDialog):
                       max_history_bytes=max(64, self.history_bytes.value()) * 1024,
                       context_bytes=(max(1, self.context_kib.value()) * 1024
                                      if self.context_enabled.isChecked() else 0),
+                      intent_mode=self.intent_box.currentData(),
                       session_log=self.session_log.isChecked(),
                       enable_file_tools=self.file_tools.isChecked(),
                       enable_shell=self.shell_tools.isChecked(),

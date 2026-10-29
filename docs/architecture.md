@@ -82,6 +82,7 @@ Key invariants:
 | `pymybot/agent.py` | PydanticAI agent, model configuration, tool loop |
 | `pymybot/agent_prompt.py` | Layered system prompt (SOUL/OPERATOR/PROJECT/GUIDE) with a byte budget |
 | `pymybot/agent_context.py` | Bounded, mtime-cached project inventory injected as untrusted data |
+| `pymybot/agent_intent.py` | Deterministic bilingual intent routing, tool allowlists and budgets |
 | `pymybot/agent_executor.py` | Approval-gated tool implementations |
 | `pymybot/agent_workspace.py` | Bounded, link-safe workspace file tools and shell |
 | `pymybot/serve.py` | Long-lived stdio JSON-RPC 2.0 backend |
