@@ -1,6 +1,6 @@
 # pymybot
 
-**把「结构 SQL + Python/Lua 驱动 + MT 动作」三层脚本接到真实机器人；同一套代码提供 CLI、桌面 GUI 和 AI Agent。**
+**把「结构 SQL + Python/Lua 驱动 + MT 动作」三层脚本接到真实机器人；同一套后端提供 GUI、CLI、AI Agent 和 MCP 四种入口。**
 
 [![CI](https://github.com/gopsc/mybot/actions/workflows/ci.yml/badge.svg)](https://github.com/gopsc/mybot/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/gopsc/mybot?include_prereleases&sort=semver)](https://github.com/gopsc/mybot/releases)
@@ -11,9 +11,19 @@
 
 ![pymybot GUI](docs/screenshots/gui.png)
 
-> 截图来自 PySide6 窗口与本地回环模拟模型：Agent 列出硬件，经审批执行虚拟动作，再返回结果。
+> 截图来自 PySide6 窗口和本地回环模型：Agent 列出硬件，经审批执行虚拟动作，再把结果带回来。
+
+## 我们为什么做 pymybot
+
+做硬件项目时，最耗神的往往不是写业务逻辑，而是那些反复出现的琐事：这个传感器接在哪条总线、初始化要发哪几个字节、换一块板子之后脚本要不要重写、出错之后到底发没发出去。等你想让 AI 帮忙，又发现模型再聪明，也没有一层能解释“它到底动了什么”的控制面。
+
+pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人身上有什么，用 Python 或 Lua 写器件怎么工作，再用 MT 动作脚本说明这一刻要做什么。总线、权限、审批、回执、日志，以及 GUI、CLI、Agent、MCP 这些入口，由同一套执行器负责。
+
+它不是要替代你的业务代码，而是把“软件怎么安全地碰硬件”这件事收拢到一处。
 
 ## 四种入口
+
+同一套后端，四种用法。选一个顺手的就行，不必为桌面、CI 和模型各维护一套逻辑。
 
 | 入口 | 适合谁 | 命令 |
 | --- | --- | --- |
@@ -22,20 +32,20 @@
 | **AI Agent** | 自然语言控制机器人 | `pymybot --no-gui --robot ... --task "..."` |
 | **MCP** | Claude Desktop、Cursor、其他 MCP 客户端 | `pymybot mcp --robot ...` |
 
-另有一个长驻 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
-`mcp` 与 `serve` 共用同一套执行器：工具回执、故障锁存和串行化规则完全一致。
+另外还有一个长驻的 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
+`mcp` 和 `serve` 共用同一个执行器：工具回执、故障锁存和串行化规则保持一致。
 
-## 为什么不是又一个“聊天壳”
+## 我们不想做又一个“聊天壳”
 
-- **三层解耦**：结构、驱动、动作各写各的；换传感器不改剧本，换剧本不碰驱动。
-- **无硬件可跑通**：虚拟总线、寄存器模型、`loop://` 串口回环和逐驱动夹具，让 CI 不需要插板子。
-- **HAL 默认受控**：静态命令不激活设备；HAL 的物理总线、非回环 HTTP 和 Shell 都要显式开关（驱动不是沙箱）。
-- **可审计的动作**：动作脚本是矩阵数据，不是任意代码；每次派发、捕获和结果都有 JSON 回执。
-- **失败说清楚**：动作已派发后的异常锁存为“结果未知”，不假装回滚；非零退出码不是“未执行”。
+- **三层各管各的**：结构、驱动、动作分开写。换传感器不用改剧本，换剧本也不用碰驱动。
+- **没有硬件也能跑**：虚拟总线、寄存器模型、`loop://` 串口回环和逐驱动夹具，让 CI 不用插板子。
+- **默认是关着的**：物理总线、非回环 HTTP 和 Shell 都要显式打开。HAL 管得住这些入口，但驱动本身不是沙箱。
+- **动作可回看**：动作脚本是矩阵数据，不是任意代码；每次派发、捕获和结果都有 JSON 回执。
+- **失败就说清楚**：动作已经派发后出异常，会锁存成“结果未知”。我们不假装回滚，也不把非零退出码说成“没执行”。
 
 ## 快速开始
 
-要求 Python 3.11+。
+要求 Python 3.11+。先装基础依赖，不接硬件也能把链路跑通。
 
 ```sh
 git clone https://github.com/gopsc/mybot.git
@@ -75,9 +85,9 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 .venv/bin/python -m pymybot
 ```
 
-GUI 使用 PySide6（Qt 6）；纯命令行环境无需安装 `gui` 可选依赖。
+GUI 用 PySide6（Qt 6）；只在命令行里用的话，不需要装 `gui` 可选依赖。
 
-首次使用在 **设置** 中选择 workspace、结构文件和模型；如果只想控制硬件，不需要模型配置。
+第一次打开，在 **设置** 里选 workspace、结构文件和模型。如果你只想控制硬件，不配模型也能用。
 
 ### 3. 启用 AI Agent
 
@@ -90,9 +100,9 @@ export DEEPSEEK_API_KEY="sk-..."
   --task "列出硬件并解释每个变量的作用"
 ```
 
-支持的模型提供商：`openai`、`openai-chat`、`anthropic`、`deepseek`。密钥只从环境变量读取；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
+支持的模型提供商有 `openai`、`openai-chat`、`anthropic` 和 `deepseek`。密钥只从环境变量读；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
 
-Agent 还可以通过 `--mcp-config` 连接外部 MCP 服务，把它们的工具纳入同一套逐次审批：
+Agent 也能通过 `--mcp-config` 接外部 MCP 服务，把它们的工具放进同一套逐次审批里：
 
 ```sh
 .venv/bin/pip install -e ".[agent,mcp]"
@@ -102,11 +112,11 @@ Agent 还可以通过 `--mcp-config` 连接外部 MCP 服务，把它们的工�
   --mcp-config ./mcp.json
 ```
 
-提示词分四层：不可变的安全约束、操作员 `--prompt-file`、有界的工程上下文（工作区/结构/脚本清单）以及运行时技能/MCP 说明；`--context-bytes` 控制上下文预算（0 关闭，默认 4096）。`--intent auto` 会按请求识别查看/控制/编写/诊断意图，只开放对应工具并收紧预算；混合请求取工具并集，无法识别的闲聊保持不受限。
-联网工具默认关闭：`--web` 启用 HTTPS 抓取，`--search-endpoint` 配置 SearXNG 后才有搜索；私网/回环地址、超长正文和重定向都会被拒绝，每次请求仍需审批（`--allow-web` 可预批准）。
+提示词分四层：不可变的安全约束、操作员的 `--prompt-file`、有界的工程上下文（工作区/结构/脚本清单），以及运行时的技能/MCP 说明。`--context-bytes` 控制上下文预算（0 关闭，默认 4096）。`--intent auto` 会先判断这次请求是查看、控制、编写还是诊断，只开放对应的工具并收紧预算；混合请求取工具并集，识别不出的闲聊保持原样。
 
-`mcp.json` 使用 Claude Desktop/Cursor 的 `mcpServers` 格式。外部服务是宿主用户权限下的
-可信进程，不是沙箱；结果按 64 KiB 限界，异常回执标记为“结果未知”，不自动重试。
+联网工具默认关闭：`--web` 打开 HTTPS 抓取，配了 `--search-endpoint` 才有 SearXNG 搜索。私网/回环地址、超长正文和重定向都会被拒绝，每次请求仍然要审批（`--allow-web` 可以预先批准）。
+
+`mcp.json` 用 Claude Desktop/Cursor 的 `mcpServers` 格式。外部服务是以宿主用户权限运行的可信进程，不是沙箱；结果按 64 KiB 限界，异常回执标成“结果未知”，不会自动重试。
 
 ### 4. 作为 MCP 服务端接入 Claude Desktop / Cursor
 
@@ -117,13 +127,13 @@ Agent 还可以通过 `--mcp-config` 连接外部 MCP 服务，把它们的工�
   --scripts-dir scripts
 ```
 
-默认只读：`list_hardware`、`query_sql`、`read_action_script` 等静态工具可用；执行脚本、
-读变量和抓图要显式加 `--allow-execution`，物理硬件再加 `--allow-hardware`。完整工具表、
-资源 URI 和客户端配置见 [docs/mcp.md](docs/mcp.md)。
+默认只读：`list_hardware`、`query_sql`、`read_action_script` 这些静态工具可以直接用；执行脚本、读变量和抓图要显式加 `--allow-execution`，要碰物理硬件再加 `--allow-hardware`。完整工具表、资源 URI 和客户端配置见 [docs/mcp.md](docs/mcp.md)。
 
-对话默认转录到 `~/.mybot/sessions`（含工具参数、受限结果与图片；环境变量中的密钥不会被主动读取）。转录只用于回看，不能恢复会话；用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，用 `pymybot sessions` 查看或 `pymybot sessions --prune --keep 20 --yes` 清理，详见 [docs/cli.md](docs/cli.md#session-transcripts)。
+对话默认转录到 `~/.mybot/sessions`，包含工具参数、受限结果和图片；环境变量里的密钥不会被主动读取。转录只用于回看，不能恢复会话。用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，用 `pymybot sessions` 查看，或用 `pymybot sessions --prune --keep 20 --yes` 清理，详见 [docs/cli.md](docs/cli.md#session-transcripts)。
 
 ## 架构
+
+可以把三层理解成三样东西：结构 SQL 是接线图，驱动是器件说明书，MT 动作是一轮操作清单。
 
 ```mermaid
 flowchart LR
@@ -135,8 +145,8 @@ flowchart LR
     HAL --> DEV["I2C · SPI · UART · HTTP · Camera · Shell"]
 ```
 
-- **结构 SQL** 声明机器人身上有哪些变量、接在哪条总线、谁引用谁。
-- **Python / Lua 驱动** 实现一个器件的 `build / call`，可选 `read / destroy`。
+- **结构 SQL** 说明机器人身上有哪些变量、接在哪条总线、谁引用谁。
+- **Python / Lua 驱动** 只负责一个器件的 `build / call`，需要时加 `read / destroy`。
 - **MT 动作** 用矩阵描述“第几行对哪个变量发什么参数”，支持捕获、条件、循环和结构 JSON。
 
 完整分层、线程模型和包结构见 [docs/architecture.md](docs/architecture.md)。
@@ -162,32 +172,28 @@ flowchart LR
 
 ## GUI
 
-- 启动先显示复古风入口界面：SVG 机器人 logo、扫描线动画、真实 serve 状态、`进入控制台` 按钮与淡入过渡；`--no-splash` 可跳过。
-- 左侧：workspace、脚本/技能/模块/MCP 配置、硬件树、权限与预算、模型摘要。
-- 右侧：对话、日志、资源三个标签页；资源页可预览结构 SQL、Python/Lua 驱动、脚本、技能和文档（Markdown 渲染、语法高亮、按 mtime 缓存、文件变化自动刷新）。
-- 管理控制台：菜单/工具栏提供命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、MCP 配置编辑器（同后端校验）、会话管理（查看/删除/清理）、环境诊断、文档与关于。
-- 流式输出、忙碌指示、重试上一任务、清空/复制对话；危险工具逐次弹窗确认。
-- `允许硬件`、`自动批准动作`、文件写入、Shell 和 MCP 自动批准都逐次启动确认，不落盘；文件/Shell 工具默认关闭。
-- GUI 只驱动一个 `serve` 子进程，不重复实现机器人逻辑；重启、取消和崩溃恢复都有测试覆盖。
+GUI 是一个前端，不重复实现机器人逻辑：窗口只启动一个 `serve` 子进程，所有机器人和模型调用都走同一条链路。
 
-详见 [docs/gui.md](docs/gui.md)，其中包含设置、资源预览、MCP 编辑器、会话管理和诊断截图。
+- 启动先显示复古风入口界面：SVG 机器人 logo、扫描线、真实的 serve 状态、`进入控制台` 按钮和淡入过渡；`--no-splash` 可以跳过。
+- 左侧是 workspace、脚本/技能/模块/MCP 配置、硬件树、权限与预算，以及模型摘要。
+- 右侧是对话、日志、资源三个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
+- 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
+- 对话支持流式输出、忙碌指示、重试、清空和复制；危险工具会逐次弹窗确认。
+- `允许硬件`、`自动批准动作`、文件写入、Shell 和 MCP 自动批准都在每次启动时重新确认，不落盘；文件/Shell 工具默认关闭。
+- 重启、取消和崩溃恢复都有测试覆盖。
 
-## 脚本示例
+详见 [docs/gui.md](docs/gui.md)，里面有设置、资源预览、MCP 编辑器、会话管理和诊断截图。
 
-SQL 普通表名选择 `modules/<表名>.py` 或 `.lua`（`Alias` / `Vars` / `Daemon` 除外）。
-按模块根顺序查找，**每个根内先 `.py` 后 `.lua`**；较早根的 Lua 仍优先于较晚根的 Python。
-可重复传 `--module-path DIR` 指定根；激活时每行独立执行 Python 模块并创建 `Driver(context)`。
+## 写一个驱动
 
-- 必需方法：`build(data)`、`call(data)`；可选 `read(data)`（缺省回退到 `call`）、`destroy(data)`。
-- `data` 是结构元数据、动作参数和触发结果组成的字典；返回非空字典，可省略 `result`，
-  或用 `"OK"` 表示成功、`"ERR"` + `message` 报错。
-- `context.call(operation, *args)` 调用既有 HAL 操作，保留权限检查、句柄归属与取消检查；
-  `context.check()` 检查协作预算。`check` 只编译 Python 源码，不执行模块、构造器或驱动方法。
-- 内置 I2C/SPI/UART/HTTP/Camera/Shell 普通表已迁为 Python；HAL 总线句柄仍可供 Lua 器件驱动使用。
-  I2C/SPI/UART 的 `proto=virt` / `virt-*` 显式使用保留的 Lua 虚拟实现，不会回落到真实硬件。
-  既有 Daemon chunk 仍只支持 Lua；若选中 Python 驱动，静态检查会拒绝。
+SQL 普通表名会选择 `modules/<表名>.py` 或 `.lua`（`Alias` / `Vars` / `Daemon` 除外）。模块按根目录顺序查找，**每个根内先 `.py` 后 `.lua`**；较早根目录里的 Lua 仍优先于较晚根目录里的 Python。可以用 `--module-path DIR` 重复指定根目录。激活时，每一行独立执行 Python 模块并创建一个 `Driver(context)`。
 
-仓库自带 pyserial `loop://` 回环示例，不需要物理硬件、模型或凭据。结构 `robots/uart-loopback.sql`：
+- 必需方法：`build(data)`、`call(data)`；可选 `read(data)`（缺省回退到 `call`）和 `destroy(data)`。
+- `data` 是结构元数据、动作参数和触发结果组成的字典；返回非空字典。`result` 可以省略，或用 `"OK"` 表示成功、用 `"ERR"` + `message` 报错。
+- `context.call(operation, *args)` 调用已有的 HAL 操作，权限检查、句柄归属和取消检查都还在；`context.check()` 检查协作预算。`check` 只编译 Python 源码，不执行模块、构造器或驱动方法。
+- 内置的 I2C/SPI/UART/HTTP/Camera/Shell 普通表已经迁到 Python；HAL 总线句柄仍然可以给 Lua 器件驱动用。I2C/SPI/UART 的 `proto=virt` / `virt-*` 会显式使用保留的 Lua 虚拟实现，不会悄悄回落到真实硬件。既有 Daemon chunk 仍只支持 Lua；如果选中 Python 驱动，静态检查会直接拒绝。
+
+仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件、模型或凭据。结构 `robots/uart-loopback.sql`：
 
 ```sql
 CREATE TABLE UART (name String, path String, baud Number);
@@ -244,6 +250,8 @@ class Driver:
 
 ## 安全边界
 
+默认关掉，需要时再打开。这不是为了显得谨慎，而是因为硬件动作很难撤回。
+
 | 能力 | 默认 | 打开方式 |
 | --- | --- | --- |
 | 物理 I2C/SPI/UART | 关闭 | `--allow-hardware` |
@@ -255,11 +263,8 @@ class Driver:
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
 | Agent 外部 MCP 工具 | 逐次确认 | `--allow-mcp-tools`（外部服务不是沙箱） |
 
-**Agent Shell 默认尝试 bubblewrap（可用时）；不可用时退回工作区牢笼，两者都需显式启用与审批。**
-Python / Lua 驱动是可信进程内代码，**不是沙箱**。Python 导入及直接原生 I/O 不受限制，
-上表的 HAL 权限不能约束这类直接访问。Python 的预算/取消是协作式的：长循环应调用
-`context.check()`；不能硬中断阻塞原生调用或不协作的 Python 循环。只运行审阅过的驱动；
-动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
+**Agent Shell 默认尝试 bubblewrap（可用时）；不可用时退回工作区牢笼，两者都要显式启用和审批。**
+Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 import 和直接原生 I/O 不受限制，上表的 HAL 权限也管不到这类直接访问。Python 的预算/取消是协作式的：长循环应该调用 `context.check()`；阻塞的原生调用或不合作的 Python 循环没法被硬中断。只运行你审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
 
 ## 兼容性
 
@@ -269,7 +274,7 @@ Python / Lua 驱动是可信进程内代码，**不是沙箱**。Python 导入�
 | Windows | pyserial `COMn` | pyftdi MPSSE | PyAV DirectShow | PySide6 |
 | macOS | pyserial | pyftdi MPSSE | PyAV AVFoundation（14+） | PySide6 |
 
-不提供 GPIO/PWM/Speaker 原生后端；这些外设请通过受支持总线写协议实现。无硬件时使用 `*_virt.sql` 或 `loop://`。
+不提供 GPIO/PWM/Speaker 原生后端；这类外设请通过受支持的总线写协议实现。没有硬件时，用 `*_virt.sql` 或 `loop://`。
 
 ## 目录结构
 
@@ -315,12 +320,12 @@ CI 覆盖 Python 3.11–3.14、Windows、Agent（离线模型）、wheel/sdist �
 
 ## 贡献
 
-欢迎驱动、文档、测试和前端贡献。请先读 [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md)：
+欢迎驱动、文档、测试和前端贡献。动手前先读 [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md)：
 
-- Bug/功能先开 Issue；小修可直接提 PR。
-- Conventional Commits；默认分支（`gui-mybot`，owner 可后续改名为 `main`）是唯一长驻分支。
-- 不提交密钥、生成物或无关格式化。
-- 安全漏洞走私密渠道：[.github/SECURITY.md](.github/SECURITY.md)。
+- Bug 或功能建议先开 Issue；小修可以直接提 PR。
+- 用 Conventional Commits；默认分支（`gui-mybot`，owner 之后可以改名为 `main`）是唯一长驻分支。
+- 不要提交密钥、生成物或无关格式化。
+- 安全漏洞请走私密渠道：[.github/SECURITY.md](.github/SECURITY.md)。
 
 ## 许可证
 
