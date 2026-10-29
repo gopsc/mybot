@@ -380,7 +380,7 @@ def test_python_inventory_and_preview_are_nonexecuting(tmp_path):
     entries = {item.name: item for item in index.refresh()}
     assert entries["Probe.py"].language == "python"
     assert entries["Other.lua"].language == "lua"
-    assert index.read(entries["Probe.py"]) == path.read_text()
+    assert index.read(entries["Probe.py"]) == path.read_bytes().decode("utf-8")
     context = ProjectContext(module_paths=[tmp_path]).render().text
     assert "Probe.py" in context and "Other.lua" in context
     assert not marker.exists()
@@ -413,7 +413,7 @@ def test_native_resource_panel_preview_and_filter(tmp_path, monkeypatch):
                          pos=panel.tree.visualItemRect(native).center())
         QTest.qWait(160)
         assert panel.preview.currentWidget() is panel.code
-        assert panel.code.toPlainText() == (MODULES / "LoopbackProbe.py").read_text()
+        assert panel.code.toPlainText() == (MODULES / "LoopbackProbe.py").read_text(encoding="utf-8")
         formats = panel.code.document().firstBlock().layout().formats()
         assert any(item.start == 0 and item.format.foreground().color().name() == COLORS["keyword"]
                    for item in formats)
@@ -427,7 +427,7 @@ def test_native_resource_panel_preview_and_filter(tmp_path, monkeypatch):
         panel.tree.scrollToItem(lua)
         QTest.mouseClick(panel.tree.viewport(), Qt.MouseButton.LeftButton,
                          pos=panel.tree.visualItemRect(lua).center())
-        assert panel.code.toPlainText() == (MODULES / "Relay.lua").read_text()
+        assert panel.code.toPlainText() == (MODULES / "Relay.lua").read_text(encoding="utf-8")
     finally:
         panel.close()
         app.processEvents()
