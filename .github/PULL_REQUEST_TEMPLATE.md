@@ -22,13 +22,6 @@ python -m pytest -q
 python -I tools/ci_smoke.py wheel
 ```
 
-## Edition
-
-- [ ] Python reference edition
-- [ ] Cangjie edition
-- [ ] C++17 + Rust edition
-- [ ] Repository / docs / CI only
-
 ## Screenshots / recordings
 
 <!-- For GUI or CLI output changes, attach before/after images. -->

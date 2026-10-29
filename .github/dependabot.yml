@@ -19,9 +19,3 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-
-  - package-ecosystem: cargo
-    directory: "/implementations/cpp-rust/agent"
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 3

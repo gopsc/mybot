@@ -1,7 +1,7 @@
 local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
 dofile(mpath.resolve("lib/drv_common.lua"))
 -- Monitor.lua - 守护数据消费 / 闭环控制示例驱动
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 用法：在结构脚本中定义 @Monitor 矩阵，某列的值填 `$` 前缀的 @Daemon 变量名，
 -- 经引用机制，该守护 play() 返回的 v0..vN / count / status

@@ -39,12 +39,7 @@ python -m pytest --durations=10 -q
 | wheel | Ubuntu 3.11; Windows 3.13 | Build from sdist, install into clean venv |
 | quickstart | Ubuntu 3.14 | README commands actually run |
 | lint | Ubuntu | syntax/undefined names; no style churn |
-| cpp-rust | Ubuntu | C++17 `-Werror` build + 808 tests; Rust `cargo test/clippy/fmt` |
 | docker | Ubuntu | headless image builds and `doctor` runs inside it |
-
-The Cangjie edition is not built in the top-level workflow: the Cangjie
-toolchain is not available on standard GitHub runners. Build it locally with
-`cjpm` as described in `implementations/cangjie/README.md`.
 
 ## Virtual device fixtures
 

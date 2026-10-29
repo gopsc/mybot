@@ -1,5 +1,5 @@
 -- sensor_daemon_multi.lua - 多器件合并采样守护 chunk（sensor_daemon 的 N 器件变体）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 动机（docs/daemon.md「守护线程开销」）：每个 @Daemon = 独立线程 + 独立 Lua 状态，
 -- 同一总线上 N 只同型/异型传感器就要 N 份运行时。本 chunk 用**一个守护**轮询

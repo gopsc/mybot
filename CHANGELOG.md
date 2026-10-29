@@ -4,11 +4,6 @@ All notable changes to the Python reference implementation are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Per-edition histories live next to each implementation:
-
-- Cangjie: [`implementations/cangjie/CHANGELOG.md`](implementations/cangjie/CHANGELOG.md)
-- C++17 + Rust agent: [`implementations/cpp-rust/docs/changelog.md`](implementations/cpp-rust/docs/changelog.md)
-
 ## [Unreleased]
 
 ### Added
@@ -65,6 +60,13 @@ Per-edition histories live next to each implementation:
   instead of manual slicing.
 - `$alias` cells may now fill structure columns; previously only `$vars`
   scalars were accepted, which blocked Alias-based credential injection.
+
+### Removed
+
+- The unmaintained Cangjie and C++17 + Rust implementations, their CI jobs,
+  Dependabot Cargo updates, issue/PR edition fields and edition-specific docs.
+  The shared Lua drivers keep working; only their legacy framework header was
+  renamed.
 
 ## [0.3.1] – 2026-10-26
 

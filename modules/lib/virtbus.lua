@@ -1,5 +1,5 @@
 -- virtbus.lua —— 虚拟总线（issue #18：设计虚拟硬件用于无真机驱动链路验证）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 概念：inject 后替换 HAL 的全部全局 i2c_*/spi_*/uart_* 函数，真实驱动（经 HAL/驱动 dofile
 -- 链路）在纯内存的虚拟总线上完成 build/call/destroy——无真机、无 /dev/i2c-*、

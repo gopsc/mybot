@@ -12,9 +12,8 @@
 
 ## What to include
 
-- Edition: Python, Cangjie, or C++17 + Rust.
 - Version or commit (`pymybot --version`, `git rev-parse HEAD`).
-- OS, Python/Cangjie/Rust version and install method.
+- OS, Python version and install method.
 - The exact command and the full JSON/error output (remove credentials).
 - Whether hardware is connected; if not, use the virtual-bus or `loop://`
   example and say so.

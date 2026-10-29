@@ -1,15 +1,13 @@
 # Contributing
 
-Thanks for improving pymybot. This repository contains three editions; the
-Python reference edition is at the root, and the Cangjie and C++17 + Rust
-editions live under `implementations/`. Read the relevant edition README before
-changing code.
+Thanks for improving pymybot. The Python implementation lives at the repository
+root; read the relevant docs before changing code.
 
 ## Before you start
 
 - Search existing issues and discussions first.
 - For a bug, open an issue with a minimal reproduction, expected/actual
-  behaviour, OS, Python/Cangjie/Rust version and relevant logs.
+  behaviour, OS, Python version and relevant logs.
 - For a feature, open an issue that states the use case and the operator
   experience before writing code. Security-sensitive features need a design
   discussion first.
@@ -35,8 +33,7 @@ For the agent and GUI:
 ```
 
 See [`../docs/development.md`](../docs/development.md) for linting, packaging and
-frozen-build commands. Edition-specific prerequisites are in each
-`implementations/*/README.md`.
+frozen-build commands.
 
 ## Branches and commits
 
@@ -74,8 +71,6 @@ authorized by the project owner.
   case, or explain why the device cannot be modelled.
 - GUI/server changes: add tests that run without a display where possible.
 - Packaging changes: run `python -I tools/ci_smoke.py wheel`.
-- Cangjie/C++/Rust: run the edition's own test target as documented in its
-  README.
 
 Never weaken a test to make it pass. If a test exposes a real bug, fix the bug
 or document the limitation in the issue.
@@ -91,7 +86,7 @@ or document the limitation in the issue.
 
 ## Documentation style
 
-- Chinese is the primary language for the reference edition; English summaries
+- Chinese is the primary language for the project; English summaries
   live in [`docs/README.en.md`](../docs/README.en.md) and selected docs.
 - Prefer concrete commands, screenshots and tables over marketing prose.
 - Link to existing references instead of duplicating large sections.

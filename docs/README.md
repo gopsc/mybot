@@ -21,8 +21,3 @@
 
 Scripting references live under
 [`../skills/pymybot-scripting/references/`](../skills/pymybot-scripting/references).
-
-Edition-specific documentation:
-
-- [Cangjie](../implementations/cangjie/README.md)
-- [C++17 + Rust](../implementations/cpp-rust/README.md)

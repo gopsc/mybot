@@ -32,7 +32,6 @@
 - **默认安全**：静态命令不激活设备；物理总线、非回环 HTTP 和 Shell 都要显式开关。
 - **可审计的动作**：动作脚本是矩阵数据，不是任意代码；每次派发、捕获和结果都有 JSON 回执。
 - **失败说清楚**：动作已派发后的异常锁存为“结果未知”，不假装回滚；非零退出码不是“未执行”。
-- **多语言同仓**：Python 参考实现、Cangjie 版、C++17 + Rust 版共用同一套脚本模型。
 
 ## 快速开始
 
@@ -138,16 +137,6 @@ flowchart LR
 - **MT 动作** 用矩阵描述“第几行对哪个变量发什么参数”，支持捕获、条件、循环和结构 JSON。
 
 完整分层、线程模型和包结构见 [docs/architecture.md](docs/architecture.md)。
-
-## 多语言实现
-
-| 版本 | 目录 | 技术栈 | 版本 |
-| --- | --- | --- | --- |
-| Python（参考实现） | 仓库根目录 | Python 3.11+ · LuaJIT · PydanticAI | 0.3.x |
-| Cangjie | [`implementations/cangjie/`](implementations/cangjie) | 仓颉 1.1.3 · LuaJIT | 0.3.3 |
-| C++17 + Rust Agent | [`implementations/cpp-rust/`](implementations/cpp-rust) | C++17 · Rust · LuaJIT | 0.1.0 |
-
-三个版本共享同一套脚本模型，但 HAL ABI、构建系统和发布物各自独立。不要在版本之间直接复制驱动，先读各自 README 和 [`implementations/README.md`](implementations/README.md)。
 
 ## CLI 一览
 
@@ -256,7 +245,6 @@ skills/                   Agent 参考技能
 tests/                    pytest 与逐驱动虚拟夹具
 docs/                     架构、CLI、GUI、开发、测试、发布、安全文档
 docs/history/             已完成的迁移与调试记录
-implementations/          Cangjie 与 C++17 + Rust 版本（各自独立构建）
 tools/                    打包与 CI 辅助（PyInstaller spec、smoke 脚本、Nuitka 实验命令）
 .github/                  CI、发布工作流、Issue/PR 模板、社区规范
 ```
@@ -299,4 +287,4 @@ CI 覆盖 Python 3.11–3.14、Windows、Agent（离线模型）、wheel/sdist �
 
 ## 许可证
 
-[MIT](LICENSE)。各语言版本保留自己的版权声明；见 `implementations/*/LICENSE`。
+[MIT](LICENSE)。

@@ -9,17 +9,6 @@ body:
         For installation failures, include the full command and error output.
         For hardware questions, state the board, adapter and sensor model.
 
-  - type: dropdown
-    id: edition
-    attributes:
-      label: Edition
-      options:
-        - Python reference edition
-        - Cangjie edition
-        - C++17 + Rust edition
-    validations:
-      required: true
-
   - type: textarea
     id: question
     attributes:

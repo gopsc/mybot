@@ -1,8 +1,8 @@
 -- sensor_daemon.lua - 万能配置驱动采样守护 chunk（D 方案：setup 一次 + daemon_tick 单次采样）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- daemon_body 先 pcall 本 chunk 一次完成 setup（解析配置、加载驱动、开总线、build 传感器、
--- 附着共享槽），随后逐拍 getglobal("daemon_tick")+pcall 采样一次，拍间由 Cangjie sleep 让出
+-- 附着共享槽），随后逐拍 getglobal("daemon_tick")+pcall 采样一次，拍间由宿主 sleep 让出
 -- 绿色线程（不再由 chunk 内 ffi usleep 阻塞 worker）。
 --
 -- DAEMON_CONFIG（"k=v;k=v"，来自 @Daemon 矩阵除 name/chunk 外的列）：

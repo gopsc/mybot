@@ -1,8 +1,7 @@
 # Architecture
 
 pymybot separates *what the robot is* from *how a part is driven* and *what
-should happen over time*. The same three-layer model is implemented by every
-edition in [`../implementations/`](../implementations).
+should happen over time*.
 
 ## Three layers
 
@@ -130,13 +129,6 @@ source checkout the code falls back to the repository directories. Frozen
 builds use `pymybot/paths.py` and `sys._MEIPASS`; never rely on the current
 working directory. See [`development.md`](development.md) for the packaging
 flow.
-
-## Multi-edition boundaries
-
-The Cangjie and C++17 + Rust editions share the DSL and operator model but have
-independent HAL ABIs, build systems and binaries. Do not copy a driver between
-editions without checking its HAL calls. See
-[`../implementations/README.md`](../implementations/README.md).
 
 ## Further reading
 

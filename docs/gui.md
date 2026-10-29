@@ -1,6 +1,6 @@
 # GUI guide
 
-The PySide6 (Qt 6) GUI is the default entry point for the Python reference edition:
+The PySide6 (Qt 6) GUI is the default entry point:
 
 ```sh
 pymybot            # opens the window

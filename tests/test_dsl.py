@@ -1,4 +1,4 @@
-"""Regression tests for the C++ .mt grammar and execution contracts."""
+"""Regression tests for the MT grammar and execution contracts."""
 from contextlib import contextmanager
 from pathlib import Path
 

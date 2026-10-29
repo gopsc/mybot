@@ -1,5 +1,5 @@
 -- ADXL345 三轴加速度计 驱动模块
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 虚拟器件模型：内嵌本文件尾部 ADXL345_VIRT（2026-09-15 自 modules/lib/virtbus/adxl345.lua
 -- 迁入，单文件驱动+模型实验第十九个，regmap 底座；无硬件单测与守护 E2E 共用；同协议独立实现，改协议两处同步）
 -- Analog Devices，I2C 地址 0x53/0x1D（ALT ADDRESS 引脚，模块缺省 0x53），

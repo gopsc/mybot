@@ -1,5 +1,5 @@
 -- MLX90393 三轴磁力计 驱动模块（Melexis Triaxis Hall，I2C 地址 0x0C~0x0F）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 虚拟器件模型：内嵌本文件尾部 MLX90393_VIRT（2026-09-15 自 modules/lib/virtbus/mlx90393.lua
 -- 迁入，单文件驱动+模型实验第三十七个，命令字 + status-first 族；无硬件单测与守护 E2E 共用；同协议独立实现，改协议两处同步）
 --

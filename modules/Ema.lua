@@ -1,7 +1,7 @@
 local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
 dofile(mpath.resolve("lib/drv_common.lua"))
 -- Ema.lua - 指数移动平均滤波硬件变量驱动
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 矩阵名 Ema → 本文件（通用 Lua 硬件变量）。与 Kalman.lua 同构：src 列引用守护/传感器，
 -- call 逐拍做 EMA 平滑，输出既作 out 也别名 v0（「虚拟传感器」，下游按 v0 统一消费）。

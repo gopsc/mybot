@@ -8,11 +8,8 @@
 | LuaJIT | provided by the `lupa` wheel |
 | PySide6 | 6.10–6.x, included in `gui`, `test` and `package` extras |
 | MCP SDK | 1.30–1.x, included in `mcp` and `agent` extras |
-| Node/npm | not required for the Python edition |
+| Node/npm | not required |
 | PyInstaller | 6.x, only for frozen builds |
-
-The Cangjie and C++17 + Rust editions have their own toolchains; see
-`implementations/*/README.md`.
 
 ## Setup
 
@@ -51,7 +48,6 @@ scripts/            MT action examples
 skills/             operator-trusted agent reference skills
 tests/              pytest suite and virtual-device fixtures
 docs/               operator and maintainer documentation
-implementations/    Cangjie and C++17 + Rust editions
 tools/              packaging helpers and PyInstaller spec
 ```
 
@@ -64,8 +60,8 @@ tools/              packaging helpers and PyInstaller spec
   `agent_workspace.py` and `paths.py`.
 - Do not add a broad `except Exception: pass` unless it is cleanup that cannot
   affect the result; log or surface the failure instead.
-- Public operator-visible text is Chinese in the reference edition; code
-  identifiers and commit messages are English.
+- Public operator-visible text is Chinese; code identifiers and commit messages
+  are English.
 
 A narrow lint gate runs in CI (`ruff` with syntax/undefined-name rules). Full
 `ruff` output is advisory because the repository predates a formatter baseline;

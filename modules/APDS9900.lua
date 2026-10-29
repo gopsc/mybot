@@ -1,5 +1,5 @@
 -- APDS9900.lua - 环境光 + 近距传感器 驱动模块
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 虚拟器件模型：内嵌本文件尾部 APDS9900_VIRT（2026-09-15 自 modules/lib/virtbus/apds9900.lua
 -- 迁入，单文件驱动+模型实验第二十七个，命令字节四态寻址族；无硬件单测与守护 E2E 共用；同协议独立实现，改协议两处同步）
 -- Broadcom/Avago APDS-9900（TAOS TSL2771 架构）：双通道 ALS（CH0 全谱 / CH1 红外）

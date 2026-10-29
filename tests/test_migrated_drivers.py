@@ -1,7 +1,7 @@
-"""Smoke tests for the chip drivers migrated from the C++/Rust edition.
+"""Smoke tests for the chip drivers migrated into the Python implementation.
 
-Each fixture pair under tests/fixtures/virt/ was lifted verbatim from the old
-repository (robots/test/<name>_virt.sql + scripts/test/<name>_virt.mt): the
+Each fixture pair under tests/fixtures/virt/ was lifted from an earlier
+repository layout (robots/test/<name>_virt.sql + scripts/test/<name>_virt.mt): the
 device or Daemon row declares proto=virt, so the driver's embedded <NAME>_VIRT
 model answers bus traffic in memory. The real driver build/call/destroy run
 unmodified through the same Robot path as physical hardware — no device is

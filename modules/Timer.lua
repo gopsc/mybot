@@ -1,5 +1,5 @@
 -- Timer 软件定时器 驱动模块
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 在未来替代内建的Speaker（Speaker目前仅负责延时）
 --
 -- 26.5 单测覆盖：由 run_all.sh 的 mtmerge_e2e / daemon_build_raise / signal_halt e2e 覆盖
