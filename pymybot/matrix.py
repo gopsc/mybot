@@ -11,7 +11,17 @@ from .errors import ScriptError
 MAX_BLOCK_DEPTH = 32
 MAX_SCRIPT_BYTES = 8 * 1024 * 1024
 _STRUCT = re.compile(r"Struct\(([A-Za-z_][A-Za-z_0-9]*)\)\Z")
+_REFLEX = re.compile(r"Reflex\(([A-Za-z_][A-Za-z_0-9-]*)\)\Z")
 _STRUCT_END = re.compile(r"@[ \t]*(?:#[^\n]*)?(?=\n|$)")
+
+
+def reflex_name(name: str) -> str | None:
+    if name == "Reflex" or name.startswith("Reflex("):
+        match = _REFLEX.fullmatch(name)
+        if match is None:
+            raise ScriptError("Expected @Reflex(identifier) without whitespace")
+        return match[1]
+    return None
 
 
 def struct_name(name: str) -> str | None:
@@ -160,7 +170,8 @@ class _Frame:
         self.item()
         if not self.cells:
             return
-        rows = self.pending if is_control(self.matrix.name) else self.matrix.rows
+        compound = is_control(self.matrix.name) or reflex_name(self.matrix.name) is not None or self.matrix.children
+        rows = self.pending if compound else self.matrix.rows
         if rows and len(rows[0]) != len(self.cells):
             raise ScriptError(f"Matrix line {line}: got {len(self.cells)} cells, expected "
                               f"{len(rows[0])} (header column count)")
@@ -201,16 +212,26 @@ def parse_matrices(text: str) -> list[Matrix]:
             frame.flush()
             (stack[-1].matrix.children if stack else out).append(frame.matrix)
         else:
+            if name == "Trigger" or name.startswith("Trigger("):
+                raise ScriptError("@Trigger is not supported; call @Reflex(name) from @Action")
+            if reflex_name(name) is not None and stack:
+                raise ScriptError("@Reflex definitions may only appear at the top level")
             if struct_name(name) is not None:
                 if stack:
                     raise ScriptError("@Struct declarations may only appear at the top level")
                 stack.append(_Frame(Matrix(name, json_text=""), json_header_line=line))
                 return
             if stack:
-                if not is_control(stack[-1].matrix.name):
-                    raise ScriptError(f"Line {line}: leaf @{stack[-1].matrix.name} "
+                parent = stack[-1]
+                if not (parent.matrix.name == "Action" or is_control(parent.matrix.name)
+                        or reflex_name(parent.matrix.name) is not None):
+                    raise ScriptError(f"Line {line}: leaf @{parent.matrix.name} "
                                       f"cannot contain nested @{name[:160]}")
-                stack[-1].flush()
+                if name in {"Alias", "Vars"} and reflex_name(parent.matrix.name) is None:
+                    raise ScriptError(f"@{name} declarations require the top level or a Reflex body")
+                if parent.matrix.name == "Action" and parent.matrix.rows:
+                    parent.pending, parent.matrix.rows = parent.matrix.rows, []
+                parent.flush()
             if len(stack) >= MAX_BLOCK_DEPTH:
                 raise ScriptError(f"Block nesting depth exceeds {MAX_BLOCK_DEPTH}")
             stack.append(_Frame(Matrix(name)))

@@ -26,8 +26,8 @@ LANGUAGES = {
     "sql": ("select", "from", "where", "insert", "into", "values", "create", "table", "drop",
             "delete", "update", "set", "show", "tables", "and", "or", "not", "null", "string",
             "number", "alias", "vars"),
-    "mt": ("action", "include", "merge", "alias", "vars", "struct", "if", "else", "end",
-           "while", "loop", "break", "controller", "trigger"),
+    "mt": ("action", "reflex", "include", "merge", "alias", "vars", "struct", "if", "else", "end",
+           "while", "loop", "break", "controller"),
 }
 
 

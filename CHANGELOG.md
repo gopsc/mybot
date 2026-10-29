@@ -8,6 +8,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Named, top-level `@Reflex(name)` blocks called through `reflexName.parameter`
+  headers, including aliases and dynamic headers. Reflex and Action bodies can
+  mix matrices with nested Action/if/while blocks. Reflex-root Alias/Vars defaults,
+  typed arguments and all inner captures (including global Struct writes) are
+  isolated per call; outer captures explicitly read the final device result.
+  Recursive calls share execution, cancellation and output budgets with a
+  32-level limit. See the MT scripting reference, section 7.
 - Standard MCP over stdio (`pip install pymybot[mcp]`): `pymybot mcp` exposes
   the controller to Claude Desktop, Cursor and other MCP clients. It is
   read-only by default, reuses `RobotExecutor` receipts and fault latching, and
@@ -100,6 +107,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **BREAKING:** MT `@Trigger` parsing/execution and the unnamed `@Reflex` table
+  syntax with a `name` column are removed and rejected at parse time, without
+  compatibility support. Migrate to `@Reflex(name)` and ordinary Action calls;
+  SQL structure triggers and their reference protections remain unchanged.
 - The unmaintained Cangjie and C++17 + Rust implementations, their CI jobs,
   Dependabot Cargo updates, issue/PR edition fields and edition-specific docs.
   The shared Lua drivers keep working; only their legacy framework header was

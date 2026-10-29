@@ -7,7 +7,7 @@ import stat
 from pathlib import Path, PureWindowsPath
 
 from .errors import ScriptError
-from .matrix import Matrix, is_control, parse_matrices, split_action_column, struct_name
+from .matrix import Matrix, is_control, parse_matrices, reflex_name, split_action_column, struct_name
 
 MAX_INCLUDES = 32
 MAX_INCLUDE_DEPTH = 32
@@ -196,8 +196,8 @@ class _Expander:
                 pending.append(matrix)
                 continue
             if pending:
-                if (is_control(name) or matrix.children or name in {"Alias", "Vars", "Trigger", "Reflex"}
-                        or struct_name(name) is not None):
+                if (is_control(name) or matrix.children or name in {"Alias", "Vars"}
+                        or reflex_name(name) is not None or struct_name(name) is not None):
                     raise ScriptError("Nested @Merge must be followed by a plain matrix table")
                 for directive in pending:
                     for relative, phase in _specs(directive):
@@ -206,8 +206,8 @@ class _Expander:
                         if not targets:
                             raise ScriptError("Nested @Merge target has no matrix")
                         for target in targets:
-                            if (target.name.strip() in {"Alias", "Vars", "Include", "Merge", "Reflex", "Trigger"}
-                                    or struct_name(target.name) is not None):
+                            if (target.name.strip() in {"Alias", "Vars", "Include", "Merge"}
+                                    or reflex_name(target.name) is not None or struct_name(target.name) is not None):
                                 raise ScriptError("Nested @Merge target must contain only plain matrix tables")
                             matrix = _merge(matrix, target, phase)
                 pending.clear()
@@ -237,6 +237,8 @@ class _Expander:
     def accumulate(self, seq: list[Matrix], base: Path, depth: int) -> dict[str, Matrix | list[Matrix] | None]:
         acc = {name: _fold(seq, name) for name in ("Alias", "Vars")}
         acc["Struct"] = [matrix for matrix in seq if struct_name(matrix.name) is not None]
+        if any(matrix.name.strip() == "Action" and matrix.children for matrix in seq):
+            raise ScriptError("Top-level @Merge requires a plain @Action matrix, not a nested block")
         acc["Action"] = next((m for m in seq if m.name.strip() == "Action"), None)
         owned: dict[str, set[str]] = {}
         for kind in ("Alias", "Vars"):

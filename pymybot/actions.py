@@ -1,12 +1,13 @@
-"""Ordered action dispatch, captures, conditions, and Trigger/Reflex calls."""
+"""Ordered action dispatch, captures, conditions, and scoped Reflex calls."""
 from __future__ import annotations
 
+import json
 import re
 
 from .errors import ScriptError
 from .expr import Expression, Reference, evaluation_guard, expr_body, parse_number, render
-from .hardware import Number
-from .matrix import MAX_BLOCK_DEPTH, Matrix, is_control, split_action_column, struct_name
+from .hardware import Alias, Number, Struct, depth_guard
+from .matrix import MAX_BLOCK_DEPTH, Matrix, is_control, reflex_name, split_action_column, struct_name
 from .security import MAX_BODY, dumps
 
 _SAFE_IDENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
@@ -38,7 +39,50 @@ class ActionRunner:
     def __init__(self, registry, budget):
         self.registry = registry
         self.budget = budget
-        self._capture_writes: dict | None = None
+        self._reflex_actions: dict[str, Matrix] = {}
+        self._execution_depth = 0
+
+    def declare_scalars(self, matrices: list[Matrix], *, local=False):
+        declared = set()
+        for matrix in matrices:
+            self.budget.check()
+            name = struct_name(matrix.name)
+            if name is not None:
+                if name in declared or self.registry.get(name) is not None:
+                    raise ScriptError(f"Duplicate Struct variable '{name}'")
+                declared.add(name)
+                self.registry.override(name, Struct(name, json.loads(matrix.json_text)))
+                continue
+            if matrix.name not in {"Alias", "Vars"}:
+                continue
+            field = "alias" if matrix.name == "Alias" else "value"
+            if "name" not in matrix.header or field not in matrix.header:
+                raise ScriptError(f"{matrix.name} requires name/{field} columns")
+            for i in range(1, len(matrix.rows)):
+                self.budget.check()
+                name = matrix.rows[i][matrix.header.index("name")]
+                if name in declared:
+                    raise ScriptError(f"Duplicate session variable '{name}'")
+                declared.add(name)
+                existing = self.registry.get(name)
+                if local and existing is not None and existing.kind not in {"alias", "vars"}:
+                    raise ScriptError(f"Reflex local '{name}' cannot replace a driver, daemon or Struct")
+                if not local and matrix.name == "Vars" and existing is not None:
+                    raise ScriptError(f"@Vars '{name}' cannot override a structure variable")
+                value = matrix.inherited(i, matrix.header.index(field))
+                if matrix.name == "Alias":
+                    variable = Alias(name, value)
+                else:
+                    precision = None
+                    if "precision" in matrix.header:
+                        raw = matrix.inherited(i, matrix.header.index("precision"))
+                        if raw.strip() not in {"-", ""}:
+                            try:
+                                precision = int(raw)
+                            except ValueError:
+                                raise ScriptError(f"@Vars '{name}' precision must be an integer from 0 to 15") from None
+                    variable = Number(name, value, self.registry.resolve_number, precision=precision)
+                self.registry.override(name, variable)
 
     def _value(self, expression: Expression):
         self.budget.check()
@@ -63,8 +107,9 @@ class ActionRunner:
             raise ScriptError(f"@Alias '{name}' must contain text")
         resolved = self.registry.get(target)
         if resolved is None:
-            raise ScriptError(f"@Action device alias '{name}' targets undefined hardware '{target}'")
-        if resolved.kind in _SCALARS:
+            if self._reflex_action(target) is None:
+                raise ScriptError(f"@Action device alias '{name}' targets undefined hardware or reflex '{target}'")
+        elif resolved.kind in _SCALARS:
             raise ScriptError("@Action device aliases support only one level of indirection, not scalar targets")
         return target
 
@@ -119,8 +164,6 @@ class ActionRunner:
         else:
             raise ScriptError(f"Cannot infer capture type for '{var}'; declare @Alias for bool fields")
         self.registry.override(var, variable)
-        if self._capture_writes is not None:
-            self._capture_writes[var] = variable
 
     @staticmethod
     def _ensure_result(value, device: str) -> dict:
@@ -142,10 +185,17 @@ class ActionRunner:
         seen: set[tuple[str, str]] = set()
         order: list[str] = []
         phase_devices: set[str] = set()
+        reflex_targets: dict[str, Matrix] = {}
         for col, head in enumerate(matrix.header):
             self.budget.check()
             raw_device, raw_param = split_action_column(head)
-            device, param = self._device(raw_device), self._param(raw_param)
+            device = self._device(raw_device)
+            action = self._reflex_action(device) if self.registry.get(device) is None else None
+            if action is not None:
+                reflex_targets[device] = action
+            param = raw_param if action is not None and expr_body(raw_param) is None else self._param(raw_param)
+            if action is not None and not _SAFE_IDENT.fullmatch(param):
+                raise ScriptError("Reflex parameter names must be safe identifiers")
             if (device, param) in seen:
                 raise ScriptError(f"Action column {head!r} duplicates target {device}.{param}")
             seen.add((device, param))
@@ -178,11 +228,10 @@ class ActionRunner:
                     value = self._value(cache[col][1])
                     if isinstance(value, bool):
                         raise ScriptError("@Action cell $(...) cannot produce a boolean result")
-                    # A bare @Vars reference keeps its operator-selected precision;
-                    # arithmetic expressions remain full-precision numbers.
+                    # Display precision must not turn numeric Reflex arguments into text.
                     variable = self.registry.get(body.strip())
-                    if (isinstance(value, float) and isinstance(variable, Number)
-                            and variable.precision is not None):
+                    if (device not in reflex_targets and isinstance(value, float)
+                            and isinstance(variable, Number) and variable.precision is not None):
                         value = variable.format(value)
                 elif capture := self._capture(raw):
                     captures.setdefault(device, []).append(capture)
@@ -192,15 +241,21 @@ class ActionRunner:
                 parameters.setdefault(device, {})[param] = value
             for device in order:
                 self.budget.check()
-                variable = self.registry.require(device)
-                if variable.kind in _SCALARS:
-                    raise ScriptError(f"@Action target '{device}' must be a driver or daemon")
+                action = reflex_targets.get(device)
+                if action is None:
+                    variable = self.registry.require(device)
+                    if variable.kind in _SCALARS:
+                        raise ScriptError(f"@Action target '{device}' must be a driver, daemon or reflex")
                 if device not in parameters and device not in captures:
                     continue
-                result = self._ensure_result(variable.play(parameters.get(device, {})), device)
+                if action is not None:
+                    result = self._call_reflex(action, parameters.get(device, {}), sink)
+                else:
+                    result = self._ensure_result(variable.play(parameters.get(device, {})), device)
                 for var, keys, path in captures.get(device, []):
                     self._apply_capture(result, var, keys, path)
-                sink.add(result)
+                if action is None:
+                    sink.add(result)
                 self.budget.check()
         return sink.items
 
@@ -223,108 +278,75 @@ class ActionRunner:
         return value
 
     def _sequence(self, matrices: list[Matrix], outputs: _OutputCollector, depth: int = 0) -> bool:
-        if depth > MAX_BLOCK_DEPTH:
+        if self._execution_depth > MAX_BLOCK_DEPTH:
             raise ScriptError("Execution block nesting exceeds depth limit")
-        actionable = False
-        for matrix in matrices:
-            self.budget.check()
-            name = matrix.name.strip()
-            if name == "Action":
-                actionable = True
-                self.dispatch(matrix, outputs)
-            elif is_control(name):
-                actionable = True
-                condition = self._condition(matrix)
-                if name.startswith("if("):
-                    if self._test_condition(condition):
+        self._execution_depth += 1
+        try:
+            actionable = False
+            for matrix in matrices:
+                self.budget.check()
+                name = matrix.name.strip()
+                if name == "Action":
+                    actionable = True
+                    if matrix.children:
                         self._sequence(matrix.children, outputs, depth + 1)
+                    else:
+                        self.dispatch(matrix, outputs)
+                elif is_control(name):
+                    actionable = True
+                    condition = self._condition(matrix)
+                    if name.startswith("if("):
+                        if self._test_condition(condition):
+                            self._sequence(matrix.children, outputs, depth + 1)
+                    else:
+                        while True:
+                            self.budget.check()
+                            if not self._test_condition(condition):
+                                break
+                            self._sequence(matrix.children, outputs, depth + 1)
+                elif name in {"Alias", "Vars"} or struct_name(name) is not None or reflex_name(name) is not None:
+                    if depth:
+                        raise ScriptError(f"@{name} declarations require the top level or a Reflex body")
                 else:
-                    while True:
-                        self.budget.check()  # Includes empty-body, forever-true loops.
-                        if not self._test_condition(condition):
-                            break
-                        self._sequence(matrix.children, outputs, depth + 1)
-            elif name in {"Alias", "Vars", "Trigger", "Reflex"} or struct_name(name) is not None:
-                if depth:
-                    raise ScriptError(f"@{name} may only be used at top level, not inside a control block")
-            else:
-                raise ScriptError(f"Unsupported action block @{name[:160]}; Include/Merge must be expanded first")
-        return actionable
+                    raise ScriptError(f"Unsupported action block @{name[:160]}; Include/Merge must be expanded first")
+            return actionable
+        finally:
+            self._execution_depth -= 1
 
-    @staticmethod
-    def _trigger(text: str) -> tuple[str, dict[str, str]]:
-        args: dict[str, str] = {}
-        if "(" not in text:
-            name = text.strip()
-        else:
-            name, rest = text.split("(", 1)
-            name = name.strip()
-            if not rest.endswith(")"):
-                raise ScriptError("Trigger call must end with a closing ')'")
-            for segment in rest[:-1].split(","):
-                segment = segment.strip()
-                if not segment:
-                    continue
-                key, eq, value = segment.partition("=")
-                key, value = key.strip(), value.strip()
-                if not eq or not value or not _SAFE_IDENT.fullmatch(key):
-                    raise ScriptError("Trigger arguments must be safe_identifier=value")
-                if key in args:
-                    raise ScriptError(f"Trigger binds duplicate argument '{key}'")
-                args[key] = value
-        if not name:
-            raise ScriptError("Trigger call is missing a reflex name")
-        return name, args
+    def _reflex_action(self, name: str) -> Matrix | None:
+        return self._reflex_actions.get(name)
 
-    def _reflex(self, matrices: list[Matrix], outputs: _OutputCollector) -> None:
-        from .hardware import Alias
-
-        triggers = [m for m in matrices if m.name.strip() == "Trigger"]
-        if not triggers:
-            return  # Untriggered definitions are deliberately lazy.
-        reflexes = [m for m in matrices if m.name.strip() == "Reflex"]
-        if len(triggers) != 1 or len(reflexes) != 1:
-            raise ScriptError("@Trigger requires exactly one @Trigger and one @Reflex definition table")
-        definitions = reflexes[0]
-        if definitions.require_col("name") != 0:
-            raise ScriptError("@Reflex requires 'name' as its first column")
-        groups: dict[str, list[list[str]]] = {}
-        for row in definitions.data:
-            if row[0].strip():
-                groups.setdefault(row[0].strip(), []).append(row[1:])
-        if not groups:
-            raise ScriptError("@Reflex has no definition rows")
-        trigger = triggers[0]
-        column = trigger.require_col("trigger")
-        for row in range(1, len(trigger.rows)):
-            self.budget.check()
-            line = trigger.inherited(row, column).strip()
-            if not line:
-                continue
-            name, args = self._trigger(line)
-            if name not in groups:
-                raise ScriptError(f"Trigger references undefined reflex '{name}'")
-            action = Matrix("Action", [definitions.header[1:]] + groups[name])
-            writes: dict = {}
-            self._capture_writes = writes
-            try:
-                with self.registry.session():
-                    for key, value in args.items():
-                        self.registry.override(key, Alias(key, value))
-                    self.dispatch(action, outputs)
-            finally:
-                self._capture_writes = None
-                # Only argument bindings are trigger-local. Captures into other
-                # names survive for later triggers, like ordinary action captures.
-                for key, variable in writes.items():
-                    if key not in args:
-                        self.registry.override(key, variable)
+    def _call_reflex(self, action: Matrix, args: dict, outputs: _OutputCollector) -> dict:
+        self.budget.check()
+        with depth_guard("reflex"):
+            bindings = {}
+            for key, value in args.items():
+                self.budget.check()
+                if not _SAFE_IDENT.fullmatch(key):
+                    raise ScriptError("Reflex parameter names must be safe identifiers")
+                existing = self.registry.get(key)
+                if existing is not None and existing.kind not in {"alias", "vars"}:
+                    raise ScriptError(f"Reflex argument '{key}' cannot replace a driver, daemon or Struct")
+                bindings[key] = Alias(key, value) if isinstance(value, str) else Number(key, value)
+            start = len(outputs.items)
+            with self.registry.session():
+                self.declare_scalars(action.children, local=True)
+                for key, variable in bindings.items():
+                    self.registry.override(key, variable)
+                self._sequence(action.children, outputs)
+            return outputs.items[-1] if len(outputs.items) > start else {"result": "OK"}
 
     def run(self, matrices: list[Matrix]) -> list[dict]:
         """Execute registered matrices; caller owns the enclosing run session."""
+        self._reflex_actions = {}
+        for matrix in matrices:
+            self.budget.check()
+            name = reflex_name(matrix.name)
+            if name is not None:
+                if name in self._reflex_actions:
+                    raise ScriptError(f"Duplicate Reflex definition '{name}'")
+                self._reflex_actions[name] = matrix
         outputs = _OutputCollector()
-        actionable = self._sequence(matrices, outputs)
-        if not actionable and not any(m.name.strip() == "Trigger" for m in matrices):
+        if not self._sequence(matrices, outputs):
             raise ScriptError("No @Action matrix found in the script")
-        self._reflex(matrices, outputs)
         return outputs.items

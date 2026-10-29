@@ -8,8 +8,7 @@
 # 条件反射结构：
 #   1. @Action 先探测登录 —— 已存在且密码正确时直接跳过注册（幂等，可反复运行）
 #   2. @if(state.status==401) 才发注册请求 —— 账号不存在或密码不对时才尝试创建
-#   3. @Trigger -> @Reflex(verify) 收尾统一验证一次登录，输出最终凭据状态
-# 注意 @Trigger 永远在普通 Action/条件之后执行，不能反过来用条件拦住触发器。
+#   3. @Action 调用 verify 收尾验证登录，在调用者捕获 state.login
 #
 # 凭据放在 @Alias，推荐用 --var-env 从环境变量注入，避免出现在 argv 里；
 # @Struct 只保存每次运行的状态（Struct 不能被 --var 覆盖）。
@@ -54,12 +53,12 @@ $("POST")     $("/users/register")    $("Content-Type=application/json")  $("{\"
 @
 
 # 3) 收尾验证：无论走哪条分支，最后再用同一凭据登录一次
-@Reflex
-name    cloud.method  cloud.path          cloud.headers                       cloud.body                                                        cloud.status;
-verify  $("POST")     $("/users/login")   $("Content-Type=application/json")  $("{\"username\":\""+user+"\",\"password\":\""+pass+"\"}")        $state.login=status;
+@Reflex(verify)
+cloud.method  cloud.path          cloud.headers                       cloud.body;
+$("POST")     $("/users/login")   $("Content-Type=application/json")  $("{\"username\":\""+user+"\",\"password\":\""+pass+"\"}");
 @
 
-@Trigger
-trigger;
-verify;
+@Action
+verify.user verify.pass verify.capture;
+$(user)     $(pass)     $state.login=status;
 @
