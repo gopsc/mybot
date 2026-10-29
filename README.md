@@ -1,6 +1,6 @@
 # pymybot
 
-**把「结构 SQL + Lua 驱动 + MT 动作」三层脚本接到真实机器人；同一套代码提供 CLI、桌面 GUI 和 AI Agent。**
+**把「结构 SQL + Python/Lua 驱动 + MT 动作」三层脚本接到真实机器人；同一套代码提供 CLI、桌面 GUI 和 AI Agent。**
 
 [![CI](https://github.com/gopsc/mybot/actions/workflows/ci.yml/badge.svg)](https://github.com/gopsc/mybot/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/gopsc/mybot?include_prereleases&sort=semver)](https://github.com/gopsc/mybot/releases)
@@ -29,7 +29,7 @@
 
 - **三层解耦**：结构、驱动、动作各写各的；换传感器不改剧本，换剧本不碰驱动。
 - **无硬件可跑通**：虚拟总线、寄存器模型、`loop://` 串口回环和逐驱动夹具，让 CI 不需要插板子。
-- **默认安全**：静态命令不激活设备；物理总线、非回环 HTTP 和 Shell 都要显式开关。
+- **HAL 默认受控**：静态命令不激活设备；HAL 的物理总线、非回环 HTTP 和 Shell 都要显式开关（驱动不是沙箱）。
 - **可审计的动作**：动作脚本是矩阵数据，不是任意代码；每次派发、捕获和结果都有 JSON 回执。
 - **失败说清楚**：动作已派发后的异常锁存为“结果未知”，不假装回滚；非零退出码不是“未执行”。
 
@@ -128,7 +128,7 @@ Agent 还可以通过 `--mcp-config` 连接外部 MCP 服务，把它们的工�
 ```mermaid
 flowchart LR
     SQL["结构 SQL<br/>robots/*.sql"] --> ROBOT["Robot<br/>变量 + 总线"]
-    LUA["Lua 驱动<br/>modules/*.lua"] --> ROBOT
+    DRIVER["Python / Lua 驱动<br/>modules/*.py / *.lua"] --> ROBOT
     MT["动作脚本<br/>scripts/*.mt"] --> RUNNER["Action runner"]
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL"]
@@ -136,7 +136,7 @@ flowchart LR
 ```
 
 - **结构 SQL** 声明机器人身上有哪些变量、接在哪条总线、谁引用谁。
-- **Lua 驱动** 实现一个器件的 `build / call / destroy / read`。
+- **Python / Lua 驱动** 实现一个器件的 `build / call`，可选 `read / destroy`。
 - **MT 动作** 用矩阵描述“第几行对哪个变量发什么参数”，支持捕获、条件、循环和结构 JSON。
 
 完整分层、线程模型和包结构见 [docs/architecture.md](docs/architecture.md)。
@@ -164,7 +164,7 @@ flowchart LR
 
 - 启动先显示复古风入口界面：SVG 机器人 logo、扫描线动画、真实 serve 状态、`进入控制台` 按钮与淡入过渡；`--no-splash` 可跳过。
 - 左侧：workspace、脚本/技能/模块/MCP 配置、硬件树、权限与预算、模型摘要。
-- 右侧：对话、日志、资源三个标签页；资源页可预览结构 SQL、Lua 驱动、脚本、技能和文档（Markdown 渲染、语法高亮、按 mtime 缓存、文件变化自动刷新）。
+- 右侧：对话、日志、资源三个标签页；资源页可预览结构 SQL、Python/Lua 驱动、脚本、技能和文档（Markdown 渲染、语法高亮、按 mtime 缓存、文件变化自动刷新）。
 - 管理控制台：菜单/工具栏提供命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、MCP 配置编辑器（同后端校验）、会话管理（查看/删除/清理）、环境诊断、文档与关于。
 - 流式输出、忙碌指示、重试上一任务、清空/复制对话；危险工具逐次弹窗确认。
 - `允许硬件`、`自动批准动作`、文件写入、Shell 和 MCP 自动批准都逐次启动确认，不落盘；文件/Shell 工具默认关闭。
@@ -174,7 +174,20 @@ flowchart LR
 
 ## 脚本示例
 
-结构文件：
+SQL 普通表名选择 `modules/<表名>.py` 或 `.lua`（`Alias` / `Vars` / `Daemon` 除外）。
+按模块根顺序查找，**每个根内先 `.py` 后 `.lua`**；较早根的 Lua 仍优先于较晚根的 Python。
+可重复传 `--module-path DIR` 指定根；激活时每行独立执行 Python 模块并创建 `Driver(context)`。
+
+- 必需方法：`build(data)`、`call(data)`；可选 `read(data)`（缺省回退到 `call`）、`destroy(data)`。
+- `data` 是结构元数据、动作参数和触发结果组成的字典；返回非空字典，可省略 `result`，
+  或用 `"OK"` 表示成功、`"ERR"` + `message` 报错。
+- `context.call(operation, *args)` 调用既有 HAL 操作，保留权限检查、句柄归属与取消检查；
+  `context.check()` 检查协作预算。`check` 只编译 Python 源码，不执行模块、构造器或驱动方法。
+- 内置 I2C/SPI/UART/HTTP/Camera/Shell 普通表已迁为 Python；HAL 总线句柄仍可供 Lua 器件驱动使用。
+  I2C/SPI/UART 的 `proto=virt` / `virt-*` 显式使用保留的 Lua 虚拟实现，不会回落到真实硬件。
+  既有 Daemon chunk 仍只支持 Lua；若选中 Python 驱动，静态检查会拒绝。
+
+仓库自带 pyserial `loop://` 回环示例，不需要物理硬件、模型或凭据。结构 `robots/uart-loopback.sql`：
 
 ```sql
 CREATE TABLE UART (name String, path String, baud Number);
@@ -183,34 +196,51 @@ CREATE TABLE LoopbackProbe (name String, UART String);
 INSERT INTO LoopbackProbe (name, UART) VALUES ('echo', '$bus');
 ```
 
-动作脚本：
+动作 `scripts/uart-loopback.mt`：
 
 ```mt
 @Action
 echo.value;
          0;
        127;
+       255;
 @
 ```
 
-驱动：
+自定义驱动 `modules/LoopbackProbe.py`（`$bus` 合并出的 `fd` 由 UART 行拥有并释放）：
 
-```lua
-local mpath = assert(__mpath)
-dofile(mpath.resolve("lib/drv_common.lua"))
-require_driver("uart", {
-    name = "LoopbackProbe",
-    build = function(ctx, data) return {result = "OK"} end,
-    call = function(ctx, data)
-        if uart_write(ctx.fd, {tonumber(data.value)}) ~= 1 then return err("short write") end
-        local reply = uart_read(ctx.fd, 1, 200)
-        if reply == nil or #reply ~= 1 then return err("read failed") end
-        return {result = "OK", rx = reply[1]}
-    end,
-})
+```python
+from pymybot.errors import DriverError
+
+
+class Driver:
+    def __init__(self, context):
+        self.context = context
+
+    def build(self, data):
+        return {"result": "OK"}
+
+    def call(self, data):
+        fd = data["fd"]
+        value = data.get("value", 0)
+        if self.context.call("uart_write", fd, [value]) != 1:
+            raise DriverError("UART write failed: " + self.context.call("last_error"))
+        reply = self.context.call("uart_read", fd, 1, 200)
+        if reply is None or len(reply) != 1:
+            raise DriverError("UART echo timed out or failed")
+        return {"result": "OK", "rx": reply[0]}
 ```
 
-完整规则见 [skills/pymybot-scripting](skills/pymybot-scripting/SKILL.md)。
+从仓库根检查并运行，结果依次含 `rx: 0`、`rx: 127`、`rx: 255`：
+
+```sh
+.venv/bin/python -m pymybot check --module-path modules \
+  --robot robots/uart-loopback.sql --input scripts/uart-loopback.mt
+.venv/bin/python -m pymybot run --module-path modules \
+  --robot robots/uart-loopback.sql --input scripts/uart-loopback.mt --timeout 10
+```
+
+完整规则见 [驱动参考](skills/pymybot-scripting/references/driver-lua.md)。
 
 ## 安全边界
 
@@ -225,7 +255,11 @@ require_driver("uart", {
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
 | Agent 外部 MCP 工具 | 逐次确认 | `--allow-mcp-tools`（外部服务不是沙箱） |
 
-**Shell 默认尝试 bubblewrap（可用时）；不可用时退回工作区牢笼，且两者都需显式启用与审批。** Lua 是可信代码；只运行审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
+**Agent Shell 默认尝试 bubblewrap（可用时）；不可用时退回工作区牢笼，两者都需显式启用与审批。**
+Python / Lua 驱动是可信进程内代码，**不是沙箱**。Python 导入及直接原生 I/O 不受限制，
+上表的 HAL 权限不能约束这类直接访问。Python 的预算/取消是协作式的：长循环应调用
+`context.check()`；不能硬中断阻塞原生调用或不协作的 Python 循环。只运行审阅过的驱动；
+动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
 
 ## 兼容性
 
@@ -241,7 +275,7 @@ require_driver("uart", {
 
 ```text
 pymybot/                  Python 包：CLI、SQL、动作执行、HAL、Daemon、Agent、GUI、MCP
-modules/                  Lua 总线、驱动和公共库
+modules/                  Python 原生驱动、保留的 Lua 驱动和公共库
 robots/                   结构 SQL 示例（含虚拟设备）
 scripts/                  MT 动作示例
 skills/                   Agent 参考技能

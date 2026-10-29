@@ -103,6 +103,36 @@ def ftdi(monkeypatch):
     return instances
 
 
+def test_native_builtin_drivers_share_hal_transports(ftdi):
+    from pymybot.robot import Robot
+
+    sql = f'''
+CREATE TABLE I2C(name String, path String);
+INSERT INTO I2C(name,path) VALUES('i','{I2C_URL}');
+CREATE TABLE SPI(name String, path String, spi_mode Number, bits Number, speed Number, delay Number);
+INSERT INTO SPI(name,path,spi_mode,bits,speed,delay) VALUES('s','{SPI_URL}',3,8,500000,2);
+CREATE TABLE UART(name String, path String, baud Number);
+INSERT INTO UART(name,path,baud) VALUES('u','loop://',9600);
+CREATE TABLE HTTP(name String, base String);
+INSERT INTO HTTP(name,base) VALUES('h','http://127.0.0.1');
+CREATE TABLE Camera(name String);
+INSERT INTO Camera(name) VALUES('c');
+CREATE TABLE Shell(name String);
+INSERT INTO Shell(name) VALUES('sh');
+'''
+    with Robot(sql, allow_hardware=True) as robot:
+        assert {variable.kind for variable in robot.registry.values()} == {"python"}
+        assert all(variable.runtime._virtual is None for variable in robot.registry.values())
+        assert len(robot.hal._handles) == 6
+        i2c = robot.registry["i"]
+        spi = robot.registry["s"]
+        assert i2c.runtime.context.call("i2c_transfer", i2c.read()["fd"], 0x40, [0], 2) == [0, 1]
+        assert spi.runtime.context.call("spi_transfer", spi.read()["fd"], [0, 255], 2) == [255, 0]
+        assert spi.read()["delay"] == 2
+    assert not robot.hal._handles and not robot.hal._buses
+    assert len(ftdi) == 2 and all(device.terminated == 1 for device in ftdi)
+
+
 def test_ftdi_i2c_atomic_shared_and_close(manager, ftdi):
     a = manager.call("i2c_open", I2C_URL)
     b = manager.call("i2c_open", I2C_URL)

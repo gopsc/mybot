@@ -1,14 +1,42 @@
-# 驱动模块（.lua）
+# 驱动模块（Python / Lua）
 
 技能 `pymybot-scripting` 参考文件。仓库根为 `mybot/`（Python 主线）。
-实现：`pymybot/runtime.py`（LuaState 沙箱与 `__hal_call` 桥）、`pymybot/hardware.py`
-（生命周期与 controller/trigger 转发）、`modules/lib/`（驱动框架与 HAL）。
+实现：`pymybot/native.py`（Python 模块与 `Driver(context)`）、`pymybot/runtime.py`
+（共享 HAL 桥与 LuaState）、`pymybot/hardware.py`（生命周期与 controller/trigger 转发）、
+`modules/lib/`（Lua 驱动框架与 HAL）。
+
+## Python 原生入口与 SQL 选择
+
+- 普通表名选择 `<表名>.py` / `<表名>.lua`，`Alias` / `Vars` / `Daemon` 除外。
+  按模块根顺序逐根查找（`--module-path` 可重复），**每根内 `.py` 优先于 `.lua`**；
+  较早根的 Lua 优先于较晚根的 Python。无需新增 SQL 语言列。
+- 每个 SQL 行在激活时独立执行模块源码、创建 `Driver(context)`，模块全局与实例状态隔离；
+  不隔离进程，普通 Python 导入仍可共享包状态。
+- 必须实现 `build(self, data)`、`call(self, data)`；可选 `read(self, data)`（缺省回退到
+  `call`）和 `destroy(self, data)`（尽力清理）。`data` 是已解析元数据、动作参数、触发结果
+  合成的字典，`mode` 是本次入口名。返回非空、可转 JSON 的字典；`result` 可省略，或以
+  `"OK"` 表示成功、`"ERR"` + `message` 表示失败；不要返回裸标量、空字典或 `None`。
+- `context.call(operation, *args)` 使用宿主 HAL 操作名，例如 `uart_write` / `uart_read`、
+  `i2c_transfer` / `spi_transfer`、`close_handle` / `sleep_ms`；不是下文的 Lua 便利函数名。
+  字节数组使用 Python list（索引从 0 起）；保留既有权限、句柄归属/释放和取消检查。
+- `context.check()` 检查协作预算，长循环应主动调用。Python 驱动是可信进程内代码，
+  **不是沙箱**：导入、直接原生 I/O 不受限制；超时/取消不能硬中断阻塞原生调用或不协作的
+  Python 循环。`--allow-hardware` 只约束 HAL 路径，不限制直接宿主访问。
+- `check` 只编译 Python 源码，不执行模块、导入、构造器或生命周期方法；入口是否齐全在激活时检查。
+- I2C/SPI/UART/HTTP/Camera/Shell 普通表已迁为 Python；HAL 总线句柄仍与 Lua 器件驱动共享。
+  I2C/SPI/UART 通过 `LUA_VIRTUAL_DRIVER` 声明保留的 Lua 虚拟实现：`proto=virt` 或 `virt-*`
+  路径显式走该实现并禁止物理访问；不是 Python 失败后的兜底。其他原生模块不会自动获得 Lua 虚拟模型。
+  **既有 Daemon chunk 仍只加载 Lua 驱动**；若 `driver` / `devices` 按根顺序选中 Python，静态检查直接拒绝。
+
+可运行的 Python + SQL + MT 回环示例见 [README](../../../README.md#脚本示例)。
+以下章节专述保留的 **Lua** 驱动协议与工具。
 
 ## 1. 生命周期与运行环境
 
-- **普通硬件变量各有独立 Lua 状态**（LuaJIT 2.1）。多器件 Daemon 在一个状态中为各器件
+- **普通 Lua 硬件变量各有独立 Lua 状态**（LuaJIT 2.1）。多器件 Daemon 在一个状态中为各器件
   创建独立环境；`require_driver` 将入口绑定到调用者环境，实例状态隔离，HAL/helper 共享。
-- 沙箱：`python` / `io` / `debug` 被删；`package.loaders` 受限；拒绝 Lua 字节码；
+- 环境收紧（**不是安全沙箱**）：移除 `python` / `debug`，`io` 仅保留 stderr；
+  `package.loaders` 受限，拒绝 Lua 字节码；LuaJIT FFI 仍可用，只运行审阅过的驱动。
   单文件 ≤8 MiB；指令计数钩子 + JIT 开关实现协作预算（阻塞的原生 I/O 不可中断）。
 - 文件加载：宿主注入 `__mpath`，`__mpath.resolve("lib/xxx.lua")` 把模块相对路径解析为
   实际文件；驱动内 `dofile` / `loadfile` 受同一解析器约束。

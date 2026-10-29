@@ -12,7 +12,7 @@ from pathlib import Path
 from .actions import ActionRunner
 from .errors import ControllerError, DriverError, ScriptError
 from .expr import Expression, expr_body
-from .hardware import Alias, Budget, FLOW, LuaVariable, Metadata, Number, Registry, Struct, safe_ident
+from .hardware import Alias, Budget, DriverVariable, FLOW, Metadata, Number, Registry, Struct, safe_ident
 from .include import expand_includes
 from .matrix import Matrix, parse_matrices, struct_name
 from .paths import asset_path
@@ -103,6 +103,17 @@ class Robot:
                 return candidate
         raise ScriptError(f"Lua module not found: {relative}")
 
+    def _driver(self, name):
+        safe_ident(name)
+        for root in self.module_paths:
+            for suffix in (".py", ".lua"):
+                candidate = root / (name + suffix)
+                if candidate.is_symlink():
+                    raise ScriptError(f"Symlink module rejected: {candidate}")
+                if candidate.is_file():
+                    return candidate
+        raise ScriptError(f"Driver module not found: {name}.py or {name}.lua")
+
     @staticmethod
     def _rows(tables):
         result = {}
@@ -129,6 +140,7 @@ class Robot:
         uart_paths = {}
         claims = {}
         paths = {}
+        checked_python = set()
         for name, (table, row) in rows.items():
             values = {col: table.inherited(row, j) for j, col in enumerate(table.header)}
             if table.name in {"I2C", "SPI", "UART"}:
@@ -136,17 +148,20 @@ class Robot:
             elif table.name == "HTTP":
                 paths[name] = values.get("base", "")
             if table.name not in {"Alias", "Vars", "Daemon"}:
-                safe_ident(table.name)
-                self._module(table.name + ".lua")
+                path = self._driver(table.name)
+                if path.suffix == ".py" and path not in checked_python:
+                    from .native import compile_driver
+                    compile_driver(path)
+                    checked_python.add(path)
             if table.name == "Daemon":
                 from .daemon import validate_config
                 config = validate_config({k: v for k, v in values.items() if v != "-"})
                 self._module(config["chunk"])
-                if "driver" in config:
-                    self._module(config["driver"] + ".lua")
-                for device in config.get("devices", "").split("|"):
-                    if device:
-                        self._module(device.split("@", 1)[0] + ".lua")
+                drivers = [config["driver"]] if "driver" in config else []
+                drivers.extend(device.split("@", 1)[0] for device in config.get("devices", "").split("|") if device)
+                for driver in drivers:
+                    if self._driver(driver).suffix != ".lua":
+                        raise ScriptError(f"Lua daemon requires a Lua driver, not Python: {driver}")
             if table.name == "Alias" and "alias" not in values:
                 raise ScriptError("Alias matrix has no 'alias' column")
             if table.name == "Vars":
@@ -198,7 +213,8 @@ class Robot:
                         driver, address, *_ = device.split("@")
                         consumers.append((driver, path, address, f"{name}[{index}]"))
             for driver, bus_path, address, consumer in consumers:
-                source = self._module(driver + ".lua").read_text(encoding="utf-8")
+                path = self._module(driver + ".lua") if table.name == "Daemon" else self._driver(driver)
+                source = path.read_text(encoding="utf-8")
                 if not re.search(r"^[ \t]*SINGLE_CONSUMER\b", source, re.MULTILINE):
                     continue
                 try:
@@ -231,6 +247,10 @@ class Robot:
         from .runtime import LuaState
         return LuaState(self.module_paths, self.hal, self.stop_event, allow_hardware=self.allow_hardware, **kwargs)
 
+    def _new_python_runtime(self):
+        from .native import PythonState
+        return PythonState(self.module_paths, self.hal, self.stop_event, allow_hardware=self.allow_hardware)
+
     def _assemble(self, rows, names):
         created = []
         for name, (table, row) in rows.items():
@@ -253,7 +273,9 @@ class Robot:
                     if flow and value != "-":
                         (controllers if flow.group(1) == "controller" else triggers).append(self.registry.require(value))
                         self.registry.flow_refs.add(value)
-                var = LuaVariable(name, self._module(table.name + ".lua"), meta, controllers, triggers, self._new_runtime)
+                path = self._driver(table.name)
+                factory = self._new_python_runtime if path.suffix == ".py" else self._new_runtime
+                var = DriverVariable(name, path, meta, controllers, triggers, factory)
                 self._metas[name] = meta
             self.registry.add(var)
             created.append(name)
@@ -380,13 +402,13 @@ class Robot:
                     else:
                         var = Alias(name, value)
                     self.registry.override(name, var)
-                lua_vars = [var for var in self.registry.values() if var.kind == "lua"]
-                for var in lua_vars:
+                driver_vars = [var for var in self.registry.values() if isinstance(var, DriverVariable)]
+                for var in driver_vars:
                     var.budget = budget
                 try:
                     return ActionRunner(self.registry, budget).run(matrices)
                 finally:
-                    for var in lua_vars:
+                    for var in driver_vars:
                         var.budget = None
 
     def query_sql(self, sql):
@@ -473,7 +495,7 @@ class Robot:
         return removed
 
     def _refresh_flow_refs(self):
-        self.registry.flow_refs = {target.name for var in self.registry.values() if var.kind == "lua" for target in var.controllers + var.triggers}
+        self.registry.flow_refs = {target.name for var in self.registry.values() if isinstance(var, DriverVariable) for target in var.controllers + var.triggers}
 
     def apply_sql(self, sql, *, cancel=None):
         with self._lock:
@@ -534,14 +556,14 @@ class Robot:
                 action = candidate.get("Action")
                 if action and len(action.rows) > 1:
                     action_budget = Budget(self.stop_event, 180, cancel)
-                    lua_vars = [var for var in self.registry.values() if var.kind == "lua"]
-                    for var in lua_vars:
+                    driver_vars = [var for var in self.registry.values() if isinstance(var, DriverVariable)]
+                    for var in driver_vars:
                         var.budget = action_budget
                     try:
                         with self.registry.session():
                             ActionRunner(self.registry, action_budget).dispatch(action)
                     finally:
-                        for var in lua_vars:
+                        for var in driver_vars:
                             var.budget = None
                 if not delete_first:
                     self._remove_variables(removed, budget)

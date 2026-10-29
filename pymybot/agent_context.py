@@ -125,7 +125,10 @@ class ProjectContext:
         for root in self.module_paths:
             if not root.is_dir():
                 continue
-            names = _relative_names(root, "*.lua", MAX_MODULE_ENTRIES)
+            names = sorted(
+                name for suffix in (".py", ".lua")
+                for name in _relative_names(root, "*" + suffix, MAX_MODULE_ENTRIES)
+            )[:MAX_MODULE_ENTRIES]
             if names:
                 lines.append(f"Drivers in {root.name}: " + ", ".join(names))
         return lines

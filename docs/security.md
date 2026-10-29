@@ -16,7 +16,7 @@ operator must accept.
 ```mermaid
 flowchart LR
     MODEL["Model output<br/>(untrusted)"] --> AGENT["Agent loop"]
-    SCRIPT["SQL / MT / Lua<br/>(operator-authored)"] --> RUNTIME["Robot runtime"]
+    SCRIPT["SQL / MT / Python / Lua<br/>(operator-authored)"] --> RUNTIME["Robot runtime"]
     AGENT -->|approved tools| EXEC["Agent executor"]
     EXEC --> RUNTIME
     RUNTIME --> HAL
@@ -32,9 +32,30 @@ flowchart LR
 | Model → network | Non-loopback HTTP requires `--allow-hardware`; redirects are refused; URL credentials/query/fragment are rejected. Agent web tools are separate and opt-in: HTTPS only, private/loopback/link-local targets refused, every redirect re-validated, text-only bodies bounded to 512 KiB, and SearXNG is the only search provider. |
 | MCP client → host | A stdio MCP server is operator-configured host code, not a sandbox. Every external tool call is approval-gated unless `--allow-mcp-tools`; results are bounded and failures are reported as unknown. |
 | MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware`, `--read-var` and `--camera-var` stay separate gates. Resources never grant execution. |
-| Scripts → Lua | Lua is trusted code. LuaJIT FFI is available; only run reviewed drivers. |
+| Scripts → Python / Lua | Both are trusted in-process code. Python imports/direct native I/O are unrestricted; LuaJIT FFI is available. Neither is a security sandbox. |
 | Driver → device | `active`/`build`/`destroy`/`sample` may write hardware even when they appear read-only. |
 | Agent → logs | Final JSON excludes arguments, secrets and images; diagnostics are escaped. Session transcripts under `~/.mybot/sessions` do contain tool arguments, bounded results and images; API keys in environment variables are not read into them. See [`cli.md`](cli.md#session-transcripts). |
+
+## Native driver trust
+
+An ordinary SQL table selects `<Table>.py` before `<Table>.lua` **within each
+configured root**, in root order. Review both the selected source and root order:
+a Python file can supersede a same-root Lua driver. `check` compiles Python source
+without executing it; it does not validate constructor behavior, imports, required
+methods or safety. Activation executes a separate module and `Driver(context)`
+instance per row, not a separate process or sandbox; imported packages can share state.
+
+The native contract requires `build(data)` / `call(data)`, with optional `read(data)`
+(fallback to `call`) / `destroy(data)`, returning a nonempty dictionary with optional
+`result: "OK"` or `"ERR"`. `context.call(operation, *args)` retains HAL permission,
+handle ownership/cleanup and cancellation checks. These checks do **not** constrain
+Python imports or direct file, network, subprocess or native I/O. `--allow-hardware`
+is a HAL gate, not a restriction on trusted Python code's host-account privileges.
+
+I2C/SPI/UART/HTTP/Camera/Shell ordinary-table drivers use Python with the existing
+HAL; native bus handles remain usable by Lua device drivers. I2C/SPI/UART explicitly
+route virtual declarations to retained Lua implementations with physical access
+disabled. Existing Daemon chunks remain Lua-only and reject Python-selected drivers.
 
 ## System prompt ownership
 
@@ -56,8 +77,11 @@ closed as a deliberate design decision, not an implementation gap.
 
 ## Denial of service and physical safety
 
-- Instruction budgets, wall-clock timeouts, bounded outputs and image limits
-  exist, but cancellation cannot interrupt a blocking native driver call.
+- Lua instruction budgets, wall-clock timeouts, bounded outputs and image limits
+  exist. Python drivers use cooperative `context.check()` / HAL checks; call
+  these regularly in long loops. Timeouts/cancellation cannot forcibly interrupt
+  a blocking native call **or an uncooperative Python loop**. They are not a hard
+  execution limit or a safety stop.
 - A dispatched action is never claimed to be rolled back. If an exception
   occurs after dispatch, the result is “unknown”; the operator must inspect the
   robot.
@@ -81,4 +105,5 @@ a public issue for an exploitable problem.
   camera images must not be kept on disk.
 - Use a private model endpoint or a local model for sensitive data.
 - Pin releases by SHA-256; verify `SHA256SUMS`.
-- Review every Lua driver and skill before use.
+- Review every Python/Lua driver, its imports and every skill before use; keep
+  trusted module roots out of agent-writable locations.

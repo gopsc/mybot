@@ -19,7 +19,7 @@ description: Reference for the pymybot three-layer robot scripting stack — SQL
 | --- | --- |
 | 写/改结构脚本、Daemon 表配置、排查加载报错 | `references/structure-sql.md` |
 | 写/改动作脚本、表达式、@if/@while、Include/Merge | `references/action-mt.md` |
-| 写/改 Lua 驱动、HAL 调用、drv_common 工具 | `references/driver-lua.md` |
+| 写/改 Python/Lua 驱动、HAL 调用、drv_common 工具 | `references/driver-lua.md` |
 | 写虚拟器件模型 `*_VIRT`、`proto='virt'` | `references/virt-model.md` |
 | Daemon 后台采样、滤波/监视消费者 | `references/daemon.md` |
 | 验证流程、常见报错对照、速查表 | `references/workflow-errors.md` |
@@ -34,7 +34,7 @@ references 内的相对路径均以仓库根 `mybot/` 为基准。
 3. 一切引用先声明后使用：`$变量`、`$(表达式)`、controller/trigger 列都只认先前声明的变量。
 4. 驱动返回值必须是非空表，含 `result` 键时必须恰为 `"OK"`；失败返回 `err("原因")`。
 5. 数值入参一律过 `finite_of`/`int_or`/`num_or`——NaN 是 truthy，`tonumber(v) or def` 挡不住。
-6. 每张普通表名对应 `modules/<表名>.lua`；表名不带连字符，变量名（name 列的值）可带。
+6. 普通表对应 `modules/<表名>.py` 或 `.lua`：逐根查找，同根 Python 优先；原生入口是 `Driver(context)`，详见驱动参考。表名不带连字符。
 7. `proto='virt'` 找不到内嵌 `*_VIRT` 模型会响亮报错，**绝不静默回落真机**；
    虚拟与真机用分别命名的 SQL。
 8. `destroy` 是尽力释放：资源不可用就跳过动作、仍返回 OK。

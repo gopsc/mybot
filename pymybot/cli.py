@@ -415,12 +415,12 @@ def doctor():
     from .sandbox import backend_status
     checks.append(backend_status())
 
-    suffixes = {"modules": ".lua", "robots": ".sql", "scripts": ".mt", "skills": ".md"}
+    suffixes = {"modules": (".py", ".lua"), "robots": (".sql",), "scripts": (".mt",), "skills": (".md",)}
     assets = {}
-    for name, suffix in suffixes.items():
+    for name, extensions in suffixes.items():
         path = asset_path(name)
-        files = list(path.rglob("*" + suffix)) if path.is_dir() else []
-        assets[name] = {"path": str(path), "exists": path.is_dir(), "files": len(files)}
+        count = sum(1 for suffix in extensions for _ in path.rglob("*" + suffix)) if path.is_dir() else 0
+        assets[name] = {"path": str(path), "exists": path.is_dir(), "files": count}
     assets_ok = all(item["exists"] and item["files"] for item in assets.values())
 
     python_ok = sys.version_info >= (3, 11)
