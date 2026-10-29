@@ -17,6 +17,25 @@ python -m pip install -e ".[agent,test]"
 
 Then choose the same interpreter in **设置**.
 
+## `pymybot mcp` says MCP dependencies are unavailable
+
+The MCP SDK is optional. Install it into the interpreter that starts the server:
+
+```sh
+python -m pip install -e ".[mcp]"
+```
+
+For the agent’s external MCP client, install `.[agent,mcp]`. Restart the client
+after upgrading so it launches the new process.
+
+## An external MCP tool was denied or reported `unknown`
+
+Denied means the operator (or the missing approval channel) rejected the call
+before it ran; do not retry or work around it. `unknown` means the call may
+already have had side effects; inspect the host and the MCP server before
+restarting. External MCP servers run with host-user permissions and are not a
+sandbox. See [mcp.md](mcp.md).
+
 ## Can I use pymybot without any API key?
 
 Yes. `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, the

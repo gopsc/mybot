@@ -27,11 +27,13 @@ def preflight(mode):
         require(importlib.util.find_spec("pydantic_ai") is None,
                 "Base CI must not have pydantic_ai installed")
     else:
-        # Missing agent dependencies must fail rather than silently skip integration tests.
+        # Missing agent/MCP dependencies must fail rather than silently skip tests.
         for name in ("pydantic_ai", "pymybot.agent", "pytest", "openai", "anthropic",
                      "pydantic_ai.models.function", "pydantic_ai.models.openai",
                      "pydantic_ai.models.anthropic", "pydantic_ai.providers.openai",
-                     "pydantic_ai.providers.anthropic", "pydantic_ai.providers.deepseek"):
+                     "pydantic_ai.providers.anthropic", "pydantic_ai.providers.deepseek",
+                     "mcp", "pymybot.mcp_server", "pymybot.mcp_client",
+                     "pydantic_ai.mcp"):
             importlib.import_module(name)
     print(f"{mode} dependency preflight passed", flush=True)
 

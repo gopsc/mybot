@@ -103,6 +103,8 @@ def cli_args(
         if scripts_dir:
             args.append(f"--scripts-dir={scripts_dir}")
         return args
+    if command in {"doctor", "sessions"}:
+        return args
     if not str(robot).strip():
         raise ValueError(f"{command} requires a structure file")
     args.append(f"--robot={robot}")
@@ -134,6 +136,38 @@ def cli_args(
         )
     if allow_hardware and command in {"run", "sample", "apply-sql"}:
         args.append("--allow-hardware")
+    return args
+
+
+def sessions_args(*, delete=(), prune=False, keep=20, older_than=None,
+                  dry_run=False, yes=False):
+    """Build the argv for ``pymybot sessions`` (list, delete or prune).
+
+    Deletion and pruning need ``--yes``; ``--dry-run`` previews the same set.
+    ``--keep``/``--older-than`` only apply to ``--prune``.
+    """
+    args = ["-m", "pymybot", "sessions"]
+    if prune and delete:
+        raise ValueError("choose --prune or --delete")
+    if delete:
+        for ident in delete:
+            if not str(ident).strip():
+                raise ValueError("session ids must not be empty")
+            args.append(f"--delete={ident}")
+    if prune:
+        args.append("--prune")
+        args.append(f"--keep={int(keep)}")
+        if older_than is not None:
+            args.append(f"--older-than={int(older_than)}")
+    if delete or prune:
+        if dry_run and yes:
+            raise ValueError("choose --dry-run or --yes")
+        if dry_run:
+            args.append("--dry-run")
+        elif yes:
+            args.append("--yes")
+        else:
+            raise ValueError("deletion requires --yes or --dry-run")
     return args
 
 

@@ -306,7 +306,9 @@ class Server:
 
     async def m_initialize(self, ident, params, cancel):
         return {"protocol": PROTOCOL, "version": __version__,
-                "agent": self.enable_agent and agent_available(), "status": self.status()}
+                "agent": self.enable_agent and agent_available(),
+                "mcp": importlib.util.find_spec("mcp") is not None,
+                "status": self.status()}
 
     async def m_session_status(self, ident, params, cancel):
         return self.status()
@@ -498,6 +500,13 @@ class Server:
             "vars": params.bindings("vars"),
             "timeout": params.seconds("timeout", 180), "maxRequests": params.integer("maxRequests", 1, 100, 8),
             "maxToolCalls": params.integer("maxToolCalls", 1, 1000, 16),
+            "historyTurns": params.integer("historyTurns", 1, 20, 6),
+            "maxHistoryBytes": params.integer("maxHistoryBytes", 64 * 1024, 64 * 1024 * 1024,
+                                              4 * 1024 * 1024),
+            "mcpConfig": params.text("mcpConfig", cap=4096), "allowMcpTools": params.flag("allowMcpTools"),
+            "workspaceDir": params.text("workspaceDir", cap=4096),
+            "enableShell": params.flag("enableShell"), "allowShell": params.flag("allowShell"),
+            "allowFileWrites": params.flag("allowFileWrites"),
         }
         self.require_owner("agent")
         if self.agent_lock.locked():
@@ -545,11 +554,28 @@ class Server:
         from .agent_executor import RobotExecutor
         from .agent_skills import SkillsLibrary, default_skills_root
         from .session_log import create_session_log
+        workspace = Path(key["workspaceDir"]).absolute() if key["workspaceDir"] else None
+        if key["enableShell"] and workspace is None:
+            raise AgentConfigurationError("Shell tools require a workspace; no model request was sent")
+        if key["allowShell"] and not key["enableShell"]:
+            raise AgentConfigurationError("allowShell requires enableShell; no model request was sent")
+        if key["allowFileWrites"] and workspace is None:
+            raise AgentConfigurationError("File writes require a workspace; no model request was sent")
         config = AgentConfig(model=key["model"] or os.environ.get("MYBOT_MODEL", ""),
                              base_url=key["baseUrl"] or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=key["apiKeyEnv"], timeout=key["timeout"],
                              request_limit=key["maxRequests"], tool_calls_limit=key["maxToolCalls"],
-                             allow_actions=key["allowActions"])
+                             history_turns=key["historyTurns"], history_bytes=key["maxHistoryBytes"],
+                             allow_actions=key["allowActions"],
+                             allow_shell=key["allowShell"], allow_file_writes=key["allowFileWrites"],
+                             mcp_config=key["mcpConfig"] or None,
+                             allow_mcp_tools=key["allowMcpTools"])
+        from .mcp_client import load_servers
+        try:
+            mcp_servers = load_servers(config.mcp_config)
+        except Exception as exc:
+            raise AgentConfigurationError(
+                f"Cannot load MCP configuration: {exc}; no model request was sent") from None
         model, client = create_model(config)
         executor = None
         session_log = None
@@ -560,14 +586,17 @@ class Server:
             executor = RobotExecutor(key["robot"], module_paths=key["modulePaths"] or None,
                                      camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"],
                                      allow_hardware=key["allowHardware"], read_vars=key["readVars"],
-                                     camera_vars=key["cameraVars"], vars=key["vars"], skills=skills)
+                                     camera_vars=key["cameraVars"], vars=key["vars"], skills=skills,
+                                     workspace_dir=workspace, enable_shell=key["enableShell"])
 
             async def confirm(name, arguments):
                 reply = await self.ask_client("confirm", {"tool": name, "arguments": arguments})
                 return isinstance(reply, dict) and reply.get("approved") is True
 
             session = AgentSession(executor, model, config, confirm=confirm, read_vars=key["readVars"],
-                                   camera_vars=key["cameraVars"], skills=skills, session_log=session_log)
+                                   camera_vars=key["cameraVars"], skills=skills, session_log=session_log,
+                                   workspace=workspace is not None, enable_shell=key["enableShell"],
+                                   mcp_servers=mcp_servers)
             return {"session": session, "client": client}
         except BaseException as exc:
             try:

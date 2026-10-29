@@ -319,6 +319,51 @@ def list_sessions(root=None):
     return sorted(sessions, key=lambda item: (item["modified"], item["id"]), reverse=True)
 
 
+def delete_sessions(ids, dry_run=False, root=None):
+    """Delete named transcripts with the same checks as ``prune_sessions``.
+
+    The caller is expected to confirm interactively; this function never
+    follows symlinks and never removes an active session.
+    """
+    if not isinstance(ids, (list, tuple)) or not 0 < len(ids) <= MAX_KEEP:
+        raise ValueError(f"ids must contain 1..{MAX_KEEP} session names")
+    if type(dry_run) is not bool:
+        raise ValueError("dry_run must be a boolean")
+    base = Path(root).expanduser() if root is not None else session_root()
+    known = {item["id"]: item for item in list_sessions(base)}
+    deleted, freed, skipped, errors = [], 0, [], []
+    for ident in dict.fromkeys(ids):
+        if not isinstance(ident, str) or not _SESSION_NAME.fullmatch(ident) or ident not in known:
+            errors.append(str(ident))
+            continue
+        item = known[ident]
+        directory = Path(item["path"])
+        if item["active"]:
+            skipped.append(ident)
+            continue
+        if (directory.parent != base or directory.is_symlink()
+                or not _SESSION_NAME.fullmatch(directory.name)
+                or not (directory / "meta.json").is_file()):
+            errors.append(ident)
+            continue
+        if not dry_run:
+            try:
+                shutil.rmtree(directory)
+            except OSError:
+                errors.append(ident)
+                continue
+        deleted.append(ident)
+        freed += item["bytes"]
+    return {
+        "root": str(base),
+        "dry_run": dry_run,
+        "deleted": deleted,
+        "bytes_freed": freed,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+
 def prune_sessions(keep=20, older_than_days=None, dry_run=False, root=None):
     """Delete sessions beyond the newest ``keep``, optionally only if old.
 

@@ -7,16 +7,18 @@ scripts — with a CLI, a desktop GUI and an AI agent.**
 
 ![pymybot GUI](screenshots/gui.png)
 
-## Three entry points
+## Four entry points
 
 | Entry | Use it for | Command |
 | --- | --- | --- |
 | GUI | Desktop debugging, demos, per-tool approval | `pymybot` |
 | CLI controller | CI/CD, scripts, no model required | `pymybot check / run / sample / ...` |
 | AI agent | Natural-language robot control | `pymybot --no-gui --robot ... --task "..."` |
+| MCP | Claude Desktop, Cursor and other MCP clients | `pymybot mcp --robot ...` |
 
 A long-lived `serve` backend exposes the same session over stdio JSON-RPC 2.0
-for IDE and custom front-ends.
+for IDE and custom front-ends. The MCP server is a read-only-by-default
+protocol adapter over the same executor; see [mcp.md](mcp.md).
 
 ## Quick start
 

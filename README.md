@@ -13,15 +13,17 @@
 
 > 截图来自 PySide6 窗口与本地回环模拟模型：Agent 列出硬件，经审批执行虚拟动作，再返回结果。
 
-## 三种入口
+## 四种入口
 
 | 入口 | 适合谁 | 命令 |
 | --- | --- | --- |
 | **GUI** | 桌面调试、演示、人工审批每一步 | `pymybot` |
 | **CLI 控制器** | CI/CD、脚本、无模型环境 | `pymybot check / run / sample / ...` |
 | **AI Agent** | 自然语言控制机器人 | `pymybot --no-gui --robot ... --task "..."` |
+| **MCP** | Claude Desktop、Cursor、其他 MCP 客户端 | `pymybot mcp --robot ...` |
 
 另有一个长驻 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
+`mcp` 与 `serve` 共用同一套执行器：工具回执、故障锁存和串行化规则完全一致。
 
 ## 为什么不是又一个“聊天壳”
 
@@ -91,6 +93,32 @@ export DEEPSEEK_API_KEY="sk-..."
 
 支持的模型提供商：`openai`、`openai-chat`、`anthropic`、`deepseek`。密钥只从环境变量读取；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
 
+Agent 还可以通过 `--mcp-config` 连接外部 MCP 服务，把它们的工具纳入同一套逐次审批：
+
+```sh
+.venv/bin/pip install -e ".[agent,mcp]"
+.venv/bin/python -m pymybot --no-gui \
+  --robot robots/relay-test.sql \
+  --task "列出硬件" \
+  --mcp-config ./mcp.json
+```
+
+`mcp.json` 使用 Claude Desktop/Cursor 的 `mcpServers` 格式。外部服务是宿主用户权限下的
+可信进程，不是沙箱；结果按 64 KiB 限界，异常回执标记为“结果未知”，不自动重试。
+
+### 4. 作为 MCP 服务端接入 Claude Desktop / Cursor
+
+```sh
+.venv/bin/pip install -e ".[mcp]"
+.venv/bin/python -m pymybot mcp \
+  --robot robots/relay-test.sql \
+  --scripts-dir scripts
+```
+
+默认只读：`list_hardware`、`query_sql`、`read_action_script` 等静态工具可用；执行脚本、
+读变量和抓图要显式加 `--allow-execution`，物理硬件再加 `--allow-hardware`。完整工具表、
+资源 URI 和客户端配置见 [docs/mcp.md](docs/mcp.md)。
+
 对话默认转录到 `~/.mybot/sessions`（含工具参数、受限结果与图片；环境变量中的密钥不会被主动读取）。转录只用于回看，不能恢复会话；用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，用 `pymybot sessions` 查看或 `pymybot sessions --prune --keep 20 --yes` 清理，详见 [docs/cli.md](docs/cli.md#session-transcripts)。
 
 ## 架构
@@ -134,6 +162,7 @@ flowchart LR
 | `apply-sql` | 对临时会话应用受限 SQL | 是 |
 | `agent` | PydanticAI 任务/REPL | 经审批 |
 | `serve` | 长驻 JSON-RPC 服务 | 经请求 |
+| `mcp` | 标准 MCP stdio 服务端 | 经 `--allow-execution` |
 | `doctor` | 环境、依赖、资产诊断 | 否 |
 | `sessions` | 列出或清理 `~/.mybot/sessions` 转录 | 否 |
 
@@ -141,12 +170,14 @@ flowchart LR
 
 ## GUI
 
-- 左侧：workspace、脚本/技能/模块路径、硬件树、权限与预算、模型摘要。
-- 右侧：对话、工具调用、日志双标签页；底部输入框 `Ctrl+Enter` 发送。
-- 危险工具逐次弹窗确认；`允许硬件` 和 `自动批准动作` 每次启动都重新确认，不落盘。
+- 左侧：workspace、脚本/技能/模块/MCP 配置、硬件树、权限与预算、模型摘要。
+- 右侧：对话、日志、资源三个标签页；资源页可预览脚本、技能和文档（Markdown 渲染、语法高亮、按 mtime 缓存）。
+- 管理控制台：菜单/工具栏提供命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、MCP 配置编辑器（同后端校验）、会话管理（查看/删除/清理）、环境诊断、文档与关于。
+- 流式输出、忙碌指示、重试上一任务、清空/复制对话；危险工具逐次弹窗确认。
+- `允许硬件`、`自动批准动作`、文件写入、Shell 和 MCP 自动批准都逐次启动确认，不落盘；文件/Shell 工具默认关闭。
 - GUI 只驱动一个 `serve` 子进程，不重复实现机器人逻辑；重启、取消和崩溃恢复都有测试覆盖。
 
-详见 [docs/gui.md](docs/gui.md)。
+详见 [docs/gui.md](docs/gui.md)，其中包含设置、资源预览、MCP 编辑器、会话管理和诊断截图。
 
 ## 脚本示例
 
@@ -198,6 +229,8 @@ require_driver("uart", {
 | Agent 动作/读取/拍照 | 逐次确认 | `--allow-actions` 或弹窗 |
 | Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |
 | Agent Shell | 关闭 | `--enable-shell` + `--allow-shell` |
+| MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
+| Agent 外部 MCP 工具 | 逐次确认 | `--allow-mcp-tools`（外部服务不是沙箱） |
 
 **Shell 不是沙箱，Lua 是可信代码。** 只运行审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
 
@@ -214,7 +247,7 @@ require_driver("uart", {
 ## 目录结构
 
 ```text
-pymybot/                  Python 包：CLI、SQL、动作执行、HAL、Daemon、Agent、GUI
+pymybot/                  Python 包：CLI、SQL、动作执行、HAL、Daemon、Agent、GUI、MCP
 modules/                  Lua 总线、驱动和公共库
 robots/                   结构 SQL 示例（含虚拟设备）
 scripts/                  MT 动作示例
@@ -234,6 +267,7 @@ tools/                    打包与 CI 辅助（PyInstaller spec、smoke 脚本�
 | 全部文档 | [docs/README.md](docs/README.md) |
 | 架构与数据流 | [docs/architecture.md](docs/architecture.md) |
 | CLI / JSON / serve | [docs/cli.md](docs/cli.md) |
+| MCP 服务端与客户端 | [docs/mcp.md](docs/mcp.md) |
 | GUI | [docs/gui.md](docs/gui.md) |
 | 开发与打包 | [docs/development.md](docs/development.md) |
 | 测试与 CI 通道 | [docs/testing.md](docs/testing.md) |

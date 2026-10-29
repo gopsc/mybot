@@ -84,6 +84,8 @@ Key invariants:
 | `pymybot/agent_executor.py` | Approval-gated tool implementations |
 | `pymybot/agent_workspace.py` | Bounded, link-safe workspace file tools and shell |
 | `pymybot/serve.py` | Long-lived stdio JSON-RPC 2.0 backend |
+| `pymybot/mcp_server.py` | Standard MCP stdio server over the same executor (read-only by default) |
+| `pymybot/mcp_client.py` | Operator `mcpServers` configuration for external agent tools |
 | `pymybot/gui/` | PySide6 front-end: protocol client, settings, approvals |
 | `pymybot/security.py` | Bounded reads and strict JSON output |
 | `pymybot/paths.py` | Source/frozen asset resolution |
@@ -96,19 +98,29 @@ flowchart TB
     U --> C[CLI]
     U --> A[Agent REPL]
     U --> S[serve JSON-RPC]
+    M[MCP client] -->|stdio JSON-RPC| X[mcp server]
+    U --> M
     G -->|spawn + stdio| S
     C --> R[Robot]
     A --> E[Agent executor]
     S --> E
+    X --> E
     E --> R
+    A -->|approved external tools| N[External MCP servers]
     R --> L[Lua drivers]
     L --> H[HAL]
 ```
 
 - **GUI** never executes robot logic itself; it drives one `serve` child process
   and marshals all callbacks onto the Qt GUI thread.
-- **Agent modes** execute tools through `AgentExecutor`, which runs hardware
+- **Agent modes** execute tools through `RobotExecutor`, which runs hardware
   work on a dedicated owner thread and asks for approval through a callback.
+  External MCP tools stay outside that owner thread and are surfaced by
+  PydanticAI toolsets, but approval, result bounding and transcripts use the
+  same session rules.
+- **MCP server mode** is a protocol adapter over `RobotExecutor`: the model is
+  absent, the operator passes static and execution switches at launch, and
+  stdout carries only MCP JSON-RPC.
 - **CLI controller mode** skips the model entirely and is suitable for CI.
 
 ## Asset and path resolution

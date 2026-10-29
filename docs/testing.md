@@ -9,6 +9,7 @@
 | Virtual devices | `tests/fixtures/virt/*.sql` + `*.mt` | Real driver build/call/destroy paths without hardware |
 | Robot integration | `tests/test_robot.py`, `tests/test_daemon.py` | Activation, inheritance, controllers, sampling |
 | Agent | `tests/test_agent*.py` | Offline model loop, approval, budgets, cleanup |
+| MCP | `tests/test_mcp_server.py`, `tests/test_mcp_client.py` | Real stdio MCP clients, permissions, resources, external tool gating |
 | Transcripts | `tests/test_session_log.py` | JSONL bounds, permissions, list/prune safety |
 | Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs |
 | Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
@@ -16,7 +17,8 @@
 The suite must run without physical hardware. The `test` extra includes
 PySide6; GUI tests use Qt's offscreen platform and run on headless CI. Agent
 tests are not allowed to silently skip when dependencies are missing in the
-agent channel—`ci_smoke.py agent` fails instead.
+agent channel—`ci_smoke.py agent` fails instead. The agent channel installs
+`.[agent,mcp,test]` so `tests/test_mcp*.py` run there rather than skip.
 
 ## General commands
 
@@ -33,7 +35,7 @@ python -m pytest --durations=10 -q
 | --- | --- | --- |
 | base | Ubuntu 3.11, 3.12, 3.13, 3.14 | No `pydantic_ai` installed; controller regression |
 | windows | Windows / 3.13 | faulthandler, UTF-8 and Qt behaviour |
-| agent | Ubuntu 3.11; Windows 3.13 | Offline model/agent integration |
+| agent | Ubuntu 3.11; Windows 3.13 | Offline model/agent integration + MCP server/client |
 | wheel | Ubuntu 3.11; Windows 3.13 | Build from sdist, install into clean venv |
 | quickstart | Ubuntu 3.14 | README commands actually run |
 | lint | Ubuntu | syntax/undefined names; no style churn |

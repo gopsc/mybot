@@ -17,7 +17,8 @@ import pytest
 from pymybot import cli
 from pymybot.gui import protocol as gui_protocol
 from pymybot.gui.config import GuiConfig, merge_args
-from pymybot.gui.protocol import CliCall, RpcError, ServeClient, cli_args, parse_result, resolve_python
+from pymybot.gui.protocol import (CliCall, RpcError, ServeClient, cli_args, parse_result,
+                                  resolve_python, sessions_args)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -93,6 +94,23 @@ def test_config_roundtrip_drops_runtime_grants(tmp_path):
     assert loaded.session_log is False
     assert loaded.vars == {}
     assert loaded.allow_hardware is False and loaded.allow_actions is False
+
+
+def test_config_keeps_tool_preferences_but_drops_grants(tmp_path):
+    path = tmp_path / "settings.json"
+    cfg = GuiConfig(workspace=str(tmp_path), mcp_config="mcp.json",
+                    enable_file_tools=True, enable_shell=True,
+                    allow_file_writes=True, allow_shell=True, allow_mcp_tools=True,
+                    history_turns=9, max_history_bytes=8 * 1024 * 1024)
+    cfg.store(path)
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert stored["enable_file_tools"] is True and stored["enable_shell"] is True
+    assert "allow_file_writes" not in stored and "allow_shell" not in stored
+    assert "allow_mcp_tools" not in stored
+    loaded = GuiConfig.load(path)
+    assert loaded.history_turns == 9 and loaded.max_history_bytes == 8 * 1024 * 1024
+    assert loaded.enable_file_tools and loaded.enable_shell
+    assert not loaded.allow_file_writes and not loaded.allow_shell and not loaded.allow_mcp_tools
 
 
 def test_config_rejects_hostile_values(tmp_path):
@@ -1116,3 +1134,248 @@ def test_run_gui_uses_existing_qapplication_and_returns_closed(ui, monkeypatch, 
 
     gui.QTimer.singleShot(20, close_window)
     assert gui.run_gui(SimpleNamespace(workspace_dir=str(tmp_path))) == {"closed": True}
+
+
+# -- management console -----------------------------------------------------
+def test_sessions_args_builds_safe_commands():
+    assert sessions_args() == ["-m", "pymybot", "sessions"]
+    assert sessions_args(delete=["a"], dry_run=True) == [
+        "-m", "pymybot", "sessions", "--delete=a", "--dry-run"]
+    assert sessions_args(prune=True, keep=3, older_than=7, yes=True) == [
+        "-m", "pymybot", "sessions", "--prune", "--keep=3", "--older-than=7", "--yes"]
+    for kwargs in ({"prune": True, "delete": ["a"], "yes": True},
+                   {"delete": ["a"], "dry_run": True, "yes": True},
+                   {"delete": ["a"]},
+                   {"delete": [""], "yes": True}):
+        with pytest.raises(ValueError):
+            sessions_args(**kwargs)
+
+
+def test_settings_cover_backend_budgets_and_permissions(ui):
+    gui, app = ui
+    dialog = gui.SettingsDialog(app, app.cfg, app.cfg.workspace, "")
+    try:
+        assert dialog.entries["mcp_config"].text() == app.cfg.mcp_config
+        assert dialog.history_turns.value() == app.cfg.history_turns
+        assert dialog.history_bytes.value() == app.cfg.max_history_bytes // 1024
+        dialog.file_tools.setChecked(True)
+        dialog.shell_tools.setChecked(True)
+        dialog.shell_grant.setChecked(True)
+        dialog.history_turns.setValue(9)
+        dialog.history_bytes.setValue(4096)
+        dialog._save()
+        assert dialog.values["enable_file_tools"] is True
+        assert dialog.values["enable_shell"] is True
+        assert dialog.values["allow_shell"] is True
+        assert dialog.values["history_turns"] == 9
+        assert dialog.values["max_history_bytes"] == 4096 * 1024
+    finally:
+        dialog.close()
+
+
+def test_send_forwards_workspace_shell_file_and_mcp_controls(ui):
+    gui, app = ui
+    client = attach_client(app)
+    app.cfg.mcp_config = str(ROOT / "mcp.json")
+    app.context_entries["mcp_config"].setText(str(ROOT / "mcp.json"))
+    app._confirm_grant = lambda kind: True
+    app.file_tools_toggle.setChecked(True)
+    app.file_writes_toggle.setChecked(True)
+    app.shell_tools_toggle.setChecked(True)
+    app.shell_grant_toggle.setChecked(True)
+    app.mcp_tools_toggle.setChecked(True)
+    app.history_box.setValue(9)
+    assert app._send("列出硬件")
+    method, params = client.requests[-1]
+    assert method == "agent.ask"
+    assert params["workspaceDir"] == str(Path(app.cfg.workspace).absolute())
+    assert params["allowFileWrites"] is True
+    assert params["enableShell"] is True and params["allowShell"] is True
+    assert params["allowMcpTools"] is True
+    assert params["historyTurns"] == 9
+    assert params["maxHistoryBytes"] == app.cfg.max_history_bytes
+
+
+def test_retry_resends_the_last_task(ui):
+    gui, app = ui
+    client = attach_client(app)
+    app.last_task = "列出硬件"
+    app._refresh_status()
+    assert app.composer_retry.isEnabled()
+    app.retry_task()
+    assert client.requests[-1][0] == "agent.ask"
+    assert client.requests[-1][1]["task"] == "列出硬件"
+
+
+def test_clear_chat_requires_confirmation(ui, interact):
+    gui, app = ui
+    app._chat_line("要清空的内容", "user")
+
+    def confirm(dialog, test):
+        assert isinstance(dialog, gui.QMessageBox)
+        test.mouseClick(dialog.button(gui.QMessageBox.StandardButton.Ok),
+                        gui.Qt.MouseButton.LeftButton)
+
+    interact(confirm)
+    app.clear_chat()
+    assert app.chat.toPlainText() == ""
+
+
+def test_resource_panel_previews_cached_scripts_and_skills(qapp, tmp_path):
+    from pymybot.gui.dialogs import ResourcePanel
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    action = scripts / "demo.mt"
+    action.write_text("@Action\nrelay0.test;\n1;\n@\n", encoding="utf-8")
+    skill = tmp_path / "skills" / "demo"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: demo skill\n---\n# 标题\n正文\n", encoding="utf-8")
+
+    panel = ResourcePanel()
+    try:
+        panel.set_roots(scripts, tmp_path / "skills")
+        panel.reload()
+        assert panel.tree.topLevelItemCount() >= 2
+        found = []
+        for group_index in range(panel.tree.topLevelItemCount()):
+            group = panel.tree.topLevelItem(group_index)
+            for child_index in range(group.childCount()):
+                found.append(group.child(child_index))
+        script_item = next(item for item in found if item.text(0) == "demo.mt")
+        panel.tree.setCurrentItem(script_item)
+        panel._on_select()
+        assert panel.preview.currentWidget() is panel.code
+        assert "@Action" in panel.code.toPlainText()
+        panel.index.read(panel._selected())
+        mtime = Path(script_item.toolTip(0)).stat().st_mtime
+        assert panel.index._cache[str(script_item.toolTip(0))][0] == mtime
+
+        panel.filter.setText("demo.mt")
+        assert not script_item.isHidden()
+        panel.filter.setText("no-such-resource")
+        assert script_item.isHidden()
+    finally:
+        panel.deleteLater()
+
+
+def test_mcp_dialog_validates_hides_secrets_and_saves(qapp, tmp_path):
+    from pymybot.gui.dialogs import McpConfigDialog
+
+    path = tmp_path / "mcp.json"
+    path.write_text(json.dumps({"mcpServers": {"demo": {
+        "command": "python", "args": ["-m", "demo"], "env": {"TOKEN": "s3cret"}}}}),
+        encoding="utf-8")
+    dialog = McpConfigDialog(None, str(path), base_dir=str(tmp_path))
+    try:
+        assert dialog.table.rowCount() == 1
+        assert dialog.table.item(0, 3).text() == "TOKEN"
+        assert "s3cret" not in dialog.status.text() and "校验通过" in dialog.status.text()
+        dialog.editor.setPlainText('{"mcpServers": {"bad name!": {"command": "python"}}}')
+        assert dialog.validate() is None and "校验失败" in dialog.status.text()
+        dialog.editor.setPlainText(json.dumps({"mcpServers": {"x": {
+            "command": "python", "args": []}}}))
+        dialog.save()
+        assert dialog.saved_path == str(path)
+        assert json.loads(path.read_text(encoding="utf-8"))["mcpServers"]["x"]["command"] == "python"
+    finally:
+        dialog.deleteLater()
+
+
+def _fake_session(root, name, robot, started):
+    directory = root / name
+    directory.mkdir(parents=True)
+    (directory / "meta.json").write_text(json.dumps({
+        "started_at": started, "robot": robot, "model": "openai:test", "mode": "serve",
+        "pid": 0, "version": "0.3.1"}), encoding="utf-8")
+    (directory / "transcript.jsonl").write_text(
+        '{"type":"session_start"}\n{"type":"session_end"}\n', encoding="utf-8")
+    return directory
+
+
+def test_sessions_dialog_lists_filters_deletes_and_prunes(qapp, tmp_path):
+    from pymybot.gui.dialogs import SessionsDialog
+
+    root = tmp_path / "sessions"
+    first = _fake_session(root, "20261028-090000-12345678", "robots/a.sql", "2026-10-28T09:00:00")
+    second = _fake_session(root, "20261029-120000-abcdef12", "robots/b.sql", "2026-10-29T12:00:00")
+    dialog = SessionsDialog(None, root=root, confirm=lambda *_: True)
+    try:
+        assert dialog.table.rowCount() == 2
+        dialog.filter.setText("b.sql")
+        assert dialog.table.isRowHidden(0) is True or dialog.table.isRowHidden(1) is True
+        dialog.filter.clear()
+        dialog.table.selectRow(0)
+        dialog.delete()
+        assert len(list(root.iterdir())) == 1
+        dialog.keep.setValue(1)
+        dialog.prune(True)
+        assert "预览" in dialog.status.text()
+        dialog.prune(False)
+        assert "没有可清理" in dialog.status.text()
+    finally:
+        dialog.deleteLater()
+
+
+def test_doctor_dialog_renders_injected_payload(qapp):
+    from pymybot.gui.dialogs import DoctorDialog
+
+    payload = {"version": "0.3.1", "python": "3.14", "platform": "linux", "healthy": True,
+               "checks": [{"name": "mcp", "label": "MCP", "status": "ok", "version": "1.30"}]}
+    dialog = DoctorDialog(None, doctor=lambda: payload)
+    try:
+        assert dialog.table.rowCount() == 1
+        assert "健康" in dialog.summary.text()
+        assert dialog.table.item(0, 1).text() == "ok"
+    finally:
+        dialog.deleteLater()
+
+
+def test_command_dialog_builds_argv_and_renders_contract(qapp, tmp_path):
+    from pymybot.gui.dialogs import CommandDialog
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "a.mt").write_text("@Action\n@\n", encoding="utf-8")
+    dialog = CommandDialog(None, python=sys.executable, cwd=str(tmp_path),
+                           robot=str(tmp_path / "robot.sql"),
+                           scripts_dir=str(scripts), timeout=30)
+    try:
+        dialog.command.setCurrentIndex(dialog.command.findData("run"))
+        dialog.script.setCurrentText("a.mt")
+        dialog.timeout.setValue(5)
+        argv = dialog.build_argv()
+        assert argv[:3] == ["-m", "pymybot", "run"]
+        assert f"--robot={tmp_path / 'robot.sql'}" in argv
+        assert "--input=a.mt" in argv and "--timeout=5.0" in argv
+
+        dialog._done({"code": 0, "json": {"ok": True, "command": "run", "outputs": [1]},
+                      "duration_ms": 12})
+        assert "outputs" in dialog.output.toPlainText()
+        assert "退出码 0" in dialog.status.text()
+
+        dialog.command.setCurrentIndex(dialog.command.findData("doctor"))
+        assert dialog.build_argv() == ["-m", "pymybot", "doctor"]
+
+        calls = []
+        dialog.command.setCurrentIndex(dialog.command.findData("sample"))
+        dialog.variable.setText("v0")
+        dialog.hardware.setChecked(True)
+        dialog.runner = lambda argv, cwd: calls.append(argv) or {"code": 0, "json": {"ok": True}}
+        dialog.confirm = lambda title, text: False
+        dialog.run()
+        assert calls == [] and dialog.run_button.isEnabled()
+
+        dialog.command.setCurrentIndex(dialog.command.findData("sample"))
+        dialog.hardware.setChecked(False)
+        dialog.runner = lambda argv, cwd: (calls.append(argv) or
+                                          {"code": 0, "json": {"ok": True}, "duration_ms": 1})
+        dialog.run()
+        for _ in range(100):
+            qapp.processEvents()
+            if calls:
+                break
+        assert calls and "--name=v0" in calls[0]
+    finally:
+        dialog.deleteLater()

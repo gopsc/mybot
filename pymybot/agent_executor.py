@@ -39,6 +39,7 @@ _NOT_EXECUTED = "Request was not executed. Check operator configuration and tool
 _TOOLS = {
     "list_hardware": (set(), set()),
     "list_action_scripts": (set(), set()),
+    "read_action_script": ({"script"}, {"script"}),
     "query_sql": ({"sql"}, {"sql"}),
     "run_action_script": ({"script"}, {"script", "vars"}),
     "read_variables": ({"names"}, {"names"}),
@@ -47,6 +48,7 @@ _TOOLS = {
     "read_skill": ({"name"}, {"name", "file"}),
     **WORKSPACE_TOOLS,
 }
+EXECUTION_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
 
 
 def _session_vars(values):
@@ -413,9 +415,10 @@ class RobotExecutor:
                 "error": {"type": type(exc).__name__,
                           "message": _UNKNOWN if executed else _NOT_EXECUTED}}
 
-    def _record(self, name, result):
+    def _record(self, name, result, *, control=False):
+        known = isinstance(name, str) and (name in _TOOLS or (control and name == "deactivate"))
         with self._records_lock:
-            self.records.append({"tool": name if isinstance(name, str) and name in _TOOLS else "unknown",
+            self.records.append({"tool": name if known else "unknown",
                                  **{k: result[k] for k in ("state", "ok", "executed")}})
             self.records[:] = self.records[-MAX_LIST:]
         return result
@@ -500,6 +503,36 @@ class RobotExecutor:
         return await self._wait(asyncio.wrap_future(self._pool.submit(self._start, deadline)),
                                 propagate=True)
 
+    def status(self):
+        """Cheap status snapshot; safe to call while an owner-thread call is queued."""
+        with self._records_lock:
+            last = self.records[-1] if self.records else None
+        return {"loaded": self._ready, "active": self._active,
+                "faulted": self._faulted, "interrupted": self._interrupted,
+                "last_receipt": last}
+
+    def _deactivate(self):
+        self._owner()
+        if not self._faulted:
+            self._cleanup()
+        return {"active": self._active, "faulted": self._faulted}
+
+    async def deactivate(self) -> dict:
+        """Release an idle robot without ending the session.
+
+        Reactivation happens on the next execution tool. This is not an
+        emergency stop and it never clears a latched fault.
+        """
+        if self._closing:
+            return self._record("deactivate", self._failure(SecurityError()), control=True)
+        try:
+            future = self._pool.submit(self._deactivate)
+        except Exception as exc:
+            return self._record("deactivate", self._failure(exc), control=True)
+        data = await self._wait(asyncio.wrap_future(future))
+        return self._record("deactivate", {"ok": True, "executed": False, "state": "completed", "data": data},
+                            control=True)
+
     @staticmethod
     def _arguments(name, arguments):
         if not isinstance(name, str) or name not in _TOOLS or type(arguments) is not dict:
@@ -510,6 +543,8 @@ class RobotExecutor:
         checked_text(dumps(arguments))
         if name in WORKSPACE_TOOLS:
             Workspace.validate(name, arguments)
+        elif name == "read_action_script":
+            _relative(arguments["script"])
         elif name == "query_sql":
             checked_text(arguments["sql"])
             if any(s.kind not in {"SHOW", "SELECT"} for s in parse_sql(arguments["sql"])):
@@ -604,6 +639,10 @@ class RobotExecutor:
                 data = self._hardware()
             elif name == "list_action_scripts":
                 data = self._scripts.listing(lambda: self._check(deadline))
+            elif name == "read_action_script":
+                path = self._scripts.path.joinpath(*_relative(arguments["script"]).split("/"))
+                self._scripts.check(path)
+                data = {"script": arguments["script"], "content": self._scripts.read(path)}
             elif name == "query_sql":
                 data = {"output": self._robot.query_sql(arguments["sql"])}
             elif name == "list_skills":

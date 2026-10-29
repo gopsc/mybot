@@ -9,125 +9,28 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QKeySequence, QPalette, QShortcut, QTextCharFormat, QTextCursor
+from PySide6.QtCore import QEventLoop, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase,
+                           QKeySequence, QShortcut, QTextCharFormat, QTextCursor)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTreeWidget, QTreeWidgetItem,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
+    QScrollArea, QSpinBox, QSplitter, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
+from ..paths import source_root
+from ..session_log import session_root
 from . import GuiUnavailable
 from .config import GuiConfig, config_home, default_workspace, merge_args
+from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog, PreviewDialog,
+                      ResourcePanel, SessionsDialog)
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
+from .theme import PALETTE, apply_theme as _apply_theme
 
 TITLE = "mybot · 智能体"
 MAX_DIALOG_ARGS = 4000
-PALETTE = {
-    "user": "#245cc5", "assistant": "#243247", "tool": "#536277",
-    "toolerr": "#b42332", "error": "#b42332", "system": "#59677a",
-}
-STYLESHEET = """
-QWidget { color: #243247; }
-QMainWindow, QDialog, QScrollArea > QWidget > QWidget { background: #f3f5f8; }
-QGroupBox {
-    background: #ffffff; border: 1px solid #d4dbe5; border-radius: 8px;
-    margin-top: 10px; padding: 12px 8px 8px; font-weight: 600;
-}
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #34445a; }
-QLabel#secondaryText { color: #59677a; }
-QScrollArea { border: none; }
-QLineEdit, QPlainTextEdit, QTreeWidget {
-    background: #ffffff; color: #243247; border: 1px solid #b8c3d2;
-    border-radius: 5px; padding: 4px 6px; placeholder-text-color: #59677a;
-    selection-background-color: #245cc5; selection-color: #ffffff;
-}
-QComboBox, QAbstractSpinBox {
-    background: #ffffff; color: #243247; min-height: 1.8em;
-    selection-background-color: #245cc5; selection-color: #ffffff;
-}
-QLineEdit:focus, QPlainTextEdit:focus, QTreeWidget:focus {
-    border: 1px solid #245cc5;
-}
-QLineEdit:disabled, QPlainTextEdit:disabled, QComboBox:disabled, QAbstractSpinBox:disabled {
-    color: #606d7e; background: #edf0f4; border-color: #d4dbe5;
-}
-QComboBox QAbstractItemView {
-    background: #ffffff; color: #243247;
-    selection-background-color: #245cc5; selection-color: #ffffff;
-}
-QPlainTextEdit#chatTranscript { padding: 10px; border: none; }
-QPlainTextEdit#eventLog { background: #f8fafc; padding: 10px; border: none; }
-QPushButton {
-    background: #ffffff; color: #34445a; border: 1px solid #b8c3d2;
-    border-radius: 5px; padding: 5px 10px;
-}
-QPushButton:hover { background: #edf3fc; border-color: #829ac0; }
-QPushButton:pressed { background: #dfe9f8; }
-QPushButton:default, QPushButton:focus { border: 2px solid #245cc5; padding: 4px 9px; }
-QPushButton[role="primary"] { background: #245cc5; color: #ffffff; border-color: #245cc5; }
-QPushButton[role="primary"]:hover { background: #1d4fae; border-color: #1d4fae; }
-QPushButton[role="primary"]:pressed { background: #193f8a; border-color: #193f8a; }
-QPushButton[role="primary"]:focus { border-color: #142e60; }
-QPushButton[role="danger"] { color: #b42332; }
-QPushButton[role="danger"]:hover { background: #fff1f2; border-color: #b42332; }
-QPushButton:disabled, QPushButton[role="primary"]:disabled, QPushButton[role="danger"]:disabled {
-    background: #edf0f4; color: #606d7e; border: 1px solid #d4dbe5; padding: 5px 10px;
-}
-QCheckBox { color: #34445a; spacing: 6px; padding: 3px 0; }
-QCheckBox:disabled { color: #606d7e; }
-QTabWidget::pane { background: #ffffff; border: 1px solid #d4dbe5; border-radius: 5px; }
-QTabBar::tab {
-    background: #edf0f4; color: #59677a; padding: 7px 18px;
-    border-bottom: 2px solid transparent; margin-right: 3px;
-}
-QTabBar::tab:selected { background: #ffffff; color: #245cc5; border-bottom-color: #245cc5; }
-QTabBar::tab:hover:!selected { background: #e5ebf4; color: #34445a; }
-QTreeWidget { alternate-background-color: #f3f6fa; }
-QTreeWidget::item { padding: 3px 0; }
-QHeaderView::section {
-    background: #edf2f8; color: #34445a; border: none;
-    border-bottom: 1px solid #d4dbe5; padding: 5px; font-weight: 600;
-}
-QSplitter::handle { background: #e3e8ef; }
-QSplitter::handle:hover { background: #b8c9e4; }
-QScrollBar:vertical { background: #edf2f8; width: 14px; margin: 0; }
-QScrollBar:horizontal { background: #edf2f8; height: 14px; margin: 0; }
-QScrollBar::handle { background: #b8c3d2; border: 3px solid #edf2f8; border-radius: 6px; }
-QScrollBar::handle:vertical { min-height: 28px; }
-QScrollBar::handle:horizontal { min-width: 28px; }
-QScrollBar::handle:hover { background: #829ac0; }
-QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
-QScrollBar::add-page, QScrollBar::sub-page { background: none; }
-QStatusBar { background: #edf2f8; color: #34445a; border-top: 1px solid #d4dbe5; }
-QStatusBar::item { border: none; }
-QStatusBar QLabel { padding: 3px 6px; }
-QToolTip { background: #243247; color: #ffffff; border: none; padding: 5px 8px; }
-"""
-
-
-def _apply_theme(window):
-    palette = QPalette()
-    for role, color in {
-        "Window": "#f3f5f8", "WindowText": "#243247", "Base": "#ffffff",
-        "AlternateBase": "#f3f6fa", "Text": "#243247", "Button": "#ffffff",
-        "ButtonText": "#34445a", "BrightText": "#ffffff", "Highlight": "#245cc5",
-        "Accent": "#245cc5", "HighlightedText": "#ffffff", "PlaceholderText": "#59677a",
-        "ToolTipBase": "#243247", "ToolTipText": "#ffffff",
-        "Link": "#245cc5", "LinkVisited": "#6547a3",
-        "Light": "#ffffff", "Midlight": "#edf0f4", "Mid": "#b8c3d2",
-        "Dark": "#606d7e", "Shadow": "#34445a",
-    }.items():
-        palette.setColor(getattr(QPalette.ColorRole, role), QColor(color))
-    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText):
-        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor("#606d7e"))
-    window.setPalette(palette)
-    window.setStyleSheet(STYLESHEET)
-    font = window.font()
-    font.setPointSizeF(max(font.pointSizeF(), 10))
-    window.setFont(font)
 
 
 def _brief(value, limit=160):
@@ -198,11 +101,17 @@ class App(QMainWindow):
         self.greeted = False
         self.serve_state = "未启动"
         self.agent_available = False
+        self.mcp_available = False
         self.busy = False
         self.turn_id = None
         self.turn_text = 0
         self.at_line_start = True
         self.pending_task = ""
+        self.last_task = ""
+        self.last_failed = False
+        self._resource_roots = None
+        self._confirmed_grants = set()
+        self._in_permission = False
         self._stopping = False
         self._lifecycle_lock = threading.Lock()
         self._clients = {}
@@ -233,6 +142,7 @@ class App(QMainWindow):
         self.setWindowTitle(TITLE)
         self.resize(1180, 780)
         self.setMinimumSize(900, 600)
+        self._build_menu()
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
@@ -240,15 +150,20 @@ class App(QMainWindow):
         layout.addLayout(toolbar)
         toolbar.addWidget(_button("打开工作区", self.pick_workspace))
         self.workspace_label = _label()
-        self.workspace_label.setMaximumWidth(220)
+        self.workspace_label.setMaximumWidth(160)
         toolbar.addWidget(self.workspace_label)
         toolbar.addWidget(_label("结构"))
         self.robot_box = QComboBox()
-        self.robot_box.setMinimumWidth(180)
+        self.robot_box.setMinimumWidth(160)
         self.robot_box.activated.connect(self.on_robot_changed)
         toolbar.addWidget(self.robot_box, 1)
-        toolbar.addWidget(_button("选择 SQL", self.pick_robot))
         toolbar.addWidget(_button("刷新", self.refresh_context))
+        self.manage_button = QToolButton()
+        self.manage_button.setText("管理")
+        self.manage_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.manage_button.setMenu(self._manage_menu())
+        toolbar.addWidget(self.manage_button)
+        toolbar.addWidget(_button("命令", self.open_console))
         self.new_button = _button("新对话", self.new_conversation)
         self.stop_button = _button("停止", self.stop_turn, role="danger")
         toolbar.addWidget(self.new_button)
@@ -269,14 +184,66 @@ class App(QMainWindow):
         body.addWidget(right)
         body.setStretchFactor(0, 0)
         body.setStretchFactor(1, 1)
-        body.setSizes([350, 810])
+        body.setSizes([380, 1020])
 
         self.status_state = _label()
         self.status_agent = _label()
         self.status_busy = _label()
         self.status_notice = _label()
-        for label in (self.status_state, self.status_agent, self.status_busy, self.status_notice):
+        self.busy_progress = QProgressBar()
+        self.busy_progress.setRange(0, 0)
+        self.busy_progress.setFixedWidth(90)
+        self.busy_progress.setTextVisible(False)
+        self.busy_progress.hide()
+        for label in (self.status_state, self.status_agent, self.status_busy):
+            label.setWordWrap(False)
             self.statusBar().addWidget(label)
+        self.statusBar().addWidget(self.status_notice)
+        self.statusBar().addPermanentWidget(self.busy_progress)
+
+    def _build_menu(self):
+        def action(menu, text, slot, shortcut=None):
+            item = QAction(text, self)
+            if shortcut:
+                item.setShortcut(QKeySequence(shortcut))
+            item.triggered.connect(lambda _checked=False, fn=slot: fn())
+            menu.addAction(item)
+            return item
+
+        bar = self.menuBar()
+        files = bar.addMenu("文件")
+        action(files, "打开工作区…", self.pick_workspace, "Ctrl+O")
+        action(files, "选择结构…", self.pick_robot, "Ctrl+Shift+O")
+        action(files, "刷新上下文", self.refresh_context, "F5")
+        files.addSeparator()
+        action(files, "设置…", self.open_settings, "Ctrl+,")
+        files.addSeparator()
+        action(files, "退出", self.close, "Ctrl+Q")
+
+        tools = bar.addMenu("工具")
+        action(tools, "命令面板…", self.open_console, "Ctrl+Shift+P")
+        action(tools, "MCP 配置…", self.open_mcp)
+        action(tools, "会话管理…", self.open_sessions)
+        action(tools, "环境诊断…", self.open_doctor)
+        action(tools, "资源预览", self.show_resources)
+        tools.addSeparator()
+        action(tools, "打开会话目录", self.open_sessions_folder)
+        action(tools, "清空对话", self.clear_chat)
+        action(tools, "复制对话", self.copy_chat)
+
+        help_menu = bar.addMenu("帮助")
+        action(help_menu, "使用文档", self.open_docs, "F1")
+        action(help_menu, "关于", self.open_about)
+
+    def _manage_menu(self):
+        menu = QMenu(self)
+        for text, slot in (("命令面板…", self.open_console), ("MCP 配置…", self.open_mcp),
+                           ("会话管理…", self.open_sessions), ("环境诊断…", self.open_doctor),
+                           ("资源预览", self.show_resources), ("清空对话", self.clear_chat)):
+            action = QAction(text, menu)
+            action.triggered.connect(lambda _checked=False, fn=slot: fn())
+            menu.addAction(action)
+        return menu
 
     def _build_side(self, side):
         layout = QVBoxLayout(side)
@@ -284,18 +251,23 @@ class App(QMainWindow):
         form = QFormLayout(robot)
         self.context_entries = {}
         fields = (
-            ("scripts_dir", "脚本根目录", True), ("skills_dir", "技能目录", True),
-            ("module_paths", "模块路径", False), ("camera_src_dir", "图片源目录", True),
+            ("scripts_dir", "脚本根目录", "dir"), ("skills_dir", "技能目录", "dir"),
+            ("module_paths", "模块路径", None), ("camera_src_dir", "图片源目录", "dir"),
+            ("mcp_config", "MCP 配置（mcpServers JSON）", "edit"),
         )
-        for name, label, browse in fields:
+        for name, label, mode in fields:
             row = QHBoxLayout()
             value = getattr(self.cfg, name)
             entry = QLineEdit(os.pathsep.join(value) if name == "module_paths" else value)
+            entry.setToolTip(entry.text())
+            entry.textChanged.connect(lambda text, e=entry: e.setToolTip(text))
             entry.editingFinished.connect(self._sync_config)
             self.context_entries[name] = entry
             row.addWidget(entry)
-            if browse:
+            if mode == "dir":
                 row.addWidget(_button("…", lambda checked=False, e=entry: self._browse_into(e)))
+            elif mode == "edit":
+                row.addWidget(_button("编辑", self.open_mcp))
             form.addRow(label, row)
         layout.addWidget(robot)
 
@@ -329,10 +301,32 @@ class App(QMainWindow):
         self.timeout_box = _spin(self.cfg.timeout, 3600, fractional=True)
         self.requests_box = _spin(self.cfg.max_requests, 100)
         self.tools_box = _spin(self.cfg.max_tool_calls, 1000)
+        self.history_box = _spin(self.cfg.history_turns, 20)
         form.addRow("超时（秒）", self.timeout_box)
         form.addRow("请求预算", self.requests_box)
         form.addRow("工具预算", self.tools_box)
+        form.addRow("历史轮数", self.history_box)
         layout.addWidget(guard)
+
+        advanced = QGroupBox("高级工具权限（默认关闭）")
+        advanced_form = QFormLayout(advanced)
+        self.file_tools_toggle = QCheckBox("文件工具（工作区只读）")
+        self.file_tools_toggle.setChecked(bool(self.cfg.enable_file_tools))
+        self.file_writes_toggle = QCheckBox("允许文件写入（逐次确认）")
+        self.file_writes_toggle.setChecked(bool(self.cfg.allow_file_writes))
+        self.shell_tools_toggle = QCheckBox("Shell 工具（不是沙箱）")
+        self.shell_tools_toggle.setChecked(bool(self.cfg.enable_shell))
+        self.shell_grant_toggle = QCheckBox("自动批准 Shell")
+        self.shell_grant_toggle.setChecked(bool(self.cfg.allow_shell))
+        self.mcp_tools_toggle = QCheckBox("自动批准 MCP 工具")
+        self.mcp_tools_toggle.setChecked(bool(self.cfg.allow_mcp_tools))
+        for toggle in (self.file_tools_toggle, self.file_writes_toggle,
+                       self.shell_tools_toggle, self.shell_grant_toggle, self.mcp_tools_toggle):
+            toggle.toggled.connect(self.on_permission_toggle)
+            advanced_form.addRow(toggle)
+        advanced_form.addRow(_label("Shell/MCP 拥有宿主用户权限，不是沙箱；默认逐次确认。", secondary=True))
+        layout.addWidget(advanced)
+
         model = QGroupBox("模型（在设置中修改）")
         model_layout = QVBoxLayout(model)
         self.model_label = _label()
@@ -353,8 +347,11 @@ class App(QMainWindow):
         self.log.setFont(self.font_mono)
         self.log.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log.setObjectName("eventLog")
+        self.resources = ResourcePanel()
         self.notebook.addTab(self.chat, "对话")
         self.notebook.addTab(self.log, "日志")
+        self.notebook.addTab(self.resources, "资源")
+        self.notebook.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.notebook, 1)
         composer = QHBoxLayout()
         self.task_box = QPlainTextEdit()
@@ -364,6 +361,9 @@ class App(QMainWindow):
         buttons = QVBoxLayout()
         self.send_button = _button("发送", self.send_task, role="primary")
         buttons.addWidget(self.send_button)
+        self.composer_retry = _button("重试", self.retry_task)
+        self.composer_retry.setEnabled(False)
+        buttons.addWidget(self.composer_retry)
         buttons.addWidget(_label("Ctrl+Enter", secondary=True))
         composer.addLayout(buttons)
         layout.addLayout(composer)
@@ -373,6 +373,19 @@ class App(QMainWindow):
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(self.send_task)
             self.send_shortcuts.append(shortcut)
+
+    def _on_tab_changed(self, index):
+        if self.notebook.widget(index) is self.resources:
+            self.show_resources()
+
+    def show_resources(self):
+        roots = (self._scripts_root(), _absolute(self.cfg.skills_dir,
+                                                self.cfg.workspace or default_workspace()))
+        if roots != self._resource_roots:
+            self._resource_roots = roots
+            self.resources.set_roots(*roots)
+        self.notebook.setCurrentWidget(self.resources)
+        self.resources.ensure_loaded()
 
     def post(self, callback):
         """Only the Qt timer consumes callbacks; cleanup never depends on it."""
@@ -417,6 +430,8 @@ class App(QMainWindow):
         self._notice_timer.start(int(seconds * 1000))
 
     def _insert_text(self, widget, text, tag=None):
+        bar = widget.verticalScrollBar()
+        at_bottom = bar.value() >= bar.maximum() - 4
         cursor = widget.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         fmt = QTextCharFormat()
@@ -430,7 +445,8 @@ class App(QMainWindow):
                 fmt.setFontItalic(True)
         cursor.insertText(text, fmt)
         widget.setTextCursor(cursor)
-        widget.ensureCursorVisible()
+        if at_bottom:
+            widget.ensureCursorVisible()
 
     def _log(self, chunk):
         if chunk and not self._stopping:
@@ -480,6 +496,12 @@ class App(QMainWindow):
         self.cfg.timeout = self.timeout_box.value()
         self.cfg.max_requests = self.requests_box.value()
         self.cfg.max_tool_calls = self.tools_box.value()
+        self.cfg.history_turns = self.history_box.value()
+        self.cfg.enable_file_tools = self.file_tools_toggle.isChecked()
+        self.cfg.enable_shell = self.shell_tools_toggle.isChecked()
+        self.cfg.allow_file_writes = self.file_writes_toggle.isChecked()
+        self.cfg.allow_shell = self.shell_grant_toggle.isChecked()
+        self.cfg.allow_mcp_tools = self.mcp_tools_toggle.isChecked()
 
     def _sync_controls(self):
         for name, entry in self.context_entries.items():
@@ -490,6 +512,13 @@ class App(QMainWindow):
         self.timeout_box.setValue(self.cfg.timeout)
         self.requests_box.setValue(self.cfg.max_requests)
         self.tools_box.setValue(self.cfg.max_tool_calls)
+        self.history_box.setValue(self.cfg.history_turns)
+        self.file_tools_toggle.setChecked(bool(self.cfg.enable_file_tools))
+        self.shell_tools_toggle.setChecked(bool(self.cfg.enable_shell))
+        self.file_writes_toggle.setChecked(bool(self.cfg.allow_file_writes))
+        self.shell_grant_toggle.setChecked(bool(self.cfg.allow_shell))
+        self.mcp_tools_toggle.setChecked(bool(self.cfg.allow_mcp_tools))
+        self.on_permission_toggle()
 
     def _browse_into(self, entry):
         chosen = QFileDialog.getExistingDirectory(self, "选择目录", self.cfg.workspace or default_workspace())
@@ -645,6 +674,7 @@ class App(QMainWindow):
             return
         self.serve = client
         self.agent_available = bool(info.get("agent"))
+        self.mcp_available = bool(info.get("mcp"))
         self.serve_state = f"就绪（协议 {info.get('protocol')}）"
         self._log(f"[gui] serve 就绪：{json.dumps(info, ensure_ascii=False)}\n")
         if not self.agent_available:
@@ -684,6 +714,7 @@ class App(QMainWindow):
         self._start_timer.stop()
         client, self.serve = self.serve, None
         self.agent_available = False
+        self.mcp_available = False
         self.generation += 1
         self._dismiss_approvals()
         self.serve_state = "重新启动…"
@@ -706,6 +737,7 @@ class App(QMainWindow):
             return
         self.serve = None
         self.agent_available = False
+        self.mcp_available = False
         self._dismiss_approvals()
         self.serve_state = f"已退出（{code}）"
         if self.busy:
@@ -795,18 +827,38 @@ class App(QMainWindow):
             return False
         if self.hardware_toggle.isChecked() and not self._confirm_hardware():
             return False
+        self._sync_config()
+        if self.shell_tools_toggle.isChecked() and not self.file_tools_toggle.isChecked():
+            self._notice("Shell 工具需要先启用文件工具")
+            return False
+        for kind, toggle in (("file_writes", self.file_writes_toggle),
+                             ("shell", self.shell_grant_toggle),
+                             ("mcp", self.mcp_tools_toggle)):
+            if toggle.isChecked() and kind not in self._confirmed_grants:
+                if not self._confirm_grant(kind):
+                    toggle.setChecked(False)
+                    return False
+                self._confirmed_grants.add(kind)
         if self._stopping or client is not self.serve or generation != self.generation or self.busy:
             return False
-        self._sync_config()
         workspace = self.cfg.workspace or default_workspace()
+        use_workspace = self.file_tools_toggle.isChecked() or self.shell_tools_toggle.isChecked()
         params = {
             "task": task, "robot": self._robot_path(), "scriptsDir": self._scripts_root(),
             "cameraSrcDir": _absolute(self.cfg.camera_src_dir, workspace),
             "skillsDir": _absolute(self.cfg.skills_dir, workspace),
+            "mcpConfig": _absolute(self.cfg.mcp_config, workspace),
             "readVars": self.cfg.read_vars, "cameraVars": self.cfg.camera_vars,
             "vars": self.cfg.vars or None,
             "allowActions": self.actions_toggle.isChecked(),
             "allowHardware": self.hardware_toggle.isChecked(),
+            "allowMcpTools": self.mcp_tools_toggle.isChecked(),
+            "workspaceDir": workspace if use_workspace else "",
+            "enableShell": self.shell_tools_toggle.isChecked(),
+            "allowShell": self.shell_grant_toggle.isChecked(),
+            "allowFileWrites": self.file_writes_toggle.isChecked(),
+            "historyTurns": self.cfg.history_turns,
+            "maxHistoryBytes": self.cfg.max_history_bytes,
             "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
             "maxToolCalls": self.cfg.max_tool_calls, "modulePaths": self._module_paths(),
         }
@@ -821,6 +873,8 @@ class App(QMainWindow):
             self._chat_line(str(exc), "error")
             return False
         self._chat_line(f"你：{task}", "user")
+        self.last_task = task
+        self.last_failed = False
         self.turn_id = ident
         self.turn_text = 0
         self.at_line_start = True
@@ -836,12 +890,14 @@ class App(QMainWindow):
         self._dismiss_approvals()
         self._set_busy(False)
         if error is not None:
+            self.last_failed = True
             if isinstance(error, RpcError) and error.code == CANCELLED:
                 self._chat_line("[已停止]", "system")
             else:
                 self._chat_line(str(error), "error")
                 for event in getattr(error, "tool_events", []):
                     self._chat_line(f"  {_brief(event, 200)}", "system")
+            self._refresh_status()
             return
         result = result or {}
         if self.turn_text == 0 and result.get("output"):
@@ -883,7 +939,114 @@ class App(QMainWindow):
             return
         self._chat_line(f"重置失败：{error}" if error else "[新对话，硬件已释放]", "error" if error else "system")
 
+    def retry_task(self):
+        if self.busy:
+            self._notice("上一轮还在执行，先停止或等待完成")
+            return
+        task = self.last_task.strip()
+        if not task:
+            return
+        self.task_box.setPlainText(task)
+        self.send_task()
+
+    def _update_retry_buttons(self):
+        enabled = bool(self.last_task) and not self.busy and not self._stopping
+        self.composer_retry.setEnabled(enabled)
+
+    def clear_chat(self):
+        if not self.chat.toPlainText().strip():
+            return
+        if not self._message("清空对话", "清空窗口中的对话记录？磁盘上的会话转录不受影响。", confirm=True):
+            return
+        self.chat.clear()
+        self.at_line_start = True
+        self.turn_text = 0
+        self._notice("对话已清空")
+
+    def copy_chat(self):
+        text = self.chat.toPlainText().strip()
+        if text:
+            QApplication.clipboard().setText(text)
+            self._notice("对话已复制到剪贴板")
+
+    def open_mcp(self):
+        if self._stopping:
+            return
+        self._sync_config()
+        workspace = self.cfg.workspace or default_workspace()
+        path = _absolute(self.cfg.mcp_config, workspace)
+        dialog = McpConfigDialog(self, path, base_dir=workspace)
+        if self._exec_dialog(dialog) == QDialog.DialogCode.Accepted and dialog.saved_path:
+            self.cfg.mcp_config = dialog.saved_path
+            self.context_entries["mcp_config"].setText(dialog.saved_path)
+            self.on_permission_toggle()
+            self._save()
+            self._notice("MCP 配置已保存")
+
+    def open_sessions(self):
+        if self._stopping:
+            return
+        self._exec_dialog(SessionsDialog(self))
+
+    def open_doctor(self):
+        if self._stopping:
+            return
+        self._exec_dialog(DoctorDialog(self))
+
+    def open_console(self):
+        if self._stopping:
+            return
+        self._sync_config()
+        workspace = self.cfg.workspace or default_workspace()
+        dialog = CommandDialog(
+            self, python=resolve_python(workspace, self.cfg.python), cwd=workspace,
+            robot=self._robot_path(), module_paths=self._module_paths(),
+            camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace),
+            scripts_dir=self._scripts_root(), timeout=self.cfg.timeout,
+            confirm=lambda title, text: self._message(title, text, confirm=True))
+        self._exec_dialog(dialog)
+
+    def open_about(self):
+        if not self._stopping:
+            self._exec_dialog(AboutDialog(self))
+
+    def open_docs(self):
+        path = source_root() / "docs" / "README.md"
+        if path.is_file():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        else:
+            QDesktopServices.openUrl(QUrl("https://github.com/gopsc/mybot/tree/gui-mybot/docs"))
+
+    def open_sessions_folder(self):
+        root = session_root()
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._notice(f"无法创建会话目录：{exc}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(root)))
+
     def on_permission_toggle(self):
+        if self._in_permission:
+            return
+        self._in_permission = True
+        try:
+            file_tools = self.file_tools_toggle.isChecked()
+            self.file_writes_toggle.setEnabled(file_tools)
+            self.shell_tools_toggle.setEnabled(file_tools)
+            if not file_tools:
+                self.file_writes_toggle.setChecked(False)
+                self.shell_tools_toggle.setChecked(False)
+            shell = self.shell_tools_toggle.isChecked()
+            self.shell_grant_toggle.setEnabled(shell)
+            if not shell:
+                self.shell_grant_toggle.setChecked(False)
+            has_mcp = bool(self.context_entries["mcp_config"].text().strip())
+            self.mcp_tools_toggle.setEnabled(has_mcp)
+            if not has_mcp:
+                self.mcp_tools_toggle.setChecked(False)
+        finally:
+            self._in_permission = False
         self._refresh_status()
 
     def _confirm_hardware(self):
@@ -891,6 +1054,19 @@ class App(QMainWindow):
             "确认硬件权限",
             "即将以 --allow-hardware 运行：会打开物理设备，激活本身就可能写硬件。\n\n"
             "只对已审阅的可信结构文件与驱动授权。", confirm=True)
+
+    def _confirm_grant(self, kind):
+        messages = {
+            "file_writes": ("允许文件写入", "模型可以创建或修改工作区文件（含脚本/驱动），仍会逐次弹出审批。"),
+            "shell": ("允许 Shell 自动批准",
+                      "Shell 会以宿主用户权限运行，不是沙箱；可访问文件、网络和物理设备。\n"
+                      "只对当前启动授权，关闭窗口即失效。"),
+            "mcp": ("允许 MCP 工具自动批准",
+                    "外部 MCP 服务以宿主用户权限运行，不是沙箱；其输出是不可信数据。\n"
+                    "只对当前启动授权，关闭窗口即失效。"),
+        }
+        title, text = messages[kind]
+        return self._message(title, text, confirm=True)
 
     def _ask_tool(self, params):
         tool = str(params.get("tool") or "?")
@@ -1008,20 +1184,31 @@ class App(QMainWindow):
 
     def _refresh_status(self):
         self.status_state.setText(f"服务：{self.serve_state}")
-        self.status_agent.setText("智能体：可用" if self.agent_available else "智能体：不可用")
+        agent = "智能体：可用" if self.agent_available else "智能体：不可用"
+        if self.agent_available and self.mcp_available:
+            agent += " · MCP：可用"
+        self.status_agent.setText(agent)
         flags = []
         if self.hardware_toggle.isChecked():
             flags.append("允许硬件")
         if self.actions_toggle.isChecked():
             flags.append("自动批准动作")
+        if self.file_tools_toggle.isChecked():
+            flags.append("文件")
+        if self.shell_tools_toggle.isChecked():
+            flags.append("Shell")
+        if self.mcp_tools_toggle.isChecked():
+            flags.append("MCP")
         busy = "执行中…" if self.busy else "空闲"
         self.status_busy.setText(busy + ("（" + "、".join(flags) + "）" if flags else ""))
         self.stop_button.setEnabled(self.busy or bool(self.pending_task))
+        self._update_retry_buttons()
 
     def _set_busy(self, busy):
         self.busy = busy
         self.send_button.setEnabled(not busy)
         self.new_button.setEnabled(not busy)
+        self.busy_progress.setVisible(busy)
         self._refresh_status()
 
     def shutdown(self):
@@ -1102,60 +1289,81 @@ class ToolDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    FIELDS = (
-        ("workspace", "工作区"), ("python", "Python 解释器"),
-        ("model", "模型（provider:model）"), ("base_url", "端点 Base URL"),
-        ("api_key_env", "API Key 环境变量名"), ("scripts_dir", "脚本根目录"),
-        ("skills_dir", "技能目录"), ("camera_src_dir", "图片源目录"),
-        ("module_paths", "模块路径（每行一个）"),
-        ("read_vars", "读取变量（逗号分隔）"), ("camera_vars", "相机变量（逗号分隔）"),
-        ("vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）"),
-    )
+    """Tabbed operator settings covering every agent/backend switch."""
 
     def __init__(self, parent, cfg: GuiConfig, workspace, config_path=""):
         super().__init__(parent)
         _apply_theme(self)
         self.setWindowTitle("设置")
         self.setModal(True)
-        self.resize(640, 680)
+        self.resize(760, 760)
         self.values = None
-        layout = QVBoxLayout(self)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        body = QWidget()
-        form = QFormLayout(body)
-        scroll.setWidget(body)
-        layout.addWidget(scroll, 1)
         self.entries = {}
-        for name, label in self.FIELDS:
-            value = getattr(cfg, name)
-            if name == "module_paths":
-                widget = QPlainTextEdit("\n".join(value))
-                widget.setMaximumHeight(85)
-            elif name == "vars":
-                widget = QPlainTextEdit("\n".join(f"{key}={text}" for key, text in value.items()))
-                widget.setMaximumHeight(85)
-            else:
-                widget = QLineEdit(",".join(value) if isinstance(value, list) else str(value or ""))
-            self.entries[name] = widget
-            if name in {"workspace", "scripts_dir", "skills_dir", "camera_src_dir"}:
-                row = QHBoxLayout()
-                row.addWidget(widget)
-                row.addWidget(_button("…", lambda checked=False, w=widget: self._browse(w, workspace)))
-                form.addRow(label, row)
-            else:
-                form.addRow(label, widget)
+        self._workspace = workspace
+        layout = QVBoxLayout(self)
+        tabs = QTabWidget()
+        layout.addWidget(tabs, 1)
+
+        general = QWidget()
+        general_form = QFormLayout(general)
+        self._field(general_form, cfg, "workspace", "工作区", browse=True)
+        self._field(general_form, cfg, "python", "Python 解释器")
+        self._field(general_form, cfg, "scripts_dir", "脚本根目录", browse=True)
+        self._field(general_form, cfg, "skills_dir", "技能目录", browse=True)
+        self._field(general_form, cfg, "camera_src_dir", "图片源目录", browse=True)
+        self._field(general_form, cfg, "module_paths", "模块路径（每行一个）", kind="lines")
+        self._field(general_form, cfg, "read_vars", "读取变量（逗号分隔）")
+        self._field(general_form, cfg, "camera_vars", "相机变量（逗号分隔）")
+        tabs.addTab(general, "通用")
+
+        model = QWidget()
+        model_form = QFormLayout(model)
+        self._field(model_form, cfg, "model", "模型（provider:model）")
+        self._field(model_form, cfg, "base_url", "端点 Base URL")
+        self._field(model_form, cfg, "api_key_env", "API Key 环境变量名")
         self.timeout = _spin(cfg.timeout, 3600, fractional=True)
         self.requests = _spin(cfg.max_requests, 100)
         self.tools = _spin(cfg.max_tool_calls, 1000)
-        form.addRow("超时（秒）", self.timeout)
-        form.addRow("请求预算", self.requests)
-        form.addRow("工具预算", self.tools)
+        self.history_turns = _spin(cfg.history_turns, 20)
+        self.history_bytes = _spin(max(1, cfg.max_history_bytes // 1024), 65536)
+        for label, widget in (("超时（秒）", self.timeout), ("请求预算", self.requests),
+                              ("工具预算", self.tools), ("历史轮数", self.history_turns),
+                              ("历史上限（KiB）", self.history_bytes)):
+            model_form.addRow(label, widget)
         self.session_log = QCheckBox("保存会话转录（~/.mybot/sessions）")
         self.session_log.setChecked(bool(cfg.session_log))
-        form.addRow(self.session_log)
-        layout.addWidget(_label("密钥只读取环境变量，窗口不保存也不显示它。", secondary=True))
-        layout.addWidget(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
+        model_form.addRow(self.session_log)
+        model_form.addRow(_label("密钥只读取环境变量，窗口不保存也不显示它。", secondary=True))
+        tabs.addTab(model, "模型与预算")
+
+        permissions = QWidget()
+        permission_form = QFormLayout(permissions)
+        self.file_tools = QCheckBox("启用文件工具（工作区只读）")
+        self.file_writes = QCheckBox("允许文件写入（逐次确认）")
+        self.shell_tools = QCheckBox("启用 Shell 工具（不是沙箱）")
+        self.shell_grant = QCheckBox("自动批准 Shell")
+        self.mcp_grant = QCheckBox("自动批准 MCP 工具")
+        for toggle, value in ((self.file_tools, cfg.enable_file_tools),
+                              (self.file_writes, cfg.allow_file_writes),
+                              (self.shell_tools, cfg.enable_shell),
+                              (self.shell_grant, cfg.allow_shell),
+                              (self.mcp_grant, cfg.allow_mcp_tools)):
+            toggle.setChecked(bool(value))
+            toggle.toggled.connect(self._permissions_changed)
+            permission_form.addRow(toggle)
+        permission_form.addRow(_label(
+            "Shell/MCP 以宿主用户权限运行，不是沙箱；自动批准只在本次启动有效。\n"
+            "文件写入、Shell 和 MCP 自动批准在首次发送时仍会弹窗确认。", secondary=True))
+        tabs.addTab(permissions, "权限")
+
+        advanced = QWidget()
+        advanced_form = QFormLayout(advanced)
+        self._field(advanced_form, cfg, "mcp_config", "MCP 配置（mcpServers JSON）", browse_file=True)
+        self._field(advanced_form, cfg, "vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）", kind="lines")
+        advanced_form.addRow(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
+        tabs.addTab(advanced, "高级 / MCP")
+
+        layout.addWidget(_label("运行时权限以左侧栏为准；这里保存偏好与预算。", secondary=True))
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setProperty("role", "primary")
@@ -1163,13 +1371,70 @@ class SettingsDialog(QDialog):
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
+        self._permissions_changed()
 
-    def _browse(self, widget, workspace):
-        chosen = QFileDialog.getExistingDirectory(self, "选择目录", workspace)
+    def _field(self, form, cfg, name, label, *, kind="text", browse=False, browse_file=False):
+        value = getattr(cfg, name)
+        if kind == "lines" and name == "module_paths":
+            widget = QPlainTextEdit("\n".join(value))
+            widget.setMaximumHeight(85)
+        elif kind == "lines":
+            widget = QPlainTextEdit("\n".join(f"{key}={text}" for key, text in value.items()))
+            widget.setMaximumHeight(85)
+        else:
+            widget = QLineEdit(",".join(value) if isinstance(value, list) else str(value or ""))
+        self.entries[name] = widget
+        if browse:
+            row = QHBoxLayout()
+            row.addWidget(widget)
+            row.addWidget(_button("…", lambda checked=False, w=widget: self._browse(w)))
+            form.addRow(label, row)
+        elif browse_file:
+            row = QHBoxLayout()
+            row.addWidget(widget)
+            row.addWidget(_button("…", lambda checked=False, w=widget: self._browse_file(w)))
+            form.addRow(label, row)
+        else:
+            form.addRow(label, widget)
+
+    def _browse(self, widget):
+        chosen = QFileDialog.getExistingDirectory(self, "选择目录", self._workspace)
         if chosen:
             widget.setText(chosen)
 
+    def _browse_file(self, widget):
+        chosen, _ = QFileDialog.getOpenFileName(self, "选择 MCP 配置", self._workspace, "JSON (*.json)")
+        if chosen:
+            widget.setText(chosen)
+
+    def _permissions_changed(self):
+        files = self.file_tools.isChecked()
+        self.file_writes.setEnabled(files)
+        self.shell_tools.setEnabled(files)
+        if not files:
+            self.file_writes.setChecked(False)
+            self.shell_tools.setChecked(False)
+        shell = self.shell_tools.isChecked()
+        self.shell_grant.setEnabled(shell)
+        if not shell:
+            self.shell_grant.setChecked(False)
+        entry = self.entries.get("mcp_config")
+        has_mcp = bool(entry is not None and entry.text().strip())
+        self.mcp_grant.setEnabled(has_mcp)
+        if not has_mcp:
+            self.mcp_grant.setChecked(False)
+
     def _save(self):
+        mcp_config = self.entries["mcp_config"].text().strip()
+        if self.file_writes.isChecked() and not self.file_tools.isChecked():
+            self._message("需要文件工具", "允许文件写入前，先启用文件工具。")
+            return
+        if self.mcp_grant.isChecked() and not mcp_config:
+            self._message("需要 MCP 配置", "自动批准 MCP 工具前，先选择 mcpServers JSON 配置文件。")
+            return
+        if self.shell_grant.isChecked() and not self.shell_tools.isChecked():
+            self._message("需要 Shell 工具", "自动批准 Shell 前，先启用 Shell 工具。")
+            return
         values = {}
         for name, widget in self.entries.items():
             if name == "module_paths":
@@ -1181,9 +1446,19 @@ class SettingsDialog(QDialog):
             else:
                 values[name] = widget.text().strip()
         values.update(timeout=self.timeout.value(), max_requests=self.requests.value(),
-                      max_tool_calls=self.tools.value(), session_log=self.session_log.isChecked())
+                      max_tool_calls=self.tools.value(), history_turns=self.history_turns.value(),
+                      max_history_bytes=max(64, self.history_bytes.value()) * 1024,
+                      session_log=self.session_log.isChecked(),
+                      enable_file_tools=self.file_tools.isChecked(),
+                      enable_shell=self.shell_tools.isChecked(),
+                      allow_file_writes=self.file_writes.isChecked(),
+                      allow_shell=self.shell_grant.isChecked(),
+                      allow_mcp_tools=self.mcp_grant.isChecked())
         self.values = values
         self.accept()
+
+    def _message(self, title, text):
+        QMessageBox.warning(self, title, text)
 
 
 def _check_display():

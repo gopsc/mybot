@@ -1029,3 +1029,56 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
         assert server.agent is None and server.robot is None
 
     asyncio.run(scenario())
+
+
+def test_open_agent_wires_workspace_shell_and_file_write_grants(monkeypatch, tmp_path):
+    pytest.importorskip("pydantic_ai")
+    import io
+
+    from pymybot import agent as agent_module, agent_executor
+
+    calls = {}
+
+    class FakeClient:
+        async def close(self):
+            pass
+
+    class FakeExecutor:
+        def __init__(self, *args, **kwargs):
+            calls["executor"] = kwargs
+
+        async def close(self):
+            pass
+
+    class FakeSession:
+        def __init__(self, executor, model, config, **kwargs):
+            calls["config"] = config
+            calls["session"] = kwargs
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(agent_module, "create_model", lambda config: (object(), FakeClient()))
+    monkeypatch.setattr(agent_executor, "RobotExecutor", FakeExecutor)
+    monkeypatch.setattr(agent_module, "AgentSession", FakeSession)
+
+    server = serve.Server(io.StringIO(), threading.Event())
+    key = {
+        "robot": "r.sql", "modulePaths": [], "cameraSrcDir": "", "scriptsDir": "scripts",
+        "skillsDir": "", "model": "", "baseUrl": "", "apiKeyEnv": "", "readVars": [],
+        "cameraVars": [], "allowActions": False, "allowHardware": False, "vars": {},
+        "timeout": 10, "maxRequests": 1, "maxToolCalls": 1, "historyTurns": 6,
+        "maxHistoryBytes": 65536, "mcpConfig": "", "allowMcpTools": False,
+        "workspaceDir": str(tmp_path), "enableShell": True, "allowShell": True,
+        "allowFileWrites": True,
+    }
+    asyncio.run(server.open_agent(key))
+    assert calls["executor"]["workspace_dir"] == tmp_path.absolute()
+    assert calls["executor"]["enable_shell"] is True
+    assert calls["config"].allow_shell is True and calls["config"].allow_file_writes is True
+    assert calls["config"].history_bytes == 65536
+    assert calls["session"]["workspace"] is True
+    assert calls["session"]["enable_shell"] is True
+
+    with pytest.raises(agent_module.AgentConfigurationError):
+        asyncio.run(server.open_agent({**key, "workspaceDir": "", "enableShell": True}))

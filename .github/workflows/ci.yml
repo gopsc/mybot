@@ -98,11 +98,11 @@ jobs:
       - name: Install Qt system dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libegl1 libopengl0
-      - name: Install agent and test dependencies
-        run: python -m pip install -e ".[agent,test]"
-      - name: Agent import preflight
+      - name: Install agent, MCP and test dependencies
+        run: python -m pip install -e ".[agent,mcp,test]"
+      - name: Agent and MCP import preflight
         run: python -I tools/ci_smoke.py agent
-      - name: Offline model and full regression
+      - name: Offline model, MCP and full regression
         run: python -m pytest -q
 
   wheel:

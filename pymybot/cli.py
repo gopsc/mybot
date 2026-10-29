@@ -128,6 +128,7 @@ def parser():
         "agent": "PydanticAI task or interactive session on the terminal (see --no-gui)",
         "gui": "PySide6 agent window (the default entry; no command required)",
         "serve": "Long-lived stdio JSON-RPC 2.0 server for IDE frontends (one JSON object per line)",
+        "mcp": "Standard MCP stdio server for MCP clients (read-only unless --allow-execution)",
         "doctor": "Check the interpreter, optional dependencies and bundled assets without touching hardware",
         "sessions": "List or prune conversation transcripts under ~/.mybot/sessions",
     }
@@ -142,6 +143,8 @@ def parser():
             command.add_argument("--camera-src-dir", metavar="DIR", help="local camera image root")
             command.add_argument("--scripts-dir", metavar="DIR", help="trusted .mt script root offered to the agent")
             command.add_argument("--skills-dir", metavar="DIR", help="operator skill directories")
+            command.add_argument("--mcp-config", metavar="FILE",
+                                 help="initial operator mcpServers JSON file (saved as a preference)")
             command.add_argument("--model", help="provider:model; defaults to MYBOT_MODEL")
             command.add_argument("--base-url", help="provider endpoint; defaults to MYBOT_BASE_URL")
             command.add_argument("--api-key-env", help="environment variable holding the API key")
@@ -154,17 +157,47 @@ def parser():
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help="per-task wall-clock budget (default: 180)")
             continue
+        if name == "mcp":
+            command.add_argument("--robot", required=True, metavar="FILE",
+                                 help="structure SQL file (at most 8 MiB)")
+            command.add_argument("--module-path", action="append", metavar="DIR",
+                                 help="trusted Lua module root; repeatable")
+            command.add_argument("--camera-src-dir", metavar="DIR", help="explicit local camera image root")
+            command.add_argument("--scripts-dir", default=default_scripts_dir(), metavar="DIR",
+                                 help="trusted .mt script root; default: packaged assets/scripts, else source scripts")
+            command.add_argument("--skills-dir", default=asset_path("skills"), metavar="DIR",
+                                 help="operator skill root; default: packaged assets/skills, else source skills")
+            command.add_argument("--allow-execution", action="store_true",
+                                 help="permit action scripts, variable reads and camera capture; "
+                                      "static tools stay available either way")
+            command.add_argument("--allow-hardware", action="store_true",
+                                 help="permit physical devices; requires --allow-execution")
+            command.add_argument("--read-var", type=safe_ident, action="append", default=[], metavar="NAME",
+                                 help="allowlist a readable variable; repeatable")
+            command.add_argument("--camera-var", type=safe_ident, action="append", default=[], metavar="NAME",
+                                 help="allow image capture from this declared Camera variable; repeatable")
+            command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
+                                 help=f"cooperative execution budget, >0 and <={MAX_TIMEOUT} (default: 180)")
+            command.add_argument("--var", type=variable, action="append", default=[], metavar="NAME=VALUE",
+                                 help="session alias binding and Alias/Vars structure override; repeatable")
+            command.add_argument("--var-env", type=variable_env, action="append", default=[], metavar="NAME=ENVVAR",
+                                 help="session alias binding read from an environment variable at run time; repeatable")
+            continue
         if name == "sessions":
             command.add_argument("--no-agent", action="store_true",
                                  help="accepted for CLI consistency; sessions never uses a model")
             command.add_argument("--prune", action="store_true",
                                  help="delete old transcripts instead of listing them")
+            command.add_argument("--delete", action="append", default=[], metavar="ID",
+                                 help="delete one session directory by id; repeatable")
             command.add_argument("--keep", type=bounded_int(1, 10_000), default=20,
                                  help="keep the newest N sessions (default: 20)")
             command.add_argument("--older-than", type=bounded_int(0, 3650), metavar="DAYS",
                                  help="only prune sessions at least DAYS old")
-            command.add_argument("--dry-run", action="store_true", help="show what --prune would delete")
-            command.add_argument("--yes", action="store_true", help="confirm deletion (required with --prune)")
+            command.add_argument("--dry-run", action="store_true",
+                                 help="show what --prune/--delete would remove")
+            command.add_argument("--yes", action="store_true",
+                                 help="confirm deletion (required with --prune/--delete)")
             continue
         command.add_argument("--no-agent", action="store_true",
                              help="disable agent.* methods" if name == "serve"
@@ -225,9 +258,15 @@ def parser():
                                  help="preapprove workspace file creation/edits; requires --workspace-dir")
             command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
             command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
+            command.add_argument("--history-turns", type=bounded_int(1, 20), default=6,
+                                 help="retained complete conversation turns (default: 6)")
             command.add_argument("--max-history-bytes", type=bounded_int(64 * 1024, 64 * 1024 * 1024),
                                  default=4 * 1024 * 1024,
                                  help="upper bound for retained conversation history (default: 4 MiB)")
+            command.add_argument("--mcp-config", metavar="FILE",
+                                 help="operator mcpServers JSON file; exposes external MCP tools to the model")
+            command.add_argument("--allow-mcp-tools", action="store_true",
+                                 help="preapprove external MCP tool calls; requires --mcp-config")
     return p
 
 
@@ -237,7 +276,7 @@ def parse_args(argv=None):
         print(f"pymybot {__version__}")
         raise SystemExit(0)
     commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql",
-                "agent", "gui", "serve", "doctor", "sessions"}
+                "agent", "gui", "serve", "mcp", "doctor", "sessions"}
     # --no-gui is a top-level switch: the GUI is the default entry, so drop it
     # before choosing a command, and let a subcommand keep its own semantics.
     no_gui = "--no-gui" in arguments
@@ -257,12 +296,17 @@ def parse_args(argv=None):
     if not arguments or arguments[0] not in commands | {"--help", "-h"}:
         arguments.insert(0, "agent" if no_gui else "gui")
     args = parser().parse_args(arguments)
+    if args.command == "mcp":
+        if args.allow_hardware and not args.allow_execution:
+            raise UsageError("--allow-hardware requires --allow-execution")
+        return args
     if args.command != "agent":
         return args  # Existing subcommands always bypass the model.
     if args.no_agent:
         if (args.task is not None or args.model or args.base_url or args.api_key_env
                 or args.allow_actions or args.read_var or args.camera_var or args.workspace_dir
-                or args.enable_shell or args.allow_shell or args.allow_file_writes):
+                or args.enable_shell or args.allow_shell or args.allow_file_writes
+                or args.mcp_config or args.allow_mcp_tools):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
         if not args.input:
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
@@ -272,6 +316,8 @@ def parse_args(argv=None):
         raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir")
     if args.allow_shell and not args.enable_shell:
         raise UsageError("--allow-shell requires --enable-shell")
+    if args.allow_mcp_tools and not args.mcp_config:
+        raise UsageError("--allow-mcp-tools requires --mcp-config")
     if args.input:
         raise UsageError("--input requires --no-agent or the run command; use --task for an agent")
     if args.task is None and not sys.stdin.isatty():
@@ -302,6 +348,7 @@ def doctor():
     optional = [
         ("av", "av", "camera capture", "pip install pymybot[camera]"),
         ("pydantic_ai", "pydantic-ai-slim", "agent mode", "pip install pymybot[agent]"),
+        ("mcp", "mcp", "MCP server and agent client", "pip install pymybot[mcp]"),
         ("PySide6.QtWidgets", "PySide6", "GUI", "pip install pymybot[gui]"),
     ]
 
@@ -404,20 +451,26 @@ def execute(args, stop):
     if args.command == "doctor":
         return doctor()
     if args.command == "sessions":
-        from .session_log import list_sessions, prune_sessions, session_root
-        if args.prune:
+        from .session_log import delete_sessions, list_sessions, prune_sessions, session_root
+        if args.prune and args.delete:
+            raise UsageError("--prune and --delete are mutually exclusive")
+        if args.delete or args.prune:
             if args.dry_run and args.yes:
                 raise UsageError("choose --dry-run or --yes, not both")
             if not args.yes and not args.dry_run:
-                raise UsageError("--prune requires --yes or --dry-run")
+                raise UsageError("--prune/--delete require --yes or --dry-run")
+            if args.delete and (args.keep != 20 or args.older_than is not None):
+                raise UsageError("--keep/--older-than require --prune")
             try:
+                if args.delete:
+                    return delete_sessions(args.delete, dry_run=args.dry_run)
                 return prune_sessions(keep=args.keep, older_than_days=args.older_than,
                                       dry_run=args.dry_run)
             except ValueError as exc:
                 raise UsageError(str(exc)) from None
         if (args.keep != 20 or args.older_than is not None
                 or args.dry_run or args.yes):
-            raise UsageError("--keep/--older-than/--dry-run/--yes require --prune")
+            raise UsageError("--keep/--older-than/--dry-run/--yes require --prune/--delete")
         return {"root": str(session_root()), "sessions": list_sessions()}
     if args.command == "scripts":
         return list_scripts(args.scripts_dir or default_scripts_dir())
@@ -433,6 +486,19 @@ def execute(args, stop):
     if args.command == "serve":
         from .serve import run_server
         return run_server(stop, enable_agent=not args.no_agent, enable_session_log=not args.no_session_log)
+    if args.command == "mcp":
+        try:
+            from .mcp_server import run_server
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(f"MCP dependencies unavailable ({exc}); install pymybot[mcp] "
+                               "(source checkout: pip install -e '.[mcp]')") from exc
+        bindings = session_bindings(args)
+        return run_server(stop, robot_path=args.robot, scripts_dir=args.scripts_dir,
+                          module_paths=args.module_path, camera_src_root=args.camera_src_dir,
+                          vars=bindings, allow_execution=args.allow_execution,
+                          allow_hardware=args.allow_hardware, read_vars=args.read_var,
+                          camera_vars=args.camera_var, timeout=args.timeout,
+                          skills_dir=args.skills_dir)
     bindings = session_bindings(args)
     if args.command == "agent":
         try:
@@ -536,26 +602,39 @@ def main(argv=None):
     stop = threading.Event()
     handlers = {}
     args = None
+    # Detect the protocol command before parsing: even usage errors must not
+    # write CLI JSON onto the MCP channel.
+    requested = list(sys.argv[1:] if argv is None else argv)
+    protocol = bool(requested) and requested[0] == "mcp"
     try:
         args = parse_args(argv)
-        if args.command in {"run", "sample", "apply-sql", "agent", "serve"} and threading.current_thread() is threading.main_thread():
+        # MCP reserves stdout for JSON-RPC: no final CLI JSON on that channel.
+        protocol = args.command == "mcp"
+        if (args.command in {"run", "sample", "apply-sql", "agent", "serve", "mcp"}
+                and threading.current_thread() is threading.main_thread()):
             for sig in (signal.SIGINT, signal.SIGTERM):
                 handlers[sig] = signal.signal(sig, lambda *_: stop.set())
         # Python prints and Lua diagnostics must not contaminate the JSON channel.
         with redirect_stdout(sys.stderr):
             result = execute(args, stop)
+        if protocol:
+            return 0
         output = dumps({"ok": True, "command": args.command, **result})
         code = 0
     except (KeyboardInterrupt, AgentInterrupted) as exc:
         stop.set()
+        if protocol:
+            return 130
         extra = {key: getattr(exc, key) for key in ("tool_events", "cleanup_errors") if hasattr(exc, key)}
         output = dumps({"ok": False, "error": {"type": "KeyboardInterrupt", "message": "Interrupted"}, **extra})
         code = 130
     except Exception as exc:
-        extra = {key: getattr(exc, key) for key in ("tool_events", "cleanup_errors") if hasattr(exc, key)}
-        output = dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}, **extra})
         print(f"pymybot: {exc}", file=sys.stderr)
         code = 2 if isinstance(exc, UsageError) else 1
+        if protocol:
+            return code
+        extra = {key: getattr(exc, key) for key in ("tool_events", "cleanup_errors") if hasattr(exc, key)}
+        output = dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}, **extra})
     finally:
         for sig, handler in handlers.items():
             signal.signal(sig, handler)

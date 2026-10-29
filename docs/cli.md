@@ -26,6 +26,7 @@ python -m pymybot doctor
 | `pymybot apply-sql --robot SQL --sql "..."` | Apply restricted SQL to a temporary session | Yes |
 | `pymybot agent ...` | PydanticAI task/REPL | Via approved tools |
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
+| `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
 | `pymybot doctor` | Environment/dependency/asset diagnostics | No |
 | `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
 
@@ -139,7 +140,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, agent options | multi-turn result and `agent.event` notifications |
+| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result and `agent.event` notifications |
 | `agent.reset` | — | closes the conversation and releases hardware |
 | `cancel` | `id` | cancels a request (`-32800` for the cancelled request) |
 | `shutdown` | — | cleanup and exit |
@@ -167,8 +168,19 @@ The important flags are:
 | `--allow-file-writes` | Pre-approve file creation/editing. |
 | `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
 | `--max-requests`, `--max-tool-calls`, `--max-history-bytes`, `--timeout` | Budgets. `--max-history-bytes` bounds retained conversation history (64 KiB–64 MiB, default 4 MiB). |
+| `--history-turns` | Complete turns retained across tasks (1–20, default 6). |
+| `--mcp-config FILE` | Operator `mcpServers` JSON; exposes external MCP tools to the model. See [mcp.md](mcp.md). |
+| `--allow-mcp-tools` | Pre-approve external MCP tool calls (requires `--mcp-config`). |
 | `--var`, `--var-env` | Structure `Alias`/`Vars` overrides and action-script bindings, as described above. |
 | `--no-session-log` | Do not write a session transcript (also accepted by `serve`). |
+
+## `mcp` server
+
+`pymybot mcp --robot SQL` speaks standard MCP over stdio and reserves stdout for
+JSON-RPC; diagnostics stay on stderr. It is read-only unless `--allow-execution`
+is passed, and physical hardware still requires `--allow-hardware`. Tools,
+resources, client configuration and the agent-side MCP client are documented in
+[mcp.md](mcp.md).
 
 ## Session transcripts
 
@@ -196,10 +208,17 @@ written. On POSIX, directories are `0700` and files `0600`.
 
 ```sh
 pymybot sessions                                  # JSON list, newest first
+pymybot sessions --delete ID --dry-run            # preview one deletion
+pymybot sessions --delete ID --yes                # delete one session
+pymybot sessions --delete ID --delete ID2 --yes   # repeatable
 pymybot sessions --prune --keep 20 --dry-run      # show what would go
 pymybot sessions --prune --keep 20 --yes          # delete older sessions
 pymybot sessions --prune --keep 20 --older-than 30 --yes
 ```
+
+`--prune` and `--delete` are mutually exclusive; both require `--yes` or
+`--dry-run`. The GUI's **工具 → 会话管理** uses the same functions with
+filtering, preview, delete and prune controls.
 
 The newest `--keep` sessions are always protected. `--older-than DAYS` adds a
 second condition among the rest, so a recent overflow is not deleted before it
