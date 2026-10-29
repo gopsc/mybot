@@ -888,6 +888,8 @@ class App(QMainWindow):
             "allowFileWrites": self.file_writes_toggle.isChecked(),
             "historyTurns": self.cfg.history_turns,
             "maxHistoryBytes": self.cfg.max_history_bytes,
+            "promptFile": _absolute(self.cfg.prompt_file, workspace),
+            "contextBytes": self.cfg.context_bytes,
             "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
             "maxToolCalls": self.cfg.max_tool_calls, "modulePaths": self._module_paths(),
         }
@@ -1360,6 +1362,16 @@ class SettingsDialog(QDialog):
                               ("工具预算", self.tools), ("历史轮数", self.history_turns),
                               ("历史上限（KiB）", self.history_bytes)):
             model_form.addRow(label, widget)
+        self.context_enabled = QCheckBox("注入工程上下文（工作区/结构/脚本清单）")
+        self.context_enabled.setChecked(bool(cfg.context_bytes))
+        self.context_kib = _spin(max(1, cfg.context_bytes // 1024), 64)
+        self.context_enabled.toggled.connect(self.context_kib.setEnabled)
+        self.context_kib.setEnabled(self.context_enabled.isChecked())
+        context_row = QHBoxLayout()
+        context_row.addWidget(self.context_enabled, 1)
+        context_row.addWidget(self.context_kib)
+        context_row.addWidget(_label("KiB"))
+        model_form.addRow("工程上下文", context_row)
         self.session_log = QCheckBox("保存会话转录（~/.mybot/sessions）")
         self.session_log.setChecked(bool(cfg.session_log))
         model_form.addRow(self.session_log)
@@ -1389,6 +1401,9 @@ class SettingsDialog(QDialog):
         advanced = QWidget()
         advanced_form = QFormLayout(advanced)
         self._field(advanced_form, cfg, "mcp_config", "MCP 配置（mcpServers JSON）", browse_file=True)
+        self._field(advanced_form, cfg, "prompt_file", "提示词文件（USER 层，≤8 KiB）",
+                    browse_file=True, caption="选择提示词文件",
+                    file_filter="Markdown/文本 (*.md *.txt);;所有文件 (*)")
         self._field(advanced_form, cfg, "vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）", kind="lines")
         advanced_form.addRow(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
         tabs.addTab(advanced, "高级 / MCP")
@@ -1403,7 +1418,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.buttons)
         self._permissions_changed()
 
-    def _field(self, form, cfg, name, label, *, kind="text", browse=False, browse_file=False):
+    def _field(self, form, cfg, name, label, *, kind="text", browse=False, browse_file=False,
+               caption="选择 MCP 配置", file_filter="JSON (*.json)"):
         value = getattr(cfg, name)
         if kind == "lines" and name == "module_paths":
             widget = QPlainTextEdit("\n".join(value))
@@ -1422,7 +1438,8 @@ class SettingsDialog(QDialog):
         elif browse_file:
             row = QHBoxLayout()
             row.addWidget(widget)
-            row.addWidget(_button("…", lambda checked=False, w=widget: self._browse_file(w)))
+            row.addWidget(_button("…", lambda checked=False, w=widget: self._browse_file(
+                w, caption, file_filter)))
             form.addRow(label, row)
         else:
             form.addRow(label, widget)
@@ -1432,8 +1449,8 @@ class SettingsDialog(QDialog):
         if chosen:
             widget.setText(chosen)
 
-    def _browse_file(self, widget):
-        chosen, _ = QFileDialog.getOpenFileName(self, "选择 MCP 配置", self._workspace, "JSON (*.json)")
+    def _browse_file(self, widget, caption="选择 MCP 配置", file_filter="JSON (*.json)"):
+        chosen, _ = QFileDialog.getOpenFileName(self, caption, self._workspace, file_filter)
         if chosen:
             widget.setText(chosen)
 
@@ -1478,6 +1495,8 @@ class SettingsDialog(QDialog):
         values.update(timeout=self.timeout.value(), max_requests=self.requests.value(),
                       max_tool_calls=self.tools.value(), history_turns=self.history_turns.value(),
                       max_history_bytes=max(64, self.history_bytes.value()) * 1024,
+                      context_bytes=(max(1, self.context_kib.value()) * 1024
+                                     if self.context_enabled.isChecked() else 0),
                       session_log=self.session_log.isChecked(),
                       enable_file_tools=self.file_tools.isChecked(),
                       enable_shell=self.shell_tools.isChecked(),

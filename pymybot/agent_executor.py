@@ -370,6 +370,26 @@ class RobotExecutor:
         return self._owner_thread_id
 
     @property
+    def robot_path(self):
+        return self._robot_path
+
+    @property
+    def scripts_dir(self):
+        return self._scripts_dir
+
+    @property
+    def workspace_dir(self):
+        return self._workspace_dir
+
+    @property
+    def skills(self):
+        return self._skills
+
+    @property
+    def module_paths(self):
+        return tuple(self._module_paths or ())
+
+    @property
     def faulted(self):
         return self._faulted
 

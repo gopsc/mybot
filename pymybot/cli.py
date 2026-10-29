@@ -156,6 +156,10 @@ def parser():
             command.add_argument("--allow-hardware", action="store_true", help="start with physical device access checked")
             command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
             command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
+            command.add_argument("--prompt-file", metavar="FILE",
+                                 help="operator prompt/profile appended as the USER layer (UTF-8, max 8 KiB)")
+            command.add_argument("--context-bytes", type=bounded_int(0, 64 * 1024), default=4 * 1024,
+                                 help="bounded project-context budget; 0 disables it (default: 4096)")
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help="per-task wall-clock budget (default: 180)")
             continue
@@ -265,6 +269,10 @@ def parser():
             command.add_argument("--max-history-bytes", type=bounded_int(64 * 1024, 64 * 1024 * 1024),
                                  default=4 * 1024 * 1024,
                                  help="upper bound for retained conversation history (default: 4 MiB)")
+            command.add_argument("--prompt-file", metavar="FILE",
+                                 help="operator prompt/profile appended as the USER layer (UTF-8, max 8 KiB)")
+            command.add_argument("--context-bytes", type=bounded_int(0, 64 * 1024), default=4 * 1024,
+                                 help="bounded project-context budget; 0 disables it (default: 4096)")
             command.add_argument("--mcp-config", metavar="FILE",
                                  help="operator mcpServers JSON file; exposes external MCP tools to the model")
             command.add_argument("--allow-mcp-tools", action="store_true",
@@ -308,7 +316,7 @@ def parse_args(argv=None):
         if (args.task is not None or args.model or args.base_url or args.api_key_env
                 or args.allow_actions or args.read_var or args.camera_var or args.workspace_dir
                 or args.enable_shell or args.allow_shell or args.allow_file_writes
-                or args.mcp_config or args.allow_mcp_tools):
+                or args.mcp_config or args.allow_mcp_tools or args.prompt_file):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
         if not args.input:
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
