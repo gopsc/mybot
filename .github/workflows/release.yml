@@ -75,8 +75,8 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - name: Install agent, camera and packaging dependencies
-        run: python -m pip install -e ".[agent,camera,package]"
+      - name: Install agent, camera, web and packaging dependencies
+        run: python -m pip install -e ".[agent,camera,package,web]"
       - name: Doctor
         run: python -m pymybot doctor
       - name: Build bundle

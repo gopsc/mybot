@@ -165,6 +165,12 @@ def parser():
                                  help="intent routing: auto restricts tools by the request; off disables it")
             command.add_argument("--sandbox", choices=("off", "auto", "bwrap"), default="auto",
                                  help="shell sandbox: auto uses bubblewrap when usable; off keeps the workspace jail")
+            command.add_argument("--web", action="store_true",
+                                 help="enable web_fetch and (with --search-endpoint) web_search; needs pymybot[web]")
+            command.add_argument("--allow-web", action="store_true",
+                                 help="preapprove web requests; requires --web")
+            command.add_argument("--search-endpoint", metavar="URL",
+                                 help="SearXNG base URL for web_search; requires --web")
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help="per-task wall-clock budget (default: 180)")
             continue
@@ -283,6 +289,12 @@ def parser():
                                  help="intent routing: auto restricts tools by the request; off disables it")
             command.add_argument("--sandbox", choices=("off", "auto", "bwrap"), default="auto",
                                  help="shell sandbox: auto uses bubblewrap when usable; off keeps the workspace jail")
+            command.add_argument("--web", action="store_true",
+                                 help="enable web_fetch and (with --search-endpoint) web_search; needs pymybot[web]")
+            command.add_argument("--allow-web", action="store_true",
+                                 help="preapprove web requests; requires --web")
+            command.add_argument("--search-endpoint", metavar="URL",
+                                 help="SearXNG base URL for web_search; requires --web")
             command.add_argument("--mcp-config", metavar="FILE",
                                  help="operator mcpServers JSON file; exposes external MCP tools to the model")
             command.add_argument("--allow-mcp-tools", action="store_true",
@@ -327,7 +339,7 @@ def parse_args(argv=None):
                 or args.allow_actions or args.read_var or args.camera_var or args.workspace_dir
                 or args.enable_shell or args.allow_shell or args.allow_file_writes
                 or args.mcp_config or args.allow_mcp_tools or args.prompt_file
-                or args.intent != "auto"):
+                or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
         if not args.input:
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
@@ -337,6 +349,10 @@ def parse_args(argv=None):
         raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir")
     if args.allow_shell and not args.enable_shell:
         raise UsageError("--allow-shell requires --enable-shell")
+    if args.allow_web and not args.web:
+        raise UsageError("--allow-web requires --web")
+    if args.search_endpoint and not args.web:
+        raise UsageError("--search-endpoint requires --web")
     if args.allow_mcp_tools and not args.mcp_config:
         raise UsageError("--allow-mcp-tools requires --mcp-config")
     if args.input:
@@ -371,6 +387,8 @@ def doctor():
         ("pydantic_ai", "pydantic-ai-slim", "agent mode", "pip install pymybot[agent]"),
         ("mcp", "mcp", "MCP server and agent client", "pip install pymybot[mcp]"),
         ("PySide6.QtWidgets", "PySide6", "GUI", "pip install pymybot[gui]"),
+        ("httpx", "httpx", "web fetch", "pip install pymybot[web]"),
+        ("bs4", "beautifulsoup4", "HTML extraction", "pip install pymybot[web]"),
     ]
 
     def module_check(module, distribution, label, *, optional_check=False, hint=""):

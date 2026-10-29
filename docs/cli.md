@@ -140,7 +140,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `promptFile`, `contextBytes`, `intent`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `promptFile`, `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
 | `agent.reset` | — | closes the conversation and releases hardware |
 | `cancel` | `id` | cancels a request (`-32800` for the cancelled request) |
 | `shutdown` | — | cleanup and exit |
@@ -173,6 +173,9 @@ The important flags are:
 | `--context-bytes N` | Budget for the generated project inventory (workspace top level, structures, scripts, drivers, skills); 0 disables it (0–64 KiB, default 4096). |
 | `--intent MODE` | `auto` (default), `off`, `chat`, `inspect`, `control`, `author` or `diagnose`. Auto narrows the tool allowlist and budget when the request clearly matches an intent; mixed requests union their tools; messages with no keywords stay unrestricted. |
 | `--sandbox MODE` | `auto` (default), `off` or `bwrap`. Auto probes bubblewrap and falls back to the workspace jail; `bwrap` fails instead of running unsandboxed. The sandbox mounts the host read-only, gives the workspace a read-write overlay, clears the environment and unshares network/PID/IPC/UTS namespaces. |
+| `--web` | Enable `web_fetch` (HTTPS only) and, with `--search-endpoint`, `web_search`. Requires `pymybot[web]`. Private/link-local/loopback targets, redirects past three hops, non-text content and oversized bodies are refused. |
+| `--allow-web` | Pre-approve web requests for this session (requires `--web`). |
+| `--search-endpoint URL` | SearXNG base URL used by `web_search`; no endpoint means no search tool. |
 | `--mcp-config FILE` | Operator `mcpServers` JSON; exposes external MCP tools to the model. See [mcp.md](mcp.md). |
 | `--allow-mcp-tools` | Pre-approve external MCP tool calls (requires `--mcp-config`). |
 | `--var`, `--var-env` | Structure `Alias`/`Vars` overrides and action-script bindings, as described above. |

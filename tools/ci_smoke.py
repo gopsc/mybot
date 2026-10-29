@@ -33,7 +33,7 @@ def preflight(mode):
                      "pydantic_ai.models.anthropic", "pydantic_ai.providers.openai",
                      "pydantic_ai.providers.anthropic", "pydantic_ai.providers.deepseek",
                      "mcp", "pymybot.mcp_server", "pymybot.mcp_client",
-                     "pydantic_ai.mcp"):
+                     "pydantic_ai.mcp", "httpx", "bs4", "pymybot.agent_web"):
             importlib.import_module(name)
     print(f"{mode} dependency preflight passed", flush=True)
 
