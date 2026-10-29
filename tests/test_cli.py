@@ -259,6 +259,57 @@ def test_struct_static_check_does_not_activate(workspace, monkeypatch, capsys):
     assert result["action_blocks"] == ["Struct(state)", "Action"]
 
 
+@pytest.mark.parametrize("command", ["check", "run"])
+@pytest.mark.parametrize("body", ["@Trigger\ntrigger;\nf;\n@\n", "@Reflex\nname dev.echo;\nf 1;\n@\n"])
+def test_removed_mt_syntax_is_rejected_before_cli_activation(workspace, monkeypatch, capsys, command, body):
+    monkeypatch.setattr(Robot, "active", forbid)
+    path = workspace / "removed.mt"
+    path.write_text("@if(1<0)\n" + body + "@\n", encoding="utf-8")
+    code, result, _ = invoke(capsys, command, "--robot", workspace / "robot.sql", "--input", path)
+    assert code == 1 and result["error"]["type"] == "ScriptError"
+
+
+def test_nested_reflex_static_check_does_not_activate(workspace, monkeypatch, capsys):
+    monkeypatch.setattr(Robot, "active", forbid)
+    path = workspace / "nested-reflex.mt"
+    path.write_text('''@Reflex(step)
+@Vars
+name value;
+x 1;
+@
+dev.echo;
+$(x);
+@Action
+@if(x>0)
+dev.echo;
+$(x+1);
+@
+@
+@
+@Action
+step.x;
+2;
+@
+''', encoding="utf-8")
+    code, result, _ = invoke(capsys, "check", "--robot", workspace / "robot.sql", "--input", path)
+    assert code == 0 and result["activated"] is False
+    assert result["action_blocks"] == ["Reflex(step)", "Action"]
+
+
+@pytest.mark.parametrize("in_fragment", [False, True])
+def test_top_level_merge_rejects_later_nested_actions(workspace, monkeypatch, capsys, in_fragment):
+    monkeypatch.setattr(Robot, "active", forbid)
+    plain = "@Action\ndev.echo;\n1;\n@\n"
+    nested = "@Action\n@if(1>0)\ndev.echo;\n2;\n@\n@\n"
+    fragment = workspace / "fragment.mt"
+    fragment.write_text(plain + nested if in_fragment else plain, encoding="utf-8")
+    path = workspace / "merge.mt"
+    path.write_text(("" if in_fragment else plain + nested) + "@Merge\npath;\nfragment.mt;\n@\n", encoding="utf-8")
+    code, result, _ = invoke(capsys, "check", "--robot", workspace / "robot.sql", "--input", path)
+    assert code == 1 and result["error"]["type"] == "ScriptError"
+    assert "plain @Action" in result["error"]["message"]
+
+
 def test_include_base_is_input_parent(workspace, capsys):
     directory = workspace / "nested scripts"
     directory.mkdir()

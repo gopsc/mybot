@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
 import os
 import re
 import sys
@@ -12,9 +11,9 @@ from pathlib import Path
 from .actions import ActionRunner
 from .errors import ControllerError, DriverError, ScriptError
 from .expr import Expression, expr_body
-from .hardware import Alias, Budget, DriverVariable, FLOW, Metadata, Number, Registry, Struct, safe_ident
+from .hardware import Alias, Budget, DriverVariable, FLOW, Metadata, Number, Registry, safe_ident
 from .include import expand_includes
-from .matrix import Matrix, parse_matrices, struct_name
+from .matrix import Matrix, parse_matrices
 from .paths import asset_path
 from .sql import apply_statement, load_structure, parse_sql
 
@@ -354,45 +353,8 @@ class Robot:
             matrices = expand_includes(parse_matrices(check_script(script_text)), Path(base_dir))
             budget = Budget(self.stop_event, timeout, cancel)
             with self.registry.session():
-                declared = set()
-                for matrix in matrices:
-                    name = struct_name(matrix.name)
-                    if name is not None:
-                        if name in declared or name in self.registry:
-                            raise ScriptError(f"Duplicate Struct variable '{name}'")
-                        declared.add(name)
-                        self.registry.override(name, Struct(name, json.loads(matrix.json_text)))
-                        continue
-                    if matrix.name not in {"Alias", "Vars"}:
-                        continue
-                    field = "alias" if matrix.name == "Alias" else "value"
-                    if "name" not in matrix.header or field not in matrix.header:
-                        raise ScriptError(f"{matrix.name} requires name/{field} columns")
-                    for i in range(1, len(matrix.rows)):
-                        name = matrix.rows[i][matrix.header.index("name")]
-                        if name in declared:
-                            raise ScriptError(f"Duplicate session variable '{name}'")
-                        declared.add(name)
-                        if matrix.name == "Vars" and name in self.registry:
-                            raise ScriptError(f"@Vars '{name}' cannot override a structure variable")
-                        value = matrix.inherited(i, matrix.header.index(field))
-                        if matrix.name == "Alias":
-                            var = Alias(name, value)
-                        else:
-                            precision = None
-                            if "precision" in matrix.header:
-                                raw = matrix.inherited(i, matrix.header.index("precision"))
-                                if raw.strip() not in {"-", ""}:
-                                    try:
-                                        precision = int(raw)
-                                    except ValueError:
-                                        raise ScriptError(
-                                            f"@Vars '{name}' precision must be an integer from 0 to 15") from None
-                                    if not 0 <= precision <= 15:
-                                        raise ScriptError(
-                                            f"@Vars '{name}' precision must be an integer from 0 to 15")
-                            var = Number(name, value, self.registry.resolve_number, precision=precision)
-                        self.registry.override(name, var)
+                runner = ActionRunner(self.registry, budget)
+                runner.declare_scalars(matrices)
                 for name, value in (vars or {}).items():
                     existing = self.registry.get(name)
                     # Keep numeric variables numeric: metadata $(name) resolves
@@ -406,7 +368,7 @@ class Robot:
                 for var in driver_vars:
                     var.budget = budget
                 try:
-                    return ActionRunner(self.registry, budget).run(matrices)
+                    return runner.run(matrices)
                 finally:
                     for var in driver_vars:
                         var.budget = None

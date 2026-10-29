@@ -714,26 +714,206 @@ def test_struct_rejects_cli_binding_override(modules):
         assert robot.registry["dev"].read()["count"] == 0
 
 
-def test_struct_reflex_captures_survive_between_calls_only(modules):
+def test_struct_reflex_outer_capture_returns_values_between_calls_and_clears_each_run(modules):
     script = '''@Struct(state)
 {"count":0}
 @
-@Reflex
-name dev.value;
-read $state.count=count;
-use $(state.count);
+@Reflex(read)
+dev.capture;
+$state.count=count;
 @
-@Trigger
-trigger;
-read;
-use;
-read;
-use;
+@Reflex(use)
+dev.value;
+$(state.count);
+@
+@Action
+read.capture;
+$state.count=count;
+@
+@Action
+use.unused;
+0;
+@
+@Action
+read.capture;
+$state.count=count;
+@
+@Action
+use.unused;
+0;
 @
 '''
     with Robot(probe_sql(), module_paths=modules) as robot:
         assert [v["value"] for v in robot.run(script)] == [0, 1, 0, 3]
         assert robot.registry.get("state") is None
+        assert [v["value"] for v in robot.run(script)] == [0, 5, 0, 7]
+        assert robot.registry.get("state") is None
+        assert robot.registry["dev"].read()["count"] == 8
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_reflex_action_bindings_and_struct_captures_are_run_local(modules, fail):
+    sql = probe_sql("CREATE TABLE Vars(name String,value Number); INSERT INTO Vars(name,value) VALUES('x',10);")
+    script = '''@Struct(state)
+{"count":0}
+@
+@Reflex(step)
+dev.value dev.capture;
+$(x+1) $state.count=count;
+@
+@Action
+step.x;
+2;
+@
+@Action
+dev.value;
+$(x+state.count);
+@
+'''
+    if fail:
+        script += "@Action\nstep.x;\n$(missing);\n@\n"
+    with Robot(sql, module_paths=modules) as robot:
+        original = robot.registry["x"]
+        if fail:
+            with pytest.raises(ScriptError, match="missing"):
+                robot.run(script)
+        else:
+            outputs = robot.run(script)
+            assert [v["value"] for v in outputs] == [3, 10]
+        assert robot.registry["x"] is original
+        assert robot.registry.resolve("x") == 10
+        assert robot.registry.get("state") is None
+        assert robot.registry.get("step") is None
+        assert robot.registry["dev"].read()["count"] == 2
+        with pytest.raises(ScriptError, match="step"):
+            robot.run("@Action\nstep.x;\n1;\n@\n")
+
+
+@pytest.mark.parametrize("flow", ["controller", "trigger"])
+@pytest.mark.parametrize("source", ["argument", "Alias", "Vars"])
+def test_reflex_bindings_cannot_override_sql_flow_references(modules, flow, source):
+    sql = probe_sql(f"CREATE TABLE Relay(name String,{flow} String);"
+                    f"INSERT INTO Relay(name,{flow}) VALUES('relay','dev');")
+    declaration = "" if source == "argument" else (
+        f"@{source}\nname {'alias' if source == 'Alias' else 'value'};\ndev 1;\n@\n")
+    script = ("@Reflex(f)\n" + declaration + "relay.test;\n1;\n@\n"
+              + f"@Action\nf.{'dev' if source == 'argument' else 'unused'};\n1;\n@\n")
+    with Robot(sql, module_paths=modules) as robot:
+        original = robot.registry["dev"]
+        with pytest.raises(ScriptError, match="(?i)cannot replace|override|referenced"):
+            robot.run(script)
+        assert robot.registry["dev"] is original
+        assert "dev" in robot.registry.flow_refs
+        assert original.read()["count"] == 0
+
+
+def test_sql_trigger_still_executes_when_driver_is_called_from_reflex(modules):
+    sql = ("CREATE TABLE Probe(name String,trigger String);"
+           "INSERT INTO Probe(name,trigger) VALUES('source','-');"
+           "INSERT INTO Probe(name,trigger) VALUES('consumer','source');")
+    script = "@Reflex(f)\nconsumer.value;\n7;\n@\n@Action\nf.unused;\n0;\n@\n"
+    with Robot(sql, module_paths=modules) as robot:
+        outputs = robot.run(script)
+        assert len(outputs) == 1 and outputs[0]["value"] == 7
+        assert robot.registry["source"].read()["count"] == 1
+        assert robot.registry["consumer"].read()["count"] == 1
+        assert "source" in robot.registry.flow_refs
+
+
+def test_reflex_local_scalars_override_defaults_without_leaking_between_calls_or_runs(modules):
+    sql = probe_sql("CREATE TABLE Vars(name String,value Number);"
+                    "INSERT INTO Vars(name,value) VALUES('x',100);"
+                    "CREATE TABLE Alias(name String,alias String);"
+                    "INSERT INTO Alias(name,alias) VALUES('label','parent');")
+    script = '''@Vars
+name value;
+seed 2;
+@
+@Alias
+name alias;
+target dev;
+@
+@Reflex(step)
+@Vars
+name value precision;
+x $(seed+1) -;
+ratio 2.3456 2;
+@
+@Alias
+name alias;
+label default;
+@
+target.value;
+$(x);
+@Action
+@if(x>0)
+target.value;
+$(label);
+@
+@
+target.value;
+$(ratio);
+@
+@Action
+step.x step.label;
+4 $("argument");
+@
+@Action
+step.unused;
+0;
+@
+@Action
+dev.value;
+$(x);
+$(label);
+@
+'''
+    with Robot(sql, module_paths=modules) as robot:
+        original_x, original_label = robot.registry["x"], robot.registry["label"]
+        for _ in range(2):
+            outputs = robot.run(script)
+            assert [item["value"] for item in outputs] == [4, "argument", "2.35", 3, "default", "2.35", 100, "parent"]
+            assert robot.registry["x"] is original_x and robot.registry["label"] is original_label
+            assert all(robot.registry.get(name) is None for name in ("seed", "target", "ratio", "unused", "step"))
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_nested_reflex_struct_writes_never_reach_parent_without_outer_capture(modules, fail):
+    script = '''@Struct(state)
+{"count":10}
+@
+@Reflex(inner)
+dev.value dev.capture;
+1 $state.count=count;
+@
+@Reflex(outer)
+@Action
+inner.capture;
+$local=count;
+@
+dev.value;
+$(state.count+local);
+'''
+    if fail:
+        script += "$(missing);\n"
+    script += '''@
+@Action
+outer.capture;
+$returned=count;
+@
+@Action
+dev.value;
+$(state.count+returned);
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        if fail:
+            with pytest.raises(ScriptError, match="missing"):
+                robot.run(script)
+            assert robot.registry["dev"].read()["count"] == 2
+        else:
+            assert [item["value"] for item in robot.run(script)] == [1, 11, 12]
+        assert all(robot.registry.get(name) is None for name in ("state", "local", "returned"))
 
 
 @pytest.mark.parametrize("directive", ["Include", "Merge"])

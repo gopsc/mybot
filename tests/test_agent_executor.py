@@ -432,7 +432,12 @@ def test_path_rejection(setup, path):
 
 
 @pytest.mark.parametrize("text", ["@Action\nsensor.test;\n1 2;\n@", "@Include\npath;\n../secret.mt;\n@",
-                                   "@Merge\npath;\nmissing.mt;\n@"])
+                                   "@Merge\npath;\nmissing.mt;\n@",
+                                   "@Reflex\nname sensor.test;\nf 1;\n@",
+                                   "@Trigger\ntrigger;\nf;\n@",
+                                   "@if(0>1)\n@Reflex\nname sensor.test;\nf 1;\n@\n@",
+                                   "@if(0>1)\n@Trigger\ntrigger;\nf;\n@\n@",
+                                   ACTION + "@Reflex(unused)\nsensor.test sensor.p;\n1;\n@"])
 def test_script_parse_and_include_precheck(setup, text):
     (setup.scripts / "bad.mt").write_text(text, encoding="utf-8")
     async def scenario():
@@ -458,6 +463,65 @@ def test_include_snapshot_cannot_change_during_activation(setup):
             assert "Include" not in frozen and parse_matrices(frozen) == parse_matrices(ACTION)
         finally:
             await ex.close()
+    asyncio.run(scenario())
+
+
+def test_reflex_and_nested_action_order_are_frozen_before_activation(setup):
+    fragment_text = '''@Reflex(step)
+@Alias
+name alias;
+target sensor;
+@
+@Vars
+name value precision;
+x 2.3456 2;
+@
+target.test;
+1;
+@Action
+target.test;
+2;
+@if(x>0)
+target.test;
+3;
+@
+target.test;
+4;
+@
+target.test;
+5;
+@
+@Reflex(other)
+sensor.test;
+6;
+@
+@Action
+step.unused;
+0;
+@if(1>0)
+other.unused;
+0;
+@
+sensor.test;
+7;
+@
+'''
+    fragment = setup.scripts / "fragment.mt"
+    fragment.write_text(fragment_text, encoding="utf-8")
+    (setup.scripts / "action.mt").write_text(ACTION + "@Include\npath;\nfragment.mt;\n@\n" + ACTION,
+                                              encoding="utf-8")
+    setup.options.active = lambda _: fragment.write_text(ACTION, encoding="utf-8")
+
+    async def scenario():
+        executor = setup.factory()
+        try:
+            result = await executor.call("run_action_script", {"script": "action.mt"})
+            assert result["ok"], result
+            frozen = setup.made[0].last_run[0]
+            assert "@Include" not in frozen
+            assert parse_matrices(frozen) == parse_matrices(ACTION + fragment_text + ACTION)
+        finally:
+            await executor.close()
     asyncio.run(scenario())
 
 
@@ -1108,6 +1172,90 @@ def test_include_merge_and_control_frozen_for_real_robot(tmp_path):
             assert len(result["data"]["outputs"]) == 2
         finally:
             await ex.close()
+    asyncio.run(scenario())
+
+
+def test_reflex_action_calls_survive_include_snapshot(tmp_path):
+    (tmp_path / "main.mt").write_text("@Include\npath;\npart.mt;\n@\n", encoding="utf-8")
+    (tmp_path / "part.mt").write_text('''@Reflex(step)
+@Alias
+name alias;
+target relay0;
+@
+@Vars
+name value;
+delta 1;
+delay 99;
+@
+@Action
+@if(delay>=0)
+target.test;
+$(delay+delta);
+@
+@
+@
+@Vars
+name value;
+count 0;
+@
+@Action
+@while(count<3)
+@Action
+step.delay step.capture;
+$(count) $count=slept;
+@
+@
+@
+''', encoding="utf-8")
+
+    async def scenario():
+        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path)
+        try:
+            for _ in range(2):
+                result = await executor.call("run_action_script", {"script": "main.mt"})
+                assert result["ok"], result
+                assert [v["slept"] for v in result["data"]["outputs"]] == [1, 2, 3]
+        finally:
+            await executor.close()
+    asyncio.run(scenario())
+
+
+def test_reflex_mixed_body_order_survives_agent_freeze(tmp_path):
+    (tmp_path / "main.mt").write_text("@Include\npath;\npart.mt;\n@\n", encoding="utf-8")
+    (tmp_path / "part.mt").write_text('''@Reflex(step)
+relay0.test;
+1;
+@Action
+relay0.test;
+2;
+@if(1>0)
+relay0.test;
+3;
+@
+relay0.test;
+4;
+@
+relay0.test;
+5;
+@
+@Action
+step.capture;
+$last=slept;
+@Action
+relay0.test;
+$(last+1);
+@
+@
+''', encoding="utf-8")
+
+    async def scenario():
+        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path)
+        try:
+            result = await executor.call("run_action_script", {"script": "main.mt"})
+            assert result["ok"], result
+            assert [item["slept"] for item in result["data"]["outputs"]] == [1, 2, 3, 4, 5, 6]
+        finally:
+            await executor.close()
     asyncio.run(scenario())
 
 

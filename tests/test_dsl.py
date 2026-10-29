@@ -28,10 +28,18 @@ class FakeRegistry:
     def resolve(self, name):
         variable = self.require(name)
         if variable.kind == "vars":
-            return float(variable.read())
-        if variable.kind == "alias":
+            return variable.numeric()
+        if variable.kind in {"alias", "struct"}:
             return variable.read()
         raise ScriptError("Expression identifier is not a scalar")
+
+    def resolve_number(self, name):
+        variable = self.require(name)
+        if variable.kind == "struct":
+            return variable.read()
+        if variable.kind != "vars":
+            raise ScriptError(f"Expression identifier '{name}' must be an @Vars number or @Struct value")
+        return variable.numeric()
 
     def override(self, name, variable):
         self.variables[name] = variable
@@ -81,6 +89,10 @@ def block(name, header, *rows):
     return "@" + name + "\n" + ";\n".join([header, *rows]) + ";\n@\n"
 
 
+def body(name, *parts):
+    return "@" + name + "\n" + "".join(parts) + "@\n"
+
+
 def expand(text, base):
     return expand_includes(parse_matrices(text), base)
 
@@ -122,13 +134,68 @@ def test_matrix_inheritance_not_header_and_mutable_rows():
 
 @pytest.mark.parametrize("text", [
     "@\n", "@Action\na.p;\n1;\n", "@Action\na b;\n1;\n@",
-    "@Action\na.p;1;\n@if(1>0)\na.p;1;\n@\n@",
+    "@Action\na.p;1\n@if(1>0)\na.p;1;\n@\n@",
     "@if(1>0)\n@Action\na.p;1;\n@\n",
     "@Action\na.p;\n1# missing semicolon\n@",
 ])
 def test_matrix_rejects_malformed(text):
     with pytest.raises(ScriptError):
         parse_matrices(text)
+
+
+@pytest.mark.parametrize("name", ["Action", "Reflex(f)"])
+def test_matrix_action_and_reflex_have_same_ordered_nested_body(name):
+    matrix = parse_matrices(body(name, "dev.p;1;\n",
+                                 body("Action", "dev.p;2;\n",
+                                      body("if(1>0)", block("Action", "dev.p", "3")),
+                                      "dev.q;4;\n"),
+                                 body("while(0>1)", "dev.p;5;\n"),
+                                 "dev.r;6;\n"))[0]
+    assert matrix.rows == []
+    assert [child.name for child in matrix.children] == ["Action", "Action", "while(0>1)", "Action"]
+    assert matrix.children[0].rows == [["dev.p"], ["1"]]
+    nested = matrix.children[1]
+    assert nested.rows == []
+    assert [child.name for child in nested.children] == ["Action", "if(1>0)", "Action"]
+    assert nested.children[0].data == [["2"]]
+    assert nested.children[1].children[0].data == [["3"]]
+    assert nested.children[2].rows == [["dev.q"], ["4"]]
+    assert matrix.children[2].children[0].data == [["5"]]
+    assert matrix.children[3].rows == [["dev.r"], ["6"]]
+
+
+def test_matrix_plain_action_keeps_rows_but_reflex_always_has_action_children():
+    action = parse_matrices(block("Action", "dev.p", "1", "-"))[0]
+    reflex = parse_matrices(block("Reflex(f)", "dev.p", "1", "-"))[0]
+    assert action.rows == [["dev.p"], ["1"], ["-"]] and action.children == []
+    assert reflex.rows == [] and reflex.children == [action]
+    assert parse_matrices(body("Reflex(empty)"))[0].children == []
+
+
+@pytest.mark.parametrize("parent", ["Action", "if(0>1)", "while(0>1)", "Reflex(outer)"])
+@pytest.mark.parametrize("declaration", [body("Reflex(inner)"), '@Struct(state)\n{}\n@\n'])
+def test_reflex_and_struct_definitions_are_top_level_only(parent, declaration):
+    with pytest.raises(ScriptError):
+        parse_matrices(body(parent, declaration))
+
+
+@pytest.mark.parametrize("declaration", [block("Alias", "name alias", "target dev"),
+                                          block("Vars", "name value", "n 1")])
+@pytest.mark.parametrize("parent", ["Action", "if(0>1)", "while(0>1)"])
+@pytest.mark.parametrize("in_reflex", [False, True])
+def test_scalar_declarations_cannot_be_inside_action_or_control(declaration, parent, in_reflex):
+    script = body(parent, declaration)
+    if in_reflex:
+        script = body("Reflex(f)", script)
+    with pytest.raises(ScriptError):
+        parse_matrices(script)
+
+
+@pytest.mark.parametrize("name", ["Reflex", "Reflex()", "Reflex(1bad)", "Reflex(a.b)",
+                                      "Reflex(a b)", "Reflex(f)junk", "Reflex(f"])
+def test_reflex_rejects_old_or_malformed_declaration_names(name):
+    with pytest.raises(ScriptError):
+        parse_matrices(block(name, "dev.p", "1"))
 
 
 def test_matrix_depth_limit_and_global_line_number():
@@ -322,35 +389,513 @@ def test_driver_failure_halts_later_rows(result):
 
 def test_reflex_order_multibeat_arguments_inheritance_and_restore():
     dev = Driver()
-    script = (block("Reflex", "name dev.p", "blink $(x)", "other 9", "blink -")
-              + block("Trigger", "trigger", "blink(x=2)", "-", "other")
-              + block("Action", "dev.p", "1"))
+    script = (block("Action", "dev.p", "1")
+              + block("Action", "blink.x", "2", "-")
+              + block("Reflex(blink)", "dev.p", "$(x)", "-")
+              + block("Reflex(other)", "dev.p", "9")
+              + block("Action", "other.unused", "0"))
     registry, outputs = run(script, dev, Alias("x", "original"))
-    assert dev.calls == [{"p": 1.0}, {"p": "2"}, {"p": "2"}, {"p": "2"}, {"p": "2"}, {"p": 9.0}]
+    assert dev.calls == [{"p": 1.0}] + [{"p": 2.0}] * 4 + [{"p": 9.0}]
     assert registry.resolve("x") == "original"
+    assert registry.get("unused") is None
+    assert [output["reading"] for output in outputs] == list(range(1, 7))
+
+
+def test_reflex_scopes_restore_on_driver_failure_and_unused_body_is_lazy():
+    original = Alias("x", "original")
+    dev = Driver(callback=lambda p: {"result": "ERR"})
+    registry = FakeRegistry(dev, original)
+    runner = ActionRunner(registry, FakeBudget())
+    with pytest.raises(ScriptError):
+        runner.run(parse_matrices(block("Reflex(f)", "dev.p", "$(x)") + block("Action", "f.x", "2")))
+    assert registry.get("x") is original
+    runner.run(parse_matrices(block("Reflex(unused)", "missing.p", "$(undefined)") + body("if(1<0)")))
+    assert len(dev.calls) == 1
+
+
+@pytest.mark.parametrize("call", ["f", "f()", "f(x=1)", "f(x)", "f(x=)", "f(=x)",
+                                   "f(x=1,x=2)", "f(x=1", "f(bad-name=1)", "missing", "(x=1)"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_removed_trigger_calls_are_rejected_at_parse_time(call, nested):
+    trigger = block("Trigger", "trigger", call)
+    script = body("if(0>1)", trigger) if nested else trigger
+    with pytest.raises(ScriptError):
+        parse_matrices(block("Reflex(f)", "dev.p", "1") + script)
+
+
+@pytest.mark.parametrize("parent", [None, "if(0>1)", "Reflex(unused)"])
+def test_legacy_reflex_table_is_rejected_even_when_unreachable(parent):
+    legacy = block("Reflex", "name dev.p", "f 1")
+    with pytest.raises(ScriptError):
+        parse_matrices(body(parent, legacy) if parent else legacy)
+
+
+@pytest.mark.parametrize(("cell", "expression", "expected"), [
+    ("4", "$(x+1)", 5.0), ("$(2+3)", "$(x*2)", 10.0),
+    ('$("你好")', '$(x+"!")', "你好!"), ('$("4")', '$(x+"!")', "4!"),
+])
+def test_reflex_action_typed_arguments_and_literal_parameter_names(cell, expression, expected):
+    dev = Driver()
+    original = Alias("x", "original")
+    script = (block("Action", "f.x", cell) + block("Reflex(f)", "dev.p", expression))
+    registry, outputs = run(script, dev, original)
+    assert dev.calls == [{"p": expected}]
+    assert type(dev.calls[0]["p"]) is type(expected)
+    assert registry.get("x") is original
+    assert len(outputs) == 1
+
+
+def test_reflex_action_preserves_numeric_precision_without_text_coercion():
+    dev = Driver()
+    number = Number("n", 2.3456, precision=2)
+    script = (block("Reflex(f)", "dev.p", "$(x+1)")
+              + block("Action", "f.x dev.p", "$(n) $(n)"))
+    registry, outputs = run(script, dev, number)
+    assert dev.calls[0]["p"] == pytest.approx(3.3456)
+    assert isinstance(dev.calls[0]["p"], float)
+    assert dev.calls[1]["p"] == "2.35"
+    assert registry.get("n") is number
+    assert len(outputs) == 2
+
+
+def test_reflex_action_multibeat_inline_order():
+    trace = []
+    dev, other = Driver(trace=trace), Driver("other", trace=trace)
+    script = (block("Action", "other.p f.x f.y", "0 2 3", "- 4 -")
+              + block("Reflex(f)", "dev.p dev.q", "$(x) $(y)", "- -")
+              + block("Action", "f.x f.y", "9 8"))
+    registry, outputs = run(script, dev, other)
+    assert trace == ["other", "dev", "dev", "other", "dev", "dev", "dev", "dev"]
+    assert dev.calls == ([{"p": 2.0, "q": 3.0}] * 2 + [{"p": 4.0, "q": 3.0}] * 2
+                         + [{"p": 9.0, "q": 8.0}] * 2)
+    assert len(outputs) == 8
+    assert registry.get("x") is None and registry.get("y") is None
+
+
+@pytest.mark.parametrize("name", ["Action", "Reflex(f)"])
+def test_action_and_reflex_execute_same_mixed_nested_body_in_order(name):
+    dev = Driver()
+    contents = ("dev.p;10;\n"
+                + body("Action", "dev.p;20;\n",
+                       body("while(count<4)", block("Action", "dev.cap", "$count=reading"),
+                            body("if(count==3)", "dev.p;30;\n")),
+                       "dev.p;40;\n")
+                + "dev.p;50;\n")
+    script = body(name, contents)
+    if name != "Action":
+        script += block("Action", "f.capture", "$returned=reading")
+    registry, outputs = run(script, dev, Number("count", 0))
+    assert dev.calls == [{"p": 10.0}, {"p": 20.0}, {}, {"p": 30.0}, {}, {"p": 40.0}, {"p": 50.0}]
+    assert [output["reading"] for output in outputs] == list(range(1, 8))
+    assert registry.resolve("count") == (5.0 if name == "Action" else 0.0)
+    if name != "Action":
+        assert registry.resolve("returned") == 7.0
+
+
+def test_reflex_action_alias_dynamic_headers_and_duplicate_targets():
+    dev = Driver()
+    definitions = block("Reflex(f)", "dev.p", "$(x)")
+    run(definitions + block("Action", "target.x $(name).$(key)", "2 3"),
+        dev, Alias("target", "f"), Alias("name", "f"), Alias("key", "y"))
+    assert dev.calls == [{"p": 2.0}]
+    with pytest.raises(ScriptError, match="duplicates"):
+        run(definitions + block("Action", "target.x f.$(key)", "2 3"),
+            dev, Alias("target", "f"), Alias("key", "x"))
+    assert len(dev.calls) == 1
+
+
+def test_reflex_action_capture_uses_last_result_and_whole_row_evaluation():
+    dev, other = Driver(), Driver("other")
+    script = (block("Reflex(f)", "dev.p", "$(x)", "-")
+              + block("Action", "f.x f.capture other.p", "7 $count=reading $(count)", "- - -"))
+    registry, outputs = run(script, dev, other, Number("count", 0))
+    assert other.calls == [{"p": 0.0}, {"p": 2.0}]
+    assert registry.resolve("count") == 4.0
     assert len(outputs) == 6
 
 
-def test_reflex_scopes_restore_on_failure_and_untriggered_is_lazy():
-    registry = FakeRegistry(Driver(callback=lambda p: {"result": "ERR"}), Alias("x", "original"))
+def test_reflex_capture_only_calls_have_no_required_dummy_argument():
+    dev = Driver()
+    script = (block("Reflex(f)", "dev.p", "7", "-")
+              + block("Action", "f.capture", "$count=reading")
+              + block("Action", "f.unused", "0"))
+    registry, outputs = run(script, dev)
+    assert dev.calls == [{"p": 7.0}] * 4
+    assert registry.resolve("count") == 2.0
+    assert registry.get("capture") is None and registry.get("unused") is None
+    assert [output["reading"] for output in outputs] == [1, 2, 3, 4]
+
+
+def test_reflex_action_inside_capture_driven_loop():
+    dev = Driver()
+    script = (block("Reflex(f)", "dev.p", "$(x)")
+              + body("while(count<3)", block("Action", "f.x f.capture", "$(count+1) $count=reading")))
+    registry, outputs = run(script, dev, Number("count", 0))
+    assert dev.calls == [{"p": 1.0}, {"p": 2.0}, {"p": 3.0}]
+    assert registry.resolve("count") == 3.0
+    assert len(outputs) == 3
+
+
+def test_reflex_action_nested_scopes_only_propagate_explicit_outer_capture():
+    dev = Driver()
+    original, count = Number("x", 20), Number("count", 99)
+    script = (body("Reflex(outer)",
+                   block("Action", "inner.x inner.capture", "$(x+1) $count=reading"),
+                   block("Action", "dev.p dev.q", "$(x) $(count)"))
+              + block("Reflex(inner)", "dev.p dev.cap dev.local", "$(x+2) $count=reading $x=reading")
+              + block("Action", "outer.x outer.capture", "4 $returned=reading")
+              + block("Action", "dev.p dev.q", "$(x) $(count)"))
+    registry, outputs = run(script, dev, original, count)
+    assert dev.calls == [{"p": 7.0}, {"p": 4.0, "q": 1.0}, {"p": 20.0, "q": 99.0}]
+    assert registry.get("x") is original and registry.get("count") is count
+    assert registry.resolve("returned") == 2.0
+    assert [output["reading"] for output in outputs] == [1, 2, 3]
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_reflex_action_failure_restores_all_captures_without_undoing_calls(nested):
+    dev = Driver()
+    original, count = Alias("x", "original"), Number("count", 99)
+    registry = FakeRegistry(dev, original, count)
+    script = block("Reflex(inner)", "dev.p dev.cap dev.new", "$(x) $count=reading $fresh=reading",
+                   "$(missing) - -")
+    if nested:
+        script += (body("Reflex(outer)", block("Alias", "name alias", "target inner"),
+                        block("Action", "target.x target.capture", "$(x) $count=reading"))
+                   + block("Action", "outer.x outer.capture", "4 $returned=reading"))
+    else:
+        script += block("Action", "inner.x inner.capture", "4 $returned=reading")
+    with pytest.raises(ScriptError, match="missing"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert dev.calls == [{"p": 4.0}]
+    assert registry.get("x") is original and registry.get("count") is count
+    assert all(registry.get(name) is None for name in ("target", "fresh", "returned"))
+
+
+@pytest.mark.parametrize("mutual", [False, True])
+def test_reflex_action_recursion_has_shared_depth_limit(mutual):
+    original = Alias("x", "original")
+    registry = FakeRegistry(original)
+    script = block("Reflex(f)", "g.x" if mutual else "f.x", "$(x)")
+    if mutual:
+        script += block("Reflex(g)", "f.x", "$(x)")
+    script += block("Action", "f.x", "1")
+    with pytest.raises(ScriptError, match="(?i)reflex.*32"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert registry.get("x") is original
+
+
+@pytest.mark.parametrize("depth", [0, 3, 15])
+def test_reflex_recursion_terminates_on_condition_and_restores_each_frame(depth):
+    dev = Driver()
+    original = Number("n", 100)
+    script = (body("Reflex(countdown)", "dev.p;$(n);\n",
+                   body("if(n>0)", block("Action", "countdown.n", "$(n-1)")),
+                   "dev.p;$(n);\n")
+              + block("Action", "countdown.n countdown.capture", f"{depth} $last=reading"))
+    registry, outputs = run(script, dev, original)
+    expected = list(range(depth, -1, -1)) + list(range(depth + 1))
+    assert [params["p"] for params in dev.calls] == expected
+    assert len(outputs) == 2 * (depth + 1)
+    assert registry.resolve("last") == len(outputs)
+    assert registry.get("n") is original
+
+
+@pytest.mark.parametrize("depth", [16, 31])
+def test_reflex_recursion_and_control_blocks_share_execution_depth_limit(depth):
+    dev = Driver()
+    original = Number("n", 100)
+    registry = FakeRegistry(dev, original)
     runner = ActionRunner(registry, FakeBudget())
-    with pytest.raises(ScriptError):
-        runner.run(parse_matrices(block("Reflex", "name dev.p", "f $(x)") + block("Trigger", "trigger", "f(x=2)")))
-    assert registry.resolve("x") == "original"
-    runner.run(parse_matrices(block("Reflex", "garbage", "not_valid") + "@if(1<0)\n@"))
+    script = (body("Reflex(countdown)", "dev.p;$(n);\n",
+                   body("if(n>0)", block("Action", "countdown.n", "$(n-1)")))
+              + block("Action", "countdown.n", str(depth)))
+    with pytest.raises(ScriptError, match="nesting.*depth"):
+        runner.run(parse_matrices(script))
+    assert registry.get("n") is original
+    assert len(dev.calls) == 16
+    runner.run(parse_matrices(block("Action", "dev.p", "1")))
+    assert dev.calls[-1] == {"p": 1.0}
 
 
-@pytest.mark.parametrize("call", ["f(x)", "f(x=)", "f(=x)", "f(x=1,x=2)", "f(x=1", "f(bad-name=1)", "missing", "(x=1)"])
-def test_reflex_bad_calls(call):
+@pytest.mark.parametrize("parameter", ["bad-name", '$("1bad")', '$("x.y")'])
+def test_reflex_action_rejects_invalid_parameter_names(parameter):
+    dev = Driver()
+    script = block("Reflex(f)", "dev.p", "1") + block("Action", f"f.{parameter}", "1")
+    with pytest.raises(ScriptError, match="safe identifiers"):
+        run(script, dev)
+    assert dev.calls == []
+
+
+@pytest.mark.parametrize("kind", ["lua", "daemon", "struct"])
+@pytest.mark.parametrize("source", ["parameter", "Alias", "Vars"])
+def test_reflex_bindings_cannot_replace_non_scalars(kind, source):
+    dev, protected = Driver(), Driver("protected")
+    protected.kind = kind
+    registry = FakeRegistry(dev, protected)
+    declaration = "" if source == "parameter" else block(
+        source, "name alias" if source == "Alias" else "name value", "protected 1")
+    script = (body("Reflex(f)", declaration, block("Action", "dev.p", "1"))
+              + block("Action", "f.protected" if source == "parameter" else "f.unused", "1"))
+    with pytest.raises(ScriptError, match="(?i)cannot replace"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert registry.get("protected") is protected
+    assert dev.calls == []
+
+
+@pytest.mark.parametrize("source", ["parameter", "Alias", "Vars", "capture"])
+def test_reflex_bindings_and_captures_respect_registry_flow_refs(source):
+    from pymybot.hardware import Registry
+
+    registry = Registry()
+    dev, protected = Driver(), Number("protected", 42)
+    registry.add(dev)
+    registry.add(protected)
+    registry.flow_refs.add("protected")
+    declaration = (block(source, "name alias" if source == "Alias" else "name value", "protected 1")
+                   if source in {"Alias", "Vars"} else "")
+    script = (body("Reflex(f)", declaration,
+                   block("Action", "dev.p", "$protected=reading" if source == "capture" else "1"))
+              + block("Action", "f.protected" if source == "parameter" else "f.unused", "1"))
+    with pytest.raises(ScriptError, match="referenced|override|protected"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert registry.get("protected") is protected
+    assert registry.flow_refs == {"protected"}
+    assert len(dev.calls) == (1 if source == "capture" else 0)
+
+
+@pytest.mark.parametrize("limit", ["MAX_OUTPUTS", "MAX_OUTPUT_BYTES"])
+@pytest.mark.parametrize("nested", [False, True])
+def test_reflex_action_uses_shared_output_budget(limit, nested, monkeypatch):
+    import pymybot.actions as actions_module
+
+    monkeypatch.setattr(actions_module, limit, 2 if limit == "MAX_OUTPUTS" else 80)
+    dev = Driver(callback=lambda params: {"result": "OK", "payload": "x" * 20})
+    script = block("Reflex(f)", "dev.p", "$(x)", "-", "-")
+    if nested:
+        script += block("Reflex(outer)", "f.x", "$(x)")
+    script += block("Action", "dev.p outer.x" if nested else "dev.p f.x", "0 1")
+    registry = FakeRegistry(dev)
+    with pytest.raises(ScriptError, match="output budget"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert len(dev.calls) == (3 if limit == "MAX_OUTPUTS" else 2)
+    assert registry.get("x") is None
+
+
+def test_reflex_action_cancel_restores_scope_and_stops_later_calls():
+    budget = FakeBudget()
+    dev = Driver(callback=lambda params: (setattr(budget, "remaining", -1) or {"result": "OK"}))
+    other = Driver("other")
+    original = Alias("target", "before")
+    registry = FakeRegistry(dev, other, original)
+    script = (body("Reflex(f)", block("Alias", "name alias", "target dev"),
+                   block("Vars", "name value", "local 5"),
+                   block("Action", "target.p other.p", "$(x+local) 1"))
+              + block("Action", "f.x", "2"))
+    with pytest.raises(BudgetExceeded):
+        ActionRunner(registry, budget).run(parse_matrices(script))
+    assert dev.calls == [{"p": 7.0}] and other.calls == []
+    assert registry.get("x") is None and registry.get("local") is None
+    assert registry.get("target") is original
+
+
+def test_reflex_definitions_do_not_survive_another_run():
+    dev = Driver()
+    registry = FakeRegistry(dev)
+    runner = ActionRunner(registry, FakeBudget())
+    action = block("Action", "f.x", "1")
+    runner.run(parse_matrices(block("Reflex(f)", "dev.p", "$(x)") + action))
+    with pytest.raises(ScriptError, match="Undefined"):
+        runner.run(parse_matrices(action))
+    assert len(dev.calls) == 1
+    runner.run(parse_matrices(block("Reflex(unused)", "missing.p", "$(undefined)") + body("if(1<0)")))
+    assert len(dev.calls) == 1
+
+
+def test_reflex_action_does_not_shadow_existing_hardware_or_alias():
+    dev, other = Driver("f"), Driver("other")
+    script = (block("Reflex(f)", "absent.p", "9")
+              + block("Reflex(target)", "absent.p", "9")
+              + block("Action", "f.x target.p", "1 2"))
+    run(script, dev, other, Alias("target", "other"))
+    assert dev.calls == [{"x": 1.0}] and other.calls == [{"p": 2.0}]
+
+
+def test_registry_number_takes_precedence_over_same_named_reflex():
+    dev = Driver()
     with pytest.raises(ScriptError):
-        run(block("Reflex", "name dev.p", "f 1") + block("Trigger", "trigger", call), Driver())
+        run(block("Reflex(f)", "dev.p", "1") + block("Action", "f.x", "1"), dev, Number("f", 2))
+    assert dev.calls == []
+
+
+@pytest.mark.parametrize("script", [
+    block("Reflex(f)", "dev.p", "1") + block("Action", "missing.x", "1"),
+    block("Reflex(f)", "name dev.p", "f 1") + block("Action", "f.unused", "0"),
+    block("Reflex(f)", "dev.p name", "1 f") + block("Action", "f.unused", "0"),
+    block("Reflex(f)", "dev.p", "$(x)") + block("Action", "f.y", "1"),
+    block("Reflex(f)", "dev.p", "$(x)") + block("Action", "f.capture", "$out=reading"),
+    block("Reflex(f)", "dev.p", "$(x)") + block("Action", "f.x", "$(1>0)"),
+])
+def test_reflex_action_invalid_calls_do_not_dispatch(script):
+    dev = Driver()
+    with pytest.raises(ScriptError):
+        run(script, dev)
+    assert dev.calls == []
+
+
+@pytest.mark.parametrize("called", [False, True])
+def test_duplicate_reflex_definitions_fail_before_any_action(called):
+    dev = Driver()
+    script = block("Action", "dev.p", "99") + block("Reflex(f)", "dev.p", "1") * 2
+    if called:
+        script += block("Action", "f.unused", "0")
+    with pytest.raises(ScriptError, match="(?i)duplicate"):
+        run(script, dev)
+    assert dev.calls == []
+
+
+def test_unused_reflex_body_is_still_checked_for_syntax_errors():
+    script = block("Action", "dev.p", "99") + "@Reflex(unused)\ndev.p dev.q;\n1;\n@\n"
+    dev = Driver()
+    with pytest.raises(ScriptError):
+        run(script, dev)
+    assert dev.calls == []
+
+
+def test_reflex_local_declarations_are_registered_on_call_with_parameter_precedence():
+    dev = Driver()
+    base, word, target = Number("base", 100), Alias("word", "parent"), Alias("target", "absent")
+    script = (body("Reflex(f)", "target.p target.q;$(scaled) $(word);\n",
+                   block("Vars", "name value", "scaled $(base*2)", "base 2"),
+                   block("Alias", "name alias", "target dev", "word default"))
+              + block("Action", "f.base f.word", '5 $("passed")')
+              + block("Action", "f.unused", "0"))
+    registry, outputs = run(script, dev, base, word, target)
+    assert dev.calls == [{"p": 10.0, "q": "passed"}, {"p": 4.0, "q": "default"}]
+    assert registry.get("base") is base and registry.get("word") is word
+    assert registry.get("target") is target
+    assert registry.get("scaled") is None and registry.get("unused") is None
+    assert len(outputs) == 2
+
+
+@pytest.mark.parametrize("declaration", [block("Vars", "name value", "x 99"),
+                                          block("Alias", "name alias", "x default")])
+@pytest.mark.parametrize(("argument", "expected"), [("5", 5.0), ('$("text")', "text")])
+def test_reflex_typed_parameters_override_local_default_type(declaration, argument, expected):
+    dev = Driver()
+    original = Alias("x", "parent")
+    script = (body("Reflex(f)", declaration, block("Action", "dev.p", "$(x)"))
+              + block("Action", "f.x", argument))
+    registry, _ = run(script, dev, original)
+    assert dev.calls == [{"p": expected}]
+    assert type(dev.calls[0]["p"]) is type(expected)
+    assert registry.get("x") is original
+
+
+def test_reflex_local_vars_precision_formats_driver_but_not_nested_typed_argument():
+    dev = Driver()
+    script = (body("Reflex(outer)", block("Vars", "name value precision", "ratio 2.3456 2"),
+                   block("Action", "dev.p inner.x", "$(ratio) $(ratio)"))
+              + block("Reflex(inner)", "dev.p", "$(x+1)")
+              + block("Action", "outer.unused", "0"))
+    registry, outputs = run(script, dev)
+    assert dev.calls[0] == {"p": "2.35"}
+    assert dev.calls[1]["p"] == pytest.approx(3.3456)
+    assert isinstance(dev.calls[1]["p"], float)
+    assert registry.get("ratio") is None and registry.get("x") is None
+    assert len(outputs) == 2
+
+
+@pytest.mark.parametrize("precision", ["-1", "16", "1.5", "nope"])
+def test_reflex_invalid_local_precision_restores_partially_registered_scope(precision):
+    dev = Driver()
+    original = Alias("target", "parent")
+    registry = FakeRegistry(dev, original)
+    script = (body("Reflex(f)", block("Alias", "name alias", "target dev"),
+                   block("Vars", "name value precision", f"x 1 {precision}"),
+                   block("Action", "target.p", "$(x)"))
+              + block("Action", "f.unused", "0"))
+    with pytest.raises(ScriptError, match="precision"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert dev.calls == []
+    assert registry.get("target") is original
+    assert registry.get("x") is None and registry.get("unused") is None
+
+
+def test_reflex_local_numeric_expressions_reject_alias_dependencies():
+    dev = Driver()
+    script = (body("Reflex(f)", block("Alias", "name alias", "text 3"),
+                   block("Vars", "name value", "x $(text+1)"),
+                   block("Action", "dev.p", "$(x)"))
+              + block("Action", "f.unused", "0"))
+    registry = FakeRegistry(dev)
+    with pytest.raises(ScriptError, match="Vars"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert dev.calls == [] and set(registry.variables) == {"dev"}
+
+
+def test_unused_reflex_local_declarations_never_replace_parent_scalars():
+    original = Number("x", 7)
+    script = (body("Reflex(unused)", block("Vars", "name value", "x $(missing)"),
+                   block("Alias", "name alias", "target absent"), block("Action", "target.p", "$(x)"))
+              + body("if(0>1)"))
+    registry, outputs = run(script, original)
+    assert outputs == [] and registry.get("x") is original
+    assert registry.get("target") is None
+
+
+def test_top_level_scalars_are_pre_registered_by_caller_not_action_runner():
+    dev = Driver()
+    original = Number("x", 8)
+    script = (block("Vars", "name value", "x 1") + block("Alias", "name alias", "target absent")
+              + block("Action", "target.p", "$(x)"))
+    registry, _ = run(script, dev, original, Alias("target", "dev"))
+    assert dev.calls == [{"p": 8.0}]
+    assert registry.get("x") is original
 
 
 def test_no_executable_block_and_unexpanded_directive_rejected():
-    for text in ["", block("Alias", "name alias", "x y"), block("Trigger", "trigger", "missing"),
+    for text in ["", block("Alias", "name alias", "x y"),
                  block("Include", "path", "x.mt"), block("Unknown", "name", "x")]:
         with pytest.raises(ScriptError):
             run(text)
+
+
+def test_reflex_definitions_alone_do_not_execute_the_body():
+    dev = Driver()
+    with pytest.raises(ScriptError, match="No @Action"):
+        run(block("Reflex(f)", "dev.p", "1"), dev)
+    assert dev.calls == []
+
+
+def test_include_preserves_multiple_reflex_definitions_and_mixed_action_order(tmp_path):
+    definitions = (body("Reflex(f)", block("Alias", "name alias", "target dev"),
+                        block("Vars", "name value", "next $(x+1)"), "target.p;$(x);\n",
+                        body("Action", body("if(x>0)", block("Action", "g.x", "$(next)"))),
+                        "target.p;$(x);\n")
+                   + block("Reflex(g)", "dev.p", "$(x)"))
+    (tmp_path / "definitions.mt").write_text(definitions, encoding="utf-8")
+    script = (block("Action", "dev.p", "0") + block("Include", "path", "definitions.mt")
+              + body("Action", "f.x;2;\n", body("if(1>0)", block("Action", "g.x", "4")),
+                     "dev.p;9;\n"))
+    matrices = expand(script, tmp_path)
+    assert [matrix.name for matrix in matrices] == ["Action", "Reflex(f)", "Reflex(g)", "Action"]
+    dev = Driver()
+    registry = FakeRegistry(dev)
+    outputs = ActionRunner(registry, FakeBudget()).run(matrices)
+    assert dev.calls == [{"p": value} for value in (0.0, 2.0, 3.0, 2.0, 4.0, 9.0)]
+    assert [output["reading"] for output in outputs] == list(range(1, 7))
+    assert set(registry.variables) == {"dev"}
+
+
+def test_include_duplicate_reflex_names_fail_before_any_driver_call(tmp_path):
+    (tmp_path / "definitions.mt").write_text(block("Reflex(f)", "dev.p", "1"), encoding="utf-8")
+    dev = Driver()
+    with pytest.raises(ScriptError, match="(?i)duplicate"):
+        matrices = expand(block("Action", "dev.p", "99")
+                          + block("Include", "path", "definitions.mt", "definitions.mt"), tmp_path)
+        ActionRunner(FakeRegistry(dev), FakeBudget()).run(matrices)
+    assert dev.calls == []
 
 
 def test_include_copy_repeated_once_named_files_and_nested_relative_paths(tmp_path):
@@ -493,7 +1038,8 @@ def test_merge_and_include_negative_contracts(tmp_path, text):
         expand(text, tmp_path)
 
 
-@pytest.mark.parametrize("fragment", ["@if(1>0)\na.p;1;\n@", block("Reflex", "name a.p", "f 1"), block("Trigger", "trigger", "f")])
+@pytest.mark.parametrize("fragment", ["@if(1>0)\na.p;1;\n@", block("Reflex(f)", "a.p", "1"),
+                                       body("Action", body("if(1>0)", "a.p;1;\n"))])
 def test_merge_rejects_unmergeable_fragment_blocks(tmp_path, fragment):
     (tmp_path / "fragment.mt").write_text(fragment, encoding="utf-8")
     with pytest.raises(ScriptError):
@@ -534,14 +1080,21 @@ def test_merge_negative_phase_seeds_retained_inheritance_and_dispatch(
     assert b.calls == [params] * 2
 
 
-def test_reflex_captures_persist_but_argument_captures_are_local():
+def test_reflex_capture_is_local_until_outer_capture_explicitly_returns_it():
     dev = Driver()
-    script = (block("Reflex", "name dev.p", "read $count=reading", "use $(count)", "local $arg=reading")
-              + block("Trigger", "trigger", "read", "use", "local(arg=temporary)"))
-    registry, _ = run(script, dev, Alias("arg", "original"))
-    assert registry.resolve("count") == 1.0
+    script = (block("Reflex(read)", "dev.p", "$count=reading")
+              + block("Reflex(use)", "dev.p", "$(count)")
+              + block("Reflex(local)", "dev.p", "$arg=reading")
+              + block("Action", "read.unused", "0")
+              + block("Action", "use.unused", "0")
+              + block("Action", "read.capture", "$count=reading")
+              + block("Action", "use.unused", "0")
+              + block("Action", "local.arg", '$("temporary")'))
+    registry, outputs = run(script, dev, Number("count", 0), Alias("arg", "original"))
+    assert registry.resolve("count") == 3.0
     assert registry.resolve("arg") == "original"
-    assert dev.calls == [{}, {"p": 1.0}, {}]
+    assert dev.calls == [{}, {"p": 0.0}, {}, {"p": 3.0}, {}]
+    assert len(outputs) == 5
 
 
 def test_no_directives_fast_path_does_not_touch_filesystem(tmp_path):
@@ -979,6 +1532,40 @@ def test_struct_copy_on_write_and_capture_does_not_alias_source():
     with pytest.raises(ScriptError):
         state.updated(("points", 0, "x"), float("nan"))
     assert state.read() == source
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_nested_reflex_global_struct_captures_are_local_even_on_failure(fail):
+    from pymybot.hardware import Registry, Struct
+
+    registry = Registry()
+    state = Struct("state", {"count": 0, "points": [{"x": 10}]})
+    dev = Driver()
+    registry.add(state)
+    registry.add(dev)
+    script = (body("Reflex(inner)",
+                   block("Action", "dev.p dev.cap dev.slot dev.new",
+                         "$(x) $state.count=reading $state.points[0].x=reading $fresh=reading"),
+                   block("Action", "dev.p", "$(state.count+state.points[0].x)"))
+              + body("Reflex(outer)",
+                     block("Action", "inner.x inner.capture", "4 $inner_count=reading"),
+                     block("Action", "dev.p dev.cap", "$(state.count) $state.points[0].x=reading"),
+                     block("Action", "dev.p", "$(state.points[0].x)"),
+                     block("Action", "dev.p", "$(missing)") if fail else "")
+              + block("Action", "outer.capture", "$returned=reading"))
+    runner = ActionRunner(registry, FakeBudget())
+    if fail:
+        with pytest.raises(ScriptError, match="missing"):
+            runner.run(parse_matrices(script))
+        assert registry.get("returned") is None
+    else:
+        outputs = runner.run(parse_matrices(script))
+        assert [item["reading"] for item in outputs] == [1, 2, 3, 4]
+        assert registry.resolve("returned") == 4.0
+    assert dev.calls == [{"p": 4.0}, {"p": 2.0}, {"p": 0.0}, {"p": 3.0}]
+    assert registry.get("state") is state
+    assert state.read() == {"count": 0, "points": [{"x": 10}]}
+    assert all(registry.get(name) is None for name in ("x", "fresh", "inner_count"))
 
 
 def test_struct_member_expressions_in_action_headers():
