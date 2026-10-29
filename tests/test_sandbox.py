@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from pymybot import sandbox
-from pymybot.agent import AgentConfig, AgentConfigurationError
 from pymybot.agent_workspace import Workspace
 from pymybot.security import SecurityError
 
@@ -69,6 +68,9 @@ def test_workspace_auto_shell_reports_active_backend(tmp_path, monkeypatch):
 
 
 def test_agent_config_validates_sandbox_mode():
+    pytest.importorskip("pydantic_ai")
+    from pymybot.agent import AgentConfig, AgentConfigurationError
+
     assert AgentConfig(sandbox_mode="BWRAP").sandbox_mode == "bwrap"
     with pytest.raises(AgentConfigurationError):
         AgentConfig(sandbox_mode="docker")
