@@ -74,17 +74,6 @@ Static commands never activate hardware. Physical devices, non-loopback HTTP
 and the Shell driver require an explicit opt-in. The shell is **not** a sandbox
 and Lua is trusted code.
 
-## Multi-language editions
-
-| Edition | Path | Stack |
-| --- | --- | --- |
-| Python (reference) | root | Python 3.11+ · LuaJIT · PydanticAI |
-| Cangjie | [`implementations/cangjie/`](../implementations/cangjie) | Cangjie 1.1.3 · LuaJIT |
-| C++17 + Rust | [`implementations/cpp-rust/`](../implementations/cpp-rust) | C++17 · Rust · LuaJIT |
-
-Each edition is self-contained; see
-[`implementations/README.md`](../implementations/README.md).
-
 ## Documentation
 
 Architecture, CLI, GUI, development, testing, release, versioning and security

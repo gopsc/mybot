@@ -248,7 +248,7 @@ for i in $(seq 1 15); do .venv/Scripts/python -m pytest -q -x tests/test_robot.p
   返回反斜杠路径，不改的话拦截不命中、会重复编译一次库文件（virtbus / bus_contract 有全局
   重入守卫，实例身份不受影响，已用撤销对照确认）。
 
-bot4cj 的 C++ 宿主（`src/luasandbox.cpp`）同样注入真 `mpath` 表作为 `__mpath`，因此改动在
+旧版宿主（`src/luasandbox.cpp`）同样注入真 `mpath` 表作为 `__mpath`，因此改动在
 Linux 上行为不变，可原样回流上游。各驱动文件头 `(__mpath or dofile(...match("[^:]+")...))` 与
 `drv_common` 的 mpath 引导都被 `__mpath` 短路，未改。
 

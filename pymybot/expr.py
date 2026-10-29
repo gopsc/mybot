@@ -192,7 +192,7 @@ def _binary(op: str, a: ResolvedValue, b: ResolvedValue) -> Value:
     if op == "/":
         return x / y
     try:
-        return math.fmod(x, y)  # C++ remainder, not Python's floor modulo.
+        return math.fmod(x, y)  # fmod remainder, not Python's floor modulo.
     except ValueError:
         raise ScriptError("expression evaluates to a non-finite value") from None
 

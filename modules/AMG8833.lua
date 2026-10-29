@@ -1,5 +1,5 @@
 -- AMG8833 8x8 红外热电堆阵列 驱动模块（Grid-EYE，热像聚合输出）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 虚拟器件模型：modules/lib/virtbus/amg8833.lua（无硬件单测与守护 E2E 共用；同协议独立实现，改协议两处同步）
 -- Panasonic，I2C 地址 0x69（AD_SELECT 缺省）/0x68（拉高），64 像素
 -- 0~80°C @0.25°C/LSB，帧率 10/1Hz，基板热敏电阻 0.0625°C/LSB

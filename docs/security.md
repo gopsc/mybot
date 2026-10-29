@@ -68,7 +68,7 @@ closed as a deliberate design decision, not an implementation gap.
 ## Reporting
 
 Use the private advisory link in [`../.github/SECURITY.md`](../.github/SECURITY.md). Include the
-affected edition, commit, preconditions and a minimal reproduction. Do not open
+affected version, commit, preconditions and a minimal reproduction. Do not open
 a public issue for an exploitable problem.
 
 ## Hardening checklist for deployments

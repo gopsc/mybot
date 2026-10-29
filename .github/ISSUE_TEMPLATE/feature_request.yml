@@ -10,18 +10,6 @@ body:
         shell, files, network, hardware, prompts or credentials needs an
         explicit security/privacy section.
 
-  - type: dropdown
-    id: edition
-    attributes:
-      label: Edition
-      options:
-        - Python reference edition
-        - Cangjie edition
-        - C++17 + Rust edition
-        - Cross-edition / repository
-    validations:
-      required: true
-
   - type: textarea
     id: problem
     attributes:

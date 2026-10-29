@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible failure in any pymybot edition
+description: Report a reproducible failure in pymybot
 title: "[Bug]: "
 labels: ["bug", "needs-triage"]
 body:
@@ -11,18 +11,6 @@ body:
 
         For a security vulnerability, use the private advisory link in
         `.github/SECURITY.md` instead of this form.
-
-  - type: dropdown
-    id: edition
-    attributes:
-      label: Edition
-      options:
-        - Python reference edition
-        - Cangjie edition
-        - C++17 + Rust edition
-        - Documentation / packaging / CI
-    validations:
-      required: true
 
   - type: input
     id: version
@@ -37,7 +25,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: OS, Python/Cangjie/Rust version, install method, hardware or virtual bus
+      description: OS, Python version, install method, hardware or virtual bus
       placeholder: "Windows 11 23H2, Python 3.12.8, pip editable install, virtual bus"
     validations:
       required: true

@@ -5,7 +5,6 @@ release; security and reproducibility work takes precedence.
 
 ## 0.2.x — consolidation
 
-- [x] Monorepo layout for Python, Cangjie and C++17 + Rust editions.
 - [x] Community health files, issue forms and PR template.
 - [x] Reproducible release workflow with checksums.
 - [x] GUI restart/cancellation robustness.
@@ -41,5 +40,3 @@ release; security and reproducibility work takes precedence.
 - Freeze the `serve` JSON-RPC protocol and publish a JSON schema.
 - Publish a compatibility matrix per driver and firmware.
 - Complete a security review of the agent’s file/shell/network boundaries.
-- Decide whether the Cangjie and C++/Rust editions follow the repository version
-  or keep independent version lines.

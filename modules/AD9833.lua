@@ -1,5 +1,5 @@
 -- AD9833 DDS 可编程波形发生器 驱动模块（SPI，写-only，信号源/激励输出）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 虚拟器件模型：内嵌本文件尾部 AD9833_VIRT（2026-09-15 自 modules/lib/virtbus/ad9833.lua
 -- 迁入，单文件驱动+模型实验第七个；无硬件单测共用；写-only 无测量值，守护 E2E 豁免）
 -- Analog Devices，SPI-only（无 I2C）：每字 16 位一帧 CS，模块板载 25MHz 时钟，

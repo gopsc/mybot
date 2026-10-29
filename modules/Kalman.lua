@@ -1,7 +1,7 @@
 local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
 dofile(mpath.resolve("lib/drv_common.lua"))
 -- Kalman.lua - 一维卡尔曼滤波硬件变量驱动（方式 A）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 矩阵名 Kalman → 本文件（通用 Lua 硬件变量）。引用一个源变量（@Daemon 守护或传感器）
 -- 取其采样值，逐拍滤波；输出既作 out、也别名 v0——使本变量成为「虚拟传感器」，

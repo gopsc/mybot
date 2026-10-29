@@ -11,11 +11,9 @@ pymybot uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 Pre-1.0 releases still use `0.x.y`; breaking changes are documented in
 `CHANGELOG.md` and called out in the release notes.
 
-The Python reference edition, Cangjie edition and C++17 + Rust edition version
-independently. A repository-wide tag (`v0.3.1`) describes the reference edition
-and the state of the monorepo; edition-specific versions live in
-`pymybot/__init__.py`, `implementations/cangjie/cjpm.toml` and
-`implementations/cpp-rust/agent/Cargo.toml`.
+The version is defined in `pymybot/__init__.py`, `pyproject.toml` and
+`CITATION.cff`. A repository tag (`vX.Y.Z`) describes the Python package and
+the state of the repository.
 
 ## Release checklist
 

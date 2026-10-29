@@ -21,7 +21,7 @@ Use GitHub's private vulnerability reporting:
 If that form is unavailable, contact the maintainers through the repository
 owner's GitHub profile and ask for a private channel. Include:
 
-- affected version/commit and edition (Python, Cangjie, C++/Rust);
+- affected version/commit;
 - reproduction steps or a proof of concept;
 - impact and required preconditions;
 - whether the issue is already public.
@@ -58,7 +58,7 @@ Out of scope by design:
 
 ## Security model
 
-The reference edition follows these rules:
+pymybot follows these rules:
 
 1. Static commands never activate hardware.
 2. Physical devices, non-loopback HTTP and the host shell require an explicit

@@ -1,5 +1,5 @@
 -- Dummy 无实际用处的测试模块
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 不连接任何硬件，仅用于测试 MtVars_Lua 的完整生命周期
 -- （build 元数据传递、call 参数合并、destroy 释放）以及返回值回传
 -- 用法：在机器人结构脚本 .mt 中添加 @Dummy 矩阵并定义 name 列，

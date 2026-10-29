@@ -244,8 +244,8 @@ class _Expander:
             owned[kind] = {row[m.require_col("name")] for row in m.data} if m else set()
         actions = sum(m.name.strip() == "Action" for m in seq)
         if actions > 1:
-            # C++ anchors/retains only the first Action when merging. Surface
-            # that lossy rule rather than silently losing a copied action.
+            # The MT merge retains only the first Action; surface that lossy rule
+            # rather than silently losing a copied action.
             _LOG.warning("Top-level @Merge uses only the first @Action; %s later "
                          "@Action block(s) are discarded", actions - 1)
         for matrix in seq:

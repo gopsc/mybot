@@ -151,31 +151,6 @@ jobs:
       - name: run
         run: python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10
 
-  cpp-rust:
-    name: C++17 host / ${{ matrix.target }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: build + tests
-            command: cmake -S . -B build-ci -DMYBOT_WERROR=ON && cmake --build build-ci -j"$(nproc)" && ./build-ci/mybot_tests
-          - target: Rust agent
-            command: cd agent && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings && cargo fmt --check
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install C++ prerequisites
-        if: matrix.target == 'build + tests'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake g++ libluajit-5.1-dev luajit
-      - uses: dtolnay/rust-toolchain@stable
-        if: matrix.target == 'Rust agent'
-        with:
-          components: clippy, rustfmt
-      - name: Build and test
-        working-directory: implementations/cpp-rust
-        run: ${{ matrix.command }}
-
   docker:
     name: docker / headless
     runs-on: ubuntu-latest

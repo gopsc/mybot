@@ -69,7 +69,7 @@ provided `*_virt.sql` examples for hardware-free work.
 
 ## A long conversation hits the model context limit
 
-The reference edition bounds history to six complete turns and a byte budget,
+pymybot bounds history to six complete turns and a byte budget,
 and returns a structured JSON error instead of crashing when the provider
 rejects a request. Use `--max-history-bytes` (64 KiB–64 MiB, default 4 MiB),
 start a new conversation, or lower `--max-requests` / `--max-tool-calls` for a

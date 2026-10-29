@@ -1,5 +1,5 @@
 -- drv_common.lua - 驱动公共样板（modules/lib/）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 收敛 Low 项"样板重复"：各 I2C 驱动内联重复的开头样板：
 --   1. type(data) ~= "table" 参数校验（build/call/destroy 每函数一份）
@@ -74,7 +74,7 @@ local virt_state = "idle"		-- idle → done | error:<原因>；每状态机只�
 
 -- 按模块路径探测并加载一个共享库（rel 相对模块根，如 "lib/virtbus.lua"），
 -- 返回其模块表；找不到/加载失败返回 nil，由调用方决定兜底。
--- 宿主注入了 __mpath（bot4cj luasandbox、pymybot runtime）时交给它解析：
+-- 宿主注入了 __mpath（mybot luasandbox、pymybot runtime）时交给它解析：
 -- 自行按 ':' 切分 BOT4CJ_MODULE_PATH 会把 Windows 盘符（C:\...）切成假路径，
 -- 每次加载都抛一次被吞掉的 Lua 错误，且永远走不到真文件。脱离宿主直跑
 -- （luajit 单测、scscl_scan）没有 __mpath，才回到逐段切分。

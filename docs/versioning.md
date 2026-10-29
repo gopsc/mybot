@@ -2,14 +2,9 @@
 
 ## Repository version
 
-The repository tag `vX.Y.Z` describes the Python reference edition and the
-monorepo layout. Edition versions are independent:
-
-| Edition | Version source | Current |
-| --- | --- | --- |
-| Python | `pymybot/__init__.py`, `pyproject.toml`, `CITATION.cff` | 0.3.1 |
-| Cangjie | `implementations/cangjie/cjpm.toml` | 0.3.3 |
-| C++17 + Rust | `implementations/cpp-rust/agent/Cargo.toml` | 0.1.0 |
+The repository tag `vX.Y.Z` describes the Python package. The version sources
+are `pymybot/__init__.py`, `pyproject.toml` and `CITATION.cff` (currently
+0.3.1).
 
 ## Compatibility promises
 
@@ -38,8 +33,8 @@ The three script layers are data, not code:
 - Lua drivers target the HAL contract in
   `skills/pymybot-scripting/references/driver-lua.md`.
 
-An edition may add optional columns/keys; unknown keys must fail loudly rather
-than be silently ignored.
+The implementation may add optional columns/keys; unknown keys must fail loudly
+rather than be silently ignored.
 
 ## Historical tags
 
@@ -47,8 +42,6 @@ Active archive tags (resolvable in the repository):
 
 | Tag | Meaning |
 | --- | --- |
-| `v0.0.1beta`–`v0.0.3beta` | Early Cangjie edition milestones |
-| `archive/cangjie`, `archive/cpp-rust-agent`, `archive/cangjie-new`, `archive/release-session-log` | Preserved historical branch tips |
 | `v0.2.0` | First reproducible monorepo release |
 | `v0.3.0` | Configurable history byte budget |
 | `v0.3.1` | Session transcripts, transcript pruning, Nuitka/PyAV bundles |
@@ -58,5 +51,4 @@ Retired tags (removed from the remote, kept only as historical notes):
 
 | Tag | Reason |
 | --- | --- |
-| `cangjie-final` | Superseded by `archive/cangjie`; the commit is identical |
 | `gui-v1` | Withdrawn 2026-10-25 binary release; the release and tag were removed |
