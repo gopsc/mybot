@@ -201,7 +201,8 @@ def test_static_commands_never_activate(workspace, monkeypatch, capsys, command,
 
 @pytest.mark.parametrize("sql, message", [
     ("this is not SQL", ""),
-    ("CREATE TABLE Missing(name String); INSERT INTO Missing(name) VALUES('dev');", "Lua module not found"),
+    ("CREATE TABLE Missing(name String); INSERT INTO Missing(name) VALUES('dev');",
+     "Driver module not found: Missing.py or Missing.lua"),
     ("CREATE TABLE Relay(name String,source String); INSERT INTO Relay(name,source) VALUES('dev','$absent');", "undefined"),
     ("CREATE TABLE Relay(name String,controller String); INSERT INTO Relay(name,controller) VALUES('dev','absent');", "defined before"),
 ])

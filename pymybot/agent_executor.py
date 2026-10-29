@@ -631,7 +631,7 @@ class RobotExecutor:
             for name in names:
                 self._check(deadline)
                 target = self._robot.registry.require(name)
-                if target.kind not in {"lua", "daemon"}:
+                if target.kind not in {"lua", "python", "daemon"}:
                     raise SecurityError("Unexpected runtime variable kind")
                 if target.kind == "daemon":
                     value = target.wait_for_sample(timeout=self._remaining(deadline))

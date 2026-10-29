@@ -287,12 +287,11 @@ class Metadata:
             return result
 
 
-class LuaVariable(Variable):
-    kind = "lua"
-
+class DriverVariable(Variable):
     def __init__(self, name, path, metadata, controllers, triggers, runtime_factory):
         super().__init__(name)
         self.path = path
+        self.kind = "python" if path.suffix == ".py" else "lua"
         self.metadata = metadata
         self.controllers = controllers
         self.triggers = triggers

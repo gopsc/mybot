@@ -88,9 +88,10 @@ class ResourceIndex:
                     dirs[:] = sorted(name for name in dirs if not (Path(base) / name).is_symlink())
                     for name in sorted(files):
                         path = Path(base) / name
-                        if (path.suffix == ".lua" and not path.is_symlink()
+                        if (path.suffix in {".py", ".lua"} and not path.is_symlink()
                                 and stat.S_ISREG(path.stat().st_mode)):
-                            self._append("驱动", path, path.relative_to(root), "lua")
+                            language = "python" if path.suffix == ".py" else "lua"
+                            self._append("驱动", path, path.relative_to(root), language)
                         if len(self.items) >= MAX_DOCS:
                             return
             except OSError as exc:

@@ -14,7 +14,7 @@ import sys
 import tempfile
 
 
-ASSET_SUFFIXES = {"modules": ".lua", "robots": ".sql", "scripts": ".mt", "skills": ".md"}
+ASSET_SUFFIXES = {"modules": (".lua", ".py"), "robots": (".sql",), "scripts": (".mt",), "skills": (".md",)}
 
 
 def require(condition, message):
@@ -40,8 +40,9 @@ def preflight(mode):
 
 def asset_manifest(root):
     result = {}
-    for directory, suffix in ASSET_SUFFIXES.items():
-        files = sorted((root / directory).rglob("*" + suffix))
+    for directory, suffixes in ASSET_SUFFIXES.items():
+        files = sorted(path for path in (root / directory).rglob("*")
+                       if path.is_file() and path.suffix in suffixes)
         require(files, f"Missing or empty asset directory: {root / directory}")
         for path in files:
             result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -158,6 +159,10 @@ def installed_smoke(manifest_path):
     # Only Timer/Relay run; neither hardware permissions nor model access are enabled.
     executed = command_json([*cli, "--no-agent", "--robot", robot, "--input", action, "--timeout", "10"])
     require(executed.get("command") == "run" and executed.get("outputs"), "No-agent execution produced no outputs")
+    native = command_json([*cli, "run", "--robot", str(assets / "robots" / "uart-loopback.sql"),
+                           "--input", str(assets / "scripts" / "uart-loopback.mt"), "--timeout", "10"])
+    require([item.get("rx") for item in native.get("outputs", [])] == [0, 127, 255],
+            "Packaged Python drivers did not complete UART loopback")
     preflight("base")
     print(f"Verified {len(actual)} packaged assets and no-agent CLI from {package}", flush=True)
 

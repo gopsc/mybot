@@ -71,7 +71,7 @@ end
 '''
 
 
-class LuaState:
+class DriverRuntime:
     def __init__(self, module_paths, hal, stop_event, *, daemon=None, allow_hardware=False):
         self.module_paths = [Path(p).resolve() for p in module_paths]
         self.hal = hal
@@ -81,6 +81,75 @@ class LuaState:
         self.budget = None
         self._closed = False
         self._owner = object()
+
+    def _check(self):
+        if self.budget is not None:
+            self.budget.check()
+        if self.daemon is not None:
+            if self.daemon.quiesced or (self.daemon.stopping and not self.daemon.cleaning_up):
+                raise BudgetExceeded("Daemon stopped or quiesced")
+
+    def _hal_values(self, operation, *values):
+        self._check()
+        if not self.allow_hardware:
+            physical = operation in {"i2c_open", "spi_open"}
+            physical |= operation == "uart_open" and (not values or values[0] != "loop://")
+            if operation == "camera_capture":
+                options = values[1] if len(values) > 1 and isinstance(values[1], dict) else {}
+                physical |= not bool(options.get("src"))
+            if physical:
+                raise DriverError("Physical hardware access requires explicit --allow-hardware confirmation")
+            if operation == "http_open" and not _loopback_base(values[0] if values else None):
+                raise DriverError("HTTP access beyond loopback requires explicit --allow-hardware confirmation")
+            if operation == "shell_open":
+                raise DriverError("Host command execution requires explicit --allow-hardware confirmation")
+        if operation == "sleep_ms" and values:
+            milliseconds = float(values[0])
+            if math.isfinite(milliseconds) and milliseconds > 0:
+                remaining = min(milliseconds, 4294967)
+                while remaining > 0:
+                    self._check()
+                    duration = min(remaining, 50)
+                    self.hal.call(operation, duration, cancel_check=self._check, owner=self._owner)
+                    remaining -= duration
+                self._check()
+                return 0
+        result = self.hal.call(operation, *values, cancel_check=self._check, owner=self._owner)
+        self._check()
+        return result
+
+    def _resolve(self, relative):
+        if not isinstance(relative, str):
+            raise ScriptError("Module path must be a string")
+        part = Path(relative)
+        if part.is_absolute() or ".." in part.parts or "\\" in relative or ":" in relative:
+            raise ScriptError("Module path escapes allowed roots")
+        for root in self.module_paths:
+            candidate = root / part
+            if candidate.is_file():
+                return str(self._allowed_path(candidate))
+        return str(self._allowed_path(self.module_paths[-1] / part))
+
+    def _allowed_path(self, path):
+        path = Path(path)
+        if ".." in path.parts:
+            raise ScriptError("Module path traversal rejected")
+        absolute = path.absolute()
+        for root in self.module_paths:
+            if absolute.is_relative_to(root):
+                current = root
+                for part in absolute.relative_to(root).parts:
+                    current = current / part
+                    if current.is_symlink():
+                        raise ScriptError(f"Symlink module rejected: {path}")
+                if absolute.resolve().is_relative_to(root):
+                    return absolute
+        raise ScriptError(f"Module is outside allowed roots: {path}")
+
+
+class LuaState(DriverRuntime):
+    def __init__(self, module_paths, hal, stop_event, *, daemon=None, allow_hardware=False):
+        super().__init__(module_paths, hal, stop_event, daemon=daemon, allow_hardware=allow_hardware)
         self.lua = LuaRuntime(
             register_eval=False,
             register_builtins=False,
@@ -110,75 +179,13 @@ class LuaState:
             return os.pathsep.join(str(p) for p in self.module_paths)
         return os.environ.get(name)
 
-    def _check(self):
-        if self.budget is not None:
-            self.budget.check()
-        if self.daemon is not None:
-            if self.daemon.quiesced or (self.daemon.stopping and not self.daemon.cleaning_up):
-                raise BudgetExceeded("Daemon stopped or quiesced")
-
     def _hal_call(self, operation, *args):
-        self._check()
-        values = [self.from_lua(v) for v in args]
-        if not self.allow_hardware:
-            physical = operation in {"i2c_open", "spi_open"}
-            physical |= operation == "uart_open" and (not values or values[0] != "loop://")
-            if operation == "camera_capture":
-                options = values[1] if len(values) > 1 and isinstance(values[1], dict) else {}
-                physical |= not bool(options.get("src"))
-            if physical:
-                raise DriverError("Physical hardware access requires explicit --allow-hardware confirmation")
-            if operation == "http_open" and not _loopback_base(values[0] if values else None):
-                raise DriverError("HTTP access beyond loopback requires explicit --allow-hardware confirmation")
-            if operation == "shell_open":
-                raise DriverError("Host command execution requires explicit --allow-hardware confirmation")
-        if operation == "sleep_ms" and values:
-            milliseconds = float(values[0])
-            if math.isfinite(milliseconds) and milliseconds > 0:
-                remaining = min(milliseconds, 4294967)
-                while remaining > 0:
-                    self._check()
-                    duration = min(remaining, 50)
-                    self.hal.call(operation, duration, cancel_check=self._check, owner=self._owner)
-                    remaining -= duration
-                self._check()
-                return 0
-        result = self.hal.call(operation, *values, cancel_check=self._check, owner=self._owner)
-        self._check()
-        return self.to_lua(result)
+        return self.to_lua(self._hal_values(operation, *(self.from_lua(v) for v in args)))
 
     def _daemon_call(self, operation, *args):
         if self.daemon is None:
             raise DriverError("No daemon attached to this Lua runtime")
         return self.to_lua(self.daemon.bridge(operation, *(self.from_lua(v) for v in args)))
-
-    def _resolve(self, relative):
-        if not isinstance(relative, str):
-            raise ScriptError("Module path must be a string")
-        part = Path(relative)
-        if part.is_absolute() or ".." in part.parts or "\\" in relative or ":" in relative:
-            raise ScriptError("Module path escapes allowed roots")
-        for root in self.module_paths:
-            candidate = root / part
-            if candidate.is_file():
-                return str(self._allowed_path(candidate))
-        return str(self._allowed_path(self.module_paths[-1] / part))
-
-    def _allowed_path(self, path):
-        path = Path(path)
-        if ".." in path.parts:
-            raise ScriptError("Module path traversal rejected")
-        absolute = path.absolute()
-        for root in self.module_paths:
-            if absolute.is_relative_to(root):
-                current = root
-                for part in absolute.relative_to(root).parts:
-                    current = current / part
-                    if current.is_symlink():
-                        raise ScriptError(f"Symlink module rejected: {path}")
-                if absolute.resolve().is_relative_to(root):
-                    return absolute
-        raise ScriptError(f"Module is outside allowed roots: {path}")
 
     def _loader(self, path):
         try:

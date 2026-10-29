@@ -8,7 +8,7 @@ should happen over time*.
 ```mermaid
 flowchart LR
     SQL["Structure SQL<br/>robots/*.sql"] --> ROBOT["Robot<br/>variables + buses"]
-    LUA["Lua driver<br/>modules/*.lua"] --> ROBOT
+    DRIVER["Python / Lua driver<br/>modules/*.py / *.lua"] --> ROBOT
     MT["Action script<br/>scripts/*.mt"] --> RUNNER["Action runner"]
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL / buses"]
@@ -18,12 +18,43 @@ flowchart LR
 | Layer | File | Responsibility | Trust level |
 | --- | --- | --- | --- |
 | Structure | `robots/*.sql` | Declares variables, buses, addresses and controller links | Operator-authored |
-| Driver | `modules/*.lua` | Implements build/call/destroy/read for one device family | Reviewed code |
+| Driver | `modules/*.py` / `*.lua` | Implements build/call and optional read/destroy | Trusted in-process code |
 | Action | `scripts/*.mt` | Matrices of device parameters, captures, loops and control flow | Operator-authored |
 
-The robot is assembled from the SQL rows; each ordinary table maps to a
-`modules/<table>.lua` driver. A row is a variable instance. `$name` references a
-previously declared bus/controller, and `-` inherits the previous row's value.
+Each ordinary SQL table selects `<Table>.py` or `<Table>.lua` from the configured
+module roots (`--module-path`, repeatable). Roots are searched in order, **Python
+before Lua within each root**; an earlier root's Lua beats a later root's Python.
+`Alias`, `Vars` and `Daemon` retain their special handling. A row is a variable
+instance. `$name` references a previously declared bus/controller, and `-`
+inherits the previous row's value.
+
+## Native Python contract
+
+Activation executes the selected source in a fresh module namespace and creates
+one `Driver(context)` instance **per SQL row**. `build(data)` and `call(data)` are
+required; `read(data)` is optional and falls back to `call(data)`, and optional
+`destroy(data)` performs cleanup. Methods receive a dictionary of resolved
+metadata, action parameters and trigger results as applicable, with `mode` set
+to the entry point. Return a nonempty dictionary of JSON-compatible values;
+`result` may be omitted, or be `"OK"` for success / `"ERR"` with `message` for failure.
+
+`context.call(operation, *args)` uses existing HAL operations (for example,
+`uart_read`, `i2c_transfer`, `close_handle`) with the same permissions, handle
+ownership/cleanup and cancellation checks as Lua's HAL bridge. These are host
+operation names, not the Lua convenience helpers. `context.check()` checks the
+cooperative budget. Python is trusted, **not sandboxed**: imports and direct
+native I/O are unrestricted; neither blocking native calls nor uncooperative
+Python loops can be forcibly interrupted. Per-row module/instance isolation is
+not process isolation; imported packages may share state.
+
+The built-in I2C/SPI/UART/HTTP/Camera/Shell ordinary-table drivers now use Python.
+HAL-backed buses expose the existing HAL handles to Lua device drivers rather
+than creating a separate bus backend. I2C/SPI/UART declare `LUA_VIRTUAL_DRIVER`:
+`proto=virt` or a `virt-*` path explicitly selects their retained Lua virtual
+implementation with physical access disabled, never as an error fallback.
+Other Python drivers do not automatically gain Lua virtual models. Existing
+Daemon chunks remain Lua-only; static validation rejects a Python-selected
+`driver` or `devices` entry rather than silently selecting a different source.
 
 ## Runtime flow
 
@@ -32,33 +63,36 @@ sequenceDiagram
     participant CLI as CLI / GUI / serve
     participant Robot
     participant Registry
-    participant Lua as Lua runtime
+    participant Driver as Python / Lua driver
     participant HAL
     participant Device
 
     CLI->>Robot: load structure SQL
     Robot->>Robot: validate tables, references, controller graph
     CLI->>Robot: active()
-    Robot->>Lua: create state per variable
-    Lua->>HAL: open bus / device (build)
+    Robot->>Driver: create module + instance / Lua state per variable
+    Driver->>HAL: open bus / device (build)
     HAL->>Device: configure
     CLI->>Robot: run MT action
     Robot->>Registry: resolve variables and expressions
-    Robot->>Lua: call(device, params)
-    Lua->>HAL: transfer
+    Robot->>Driver: call(data)
+    Driver->>HAL: transfer
     HAL->>Device: I2C/SPI/UART/HTTP/Camera
-    Device-->>Lua: result
-    Lua-->>Robot: result table
+    Device-->>Driver: result
+    Driver-->>Robot: result dictionary / table
     Robot-->>CLI: outputs (one JSON envelope)
     CLI->>Robot: deactivate()
-    Robot->>Lua: destroy
+    Robot->>Driver: optional destroy, release owned handles
 ```
 
 Key invariants:
 
 - The whole command emits exactly **one JSON line** on stdout. Diagnostics go
-  to stderr; Lua `print` is redirected.
-- `check`, `hardware`, `scripts` and `query` never activate drivers.
+  to stderr; Lua `print` and the Python driver's default `print` are redirected.
+  Trusted Python code must keep direct/imported-library output off stdout too.
+- `check`, `hardware`, `scripts` and `query` never activate drivers. Python
+  source is compiled without execution; imports, constructors and method
+  availability are not validated by this static check.
 - `run`, `sample` and `apply-sql` activate the robot; activation itself may
   write to hardware.
 - Driver calls are serialised per robot; daemon sampling uses dedicated worker
@@ -76,9 +110,10 @@ Key invariants:
 | `pymybot/matrix.py` | MT action matrix parser and validator |
 | `pymybot/actions.py` | Action runner: aliases, captures, control flow |
 | `pymybot/expr.py` | Expression parser/evaluator and numeric rendering |
-| `pymybot/runtime.py` | Lupa/LuaJIT bootstrap, sandbox hygiene, Python↔Lua conversion |
+| `pymybot/runtime.py` | Shared HAL bridge, Lupa/LuaJIT bootstrap and Python↔Lua conversion |
+| `pymybot/native.py` | Compile-only validation, per-row Python modules, Driver context and results |
 | `pymybot/hal.py` | I2C/SPI/UART/HTTP/Camera/Shell host operations |
-| `pymybot/daemon.py` | Background sampling workers and snapshots |
+| `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
 | `pymybot/agent.py` | PydanticAI agent, model configuration, tool loop |
 | `pymybot/agent_prompt.py` | Layered system prompt (SOUL/OPERATOR/PROJECT/GUIDE) with a byte budget |
 | `pymybot/agent_context.py` | Bounded, mtime-cached project inventory injected as untrusted data |
@@ -111,8 +146,8 @@ flowchart TB
     X --> E
     E --> R
     A -->|approved external tools| N[External MCP servers]
-    R --> L[Lua drivers]
-    L --> H[HAL]
+    R --> D[Python / Lua drivers]
+    D --> H[HAL]
 ```
 
 - **GUI** never executes robot logic itself; it drives one `serve` child process
@@ -129,11 +164,13 @@ flowchart TB
 
 ## Asset and path resolution
 
-Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills}`. In a
-source checkout the code falls back to the repository directories. Frozen
-builds use `pymybot/paths.py` and `sys._MEIPASS`; never rely on the current
-working directory. See [`development.md`](development.md) for the packaging
-flow.
+Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills}`; module
+assets include both `.py` and `.lua`. Doctor counts both; agent inventory and
+GUI previews include both within their existing budgets, with Python syntax
+highlighting for `.py`. In a source checkout the code falls back to the
+repository directories. Frozen builds use `pymybot/paths.py` and `sys._MEIPASS`;
+never rely on the current working directory. See [`development.md`](development.md)
+for the packaging flow.
 
 ## Further reading
 

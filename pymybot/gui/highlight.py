@@ -6,6 +6,8 @@ numbers and keywords without parsing, and never modify the document.
 """
 from __future__ import annotations
 
+import keyword
+
 from PySide6.QtCore import QRegularExpression
 from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 
@@ -18,6 +20,7 @@ COLORS = {
 }
 
 LANGUAGES = {
+    "python": tuple(keyword.kwlist),
     "lua": ("lua", "local", "function", "end", "if", "then", "else", "elseif", "for", "while",
             "do", "return", "nil", "true", "false", "and", "or", "not", "break", "repeat", "until"),
     "sql": ("select", "from", "where", "insert", "into", "values", "create", "table", "drop",
@@ -69,10 +72,12 @@ class CodeHighlighter(QSyntaxHighlighter):
 
     def set_language(self, language):
         words = "|".join(LANGUAGES.get(language, LANGUAGES["mt"]))
+        case = "" if language == "python" else "(?i)"
+        comment = r"#[^\n]*" if language == "python" else r"--[^\n]*|#[^\n]*"
         self._rules = [
-            (QRegularExpression(r"--[^\n]*|#[^\n]*"), _format(COLORS["comment"])),
+            (QRegularExpression(comment), _format(COLORS["comment"])),
             (QRegularExpression(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\''), _format(COLORS["string"])),
-            (QRegularExpression(rf"(?i)\b(?:{words})\b"), _format(COLORS["keyword"], bold=True)),
+            (QRegularExpression(rf"{case}\b(?:{words})\b"), _format(COLORS["keyword"], bold=True)),
             (QRegularExpression(r"\b\d+(?:\.\d+)?\b"), _format(COLORS["number"])),
         ]
         self.rehighlight()

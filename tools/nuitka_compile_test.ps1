@@ -26,3 +26,7 @@
    --noinclude-custom-mode=genai_prices.data:bytecode `
    --noinclude-custom-mode=openai.types:bytecode `
    --noinclude-custom-mode=anthropic.types:bytecode
+
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# Nuitka excludes Python source from data directories; native drivers load it at runtime.
+Copy-Item modules\*.py build-nuitka\mybot\pymybot\assets\modules\

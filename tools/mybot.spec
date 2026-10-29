@@ -13,13 +13,14 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 ROOT = Path(SPECPATH).resolve().parent
-ASSET_SUFFIXES = {"modules": ".lua", "robots": ".sql", "scripts": ".mt", "skills": ".md"}
+ASSET_SUFFIXES = {"modules": (".lua", ".py"), "robots": (".sql",), "scripts": (".mt",), "skills": (".md",)}
 
 datas = []
-for name, suffix in ASSET_SUFFIXES.items():
-    for source in sorted((ROOT / name).rglob("*" + suffix)):
-        relative = source.relative_to(ROOT)
-        datas.append((str(source), str(Path("pymybot/assets") / relative.parent)))
+for name, suffixes in ASSET_SUFFIXES.items():
+    for source in sorted((ROOT / name).rglob("*")):
+        if source.is_file() and source.suffix in suffixes:
+            relative = source.relative_to(ROOT)
+            datas.append((str(source), str(Path("pymybot/assets") / relative.parent)))
 
 for source in sorted((ROOT / "pymybot" / "gui" / "assets").glob("*.svg")):
     datas.append((str(source), "pymybot/gui/assets"))
