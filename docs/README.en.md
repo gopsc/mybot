@@ -1,13 +1,35 @@
 # pymybot
 
-**A three-layer robot controller — structure SQL, Lua drivers and MT action
-scripts — with a CLI, a desktop GUI and an AI agent.**
+**A three-layer robot controller — structure SQL, Python/Lua drivers and MT action
+scripts — with one backend for the GUI, CLI, AI agent and MCP.**
 
 [中文 README](../README.md) · [Documentation](README.md) · [Roadmap](roadmap.md) · [Security](../.github/SECURITY.md)
 
 ![pymybot GUI](screenshots/gui.png)
 
+> The screenshot shows the PySide6 window and the local loopback model: the agent
+> lists hardware, runs a virtual action after approval, and brings the result back.
+
+## Why we built it
+
+Hardware projects rarely fail on the interesting part. They fail on the last mile:
+which bus a sensor is on, which bytes initialize it, which script changes when the
+board changes, and whether an action actually went out. Once you want an AI agent
+in the loop, there is another question: what exactly did it touch, and what happens
+if it fails halfway through?
+
+pymybot puts that last mile in one place. You describe the robot in structure SQL,
+write how one device works in Python or Lua, and describe what should happen in an
+MT action script. Buses, permissions, approvals, receipts, logs, and the GUI, CLI,
+agent and MCP front-ends all go through the same executor.
+
+It is not meant to replace your application code. It is meant to own the part where
+software has to touch real hardware safely.
+
 ## Four entry points
+
+One backend, four ways in. Pick the one that fits the job; you do not need a
+separate implementation for the desktop, CI and the model.
 
 | Entry | Use it for | Command |
 | --- | --- | --- |
@@ -16,11 +38,32 @@ scripts — with a CLI, a desktop GUI and an AI agent.**
 | AI agent | Natural-language robot control | `pymybot --no-gui --robot ... --task "..."` |
 | MCP | Claude Desktop, Cursor and other MCP clients | `pymybot mcp --robot ...` |
 
-A long-lived `serve` backend exposes the same session over stdio JSON-RPC 2.0
-for IDE and custom front-ends. The MCP server is a read-only-by-default
-protocol adapter over the same executor; see [mcp.md](mcp.md).
+A long-lived `serve` backend exposes the same session over stdio JSON-RPC 2.0 for
+IDEs and custom front-ends. The MCP server is a read-only-by-default protocol
+adapter over the same executor, so tool receipts, fault latching and serialization
+rules do not change with the entry point. See [mcp.md](mcp.md).
+
+## What we deliberately did not build
+
+- **Three separate layers.** Structure, drivers and actions are written
+  independently. Change a sensor without rewriting the action; change the action
+  without touching the driver.
+- **A requirement for real hardware.** Virtual buses, register models, the
+  `loop://` serial loopback and per-driver fixtures let CI run the full chain
+  without a board.
+- **An open-by-default bridge.** Physical buses, non-loopback HTTP and the Shell
+  driver require an explicit opt-in. HAL gates those entry points; the driver
+  itself is trusted code, not a sandbox.
+- **Actions as arbitrary code.** An action script is matrix data. Every dispatch,
+  capture and result has a JSON receipt.
+- **Pretending failures are clean.** If an exception happens after an action has
+  been dispatched, the result is latched as “result unknown”. We do not claim a
+  rollback, and a non-zero exit code is not reported as “not executed”.
 
 ## Quick start
+
+Python 3.11+ is required. Start with the base install; no hardware is needed to run
+the full chain.
 
 ```sh
 git clone https://github.com/gopsc/mybot.git
@@ -32,6 +75,9 @@ python -m venv .venv
 .venv/bin/python -m pymybot doctor
 
 # No hardware required:
+.venv/bin/python -m pymybot check \
+  --robot robots/relay-test.sql \
+  --input scripts/relay-test.mt
 .venv/bin/python -m pymybot run \
   --robot robots/relay-test.sql \
   --input scripts/relay-test.mt --timeout 10
@@ -48,6 +94,8 @@ export DEEPSEEK_API_KEY="sk-..."
   --robot robots/relay-test.sql --task "List the hardware"
 ```
 
+On Windows, use `.venv\Scripts\pip` and `.venv\Scripts\python`.
+
 Agent conversations are transcribed to `~/.mybot/sessions` by default (tool
 arguments, bounded results and images; API keys in environment variables are
 never read into the transcript). Disable with `--no-session-log`,
@@ -57,22 +105,36 @@ never read into the transcript). Disable with `--no-session-log`,
 
 ## Design
 
+Think of the three layers as a wiring diagram, a device manual and a run sheet.
+
 ```mermaid
 flowchart LR
-    SQL["Structure SQL"] --> ROBOT["Robot"]
-    LUA["Lua driver"] --> ROBOT
-    MT["MT action"] --> RUNNER["Action runner"]
-    ROBOT --> RUNNER --> HAL
+    SQL["Structure SQL<br/>robots/*.sql"] --> ROBOT["Robot<br/>variables + buses"]
+    DRIVER["Python / Lua driver<br/>modules/*.py / *.lua"] --> ROBOT
+    MT["MT action<br/>scripts/*.mt"] --> RUNNER["Action runner"]
+    ROBOT --> RUNNER
+    RUNNER --> HAL["HAL"]
     HAL --> DEV["I2C · SPI · UART · HTTP · Camera · Shell"]
 ```
 
-- Structure SQL declares variables and buses.
-- Lua drivers implement `build / call / destroy / read` for one device.
-- MT actions describe frames of parameters, captures and control flow.
+- **Structure SQL** declares variables, buses, addresses and references.
+- **Python / Lua drivers** implement `build / call`, with optional `read / destroy`,
+  for one device family. Ordinary table names resolve to `modules/<Table>.py` or
+  `.lua`. Roots are searched in order, Python before Lua within each root; an
+  earlier root’s Lua still beats a later root’s Python. Repeat `--module-path DIR`
+  to add roots.
+- **MT actions** describe frames of parameters, captures and control flow.
 
-Static commands never activate hardware. Physical devices, non-loopback HTTP
-and the Shell driver require an explicit opt-in. The shell is **not** a sandbox
-and Lua is trusted code.
+Static commands never activate hardware. Physical devices, non-loopback HTTP and
+the Shell driver require an explicit opt-in. HAL-backed drivers share the same
+permission, handle-ownership and cancellation checks as Lua. Python drivers are
+still trusted in-process code: imports and direct native I/O are unrestricted, and
+budgets and cancellation are cooperative. See [security.md](security.md).
+
+For a complete runnable example, the Chinese README has a Python UART loopback
+driver, structure SQL and action script that run without a board. The driver
+contract is documented in
+[`skills/pymybot-scripting/references/driver-lua.md`](../skills/pymybot-scripting/references/driver-lua.md).
 
 ## Documentation
 
