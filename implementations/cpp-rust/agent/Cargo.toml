@@ -39,7 +39,7 @@ libc = "0.2"
 # rustyline：交互 REPL 的行编辑 / ↑↓ 历史 / `/命令` Tab 补全（2026-09-25）。只在
 # stdin+stdout 都是终端时启用（linein.rs），管道面仍是裸逐行读。关掉缺省 feature：
 # 不要 custom-bindings（radix_trie）与 with-dirs（home）——历史路径本仓自己按 XDG 解析。
-rustyline = { version = "18", default-features = false, features = ["with-file-history"] }
+rustyline = { version = "19", default-features = false, features = ["with-file-history"] }
 # reqwest / url：http_fetch 本地工具（Phase 6）。两者已是 rig-core 的传递依赖（Cargo.lock
 # 已解析），这里钉同一版本并关缺省 feature，不新增下载、不引入 native-tls/openssl。
 # ⚠ rig-core 打开了 reqwest/system-proxy，feature 合并后本仓 client 也会读 HTTP(S)_PROXY——
