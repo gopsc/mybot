@@ -86,7 +86,8 @@ def wrap_shell(argv, *, mode, workspace, cwd):
     """Return ``(argv, backend)``; only bubblewrap rewrites the command."""
     backend = resolve_backend(mode)
     if backend != "bwrap":
-        return list(argv), backend
+        # Preserve the platform's argv shape: Windows uses one cmd.exe string.
+        return argv, backend
     executable = shutil.which("bwrap")
     root = str(workspace)
     command = str(cwd)
