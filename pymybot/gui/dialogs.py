@@ -1,19 +1,21 @@
 """Operator dialogs: MCP editor, sessions, diagnostics, previews and resources."""
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import os
 from pathlib import Path
 import sys
 import tempfile
-import threading
 
-from PySide6.QtCore import QTimer, QUrl, Signal
+from PySide6.QtCore import (QEasingCurve, QFileSystemWatcher, QPropertyAnimation, QRunnable,
+                            QThreadPool, QTimer, QUrl, Signal)
 from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
-    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QSpinBox, QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem,
+    QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
+    QFormLayout, QGraphicsOpacityEffect, QGroupBox, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
+    QPushButton, QSpinBox, QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem,
     QTextBrowser, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
@@ -26,6 +28,7 @@ from ..mcp_client import MAX_CONFIG_BYTES, McpConfigError, parse_servers
 from ..paths import source_root
 from ..security import SecurityError, read_file
 from ..session_log import delete_sessions, list_sessions, prune_sessions, session_root
+from .branding import logo_pixmap
 from .highlight import CodeHighlighter, JsonHighlighter
 from .resources import ResourceIndex
 from .theme import apply_theme
@@ -68,6 +71,13 @@ def _size_text(value):
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024.0
     return f"{size:.1f} GiB"  # pragma: no cover - loop returns first
+
+
+def _started_text(value):
+    try:
+        return datetime.fromisoformat(str(value)).astimezone().strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return str(value).replace("T", " ")[:16]
 
 
 def _mono(widget):
@@ -377,7 +387,7 @@ class SessionsDialog(QDialog):
         self.sessions = {item["id"]: item for item in sessions}
         self.table.setRowCount(len(sessions))
         for row, item in enumerate(sessions):
-            started = str(item.get("started_at", "")).replace("T", " ")[:16]
+            started = _started_text(item.get("started_at", ""))
             values = (
                 item["id"], item.get("mode", ""), item.get("robot", ""), item.get("model", ""),
                 _size_text(item.get("bytes", 0)), str(item.get("images", 0)),
@@ -547,6 +557,25 @@ class DoctorDialog(QDialog):
     def copy(self):
         QApplication.clipboard().setText(json.dumps(self.payload, indent=2, ensure_ascii=False))
         self.summary.setText("诊断 JSON 已复制到剪贴板")
+
+
+class _CommandTask(QRunnable):
+    """Qt thread-pool adapter; results cross back through the dialog's signal."""
+
+    def __init__(self, dialog, argv):
+        super().__init__()
+        self.dialog = dialog
+        self.argv = argv
+
+    def run(self):
+        try:
+            result = self.dialog.runner(self.argv, self.dialog.cwd)
+        except Exception as exc:
+            result = {"code": None, "error": f"{type(exc).__name__}: {exc}"}
+        try:
+            self.dialog.completed.emit(result)
+        except RuntimeError:  # the dialog was closed while the child ran
+            pass
 
 
 class CommandDialog(QDialog):
@@ -751,14 +780,7 @@ class CommandDialog(QDialog):
         self.progress.show()
         self.status.setText("运行中…")
         self.output.clear()
-        threading.Thread(target=self._worker, args=(argv,), daemon=True).start()
-
-    def _worker(self, argv):
-        try:
-            result = self.runner(argv, self.cwd)
-        except Exception as exc:
-            result = {"code": None, "error": f"{type(exc).__name__}: {exc}"}
-        self.completed.emit(result)
+        QThreadPool.globalInstance().start(_CommandTask(self, argv))
 
     def _done(self, result):
         self._running = False
@@ -802,9 +824,13 @@ class AboutDialog(QDialog):
         apply_theme(self)
         self.setWindowTitle("关于")
         self.setModal(True)
-        self.resize(520, 300)
+        self.resize(560, 340)
         layout = QVBoxLayout(self)
-        layout.addWidget(_label(f"pymybot {__version__}"))
+        logo = QLabel()
+        logo.setPixmap(logo_pixmap(72))
+        logo.setFixedSize(72, 72)
+        layout.addWidget(logo)
+        layout.addWidget(_label(f"MYBOT · pymybot {__version__}"))
         layout.addWidget(_label(
             "结构 SQL + Lua 驱动 + MT 动作，同一套执行器提供 GUI、CLI、Agent 与 MCP。\n"
             "Shell 与外部 MCP 服务拥有宿主用户权限，不是沙箱。", secondary=True))
@@ -839,6 +865,8 @@ class ResourcePanel(QWidget):
         self.index = ResourceIndex(None)
         self.loaded = False
         self._pending = False
+        self._fade = None
+        self._effect = None
         self._build()
 
     def _build(self):
@@ -880,10 +908,44 @@ class ResourcePanel(QWidget):
         layout.addWidget(split, 1)
         self.status = _label("", secondary=True)
         layout.addWidget(self.status)
+        self.watcher = QFileSystemWatcher(self)
+        self.watcher.directoryChanged.connect(self._schedule_reload)
+        self._reload_timer = QTimer(self)
+        self._reload_timer.setSingleShot(True)
+        self._reload_timer.timeout.connect(self._auto_reload)
 
-    def set_roots(self, scripts_root, skills_root=None):
-        self.index = ResourceIndex(scripts_root, skills_root or default_skills_root())
+    def set_roots(self, scripts_root, skills_root=None, robots_root=None, module_paths=()):
+        self.index = ResourceIndex(scripts_root, skills_root or default_skills_root(),
+                                   robots_root=robots_root, module_paths=module_paths)
+        self._watch_roots()
         if self.loaded:
+            self.reload()
+
+    def _watch_roots(self):
+        paths = set()
+        for root in (self.index.scripts_root, self.index.skills_root,
+                     self.index.docs_root, self.index.robots_root, *self.index.module_paths):
+            if root is None or not root.is_dir():
+                continue
+            paths.add(str(root))
+            try:
+                for child in list(root.iterdir())[:40]:
+                    if child.is_dir() and not child.is_symlink():
+                        paths.add(str(child))
+            except OSError:
+                continue
+        existing = self.watcher.directories()
+        if existing:
+            self.watcher.removePaths(existing)
+        for path in sorted(paths):
+            self.watcher.addPath(path)
+
+    def _schedule_reload(self, *_args):
+        if self.loaded:
+            self._reload_timer.start(400)
+
+    def _auto_reload(self):
+        if self.loaded and not self._pending:
             self.reload()
 
     def ensure_loaded(self):
@@ -915,10 +977,22 @@ class ResourcePanel(QWidget):
         errors = "；".join(self.index.errors)
         self.status.setText(f"{len(self.index.items)} 个资源" + (f" · {errors}" if errors else ""))
         self._apply_filter()
+        self._watch_roots()
         if self.index.items and self.tree.topLevelItemCount():
             first_group = self.tree.topLevelItem(0)
             if first_group.childCount():
                 self.tree.setCurrentItem(first_group.child(0))
+
+    def _animate_preview(self):
+        if self._effect is None:
+            self._effect = QGraphicsOpacityEffect(self.preview)
+            self.preview.setGraphicsEffect(self._effect)
+        self._fade = QPropertyAnimation(self._effect, b"opacity", self)
+        self._fade.setDuration(140)
+        self._fade.setStartValue(0.25)
+        self._fade.setEndValue(1.0)
+        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade.start()
 
     def _apply_filter(self):
         needle = self.filter.text().strip().lower()
@@ -957,6 +1031,7 @@ class ResourcePanel(QWidget):
             self.highlighter.set_language(resource.language)
             self.code.setPlainText(text)
             self.preview.setCurrentWidget(self.code)
+        self._animate_preview()
         self.status.setText(f"{resource.path} · {_size_text(resource.size)}")
 
     def open_selected(self):

@@ -21,6 +21,9 @@ for name, suffix in ASSET_SUFFIXES.items():
         relative = source.relative_to(ROOT)
         datas.append((str(source), str(Path("pymybot/assets") / relative.parent)))
 
+for source in sorted((ROOT / "pymybot" / "gui" / "assets").glob("*.svg")):
+    datas.append((str(source), "pymybot/gui/assets"))
+
 for extra in ("README.md", "LICENSE", "CHANGELOG.md"):
     candidate = ROOT / extra
     if candidate.is_file():
@@ -30,17 +33,18 @@ for distribution in (
     "pydantic-ai-slim", "pydantic-graph", "pydantic", "openai", "anthropic",
     "genai-prices", "httpx2", "httpcore2", "griffelib", "truststore", "jiter",
     "tiktoken", "lupa", "sqlparse", "pyserial", "pyftdi", "pillow", "av", "PySide6",
+    "mcp",
 ):
     try:
         datas += copy_metadata(distribution)
     except Exception:
         pass
 
-hiddenimports = ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets"]
+hiddenimports = ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtSvg"]
 for package in (
     "pydantic_ai", "pydantic_graph", "openai", "anthropic", "genai_prices",
     "httpx2", "httpcore2", "griffelib", "truststore", "jiter", "tiktoken",
-    "lupa", "PIL", "serial", "pyftdi", "av",
+    "lupa", "PIL", "serial", "pyftdi", "av", "mcp",
 ):
     try:
         hiddenimports += collect_submodules(package)

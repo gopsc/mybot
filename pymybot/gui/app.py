@@ -9,8 +9,9 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase,
+from PySide6.QtCore import (QEasingCurve, QEventLoop, QPropertyAnimation, Qt, QTimer,
+                            QUrl, Signal)
+from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics,
                            QKeySequence, QShortcut, QTextCharFormat, QTextCursor)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -21,12 +22,15 @@ from PySide6.QtWidgets import (
 )
 
 from ..paths import source_root
+from ..robot import module_roots
 from ..session_log import session_root
 from . import GuiUnavailable
+from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog, PreviewDialog,
                       ResourcePanel, SessionsDialog)
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
+from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
 
 TITLE = "mybot · 智能体"
@@ -121,6 +125,7 @@ class App(QMainWindow):
         self._dialogs = set()
         self.font_mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
+        self.setWindowIcon(logo_icon())
         _apply_theme(self)
         self._build()
         self._notice_timer = QTimer(self)
@@ -132,6 +137,9 @@ class App(QMainWindow):
         self._start_timer = QTimer(self)
         self._start_timer.setSingleShot(True)
         self._start_timer.timeout.connect(self._start_server)
+        self._hardware_timer = QTimer(self)
+        self._hardware_timer.setSingleShot(True)
+        self._hardware_timer.timeout.connect(self._refresh_hardware)
         self._load_robot_list()
         self._refresh_hardware()
         self._start_timer.start(120)
@@ -148,9 +156,15 @@ class App(QMainWindow):
         layout = QVBoxLayout(central)
         toolbar = QHBoxLayout()
         layout.addLayout(toolbar)
+        brand = QLabel()
+        brand.setPixmap(logo_pixmap(24))
+        brand.setFixedSize(24, 24)
+        brand.setToolTip("MYBOT robot control station")
+        toolbar.addWidget(brand)
         toolbar.addWidget(_button("打开工作区", self.pick_workspace))
         self.workspace_label = _label()
-        self.workspace_label.setMaximumWidth(160)
+        self.workspace_label.setWordWrap(False)
+        self.workspace_label.setMaximumWidth(180)
         toolbar.addWidget(self.workspace_label)
         toolbar.addWidget(_label("结构"))
         self.robot_box = QComboBox()
@@ -244,6 +258,11 @@ class App(QMainWindow):
             action.triggered.connect(lambda _checked=False, fn=slot: fn())
             menu.addAction(action)
         return menu
+
+    def _set_workspace_label(self, text):
+        self.workspace_label.setToolTip(text)
+        self.workspace_label.setText(QFontMetrics(self.workspace_label.font()).elidedText(
+            text, Qt.TextElideMode.ElideMiddle, self.workspace_label.maximumWidth()))
 
     def _build_side(self, side):
         layout = QVBoxLayout(side)
@@ -378,9 +397,19 @@ class App(QMainWindow):
         if self.notebook.widget(index) is self.resources:
             self.show_resources()
 
+    def _robots_root(self):
+        workspace = Path(self.cfg.workspace or default_workspace()).absolute()
+        candidate = workspace / "robots"
+        if candidate.is_dir():
+            return str(candidate)
+        robot = self._robot_path()
+        return str(Path(robot).parent) if robot and Path(robot).is_file() else ""
+
     def show_resources(self):
-        roots = (self._scripts_root(), _absolute(self.cfg.skills_dir,
-                                                self.cfg.workspace or default_workspace()))
+        modules = self._module_paths() or [str(path) for path in module_roots()]
+        roots = (self._scripts_root(),
+                 _absolute(self.cfg.skills_dir, self.cfg.workspace or default_workspace()),
+                 self._robots_root(), tuple(modules))
         if roots != self._resource_roots:
             self._resource_roots = roots
             self.resources.set_roots(*roots)
@@ -550,7 +579,7 @@ class App(QMainWindow):
 
     def _load_robot_list(self):
         root = Path(self.cfg.workspace or default_workspace()).absolute()
-        self.workspace_label.setText(str(root))
+        self._set_workspace_label(str(root))
         found = []
         for base in (root / "robots", root):
             if base.is_dir():
@@ -572,7 +601,7 @@ class App(QMainWindow):
 
     def on_robot_changed(self):
         self.cfg.robot = self.robot_box.currentData() or ""
-        self._refresh_hardware()
+        self._hardware_timer.start(140)
 
     def _robot_path(self):
         return _absolute(self.cfg.robot, self.cfg.workspace or default_workspace())
@@ -1085,6 +1114,7 @@ class App(QMainWindow):
 
     def refresh_context(self):
         self._sync_config()
+        self._hardware_timer.stop()
         self._load_robot_list()
         self._refresh_hardware()
 
@@ -1470,6 +1500,43 @@ def _check_display():
             "or explicitly set QT_QPA_PLATFORM=offscreen for headless testing.")
 
 
+def _splash_enabled(args):
+    if getattr(args, "no_splash", False):
+        return False
+    value = os.environ.get("MYBOT_GUI_SPLASH", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _startup_status(window):
+    state = window.serve_state
+    if window.agent_available:
+        state += " · 智能体就绪"
+    if window.mcp_available:
+        state += " · MCP 就绪"
+    if window.serve is not None:
+        hint = "服务已就绪；按 Enter 或点击按钮进入"
+    elif window.starting or window._restart_pending:
+        hint = "正在启动服务；也可以先进入，后台会继续"
+    else:
+        hint = "服务尚未就绪；进入后可在设置中检查解释器"
+    return f"初始化：{state}", hint
+
+
+def _fade_in(window):
+    window.setWindowOpacity(0.0)
+    window.show()
+    window.raise_()
+    window.activateWindow()
+    animation = QPropertyAnimation(window, b"windowOpacity", window)
+    animation.setDuration(280)
+    animation.setStartValue(0.0)
+    animation.setEndValue(1.0)
+    animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+    animation.finished.connect(lambda: window.setWindowOpacity(1.0))
+    window._entry_animation = animation
+    animation.start()
+
+
 def run_gui(args):
     _check_display()
     path = config_home() / "settings.json"
@@ -1482,10 +1549,23 @@ def run_gui(args):
     loop = application if owns_application else QEventLoop()
     window.closed.connect(loop.quit)
     application.aboutToQuit.connect(window.shutdown)
-    window.show()
+    splash = None
+    if _splash_enabled(args):
+        splash = SplashScreen(lambda: _startup_status(window))
+        splash.setWindowModality(Qt.WindowModality.ApplicationModal)
+        screen = application.primaryScreen()
+        if screen is not None:
+            splash.move(screen.availableGeometry().center() - splash.rect().center())
+        splash.entered.connect(lambda: splash.fade_out(lambda: _fade_in(window)))
+        splash.cancelled.connect(lambda: (window.shutdown(), loop.quit()))
+        splash.show()
+    else:
+        window.show()
     try:
         loop.exec()
     finally:
+        if splash is not None:
+            splash.close()
         window.shutdown()
         window.close()
         window.wait_for_shutdown()

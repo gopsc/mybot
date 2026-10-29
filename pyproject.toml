@@ -60,7 +60,7 @@ mybot-gui = "pymybot.gui.__main__:main"
 packages = ["pymybot", "pymybot.gui"]
 
 [tool.setuptools.package-data]
-pymybot = ["py.typed"]
+pymybot = ["py.typed", "gui/assets/*.svg"]
 
 [tool.setuptools.cmdclass]
 build_py = "build_support.BuildPy"

@@ -33,6 +33,14 @@ Per-edition histories live next to each implementation:
   resource browser with Markdown preview, syntax
   highlighting and mtime-based caching. Streaming only auto-scrolls when the
   transcript is at the bottom; retry, clear and copy actions were added.
+- The GUI opens with a retro entry screen (`pymybot/gui/splash.py`): SVG robot
+  logo, animated scanline and grid, live `serve` boot status, indeterminate
+  progress and an `进入控制台` button (Enter/Escape shortcuts, fade-out into
+  the main window). Set `--no-splash` or `MYBOT_GUI_SPLASH=0` to skip it; the
+  main window and About dialog share the same branding asset.
+- The resource browser indexes structures (`robots/*.sql`) and Lua drivers
+  (`modules/**/*.lua`) alongside scripts, skills and docs, watches roots with
+  `QFileSystemWatcher` and reloads after a 400 ms debounce.
 - `pymybot sessions --delete ID --yes|--dry-run` deletes named transcripts
   safely (repeatable; never follows links or removes an active session).
 - Structure `Alias`/`Vars` rows can be overridden with `--var`/`--var-env`
@@ -51,6 +59,10 @@ Per-edition histories live next to each implementation:
   protocol, streaming chat, settings and per-tool approvals. Install the `gui`
   extra for desktop use; CLI-only installations do not require Qt.
 - GUI tests run offscreen; test and packaging extras include PySide6.
+- GUI responsiveness: hardware refreshes are debounced (140 ms), command-panel
+  runs use `QThreadPool` instead of a raw thread, resource reloads are debounced
+  and previews fade in, and session timestamps parse with `datetime.fromisoformat`
+  instead of manual slicing.
 - `$alias` cells may now fill structure columns; previously only `$vars`
   scalars were accepted, which blocked Alias-based credential injection.
 
