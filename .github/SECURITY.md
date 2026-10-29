@@ -45,9 +45,10 @@ In scope:
 
 Out of scope by design:
 
-- **Shell is not a sandbox.** Once the operator enables the shell tool (or the
-  `Shell` driver), commands run with the host user's privileges. This is
-  documented, not a vulnerability.
+- **The workspace jail is not an OS sandbox.** The agent shell uses bubblewrap
+  when a namespace can be created; otherwise (including Windows) it runs with
+  host-user privileges inside the workspace jail. The `Shell` HAL driver is not
+  covered by that sandbox either. This is documented, not a vulnerability.
 - **Lua is trusted code.** LuaJIT FFI is available to drivers; only run reviewed
   drivers. This is documented.
 - **Hardware can move.** `active`, `build`, `destroy`, `sample` and action
