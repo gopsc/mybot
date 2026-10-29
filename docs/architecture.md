@@ -12,7 +12,7 @@ flowchart LR
     MT["Action script<br/>scripts/*.mt"] --> RUNNER["Action runner"]
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL / buses"]
-    HAL --> DEV["I2C · SPI · UART · HTTP · Camera · Shell"]
+    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Camera · Shell"]
 ```
 
 | Layer | File | Responsibility | Trust level |
@@ -47,7 +47,10 @@ native I/O are unrestricted; neither blocking native calls nor uncooperative
 Python loops can be forcibly interrupted. Per-row module/instance isolation is
 not process isolation; imported packages may share state.
 
-The built-in I2C/SPI/UART/HTTP/Camera/Shell ordinary-table drivers now use Python.
+The built-in I2C/SPI/UART/TCP/HTTP/Camera/Shell ordinary-table drivers use Python.
+TCP declares only name/host/port; activation validates without connecting, and MT
+explicitly controls connect/close, timeout/num_recv and hexadecimal/UTF-8 I/O.
+Each TCP row opens its own stream; no endpoint-level connection sharing or replay.
 HAL-backed buses expose the existing HAL handles to Lua device drivers rather
 than creating a separate bus backend. I2C/SPI/UART declare `LUA_VIRTUAL_DRIVER`:
 `proto=virt` or a `virt-*` path explicitly selects their retained Lua virtual

@@ -39,7 +39,7 @@ pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人�
 
 - **三层各管各的**：结构、驱动、动作分开写。换传感器不用改剧本，换剧本也不用碰驱动。
 - **没有硬件也能跑**：虚拟总线、寄存器模型、`loop://` 串口回环和逐驱动夹具，让 CI 不用插板子。
-- **默认是关着的**：物理总线、非回环 HTTP 和 Shell 都要显式打开。HAL 管得住这些入口，但驱动本身不是沙箱。
+- **默认是关着的**：物理总线、非回环 HTTP/TCP 和 Shell 都要显式打开。HAL 管得住这些入口，但驱动本身不是沙箱。
 - **动作可回看**：动作脚本是矩阵数据，不是任意代码；每次派发、捕获和结果都有 JSON 回执。
 - **失败就说清楚**：动作已经派发后出异常，会锁存成“结果未知”。我们不假装回滚，也不把非零退出码说成“没执行”。
 
@@ -142,7 +142,7 @@ flowchart LR
     MT["动作脚本<br/>scripts/*.mt"] --> RUNNER["Action runner"]
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL"]
-    HAL --> DEV["I2C · SPI · UART · HTTP · Camera · Shell"]
+    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Camera · Shell"]
 ```
 
 - **结构 SQL** 说明机器人身上有哪些变量、接在哪条总线、谁引用谁。
@@ -246,6 +246,11 @@ class Driver:
   --robot robots/uart-loopback.sql --input scripts/uart-loopback.mt --timeout 10
 ```
 
+TCP 可直接由 MT 控制：[结构示例](robots/tcp.sql) 只配置 `name`、`host`、`port`，
+[动作示例](scripts/tcp.mt) 使用 `connect`、`close`、`timeout`、`num_recv`、`send_hex`、
+`send_str`、`recv_hex`、`recv_str`。激活不自动连接；需要先启动本地 TCP 回显服务，
+再显式执行 `net.connect`。发送文本用 MT 字符串表达式，如 `$("你好")`。
+
 完整规则见 [驱动参考](skills/pymybot-scripting/references/driver-lua.md)。
 
 ## 安全边界
@@ -255,7 +260,7 @@ class Driver:
 | 能力 | 默认 | 打开方式 |
 | --- | --- | --- |
 | 物理 I2C/SPI/UART | 关闭 | `--allow-hardware` |
-| 非回环 HTTP | 关闭 | `--allow-hardware` |
+| 非回环 HTTP/TCP | 关闭 | `--allow-hardware` |
 | Shell 驱动 | 关闭 | `--allow-hardware` |
 | Agent 动作/读取/拍照 | 逐次确认 | `--allow-actions` 或弹窗 |
 | Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |

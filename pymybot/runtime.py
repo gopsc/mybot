@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import math
 import os
 import re
@@ -90,33 +91,49 @@ class DriverRuntime:
                 raise BudgetExceeded("Daemon stopped or quiesced")
 
     def _hal_values(self, operation, *values):
-        self._check()
-        if not self.allow_hardware:
-            physical = operation in {"i2c_open", "spi_open"}
-            physical |= operation == "uart_open" and (not values or values[0] != "loop://")
-            if operation == "camera_capture":
-                options = values[1] if len(values) > 1 and isinstance(values[1], dict) else {}
-                physical |= not bool(options.get("src"))
-            if physical:
-                raise DriverError("Physical hardware access requires explicit --allow-hardware confirmation")
-            if operation == "http_open" and not _loopback_base(values[0] if values else None):
-                raise DriverError("HTTP access beyond loopback requires explicit --allow-hardware confirmation")
-            if operation == "shell_open":
-                raise DriverError("Host command execution requires explicit --allow-hardware confirmation")
-        if operation == "sleep_ms" and values:
-            milliseconds = float(values[0])
-            if math.isfinite(milliseconds) and milliseconds > 0:
-                remaining = min(milliseconds, 4294967)
-                while remaining > 0:
+        result = None
+        try:
+            self._check()
+            if not self.allow_hardware:
+                physical = operation in {"i2c_open", "spi_open"}
+                physical |= operation == "uart_open" and (not values or values[0] != "loop://")
+                if operation == "camera_capture":
+                    options = values[1] if len(values) > 1 and isinstance(values[1], dict) else {}
+                    physical |= not bool(options.get("src"))
+                if physical:
+                    raise DriverError("Physical hardware access requires explicit --allow-hardware confirmation")
+                if operation == "http_open" and not _loopback_base(values[0] if values else None):
+                    raise DriverError("HTTP access beyond loopback requires explicit --allow-hardware confirmation")
+                if operation == "tcp_open":
+                    try:
+                        loopback = isinstance(values[0], str) and ipaddress.ip_address(values[0]).is_loopback
+                    except (ValueError, IndexError):
+                        loopback = False
+                    if not loopback:
+                        raise DriverError("TCP access beyond loopback requires explicit --allow-hardware confirmation")
+                if operation == "shell_open":
+                    raise DriverError("Host command execution requires explicit --allow-hardware confirmation")
+            if operation == "sleep_ms" and values:
+                milliseconds = float(values[0])
+                if math.isfinite(milliseconds) and milliseconds > 0:
+                    remaining = min(milliseconds, 4294967)
+                    while remaining > 0:
+                        self._check()
+                        duration = min(remaining, 50)
+                        self.hal.call(operation, duration, cancel_check=self._check, owner=self._owner)
+                        remaining -= duration
                     self._check()
-                    duration = min(remaining, 50)
-                    self.hal.call(operation, duration, cancel_check=self._check, owner=self._owner)
-                    remaining -= duration
-                self._check()
-                return 0
-        result = self.hal.call(operation, *values, cancel_check=self._check, owner=self._owner)
-        self._check()
-        return result
+                    return 0
+            result = self.hal.call(operation, *values, cancel_check=self._check, owner=self._owner)
+            self._check()
+            return result
+        except BaseException:
+            handle = result if operation == "tcp_open" else values[0] if values else None
+            if (operation == "tcp_open" and type(handle) is int and handle >= 0
+                    or operation in {"tcp_read", "tcp_write"} and values):
+                # Bypass the cancelled runtime check: consumed stream bytes cannot be replayed.
+                self.hal.call("close_handle", handle)
+            raise
 
     def _resolve(self, relative):
         if not isinstance(relative, str):

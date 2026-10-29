@@ -51,7 +51,7 @@ rules do not change with the entry point. See [mcp.md](mcp.md).
 - **A requirement for real hardware.** Virtual buses, register models, the
   `loop://` serial loopback and per-driver fixtures let CI run the full chain
   without a board.
-- **An open-by-default bridge.** Physical buses, non-loopback HTTP and the Shell
+- **An open-by-default bridge.** Physical buses, non-loopback HTTP/TCP and the Shell
   driver require an explicit opt-in. HAL gates those entry points; the driver
   itself is trusted code, not a sandbox.
 - **Actions as arbitrary code.** An action script is matrix data. Every dispatch,
@@ -114,7 +114,7 @@ flowchart LR
     MT["MT action<br/>scripts/*.mt"] --> RUNNER["Action runner"]
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL"]
-    HAL --> DEV["I2C · SPI · UART · HTTP · Camera · Shell"]
+    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Camera · Shell"]
 ```
 
 - **Structure SQL** declares variables, buses, addresses and references.
@@ -125,11 +125,17 @@ flowchart LR
   to add roots.
 - **MT actions** describe frames of parameters, captures and control flow.
 
-Static commands never activate hardware. Physical devices, non-loopback HTTP and
+Static commands never activate hardware. Physical devices, non-loopback HTTP/TCP and
 the Shell driver require an explicit opt-in. HAL-backed drivers share the same
 permission, handle-ownership and cancellation checks as Lua. Python drivers are
 still trusted in-process code: imports and direct native I/O are unrestricted, and
 budgets and cancellation are cooperative. See [security.md](security.md).
+
+TCP also has a direct MT interface: [robots/tcp.sql](../robots/tcp.sql) declares only
+`name`, `host` and `port`; [scripts/tcp.mt](../scripts/tcp.mt) uses `connect`, `close`,
+`timeout`, `num_recv`, `send_hex`, `send_str`, `recv_hex` and `recv_str`. Activation
+does not connect. Start a local TCP echo server before running the example;
+text arguments use MT string expressions such as `$("hello")`.
 
 For a complete runnable example, the Chinese README has a Python UART loopback
 driver, structure SQL and action script that run without a board. The driver

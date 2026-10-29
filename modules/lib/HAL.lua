@@ -134,6 +134,16 @@ function uart_read(fd, n, timeout_ms)
     if n == nil or n < 1 or timeout_ms == nil or timeout_ms > bus.UART_READ_MAX_MS then return nil end
     return report(bridge("uart_read", tonumber(fd), math.min(n, bus.UART_IO_MAX_BYTES), timeout_ms))
 end
+function tcp_open(host, port, timeout_ms)
+    return report(bridge("tcp_open", host, port, timeout_ms == nil and 1000 or timeout_ms))
+end
+function tcp_close(fd) return report(bridge("close_handle", fd)) end
+function tcp_write(fd, data, timeout_ms)
+    return bridge("tcp_write", fd, data, timeout_ms == nil and 1000 or timeout_ms)
+end
+function tcp_read(fd, n, timeout_ms)
+    return bridge("tcp_read", fd, n, timeout_ms == nil and 1000 or timeout_ms)
+end
 -- HTTP 端点会话：open 只做 URL/超时校验（不建连，HTTP 无持久连接），
 -- 实际请求由 http_request 逐次发起。回环之外的 base 由宿主 runtime 门
 -- （--allow-hardware）拦截，Lua 侧不重复判定。http_request 返回表

@@ -28,7 +28,46 @@
   路径显式走该实现并禁止物理访问；不是 Python 失败后的兜底。其他原生模块不会自动获得 Lua 虚拟模型。
   **既有 Daemon chunk 仍只加载 Lua 驱动**；若 `driver` / `devices` 按根顺序选中 Python，静态检查直接拒绝。
 
-可运行的 Python + SQL + MT 回环示例见 [README](../../../README.md#脚本示例)。
+可运行的 Python + SQL + MT 回环示例见 [README](../../../README.md#写一个驱动)。
+
+## TCP 的 MT 接口
+
+`modules/TCP.py` 使用标准库 socket，经宿主 HAL 管理连接。SQL 只配置三个字段：
+
+```sql
+CREATE TABLE TCP (name String, host String, port Number);
+INSERT INTO TCP (name, host, port) VALUES ('net', '127.0.0.1', 9000);
+```
+
+`host` 必须是 IPv4/IPv6 字面量（不支持域名或 scope），`port` 为 1..65535。
+激活仅校验配置，不联网；每个 SQL 行有独立连接。回环地址无需物理硬件权限，
+非回环连接需要 `--allow-hardware`。`read` / `sample` 只返回连接与配置元数据，不接收数据。
+
+| MT 字段 | 入参与行为 |
+| --- | --- |
+| `net.connect` | `1` 建立连接；已连接时不重新连接 |
+| `net.close` | `1` 关闭连接；重复关闭成功 |
+| `net.timeout` | 1..60000 毫秒，默认 1000，修改后用于后续连接、发送与接收 |
+| `net.num_recv` | 单次接收上限 1..512 字节，默认 512，修改后持续生效 |
+| `net.send_hex` | 十六进制文本，如 `$("00FF80")`；允许来自变量的 ASCII 空白，不接受奇数位或非十六进制字符 |
+| `net.send_str` | UTF-8 文本，如 `$("你好")`；编码后单次最多 512 字节 |
+| `net.recv_hex` | `1` 接收，回执含 `recv_hex`（大写、空格分隔）、`received` 与 `status` |
+| `net.recv_str` | `1` 接收 UTF-8，回执含 `recv_str`、`received` 与 `status` |
+
+操作旗标为 `0` 时不执行；一次派发最多一个有效操作，可附带 `timeout` / `num_recv` 设置。
+MT 普通单元格只接受数字，文本须使用 `$("...")` 或字符串表达式；表达式内不能包含
+实际空白，含空白的文本可放在 `@Struct` JSON 字段中再通过表达式引用。接收字段可按普通
+MT 捕获规则读取，例如 `net.recv_hex net.reply; 1 $reply=recv_hex;`。
+
+TCP 是字节流：接收最多读取 `num_recv` 字节，不保证填满或返回一个完整报文。
+`status` 为 `data` / `timeout` / `eof`；超时不是断连，EOF 后关闭连接。
+UTF-8 跨次接收的未完整字符会暂存，切换到 `recv_hex` 时先返回这些原始字节；
+非法 UTF-8 或 EOF 时仍有不完整字符会报错，不替换乱码。
+发送回执的 `sent` 只表示 socket 接受的字节数，不代表设备已经执行。
+发送失败或取消后关闭连接，不自动重连或重放；现有上层故障回执仍可能只给出“结果未知”。
+去激活会兜底关闭未显式关闭的连接。样例 [robots/tcp.sql](../../../robots/tcp.sql) 和
+[scripts/tcp.mt](../../../scripts/tcp.mt) 需要先在本机对应端口启动 TCP 回显服务，示例本身不会启动服务。
+
 以下章节专述保留的 **Lua** 驱动协议与工具。
 
 ## 1. 生命周期与运行环境

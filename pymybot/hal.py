@@ -7,12 +7,16 @@ Handles are process-local logical IDs, not operating-system file descriptors.
 from __future__ import annotations
 
 import base64
+import errno
 import importlib
 import io
+import ipaddress
 import math
 import os
 from pathlib import Path
 import re
+import select
+import socket
 import stat
 import struct
 import subprocess
@@ -77,6 +81,8 @@ class HALManager:
     CAMERA_FORMATS = {"win32": "dshow", "linux": "v4l2", "darwin": "avfoundation"}
     UART_MAX_BYTES = 512
     UART_MAX_MS = 60000
+    TCP_MAX_BYTES = 512
+    TCP_MAX_MS = 60000
     HTTP_MAX_BYTES = 4 * 1024 * 1024
     HTTP_MAX_HEADERS = 16
     HTTP_TIMEOUT_MS = 60000
@@ -88,6 +94,7 @@ class HALManager:
     _OPERATIONS = {
         "i2c_open", "i2c_transfer", "spi_open", "spi_setup", "spi_transfer",
         "uart_open", "uart_write", "uart_read", "uart_flush",
+        "tcp_open", "tcp_write", "tcp_read",
         "http_open", "http_request",
         "shell_open", "shell_run",
         "camera_open", "camera_capture", "close_handle", "sleep_ms", "last_error",
@@ -141,7 +148,9 @@ class HALManager:
                     raise
                 message = f"{operation}: {exc}"
                 self._errors.message = message
-                if operation == "camera_capture" or operation in {"http_request", "shell_run"}:
+                if operation == "tcp_write":
+                    return {"result": "ERR", "message": message, "sent": 0}
+                if operation in {"camera_capture", "http_request", "shell_run", "tcp_read"}:
                     return {"result": "ERR", "message": message}
                 if operation in {"i2c_transfer", "spi_transfer", "uart_read"}:
                     return None
@@ -428,6 +437,129 @@ class HALManager:
             self._live(r)
             r.device.reset_input_buffer()
         return 0
+
+    @classmethod
+    def _tcp_endpoint(cls, host, port):
+        if not isinstance(host, str) or "%" in host:
+            raise ValueError("TCP host must be an IPv4 or IPv6 address without a scope")
+        address = ipaddress.ip_address(host)
+        return address, cls._integer(port, 1, 65535)
+
+    def _tcp_wait(self, device, reading, deadline):
+        while True:
+            self._tick_cancel()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            readable, writable, exceptional = select.select(
+                [device] if reading else [], [] if reading else [device],
+                [device], min(remaining, .05),
+            )
+            self._tick_cancel()
+            if time.monotonic() >= deadline:
+                return False
+            if readable or writable or exceptional:
+                return True
+
+    @staticmethod
+    def _tcp_disconnect(resource):
+        device, resource.device = resource.device, None
+        if device is not None:
+            device.close()
+
+    def _tcp_open(self, host, port, timeout_ms=1000):
+        address, port = self._tcp_endpoint(host, port)
+        timeout = self._integer(timeout_ms, 1, self.TCP_MAX_MS)
+        deadline = time.monotonic() + timeout / 1000
+        self._tick_cancel()
+        device = socket.socket(socket.AF_INET if address.version == 4 else socket.AF_INET6, socket.SOCK_STREAM)
+        registered = False
+        try:
+            device.setblocking(False)
+            code = device.connect_ex((str(address), port))
+            connected = {0, errno.EISCONN, 10056}
+            pending = {errno.EINPROGRESS, errno.EWOULDBLOCK, errno.EALREADY, errno.EINTR, 10035, 10036, 10037}
+            if code not in connected:
+                if code not in pending:
+                    raise OSError(code, "TCP connection failed")
+                if not self._tcp_wait(device, False, deadline):
+                    raise TimeoutError("TCP connection timed out")
+                code = device.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                if code:
+                    raise OSError(code, "TCP connection failed")
+            self._tick_cancel()
+            with self._lock:
+                handle = self._register(_Resource("tcp", None, "socket", device))
+                registered = True
+                return handle
+        finally:
+            if not registered:
+                device.close()
+
+    def _tcp_write(self, handle, data, timeout_ms=1000):
+        payload = self._bytes(data, self.TCP_MAX_BYTES)
+        timeout = self._integer(timeout_ms, 1, self.TCP_MAX_MS)
+        deadline = time.monotonic() + timeout / 1000
+        resource = self._get(handle, "tcp")
+        sent = 0
+        completed = False
+        with resource.lock:
+            try:
+                self._live(resource)
+                if resource.device is None:
+                    raise ConnectionError("TCP connection is closed")
+                self._tick_cancel()
+                while sent < len(payload):
+                    if not self._tcp_wait(resource.device, False, deadline):
+                        raise TimeoutError("TCP send timed out")
+                    try:
+                        count = resource.device.send(memoryview(payload)[sent:])
+                    except (BlockingIOError, InterruptedError):
+                        continue
+                    if count == 0:
+                        raise ConnectionError("TCP connection closed during send")
+                    sent += count
+                self._tick_cancel()
+                completed = True
+                return {"result": "OK", "sent": sent}
+            except Exception as exc:
+                context = getattr(self._calls, "current", None)
+                if context is not None and context.cancelled:
+                    raise
+                message = f"tcp_write: {exc} (sent {sent} bytes; peer execution is unknown)"
+                self._errors.message = message
+                return {"result": "ERR", "message": message, "sent": sent}
+            finally:
+                if not completed:
+                    self._tcp_disconnect(resource)
+
+    def _tcp_read(self, handle, count, timeout_ms=1000):
+        count = self._integer(count, 1, self.TCP_MAX_BYTES)
+        timeout = self._integer(timeout_ms, 1, self.TCP_MAX_MS)
+        deadline = time.monotonic() + timeout / 1000
+        resource = self._get(handle, "tcp")
+        completed = False
+        with resource.lock:
+            try:
+                self._live(resource)
+                if resource.device is None:
+                    raise ConnectionError("TCP connection is closed")
+                while True:
+                    if not self._tcp_wait(resource.device, True, deadline):
+                        completed = True
+                        return {"result": "OK", "status": "timeout", "data": []}
+                    try:
+                        data = resource.device.recv(count)
+                    except (BlockingIOError, InterruptedError):
+                        continue
+                    self._tick_cancel()
+                    if not data:
+                        self._tcp_disconnect(resource)
+                    completed = True
+                    return {"result": "OK", "status": "data" if data else "eof", "data": list(data)}
+            finally:
+                if not completed:
+                    self._tcp_disconnect(resource)
 
     @staticmethod
     def _http_base(base):
