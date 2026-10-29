@@ -50,6 +50,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Pin the MCP SDK to `>=1.30,<2`. SDK 2 renamed the low-level `Server` callbacks
+  and `McpError`, which breaks the `pymybot mcp` stdio server; Dependabot now
+  ignores major MCP bumps until the adapter is ported. The agent-side client
+  keeps working with either SDK version.
 - Migrate the desktop GUI from Tkinter to PySide6 (Qt 6), retaining the serve
   protocol, streaming chat, settings and per-tool approvals. Install the `gui`
   extra for desktop use; CLI-only installations do not require Qt.

@@ -27,7 +27,10 @@ from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.stdio import stdio_server
-from mcp.shared.exceptions import McpError
+try:
+    from mcp.shared.exceptions import McpError
+except ImportError:  # MCP SDK 2.x renamed the class.
+    from mcp.shared.exceptions import MCPError as McpError
 
 from . import __version__
 from .agent_executor import EXECUTION_TOOLS, MAX_LIST, RobotExecutor

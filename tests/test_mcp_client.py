@@ -23,7 +23,10 @@ from pymybot.mcp_client import McpConfigError, load_servers
 ROOT = Path(__file__).resolve().parents[1]
 
 SERVER_SCRIPT = '''
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:  # MCP SDK 2.x renamed FastMCP to MCPServer.
+    from mcp.server.mcpserver import MCPServer as FastMCP
 
 mcp = FastMCP("demo")
 
