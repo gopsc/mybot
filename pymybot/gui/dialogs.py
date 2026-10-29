@@ -833,7 +833,7 @@ class AboutDialog(QDialog):
         layout.addWidget(_label(f"MYBOT · pymybot {__version__}"))
         layout.addWidget(_label(
             "结构 SQL + Lua 驱动 + MT 动作，同一套执行器提供 GUI、CLI、Agent 与 MCP。\n"
-            "Shell 与外部 MCP 服务拥有宿主用户权限，不是沙箱。", secondary=True))
+            "Shell 使用沙箱后端；外部 MCP 服务拥有宿主用户权限，不是沙箱。", secondary=True))
         layout.addWidget(_label(f"Qt {self._qt_version()} · Python {sys.version.split()[0]}", secondary=True))
         row = QHBoxLayout()
         row.addWidget(_button("项目文档", self.open_docs))
