@@ -48,6 +48,7 @@ MAX_HISTORY = 4 * 1024 * 1024
 IO_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
 FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
 WEB_TOOLS = frozenset({"web_fetch", "web_search"})
+MAX_IDENTICAL_CALLS = 3
 # Single source of truth: validation, key lookup, rejection message and the provider tests all derive from this.
 PROVIDER_KEY_ENV = {"openai": "OPENAI_API_KEY", "openai-chat": "OPENAI_API_KEY",
                     "anthropic": "ANTHROPIC_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
@@ -470,6 +471,8 @@ class AgentSession:
         self.events = []
         self.deadline = None
         self._asking = False
+        self._last_call = None
+        self._repeat_count = 0
 
     async def start(self):
         context = await self.executor.start(deadline=self.deadline)
@@ -517,6 +520,20 @@ class AgentSession:
                                 "switch intent or ask for a separate step.")}
             self.events.append({"tool": name, **result})
             self._log("tool_result", tool=name, **result)
+            return result
+        fingerprint = (name, dumps(arguments))
+        if fingerprint == self._last_call:
+            self._repeat_count += 1
+        else:
+            self._last_call = fingerprint
+            self._repeat_count = 1
+        if self._repeat_count > MAX_IDENTICAL_CALLS:
+            result = {"ok": False, "executed": False, "state": "not_executed",
+                      "error": f"Identical tool call repeated more than {MAX_IDENTICAL_CALLS} times; "
+                               "stop and reassess instead of retrying."}
+            self.events.append({"tool": name, **result})
+            self._log("tool_result", tool=name, **result)
+            self._log("loop_guard", tool=name, repeats=self._repeat_count)
             return result
         needs_approval = ((name in IO_TOOLS and not self.config.allow_actions)
                           or (name in FILE_WRITE_TOOLS and not self.config.allow_file_writes)
@@ -607,6 +624,8 @@ class AgentSession:
         self._asking = True
         self.deadline = time.monotonic() + self.config.timeout
         self._turn += 1
+        self._last_call = None
+        self._repeat_count = 0
         self._log("user", text=prompt)
         self.intent = classify_intent(prompt, self.config.intent_mode)
         self._log("intent", **self.intent.as_dict())

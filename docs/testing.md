@@ -57,6 +57,14 @@ timeout) when the driver supports it.
 - Symlink creation may be unavailable; `tests/conftest.py` converts that into a
   skip instead of a failure.
 
+## Agent harness evaluation
+
+`tests/test_agent_harness_eval.py` runs offline with `FunctionModel`: it asserts
+intent tool gating, the repeated-call loop guard, prompt/context injection and
+result metadata without a provider, network or hardware. Web and sandbox tests
+use local servers/kernel probing and skip when their optional dependency or
+namespace support is unavailable.
+
 ## Adding a regression test
 
 1. Reproduce the failure with the smallest input.
