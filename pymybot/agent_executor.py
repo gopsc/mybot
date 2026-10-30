@@ -26,7 +26,7 @@ from .errors import BudgetExceeded
 from .hal import HALManager
 from .hardware import Budget, ensure_ok, safe_ident
 from .include import MAX_INCLUDE_BYTES, _Expander, expand_includes
-from .matrix import parse_matrices
+from .matrix import is_control, parse_matrices, reflex_name
 from .robot import MAX_BINDING_BYTES, Robot
 from .security import MAX_BODY, SecurityError, checked_text, dumps
 from .sql import parse_sql
@@ -195,7 +195,12 @@ class _Scripts:
                     else expand_includes(matrices, path.parent))
         lines = []
 
-        def render(seq):
+        def render(seq, *, implicit=False):
+            if (implicit and len(seq) == 1 and seq[0].name == "Action"
+                    and seq[0].rows and not seq[0].children):
+                # An explicit wrapper would consume an extra level of the block-depth budget.
+                lines.extend(" ".join(row) + ";\n" for row in seq[0].rows)
+                return
             for matrix in seq:
                 if matrix.name.strip() in {"Include", "Merge"}:
                     raise SecurityError("Unexpanded file directive")
@@ -204,7 +209,7 @@ class _Scripts:
                     lines.append(matrix.json_text + "\n")
                 else:
                     lines.extend(" ".join(row) + ";\n" for row in matrix.rows)
-                render(matrix.children)
+                render(matrix.children, implicit=is_control(matrix.name) or reflex_name(matrix.name) is not None)
                 lines.append("@\n")
 
         render(matrices)

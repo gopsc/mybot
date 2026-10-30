@@ -296,6 +296,55 @@ step.x;
     assert result["action_blocks"] == ["Reflex(step)", "Action"]
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+@pytest.mark.parametrize("included", [False, True], ids=["direct", "include"])
+def test_nested_controls_check_and_run_real_cli(workspace, monkeypatch, capsys, newline, included):
+    path = workspace / "nested-controls.mt"
+    script = '''@Vars
+name value;
+outer 0;
+inner 0;
+@
+@Reflex(step)
+dev.echo;
+$(value);
+@
+@if(outer==0)
+@while(outer<2)
+dev.echo dev.capture;
+0 $inner=echo;
+@while(inner<2)
+@if(inner==0)
+dev.echo;
+100;
+@
+@Action
+step.value step.capture;
+$(inner+1) $inner=echo;
+@
+@
+dev.echo dev.capture;
+$(outer+1) $outer=echo;
+@
+@
+'''
+    path.write_bytes(script.replace("\n", newline).encode("utf-8"))
+    if included:
+        path = workspace / "entry.mt"
+        path.write_text("@Include\npath;\nnested-controls.mt;\n@\n", encoding="utf-8")
+    monkeypatch.setattr(Robot, "active", forbid)
+    code, checked, _ = invoke(capsys, "check", "--robot", workspace / "robot.sql", "--input", path)
+    assert code == 0 and checked["activated"] is False
+    assert checked["action_blocks"] == ["Vars", "Reflex(step)", "if(outer==0)"]
+    result = run_cli(workspace, "run", "--robot", "robot.sql", "--input", path, "--timeout", "5")
+    assert result.returncode == 0, result.stderr
+    assert len(result.stdout.splitlines()) == 1
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert [item["echo"] for item in payload["outputs"]] == [0, 100, 1, 2, 1, 0, 100, 1, 2, 2]
+    assert [item["count"] for item in payload["outputs"]] == list(range(1, 11))
+
+
 @pytest.mark.parametrize("in_fragment", [False, True])
 def test_top_level_merge_rejects_later_nested_actions(workspace, monkeypatch, capsys, in_fragment):
     monkeypatch.setattr(Robot, "active", forbid)

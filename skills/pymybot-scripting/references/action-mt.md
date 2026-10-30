@@ -120,11 +120,44 @@ $count=reading;
 - `@if(条件)` 为真时执行子块；`@while(条件)` 循环执行子块（含空体死循环防护——
   预算耗尽会打断）。
 - 控制块**体内直接写矩阵**即隐式子 Action（如上：`r.value` 是隐式表头，
-  其后每行是数据行），也可混排显式 `@Action` 或其他控制块；Action、Reflex body 支持同样的嵌套。
+  其后每行是数据行），也可混排显式 `@Action`、`@if` 或 `@while`；四种 if/while 相互嵌套组合均支持，
+  与 Action、Reflex body 一样按书写顺序执行。嵌套块后的矩阵段必须重新写表头，`-` 不跨段继承。
+- 外层条件为假时，整个 body 都跳过，内层条件也不求值；后续兄弟块继续执行。
+  `if` 只在进入时判断一次，`while` 每轮开始前重新判断；内层循环重新进入时也使用当前捕获值。
 - Action/控制块内不能声明 Alias/Vars、Struct 或 Reflex；Alias/Vars 另可在 Reflex 根 body
   声明局部默认值（第 7 节），Struct/Reflex 声明始终只在顶层。
   循环变量的更新靠**捕获**：上例 `$count=reading` 把 `r` 本次结果的 `reading`
   字段写回 `count`，下一轮条件立即用新值（捕获从下一行/下一块起可见，见第 5 节）。
+- 嵌套不会重置超时、取消或输出预算，空体死循环也会被预算打断；块嵌套仍最多 32 层。
+
+以下可配合 `robots/relay-test.sql` 运行，仅调用软件 Timer，不访问物理硬件。
+它展示 `if → while → if/Action → Reflex 调用`，回执中的 `slept` 依次为 `1、2、3`：
+
+```mt
+@Vars
+name value;
+count 0;
+@
+@Reflex(step)
+timer-0.delay;
+$(value);
+@
+@if(count==0)
+@while(count<3)
+@if(count<2)
+step.value step.capture;
+$(count+1) $count=slept;
+@
+@Action
+step.value step.capture;
+$(count+1) $count=slept;
+@
+@
+@
+```
+
+第二轮内层 `if(count<2)` 为假，但同层 Action 仍执行，将 `count` 更新为 3 后退出循环。
+Reflex 内部变量不会泄漏；这里通过调用处的 `step.capture` 显式更新外层循环变量。
 
 ## 5. 捕获 `$变量=字段.路径`
 

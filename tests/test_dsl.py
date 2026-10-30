@@ -143,8 +143,8 @@ def test_matrix_rejects_malformed(text):
         parse_matrices(text)
 
 
-@pytest.mark.parametrize("name", ["Action", "Reflex(f)"])
-def test_matrix_action_and_reflex_have_same_ordered_nested_body(name):
+@pytest.mark.parametrize("name", ["Action", "Reflex(f)", "if(1>0)", "while(1>0)"])
+def test_matrix_executable_blocks_have_same_ordered_nested_body(name):
     matrix = parse_matrices(body(name, "dev.p;1;\n",
                                  body("Action", "dev.p;2;\n",
                                       body("if(1>0)", block("Action", "dev.p", "3")),
@@ -198,10 +198,11 @@ def test_reflex_rejects_old_or_malformed_declaration_names(name):
         parse_matrices(block(name, "dev.p", "1"))
 
 
-def test_matrix_depth_limit_and_global_line_number():
-    assert parse_matrices("@if(1>0)\n" * 32 + "@\n" * 32)
+@pytest.mark.parametrize("name", ["Action", "if(1>0)", "while(1>0)"])
+def test_matrix_depth_limit_and_global_line_number(name):
+    assert parse_matrices(f"@{name}\n" * 32 + "@\n" * 32)
     with pytest.raises(ScriptError, match="depth"):
-        parse_matrices("@if(1>0)\n" * 33 + "@\n" * 33)
+        parse_matrices(f"@{name}\n" * 33 + "@\n" * 33)
     with pytest.raises(ScriptError, match="line 6"):
         parse_matrices("@Relay\n# h\nname note;\n# d\nr0 hello;\nr1;\n@\n")
 
@@ -334,10 +335,32 @@ def test_nested_conditions_capture_driven_while_and_order():
     assert len(outputs) == 8
 
 
-def test_false_outer_condition_does_not_evaluate_children():
+@pytest.mark.parametrize("outer", ["Action", "if(outer<2)", "while(outer<2)"])
+@pytest.mark.parametrize("inner", ["Action", "if(inner<2)", "while(inner<2)"])
+def test_nested_block_combinations_preserve_order_and_capture_updates(outer, inner):
+    dev = Driver(callback=lambda params: {"result": "OK", "value": params["value"]})
+    script = body(outer, "dev.value dev.capture;0 $inner=value;\n",
+                  body(inner, block("Action", "dev.value dev.capture", "$(inner+1) $inner=value")),
+                  "dev.value dev.capture;$(outer+1) $outer=value;\n")
+    registry, outputs = run(script, dev, Number("outer", 0), Number("inner", 0))
+    iterations = 2 if outer.startswith("while(") else 1
+    inner_values = [1, 2] if inner.startswith("while(") else [1]
+    expected = [value for index in range(iterations) for value in [0, *inner_values, index + 1]]
+    assert dev.calls == [{"value": value} for value in expected]
+    assert [output["value"] for output in outputs] == expected
+    assert registry.resolve("outer") == iterations
+    assert registry.resolve("inner") == inner_values[-1]
+
+
+@pytest.mark.parametrize("outer", ["if(0>1)", "while(0>1)"])
+@pytest.mark.parametrize("inner", ["if(missing>0)", "while(missing>0)"])
+def test_false_outer_condition_does_not_evaluate_children(outer, inner):
     dev = Driver()
-    run("@if(0>1)\n@while(missing>0)\ndev.p;\n1;\n@\n@\n", dev)
-    assert dev.calls == []
+    script = (body(outer, "dev.p;1;\n", body(inner, block("Action", "dev.p", "2")), "dev.p;3;\n")
+              + block("Action", "dev.p", "4"))
+    _, outputs = run(script, dev)
+    assert dev.calls == [{"p": 4.0}]
+    assert outputs == [{"result": "OK", "reading": 1}]
 
 
 @pytest.mark.parametrize("name", ["if", "while", "if()", "while()", "if(1>", "if(1)", 'while("yes")'])
@@ -356,6 +379,25 @@ def test_stop_and_deadline_budget_propagate_even_in_empty_loop():
         run(block("Action", "dev.p other.p", "1 1"), dev, other, budget=budget)
     assert len(dev.calls) == 1
     assert not other.calls
+
+
+@pytest.mark.parametrize("outer", ["if(1>0)", "while(1>0)"])
+@pytest.mark.parametrize("empty", [False, True])
+def test_nested_control_budget_stops_before_later_actions(outer, empty):
+    budget = FakeBudget(100)
+    dev = Driver(callback=lambda params: (setattr(budget, "remaining", -1) or {"result": "OK"}))
+    other = Driver("other")
+    contents = "" if empty else block("Action", "dev.p", "1")
+    script = (body(outer, body("while(1>0)", contents), block("Action", "other.p", "2"))
+              + block("Action", "other.p", "3"))
+    runner = ActionRunner(FakeRegistry(dev, other), budget)
+    with pytest.raises(BudgetExceeded):
+        runner.run(parse_matrices(script))
+    assert dev.calls == ([] if empty else [{"p": 1.0}])
+    assert other.calls == []
+    budget.remaining = 100
+    runner.run(parse_matrices(block("Action", "other.p", "4")))
+    assert other.calls == [{"p": 4.0}]
 
 
 @pytest.mark.parametrize(("header", "cell", "extras"), [
@@ -472,8 +514,8 @@ def test_reflex_action_multibeat_inline_order():
     assert registry.get("x") is None and registry.get("y") is None
 
 
-@pytest.mark.parametrize("name", ["Action", "Reflex(f)"])
-def test_action_and_reflex_execute_same_mixed_nested_body_in_order(name):
+@pytest.mark.parametrize("name", ["Action", "Reflex(f)", "if(1>0)", "while(count<4)"])
+def test_executable_blocks_run_same_mixed_nested_body_in_order(name):
     dev = Driver()
     contents = ("dev.p;10;\n"
                 + body("Action", "dev.p;20;\n",
@@ -482,13 +524,14 @@ def test_action_and_reflex_execute_same_mixed_nested_body_in_order(name):
                        "dev.p;40;\n")
                 + "dev.p;50;\n")
     script = body(name, contents)
-    if name != "Action":
+    is_reflex = name == "Reflex(f)"
+    if is_reflex:
         script += block("Action", "f.capture", "$returned=reading")
     registry, outputs = run(script, dev, Number("count", 0))
     assert dev.calls == [{"p": 10.0}, {"p": 20.0}, {}, {"p": 30.0}, {}, {"p": 40.0}, {"p": 50.0}]
     assert [output["reading"] for output in outputs] == list(range(1, 8))
-    assert registry.resolve("count") == (5.0 if name == "Action" else 0.0)
-    if name != "Action":
+    assert registry.resolve("count") == (0.0 if is_reflex else 5.0)
+    if is_reflex:
         assert registry.resolve("returned") == 7.0
 
 

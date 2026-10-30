@@ -6,6 +6,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep legal 32-level `if`/`while` nesting executable through Agent/serve/MCP
+  snapshots: freezing a control body no longer adds an extra `@Action` wrapper
+  around its sole nonempty matrix. Empty blocks and adjacent matrix boundaries
+  remain intact, and the original nesting limit is unchanged.
+
 ### Added
 
 - Named, top-level `@Reflex(name)` blocks called through `reflexName.parameter`
