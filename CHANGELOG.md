@@ -15,6 +15,15 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Runtime prompt layers with bundled Markdown/JSON defaults for source, wheel,
+  PyInstaller and Nuitka: `pymybot prompts list`, missing-only refill and confirmed,
+  backed-up full restore, including recovery from corrupt runtime safety/manifest
+  files. `doctor` validates bundled manifest/safety hashes without creating a home.
+- Safety layers 0/100 pinned to trusted hashes, operator-only core, and dedicated
+  per-call approvals for agent SOUL/USER/STATS updates with CAS, backups and audit
+  hashes. Automatic sanitized host-only STATS can be disabled with
+  `--no-prompt-stats`, GUI settings or serve `autoStats: false` (default true).
+  GUI prompt management shows layer state and the composed prompt's short hash.
 - Named, top-level `@Reflex(name)` blocks called through `reflexName.parameter`
   headers, including aliases and dynamic headers. Reflex and Action bodies can
   mix matrices with nested Action/if/while blocks. Reflex-root Alias/Vars defaults,
@@ -47,10 +56,9 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   progress and an `进入控制台` button (Enter/Escape shortcuts, fade-out into
   the main window). Set `--no-splash` or `MYBOT_GUI_SPLASH=0` to skip it; the
   main window and About dialog share the same branding asset.
-- Agent prompts are layered (`pymybot/agent_prompt.py`): the immutable `SOUL`
-  safety contract, an optional operator `--prompt-file`, a generated and
-  explicitly untrusted project inventory, and runtime guidance. Only optional
-  layers are truncated to the 16 KiB budget. The inventory
+- Agent prompt composition combines manifest-ordered runtime layers with an
+  optional operator `--prompt-file`, explicitly untrusted project inventory and
+  runtime guidance, bounded to 128 KiB. The inventory
   (`pymybot/agent_context.py`) lists workspace entries, structures, scripts,
   drivers and skills, is mtime-cached and bounded by `--context-bytes`
   (default 4096, 0 disables). `serve.agent.ask` accepts `promptFile` and
@@ -61,13 +69,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requests, leaves keyword-free messages unrestricted, and rejects out-of-intent
   tool calls with a structured not-executed receipt. `--intent`, the GUI
   dropdown and `serve.agent.ask` expose the mode; results carry intent metadata.
-- Shell sandbox (`pymybot/sandbox.py`): `--sandbox auto` probes bubblewrap and
-  falls back to the workspace jail; `bwrap` fails instead of running
-  unsandboxed. The bubblewrap profile mounts the host read-only, gives the
-  workspace a read-write overlay, clears the environment, and unshares network,
-  PID, IPC and UTS namespaces. `doctor` reports the active backend, Shell
-  receipts include `sandbox`, and the GUI/serve/CLI expose the mode. The
-  workspace jail remains the honest Windows fallback.
+- Shell sandbox (`pymybot/sandbox.py`): `--sandbox auto` probes bubblewrap.
+  Agent prompt protection requires it and refuses unisolated fallback, including
+  on Windows or with `off`. The profile mounts the host read-only, keeps prompt
+  roots read-only inside the writable workspace, clears the environment, and
+  unshares network, PID, IPC and UTS namespaces. `doctor` reports availability,
+  shell receipts include `sandbox`, and GUI/serve/CLI expose the mode. Standalone
+  workspace APIs without protected roots retain the legacy workspace fallback.
 - Opt-in web tools (`pymybot/agent_web.py`, `pip install pymybot[web]`):
   `--web` adds `web_fetch` (HTTPS, SSRF private/loopback/link-local checks,
   three re-validated redirects, text-only content, 512 KiB/16k-char caps) and

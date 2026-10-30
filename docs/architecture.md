@@ -118,7 +118,8 @@ Key invariants:
 | `pymybot/hal.py` | I2C/SPI/UART/HTTP/Camera/Shell host operations |
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
 | `pymybot/agent.py` | PydanticAI agent, model configuration, tool loop |
-| `pymybot/agent_prompt.py` | Layered system prompt (SOUL/OPERATOR/PROJECT/GUIDE) with a byte budget |
+| `pymybot/prompts.py` | Manifest-ordered runtime prompt layers, trusted safety hashes, bounded composition, CAS/backups and private storage |
+| `pymybot/agent_prompt.py` | Operator profile validation and legacy prompt composition compatibility |
 | `pymybot/agent_context.py` | Bounded, mtime-cached project inventory injected as untrusted data |
 | `pymybot/agent_intent.py` | Deterministic bilingual intent routing, tool allowlists and budgets |
 | `pymybot/agent_executor.py` | Approval-gated tool implementations |
@@ -167,7 +168,7 @@ flowchart TB
 
 ## Asset and path resolution
 
-Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills}`; module
+Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills,prompts}`; module
 assets include both `.py` and `.lua`. Doctor counts both; agent inventory and
 GUI previews include both within their existing budgets, with Python syntax
 highlighting for `.py`. In a source checkout the code falls back to the

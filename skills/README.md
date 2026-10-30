@@ -38,7 +38,11 @@ Rules for editing a reference:
 - The `../docs/` links are for reviewing the repository. Wheels and frozen builds
   package `skills/` without `docs/`, so a rule must never depend on following one.
 
-Prompt layering (`SOUL`/`USER`/`STATS`), runtime prompt files and a GUI reset
-button are a 0.3 design item; the system safety prefix/suffix remain
-operator-owned. See [`../docs/roadmap.md`](../docs/roadmap.md) and
-[`../docs/security.md`](../docs/security.md).
+Runtime prompt layering is implemented separately from these scripting references:
+bundled `prompts/` defaults seed `MYBOT_HOME/prompts`, with CLI list/restore and
+GUI management. Safety layers 0/100 are pinned to trusted bundled hashes; core
+is operator-only. Agent changes to SOUL/USER/STATS (97/98/99) require a dedicated
+per-call prompt approval, CAS and backup; ordinary action/file grants do not
+apply. Automatic STATS is sanitized host metadata and can be disabled. See
+[`../docs/cli.md`](../docs/cli.md#runtime-prompts) and
+[`../docs/security.md`](../docs/security.md#system-prompt-ownership).

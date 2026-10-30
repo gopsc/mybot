@@ -39,7 +39,8 @@ def read_operator_prompt(path, cap=MAX_OPERATOR_PROMPT):
     if not candidate.is_file():
         raise SecurityError(f"Operator prompt is not a regular file: {candidate}")
     try:
-        data = candidate.read_bytes()
+        with candidate.open("rb") as stream:
+            data = stream.read(cap + 1)
     except OSError as exc:
         raise SecurityError(f"Cannot read operator prompt: {exc.strerror or exc}") from None
     if len(data) > cap:

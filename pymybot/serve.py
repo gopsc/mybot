@@ -77,8 +77,8 @@ class Params:
         except SecurityError as exc:
             raise RpcError(INVALID_PARAMS, f"'{key}': {exc}") from None
 
-    def flag(self, key):
-        return self._get(key, (bool,), False, False)
+    def flag(self, key, default=False):
+        return self._get(key, (bool,), default, False)
 
     def integer(self, key, low, high, default=None, required=False):
         value = self._get(key, (int,), default, required)
@@ -504,6 +504,7 @@ class Server:
             "maxHistoryBytes": params.integer("maxHistoryBytes", 64 * 1024, 64 * 1024 * 1024,
                                               4 * 1024 * 1024),
             "promptFile": params.text("promptFile", cap=4096),
+            "autoStats": params.flag("autoStats", default=True),
             "contextBytes": params.integer("contextBytes", 0, 64 * 1024, 4 * 1024),
             "intent": params.text("intent", cap=32),
             "sandbox": params.text("sandbox", cap=16),
@@ -577,6 +578,7 @@ class Server:
                              mcp_config=key["mcpConfig"] or None,
                              allow_mcp_tools=key["allowMcpTools"],
                              prompt_file=key.get("promptFile") or None,
+                             auto_stats=key.get("autoStats", True),
                              context_bytes=key.get("contextBytes", 4 * 1024),
                              intent_mode=key.get("intent") or "auto",
                              sandbox_mode=key.get("sandbox") or "auto",

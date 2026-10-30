@@ -60,7 +60,7 @@ def data(result):
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch):
     for key in list(os.environ):
-        if key.startswith(("BOT4CJ_", "MYBOT_")):
+        if key != "MYBOT_HOME" and key.startswith(("BOT4CJ_", "MYBOT_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
 

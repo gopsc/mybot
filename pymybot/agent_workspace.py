@@ -1,7 +1,10 @@
 """Bounded workspace file tools and an approval-gated shell.
 
-The shell uses the workspace jail by default; `sandbox="auto"` upgrades to a
-bubblewrap namespace when one can actually be created.
+Without protected paths, the shell retains its legacy workspace cwd (not OS
+isolation); `sandbox="auto"` upgrades to bubblewrap when usable. Prompt-protected
+workspaces deny generic file access to those roots and require bubblewrap for
+shell writes to be isolated. Shell mounts are read-only, not a confidentiality
+boundary; dedicated prompt reads provide the file-tool privacy/audit boundary.
 """
 from __future__ import annotations
 
@@ -107,7 +110,7 @@ def _unlink_at(parent, fd, name):
 
 
 class Workspace:
-    def __init__(self, directory, *, enable_shell=False, sandbox="off"):
+    def __init__(self, directory, *, enable_shell=False, sandbox="off", protected_paths=()):
         if type(enable_shell) is not bool:
             raise SecurityError("enable_shell must be a boolean")
         if sandbox not in SANDBOX_MODES:
@@ -122,6 +125,50 @@ class Workspace:
         self._identity = _identity(info)
         self.enable_shell = enable_shell
         self.sandbox = sandbox
+        protected = {}
+        for value in protected_paths:
+            candidate = Path(value).absolute()
+            _no_links(candidate)
+            root = candidate.resolve(strict=True)
+            info = root.lstat()
+            if not stat.S_ISDIR(info.st_mode):
+                raise SecurityError("Protected prompt roots must be existing directories")
+            if self.path.is_relative_to(root):
+                raise SecurityError("Workspace cannot be inside a protected prompt directory")
+            protected[root] = _identity(info)
+        self._protected = tuple(protected.items())
+
+    @property
+    def protected_paths(self):
+        return tuple(root for root, _ in self._protected)
+
+    def _check_protected_path(self, path, *, writing=False):
+        for root, _ in self._protected:
+            if path.is_relative_to(root) or (writing and root.is_relative_to(path)):
+                raise SecurityError("Prompt assets are protected; use read_prompt or approved prompt tools")
+
+    def _check_hardlinks(self, info):
+        # A second name need not live below a protected root. Conservatively
+        # reject multiply linked files only for opt-in protected workspaces.
+        if self._protected and info is not None and info.st_nlink > 1:
+            raise SecurityError("Hardlinked files are unavailable with prompt protection; use read_prompt")
+
+    def _check_protected_shell(self, check):
+        # Read-only mounts cannot protect an existing writable hardlink outside
+        # the mount. Fail closed for linked assets rather than inspect commands.
+        def failed(error):
+            raise error
+
+        for root, _ in self._protected:
+            for base, dirs, files in os.walk(root, followlinks=False, onerror=failed):
+                check()
+                for name in (*dirs, *files):
+                    check()
+                    info = (Path(base) / name).lstat()
+                    if _linked(info):
+                        raise SecurityError("Linked prompt assets cannot be protected by the shell sandbox")
+                    if stat.S_ISREG(info.st_mode):
+                        self._check_hardlinks(info)
 
     @staticmethod
     def validate(name, arguments):
@@ -159,6 +206,11 @@ class Workspace:
         info = self.path.lstat()
         if not stat.S_ISDIR(info.st_mode) or _identity(info) != self._identity:
             raise SecurityError("Workspace root was replaced; configure the workspace again")
+        for root, identity in self._protected:
+            _no_links(root)
+            info = root.lstat()
+            if not stat.S_ISDIR(info.st_mode) or _identity(info) != identity:
+                raise SecurityError("Protected prompt root was replaced; configure the workspace again")
 
     @contextmanager
     def _directory(self, parts, check):
@@ -218,10 +270,13 @@ class Workspace:
         directory = name in {"list_files", "shell"}
         relative = arguments.get("cwd" if name == "shell" else "path", ".")
         parts = _relative(relative, directory=directory)
+        self._check_protected_path(self.path.joinpath(*parts), writing=name in {"write_file", "edit_file"})
         with self._directory(parts if directory else parts[:-1], check) as (parent, fd, guard):
             if name == "shell":
+                self._check_protected_shell(check)
                 result = self._shell(arguments["command"], parent, fd, guard, check, started,
-                                     sandbox=self.sandbox, workspace=self.path)
+                                     sandbox=self.sandbox, workspace=self.path,
+                                     protected_paths=self.protected_paths)
             elif name == "list_files":
                 result = self._listing(relative, parent, fd, check)
             elif name == "read_file":
@@ -233,6 +288,7 @@ class Workspace:
                           "truncated": offset - 1 + limit < len(lines)}
             else:
                 before = _stat_at(parent, fd, parts[-1])
+                self._check_hardlinks(before)
                 if name == "write_file":
                     if before is not None and not arguments.get("overwrite", False):
                         raise FileExistsError("File already exists; set overwrite=true to replace it")
@@ -261,8 +317,7 @@ class Workspace:
             guard()
             return result
 
-    @staticmethod
-    def _listing(relative, parent, fd, check):
+    def _listing(self, relative, parent, fd, check):
         entries, skipped, truncated = [], 0, False
         with os.scandir(fd if fd is not None else parent) as iterator:
             for entry in iterator:
@@ -276,7 +331,8 @@ class Workspace:
                     skipped += 1
                     continue
                 info = entry.stat(follow_symlinks=False)
-                if _linked(info) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+                if (_linked(info) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
+                        or (self._protected and stat.S_ISREG(info.st_mode) and info.st_nlink > 1)):
                     skipped += 1
                     continue
                 item = {"name": entry.name, "type": "directory" if stat.S_ISDIR(info.st_mode) else "file"}
@@ -286,13 +342,13 @@ class Workspace:
         return {"path": relative, "entries": sorted(entries, key=lambda item: item["name"]),
                 "truncated": truncated, "skipped": skipped}
 
-    @staticmethod
-    def _read(parent, fd, name, guard, check):
+    def _read(self, parent, fd, name, guard, check):
         check()
         guard()
         before = _stat_at(parent, fd, name)
         if before is None:
             raise FileNotFoundError("File does not exist; list the parent directory first")
+        self._check_hardlinks(before)
         if before.st_size > MAX_FILE_BYTES:
             raise SecurityError("File exceeds the 1 MiB limit")
         descriptor = _open_at(parent, fd, name, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
@@ -300,6 +356,7 @@ class Workspace:
             opened = os.fstat(descriptor)
             if not stat.S_ISREG(opened.st_mode) or _version(before) != _version(opened):
                 raise SecurityError("File changed while opening")
+            self._check_hardlinks(opened)
             data = bytearray()
             while True:
                 check()
@@ -325,8 +382,7 @@ class Workspace:
         except UnicodeDecodeError:
             raise SecurityError("File is not UTF-8 text") from None
 
-    @staticmethod
-    def _write(parent, fd, name, data, before, guard, check, started):
+    def _write(self, parent, fd, name, data, before, guard, check, started):
         check()
         guard()
         temporary = ".agent-" + secrets.token_hex(16) + ".tmp"
@@ -349,6 +405,7 @@ class Workspace:
             check()
             guard()
             current = _stat_at(parent, fd, name)
+            self._check_hardlinks(current)
             if before is None:
                 if current is not None:
                     raise FileExistsError("File appeared before creation; no existing file was replaced")
@@ -390,11 +447,12 @@ class Workspace:
                     pass  # Successful replace/Windows rename consumed the staging name.
 
     @staticmethod
-    def _shell(command, cwd, fd, guard, check, started, sandbox="off", workspace=None):
+    def _shell(command, cwd, fd, guard, check, started, sandbox="off", workspace=None, protected_paths=()):
         argv, options, interpreter = shell_command(command)
         backend = "workspace"
-        if sandbox != "off":
-            argv, backend = wrap_shell(argv, mode=sandbox, workspace=workspace, cwd=cwd)
+        if sandbox != "off" or protected_paths:
+            argv, backend = wrap_shell(argv, mode=sandbox, workspace=workspace, cwd=cwd,
+                                       protected_paths=protected_paths)
         # Linux procfs provides descriptor-pinned cwd without preexec_fn (unsafe
         # in the executor's multithreaded process). Other platforms use checks.
         if backend == "workspace" and fd is not None and Path("/proc/self/fd").is_dir():

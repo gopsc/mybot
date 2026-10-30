@@ -97,7 +97,7 @@ python -m PyInstaller --noconfirm --clean tools/mybot.spec
 The spec produces `dist/mybot/` with:
 
 - `pymybot.exe` — console CLI; no arguments opens the GUI and hides its console;
-- `_internal/pymybot/assets/` — modules, robots, scripts and skills;
+- `_internal/pymybot/assets/` — modules, robots, scripts, skills and prompts (Markdown plus manifest JSON);
 - `robots/`, `scripts/`, `README.md`, `LICENSE` next to the executable;
 - the GUI launches `pymybot.exe serve` with `CREATE_NO_WINDOW`, so no console
   flashes behind the window.
@@ -118,6 +118,27 @@ Place the data next to the executable as `pymybot/assets/` (the same layout
 command lives in
 [`tools/nuitka_compile_test.ps1`](../tools/nuitka_compile_test.ps1); it is not
 part of release CI and is not a supported release artifact.
+
+### Prompt asset checks
+
+`paths.asset_path('prompts')` is the common source/wheel/PyInstaller/Nuitka lookup.
+The bundle must include every default Markdown layer and `manifest.json`:
+`BuildPy`, `MANIFEST.in`, the PyInstaller suffix table and Nuitka data-directory
+arguments all include them. Do not package a developer's `MYBOT_HOME` or backups.
+`doctor` validates the bundled manifest and trusted safety hashes without creating
+runtime files; first-use copies belong only in the selected `MYBOT_HOME/prompts`.
+
+```sh
+python -I tools/ci_smoke.py wheel
+python -I tools/ci_smoke.py frozen --executable /absolute/path/to/pymybot
+```
+
+Wheel smoke uses fresh temporary dist/venv/work directories outside the checkout,
+compares all asset hashes, and exercises first-use copying with isolated
+`MYBOT_HOME`. Frozen smoke accepts an already-built executable (Windows:
+`pymybot.exe`), runs from a temporary working directory and checks the same prompt
+copy/manifest/hash contract. Use fresh explicit `--distpath`/`--workpath` directories
+for PyInstaller experiments; never point build cleanup at an operator's prompt home.
 
 ## Dependency policy
 

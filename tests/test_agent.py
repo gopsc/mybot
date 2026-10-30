@@ -22,14 +22,15 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 
 import pymybot.agent as agent_module
 from pymybot.agent import (AgentConfig, AgentSession, AgentBudgetExceeded, AgentInterrupted,
-                           AgentConfigurationError, SYSTEM_PROMPT, confirm_console, create_model)
+                           AgentConfigurationError, confirm_console, create_model)
+from pymybot.paths import asset_path
 
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
     for key in list(os.environ):
-        if key.startswith(("MYBOT_", "OPENAI_", "DEEPSEEK_", "ANTHROPIC_")):
+        if key != "MYBOT_HOME" and key.startswith(("MYBOT_", "OPENAI_", "DEEPSEEK_", "ANTHROPIC_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
 
@@ -125,7 +126,9 @@ def test_stream_events_order_and_content():
         finally:
             await session.close()
     asyncio.run(scenario())
-    assert events == [
+    assert events[0]["type"] == "prompt_version"
+    assert len(events[0]["hash"]) == 16
+    assert events[1:] == [
         {"type": "tool_call", "tool": "list_hardware", "arguments": {}},
         {"type": "tool_result", "tool": "list_hardware", "ok": True, "executed": False, "state": "completed"},
         {"type": "text_delta", "text": "流水"},
@@ -432,7 +435,7 @@ def test_history_prunes_complete_turns():
     history_sizes = []
     async def respond(messages, info):
         # The first turn is gone by the fourth request, but safety rules must remain.
-        assert SYSTEM_PROMPT in info.instructions
+        assert (asset_path("prompts") / "010_core.md").read_text(encoding="utf-8").strip() in info.instructions
         history_sizes.append(len([p for m in messages for p in m.parts if isinstance(p, UserPromptPart)]))
         return ModelResponse(parts=[TextPart("done")])
     async def scenario():
@@ -1053,9 +1056,11 @@ def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
     events = [json.loads(line) for line in
               (sessions[0] / "transcript.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [event["type"] for event in events] == [
-        "session_start", "user", "intent", "assistant", "usage", "session_end"]
+        "session_start", "user", "intent", "prompt_version", "assistant", "usage", "prompt_update", "session_end"]
     assert events[1]["text"] == "hello"
     assert events[2]["name"] == "chat"
-    assert events[3]["text"] == "done"
+    assert events[3]["layers"].keys() == {"0", "10", "97", "98", "99", "100"}
+    assert events[4]["text"] == "done"
+    assert events[6]["actor"] == "stats"
     meta = json.loads((sessions[0] / "meta.json").read_text(encoding="utf-8"))
     assert meta["model"] == "openai:test"

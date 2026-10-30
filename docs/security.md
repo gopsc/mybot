@@ -27,8 +27,8 @@ flowchart LR
 | Boundary | Rule |
 | --- | --- |
 | Model → tools | Every action/read/capture is approval-gated unless the operator pre-authorised the session. File writes and shell have separate switches. |
-| Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded. |
-| Model → shell | Shell is opt-in and uses a configurable sandbox: bubblewrap (read-only host, private `/tmp`, network/PID namespaces) when usable, otherwise a workspace jail that is **not** an OS boundary. |
+| Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded. Agent prompt roots (runtime and bundled) reject generic reads/writes; use the dedicated prompt tools. |
+| Model → shell | Agent shell is opt-in and requires usable bubblewrap with runtime/bundled prompt roots mounted read-only, including inside a writable workspace. If protection cannot be established, shell is refused; no unisolated fallback. Read-only mounts protect integrity, not confidentiality. |
 | Model → network | Non-loopback HTTP/TCP requires `--allow-hardware`; TCP accepts only IPv4/IPv6 literals and has no implicit reconnect or replay. HTTP redirects are refused; URL credentials/query/fragment are rejected. Agent web tools are separate and opt-in: HTTPS only, private/loopback/link-local targets refused, every redirect re-validated, text-only bodies bounded to 512 KiB, and SearXNG is the only search provider. |
 | MCP client → host | A stdio MCP server is operator-configured host code, not a sandbox. Every external tool call is approval-gated unless `--allow-mcp-tools`; results are bounded and failures are reported as unknown. |
 | MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware`, `--read-var` and `--camera-var` stay separate gates. Resources never grant execution. |
@@ -59,12 +59,51 @@ disabled. Existing Daemon chunks remain Lua-only and reject Python-selected driv
 
 ## System prompt ownership
 
-The agent instructions are operator-owned. Neither the model, a tool result,
-nor a remote app command can rewrite them: doing so would let untrusted content
-grant itself new authority or remove approval rules. Operator-specific policy
-belongs in reviewed skill files or a launch-time configuration controlled by the
-person running the robot. Issue #5 (remote prompt replacement) is therefore
-closed as a deliberate design decision, not an implementation gap.
+Bundled defaults and their manifest are distributed as `prompts/` assets. Runtime
+copies live in `$MYBOT_HOME/prompts` (default `~/.mybot/prompts`); initialization
+copies missing defaults without overwriting operator edits. Composition is bounded
+to 128 KiB, including generated context and guidance.
+
+- **0 / 100 (safety prefix/suffix):** immutable to the agent. Runtime bytes are
+  compared against trusted bundled hashes, not a runtime manifest supplied by the
+  model. A modified safety file fails closed; editing its runtime manifest cannot
+  authorize the change. Bundle validation also checks the trusted safety hashes.
+- **10 (core):** operator-editable only, never writable by a model tool.
+- **97 / 98 / 99 (SOUL / USER / STATS):** model-proposed changes use the dedicated
+  `prompt:update_prompt` approval flow. Every call requires fresh approval,
+  including its proposed diff; action, file, shell and MCP auto-approval never
+  approve a prompt update. Denial, missing approval and cancellation do not write.
+- Prompt updates use a hash-based compare-and-swap check, so an intervening edit
+  requires a new proposal/approval. Backups retain prior bytes; audit events retain
+  before/after hashes without copying prompt text into ordinary tool receipts.
+- Automatic STATS updates are a separate **host-only** path: bounded, sanitized
+  statistics, without tool arguments, prompt contents, credentials or secrets.
+  Disable them with `--no-prompt-stats`, the GUI setting, or `agent.ask`
+  `autoStats: false`. This does not grant model write authority.
+
+`pymybot prompts list` reports hashes and modifications without loading a robot
+or a model. `prompts restore --missing-only` preserves edits; `prompts restore
+--all --yes` backs up and replaces runtime defaults, including a corrupt runtime
+manifest or safety layer. Without `--yes`, full restore requires a TTY confirmation
+and otherwise refuses. Protect backups like the originals: they can contain
+private operator text. On POSIX, runtime directories/files use `0700`/`0600`.
+`doctor` validates the bundle without creating a runtime home.
+
+The agent's workspace tools reject both bundled and runtime prompt roots, and
+reject writes to their ancestors. A workspace cannot itself be a prompt directory.
+With prompt protection active, shell requires usable bubblewrap; `--sandbox off`
+or an unavailable backend refuses execution, even after shell approval. Protected
+roots are read-only after the workspace's writable mount, and linked prompt assets
+are rejected. This is an integrity boundary: the shell's read-only host mount is
+not a promise that other host files or prompt text cannot be read. Standalone
+workspace APIs without protected roots retain the legacy non-OS-isolated fallback.
+
+These checks are application boundaries, **not host-filesystem isolation**.
+Trusted in-process Python/Lua drivers (including direct imports, native I/O and
+LuaJIT FFI) and operator-configured external MCP servers remain host-account code.
+They are not OS-sandboxed and can bypass application file APIs. Review them and
+keep module/MCP configuration under operator control. Arbitrary remote replacement
+of safety policy remains unsupported; editable memory layers do not supersede it.
 
 ## Credentials
 

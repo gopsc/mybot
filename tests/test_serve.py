@@ -33,7 +33,7 @@ PHYSICAL_SQL = "CREATE TABLE I2C(name String,path String); INSERT INTO I2C(name,
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch):
     for key in list(os.environ):
-        if key.startswith(("BOT4CJ_", "PYMYBOT_", "MYBOT_")):
+        if key != "MYBOT_HOME" and key.startswith(("BOT4CJ_", "PYMYBOT_", "MYBOT_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
 

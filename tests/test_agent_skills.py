@@ -199,17 +199,24 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     pytest.importorskip("pydantic_ai")
     from pydantic_ai.models.test import TestModel
 
-    from pymybot.agent import make_agent
+    from pymybot.agent import AgentSession
 
     library = SkillsLibrary(ROOT / "skills")
-    agent = make_agent(TestModel(), skills=library)
-    plain = make_agent(TestModel())
-    instructions = str(agent._instructions() if callable(agent._instructions) else agent._instructions)
-    without = str(plain._instructions() if callable(plain._instructions) else plain._instructions)
+
+    async def scenario(skills):
+        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=ROOT / "scripts", skills=skills)
+        session = AgentSession(executor, TestModel(custom_output_text="done"), skills=skills)
+        try:
+            await session.ask("hello")
+            return session.prompt_snapshot.text, session.agent
+        finally:
+            await session.close()
+
+    instructions, agent = asyncio.run(scenario(library))
+    without, plain = asyncio.run(scenario(None))
     assert "- pymybot-scripting:" in instructions
     assert "Operator-provided reference skills" in instructions
     assert "Operator-provided reference skills" not in without
-    assert sorted(agent._function_toolset.tools) == sorted(
-        ["list_hardware", "list_action_scripts", "query_sql", "run_action_script", "list_skills", "read_skill"])
-    assert sorted(plain._function_toolset.tools) == sorted(
-        ["list_hardware", "list_action_scripts", "query_sql", "run_action_script"])
+    base_tools = ["list_hardware", "list_action_scripts", "query_sql", "run_action_script", "read_prompt", "update_prompt"]
+    assert sorted(agent._function_toolset.tools) == sorted(base_tools + ["list_skills", "read_skill"])
+    assert sorted(plain._function_toolset.tools) == sorted(base_tools)

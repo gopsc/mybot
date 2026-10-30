@@ -16,13 +16,13 @@ INTENTS = ("chat", "inspect", "control", "author", "diagnose")
 MODES = ("auto", "off", *INTENTS)
 
 READ_TOOLS = frozenset({"list_hardware", "list_action_scripts", "query_sql",
-                        "list_skills", "read_skill", "list_files", "read_file",
+                        "list_skills", "read_skill", "list_files", "read_file", "read_prompt",
                         "web_fetch", "web_search"})
 TOOLS_BY_INTENT = {
     "chat": READ_TOOLS,
     "inspect": READ_TOOLS,
     "control": READ_TOOLS | {"run_action_script", "read_variables", "capture_image"},
-    "author": READ_TOOLS | {"write_file", "edit_file"},
+    "author": READ_TOOLS | {"write_file", "edit_file", "update_prompt"},
     "diagnose": READ_TOOLS | {"shell"},
 }
 BUDGETS = {"chat": (3, 4), "inspect": (4, 8), "control": (8, 16),
@@ -32,8 +32,8 @@ _RULES = {
                 "拍一张", "拍张", "run", "execute", "start", "stop", "activate",
                 "deactivate", "capture", "sample", "relay", "servo", "motor"),
     "author": ("编写", "写一个", "写个", "生成", "修改", "修复", "新建", "创建", "重构",
-               "补全", "实现", "write", "edit", "create", "add", "fix", "refactor",
-               "implement", "patch", "rename"),
+               "补全", "实现", "记住", "記住", "write", "edit", "create", "add", "fix", "refactor",
+               "implement", "patch", "rename", "remember"),
     "diagnose": ("报错", "失败", "错误", "异常", "为什么", "无法", "诊断", "排查", "日志",
                  "堆栈", "命令", "error", "fail", "wrong", "why", "debug", "diagnose",
                  "traceback", "exception", "broken", "shell", "terminal"),

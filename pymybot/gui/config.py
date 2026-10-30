@@ -86,6 +86,7 @@ class GuiConfig:
     history_turns: int = 6
     max_history_bytes: int = 4 * 1024 * 1024
     prompt_file: str = ""
+    auto_stats: bool = True
     context_bytes: int = 4 * 1024
     intent_mode: str = "auto"
     sandbox_mode: str = "auto"
@@ -128,6 +129,7 @@ class GuiConfig:
                                and 64 * 1024 <= self.max_history_bytes <= 64 * 1024 * 1024
                                else 4 * 1024 * 1024),
             prompt_file=_text(self.prompt_file),
+            auto_stats=self.auto_stats if isinstance(self.auto_stats, bool) else True,
             context_bytes=(self.context_bytes if isinstance(self.context_bytes, int)
                            and 0 <= self.context_bytes <= 64 * 1024 else 4 * 1024),
             intent_mode=(self.intent_mode if self.intent_mode in
@@ -218,6 +220,8 @@ def merge_args(cfg, args):
         cfg.read_vars = _names(args.read_var)
     if getattr(args, "camera_var", None):
         cfg.camera_vars = _names(args.camera_var)
+    if getattr(args, "no_prompt_stats", False):
+        cfg.auto_stats = False
     if not cfg.workspace:
         cfg.workspace = default_workspace()
     return cfg.sanitized()

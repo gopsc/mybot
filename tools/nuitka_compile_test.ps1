@@ -34,6 +34,7 @@ try {
            --include-data-dir=robots=pymybot/assets/robots `
            --include-data-dir=scripts=pymybot/assets/scripts `
            --include-data-dir=skills=pymybot/assets/skills `
+           --include-data-dir=prompts=pymybot/assets/prompts `
            --include-data-dir=robots=robots --include-data-dir=scripts=scripts `
            --include-data-files=README.md=README.md --include-data-files=LICENSE=LICENSE `
            --noinclude-custom-mode=genai_prices.data:bytecode `
@@ -70,6 +71,8 @@ try {
 
     if (-not (Test-Path (Join-Path $Target "platforms\qwindows.dll"))) { throw "qwindows.dll still missing" }
     Write-Host "Qt plugins OK: $(((Get-ChildItem $Target -Directory).Name) -join ', ')"
+    & $Python -I (Join-Path $Root "tools\ci_smoke.py") frozen --executable (Join-Path $Dist "pymybot.exe")
+    if ($LASTEXITCODE -ne 0) { throw "Frozen prompt smoke failed with exit code $LASTEXITCODE" }
 } finally {
     Pop-Location
 }

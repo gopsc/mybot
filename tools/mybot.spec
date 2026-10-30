@@ -13,7 +13,8 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, copy_metadata
 
 ROOT = Path(SPECPATH).resolve().parent
-ASSET_SUFFIXES = {"modules": (".lua", ".py"), "robots": (".sql",), "scripts": (".mt",), "skills": (".md",)}
+ASSET_SUFFIXES = {"modules": (".lua", ".py"), "robots": (".sql",), "scripts": (".mt",),
+                  "skills": (".md",), "prompts": (".md", ".json")}
 
 datas = []
 for name, suffixes in ASSET_SUFFIXES.items():

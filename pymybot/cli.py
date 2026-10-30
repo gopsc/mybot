@@ -131,9 +131,27 @@ def parser():
         "mcp": "Standard MCP stdio server for MCP clients (read-only unless --allow-execution)",
         "doctor": "Check the interpreter, optional dependencies and bundled assets without touching hardware",
         "sessions": "List or prune conversation transcripts under ~/.mybot/sessions",
+        "prompts": "List or restore runtime prompt layers without a robot or model",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
+        if name == "prompts":
+            command.add_argument("--no-agent", action="store_true",
+                                 help="accepted for CLI consistency; prompts never uses a model")
+            actions = command.add_subparsers(dest="prompt_action", required=True)
+            actions.add_parser("list", help="list runtime layers, hashes and modification status", allow_abbrev=False)
+            restore = actions.add_parser("restore", help="restore bundled defaults", allow_abbrev=False)
+            mode = restore.add_mutually_exclusive_group()
+            mode.add_argument("--missing-only", action="store_true",
+                              help="refill missing files, preserving existing edits (default)")
+            mode.add_argument("--all", action="store_true", dest="restore_all",
+                              help="back up runtime prompts and restore all bundled defaults")
+            restore.add_argument("--yes", action="store_true",
+                                 help="approve --all without an interactive confirmation")
+            continue
+        if name in {"agent", "gui"}:
+            command.add_argument("--no-prompt-stats", action="store_true",
+                                 help="disable automatic host-generated prompt statistics")
         if name == "gui":
             # The window is always agent-centric: no agent/controller mode switch.
             command.add_argument("--robot", metavar="FILE", help="structure SQL file to open with")
@@ -157,14 +175,14 @@ def parser():
             command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
             command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
             command.add_argument("--prompt-file", metavar="FILE",
-                                 help="operator prompt/profile appended as the USER layer (UTF-8, max 8 KiB)")
+                                 help="additional operator prompt/profile (UTF-8, max 8 KiB); does not replace runtime USER")
             command.add_argument("--context-bytes", type=bounded_int(0, 64 * 1024), default=4 * 1024,
                                  help="bounded project-context budget; 0 disables it (default: 4096)")
             command.add_argument("--intent", choices=("auto", "off", "chat", "inspect", "control",
                                                       "author", "diagnose"), default="auto",
                                  help="intent routing: auto restricts tools by the request; off disables it")
             command.add_argument("--sandbox", choices=("off", "auto", "bwrap"), default="auto",
-                                 help="shell sandbox: auto uses bubblewrap when usable; off keeps the workspace jail")
+                                 help="shell sandbox: protected prompts require usable bubblewrap; off blocks agent shell")
             command.add_argument("--web", action="store_true",
                                  help="enable web_fetch and (with --search-endpoint) web_search; needs pymybot[web]")
             command.add_argument("--allow-web", action="store_true",
@@ -281,14 +299,14 @@ def parser():
                                  default=4 * 1024 * 1024,
                                  help="upper bound for retained conversation history (default: 4 MiB)")
             command.add_argument("--prompt-file", metavar="FILE",
-                                 help="operator prompt/profile appended as the USER layer (UTF-8, max 8 KiB)")
+                                 help="additional operator prompt/profile (UTF-8, max 8 KiB); does not replace runtime USER")
             command.add_argument("--context-bytes", type=bounded_int(0, 64 * 1024), default=4 * 1024,
                                  help="bounded project-context budget; 0 disables it (default: 4096)")
             command.add_argument("--intent", choices=("auto", "off", "chat", "inspect", "control",
                                                       "author", "diagnose"), default="auto",
                                  help="intent routing: auto restricts tools by the request; off disables it")
             command.add_argument("--sandbox", choices=("off", "auto", "bwrap"), default="auto",
-                                 help="shell sandbox: auto uses bubblewrap when usable; off keeps the workspace jail")
+                                 help="shell sandbox: protected prompts require usable bubblewrap; off blocks agent shell")
             command.add_argument("--web", action="store_true",
                                  help="enable web_fetch and (with --search-endpoint) web_search; needs pymybot[web]")
             command.add_argument("--allow-web", action="store_true",
@@ -308,7 +326,7 @@ def parse_args(argv=None):
         print(f"pymybot {__version__}")
         raise SystemExit(0)
     commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql",
-                "agent", "gui", "serve", "mcp", "doctor", "sessions"}
+                "agent", "gui", "serve", "mcp", "doctor", "sessions", "prompts"}
     # --no-gui is a top-level switch: the GUI is the default entry, so drop it
     # before choosing a command, and let a subcommand keep its own semantics.
     no_gui = "--no-gui" in arguments
@@ -338,7 +356,7 @@ def parse_args(argv=None):
         if (args.task is not None or args.model or args.base_url or args.api_key_env
                 or args.allow_actions or args.read_var or args.camera_var or args.workspace_dir
                 or args.enable_shell or args.allow_shell or args.allow_file_writes
-                or args.mcp_config or args.allow_mcp_tools or args.prompt_file
+                or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
                 or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
         if not args.input:
@@ -415,13 +433,22 @@ def doctor():
     from .sandbox import backend_status
     checks.append(backend_status())
 
-    suffixes = {"modules": (".py", ".lua"), "robots": (".sql",), "scripts": (".mt",), "skills": (".md",)}
+    suffixes = {"modules": (".py", ".lua"), "robots": (".sql",), "scripts": (".mt",),
+                "skills": (".md",), "prompts": (".md", ".json")}
     assets = {}
     for name, extensions in suffixes.items():
         path = asset_path(name)
         count = sum(1 for suffix in extensions for _ in path.rglob("*" + suffix)) if path.is_dir() else 0
         assets[name] = {"path": str(path), "exists": path.is_dir(), "files": count}
-    assets_ok = all(item["exists"] and item["files"] for item in assets.values())
+    # Validate the bundle, never initialize or consult the operator's runtime home.
+    try:
+        from .prompts import PromptLibrary
+        defaults = asset_path("prompts")
+        validation = PromptLibrary(home=defaults, defaults=defaults).validate_defaults()
+        assets["prompts"].update(valid=True, validation=validation)
+    except Exception as exc:
+        assets["prompts"].update(valid=False, error={"type": type(exc).__name__, "message": str(exc)})
+    assets_ok = all(item["exists"] and item["files"] for item in assets.values()) and assets["prompts"]["valid"]
 
     python_ok = sys.version_info >= (3, 11)
     healthy = python_ok and assets_ok and all(
@@ -488,9 +515,29 @@ def sample(robot, args, stop):
             var.budget = old_budget
 
 
+def prompt_command(args):
+    """Operator-only management; approve destructive recovery before opening the library."""
+    if args.prompt_action == "restore" and args.restore_all and not args.yes:
+        if not sys.stdin.isatty():
+            raise UsageError("prompts restore --all requires --yes in non-interactive mode")
+        print("Back up all runtime prompts and replace them with bundled defaults? [y/N] ",
+              end="", file=sys.stderr, flush=True)
+        if sys.stdin.readline().strip().lower() not in {"y", "yes"}:
+            raise UsageError("Prompt restore cancelled; use --all --yes to confirm")
+    from .prompts import PromptLibrary
+    library = PromptLibrary()
+    if args.prompt_action == "list":
+        if not library.home.exists():
+            library.ensure_home()
+        return {"root": str(library.home), "layers": library.list_layers()}
+    return library.restore(missing_only=not args.restore_all)
+
+
 def execute(args, stop):
     if args.command == "doctor":
         return doctor()
+    if args.command == "prompts":
+        return prompt_command(args)
     if args.command == "sessions":
         from .session_log import delete_sessions, list_sessions, prune_sessions, session_root
         if args.prune and args.delete:

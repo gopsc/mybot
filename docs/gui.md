@@ -54,7 +54,7 @@ The GUI exposes the backend surface described in [cli.md](cli.md) and
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 权限 / 高级·MCP: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, tool permissions (files, Shell, web, MCP), MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
+| 设置 | Tabs for 通用 / 模型与预算 / 权限 / 高级·MCP / 提示词: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, tool permissions (files, Shell, web, MCP), MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
@@ -106,6 +106,38 @@ is not interrupted by new tokens.
 4. Type a task. Tool calls that can move hardware, write files or run shell
    commands show a confirmation dialog; closing the dialog means deny.
 
+## Runtime prompt management
+
+**设置 → 提示词** lazily opens the runtime library in `$MYBOT_HOME/prompts`
+(default `~/.mybot/prompts`). Defaults ship with the source, wheel and frozen
+application; the first use copies missing files without overwriting custom text.
+
+- The layer table shows filename, bytes/limit, modification, ownership and mtime.
+  Layers 0/10/100 are read-only in this editor; operators maintain core externally,
+  while safety 0/100 must match trusted bundled hashes. Only 97/98/99 can be saved
+  here, with backup and a compare-and-swap hash check to catch intervening edits.
+- **仅补齐缺失** preserves existing text; **恢复全部默认…** requires confirmation,
+  backs up the current library, and can recover a corrupt runtime manifest or
+  safety layer. The backup location is displayed. These writes take effect
+  immediately; cancelling the settings dialog does not undo them.
+- Composition preview uses saved layers and the optional operator profile; the
+  actual turn additionally includes dynamic project/tool context. USER text is
+  hidden in the preview unless explicitly revealed for that preview.
+- **自动更新 STATS** controls sanitized host-only statistics, without USER text,
+  tool arguments or secrets. It defaults on; `pymybot gui --no-prompt-stats`
+  disables it at launch. The preference maps to serve `autoStats`.
+- The status bar shows the first 16 SHA-256 characters of the prompt snapshot
+  actually used for the turn. A changed hash identifies a different composition,
+  not permission to change policy.
+
+Model-proposed updates always open a dedicated `prompt:update_prompt` approval
+with the full diff and persistent-change warning. Action/file auto-approval does
+not approve them; closing or cancelling means deny. Prompt contents are not copied
+into ordinary chat/tool-receipt logs. A failed safety check blocks sending while
+leaving the management/restore controls available. CLI equivalents are documented
+in [cli.md](cli.md#runtime-prompts); diagnostics validates bundled defaults without
+creating a runtime home.
+
 ## Approval model
 
 | Toggle | Effect |
@@ -114,7 +146,7 @@ is not interrupted by new tokens.
 | 自动批准动作 | Pre-approves action scripts, variable reads and captures for this session. |
 | 文件工具 | Exposes `list_files`/`read_file`/`write_file`/`edit_file` inside the workspace. Off by default. |
 | 允许文件写入 | Pre-approves file creation/edits; confirmed once per launch. |
-| Shell 工具 | Exposes the shell tool; requires file tools. Uses the settings sandbox backend; the workspace jail is **not** an OS boundary. |
+| Shell 工具 | Exposes the shell tool; requires file tools and usable bubblewrap with prompt roots protected read-only. No unisolated fallback; `off` refuses execution. |
 | 自动批准 Shell | Pre-approves shell commands; confirmed once per launch. |
 | 联网工具 | Exposes `web_fetch` and, with a SearXNG endpoint, `web_search`; off by default. |
 | 自动批准联网 | Pre-approves web requests; confirmed once per launch. |

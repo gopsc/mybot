@@ -19,8 +19,9 @@ release; security and reproducibility work takes precedence.
 - [ ] Sampling charts and a session timeline in the GUI.
 - [x] Bounded conversation transcripts under `~/.mybot/sessions`
   (on by default; `--no-session-log` / `MYBOT_SESSION_LOG=0` disables them).
-- [ ] Prompt layering (`SOUL` / `USER` / `STATS`) with a GUI reset button;
-  keep the safety prefix/suffix operator-owned.
+- [x] Runtime prompt layering (`SOUL` / `USER` / `STATS`), CLI list/restore and
+  GUI management; trusted safety hashes, operator-only core, separately approved
+  prompt updates with CAS/backups, and optional sanitized host-only STATS.
 - [ ] Signed Windows/macOS installers (requires maintainer certificates).
 
 ## 0.4.x — runtime and scale

@@ -351,6 +351,8 @@ class RobotExecutor:
         self._workspace_dir = Path(workspace_dir).absolute() if workspace_dir is not None else None
         self._enable_shell = enable_shell is True
         self._workspace = None
+        self._protected_paths = ()
+        self._workspace_lock = threading.Lock()
         self._robot_path = Path(robot_path).absolute()
         self._scripts_dir = Path(scripts_dir).absolute()
         self._skills = skills if isinstance(skills, SkillsLibrary) else None
@@ -373,6 +375,19 @@ class RobotExecutor:
         self._close_task = None
         self.records: list = []
         self._records_lock = threading.Lock()
+
+    def protect_prompts(self, paths):
+        """Opt AgentSession into prompt protection before start()/call().
+
+        The caller ensures runtime/default roots exist, then supplies both (for
+        example library.home and library.defaults). Direct CLI/MCP callers retain
+        their existing behavior unless they explicitly opt in. This only protects
+        generic workspace tools, not external MCP servers or trusted drivers.
+        """
+        with self._workspace_lock:
+            if self._workspace is not None or self._owner_thread_id is not None or self._closing:
+                raise SecurityError("Prompt protection must be configured before executor startup")
+            self._protected_paths = tuple(Path(path).absolute() for path in paths)
 
     @property
     def owner_thread_id(self):
@@ -482,9 +497,10 @@ class RobotExecutor:
         if self._ready:
             return
         scripts = _Scripts(self._scripts_dir)
-        if self._workspace_dir is not None and self._workspace is None:
-            self._workspace = Workspace(self._workspace_dir, enable_shell=self._enable_shell,
-                                        sandbox=self._sandbox)
+        with self._workspace_lock:
+            if self._workspace_dir is not None and self._workspace is None:
+                self._workspace = Workspace(self._workspace_dir, enable_shell=self._enable_shell,
+                                            sandbox=self._sandbox, protected_paths=self._protected_paths)
         sql = _read_stable(self._robot_path, lambda: _no_links(self._robot_path))
         self._check(deadline)
         # Keep even a partially validated robot available for owner-thread close.
