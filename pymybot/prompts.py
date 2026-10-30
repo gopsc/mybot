@@ -93,7 +93,7 @@ def _directory(path, *, create=False, private=False):
             raise SecurityError("Prompt ancestor is not a non-linked directory")
         if _DIR_FD:
             # Closed by the finally block below, including on guard failures.
-            fd = os.open(current, flags)  # lgtm[py/file-not-closed]
+            fd = os.open(current, flags)
             opened.append(fd)
         identities.append((current, _identity(info)))
         for part in path.parts[1:]:
@@ -117,7 +117,7 @@ def _directory(path, *, create=False, private=False):
             if _linked(info) or not stat.S_ISDIR(info.st_mode):
                 raise SecurityError("Linked prompt ancestors, junctions and non-directories are forbidden")
             if fd is not None:
-                child = os.open(part, flags, dir_fd=fd)  # lgtm[py/file-not-closed]
+                child = os.open(part, flags, dir_fd=fd)
                 opened.append(child)
                 fd = child
                 if _identity(info) != _identity(os.fstat(fd)):

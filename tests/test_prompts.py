@@ -93,23 +93,30 @@ def test_windows_stamps_ignore_creation_versus_change_time(tmp_path, monkeypatch
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
 def test_private_modes_and_ancestors_are_not_chmodded(tmp_path):
-    ancestor = tmp_path / "operator-owned-ancestor"
-    ancestor.mkdir(mode=0o755)
-    # Fixture: a deliberately world-readable ancestor, to prove it stays untouched.
-    os.chmod(ancestor, 0o755)  # lgtm[py/overly-permissive-file]
-    root = ancestor / "state" / "prompts"
+    # Fixture: a deliberately world-readable ancestor, a loose runtime root and a
+    # loose layer, to prove bootstrap tightens the latter two and leaves the
+    # ancestor alone.
+    previous = os.umask(0o022)
+    try:
+        ancestor = tmp_path / "operator-owned-ancestor"
+        ancestor.mkdir(mode=0o755)
+        state = ancestor / "state"
+        state.mkdir(mode=0o700)
+        root = state / "prompts"
+        root.mkdir(mode=0o755)
+        (root / "010_core.md").write_text("operator core\n", encoding="utf-8")
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(ancestor.stat().st_mode) == 0o755
+    assert stat.S_IMODE(root.stat().st_mode) == 0o755
+    assert stat.S_IMODE((root / "010_core.md").stat().st_mode) == 0o644
     library = prompts.PromptLibrary(home=root)
     library.ensure_home()
     assert stat.S_IMODE(ancestor.stat().st_mode) == 0o755
-    assert stat.S_IMODE(root.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(state.stat().st_mode) == 0o700
     assert stat.S_IMODE(root.stat().st_mode) == 0o700
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in root.iterdir())
-    # Fixture: loosen the runtime root and one layer, to prove seeding tightens both.
-    os.chmod(root, 0o755)  # lgtm[py/overly-permissive-file]
-    os.chmod(root / "010_core.md", 0o644)  # lgtm[py/overly-permissive-file]
-    library.ensure_home()
-    assert stat.S_IMODE(root.stat().st_mode) == 0o700
-    assert stat.S_IMODE((root / "010_core.md").stat().st_mode) == 0o600
+    assert (root / "010_core.md").read_text(encoding="utf-8") == "operator core\n"
     os.chmod(root / "097_soul.md", 0o400)
     library.ensure_home()
     assert stat.S_IMODE((root / "097_soul.md").stat().st_mode) == 0o400
