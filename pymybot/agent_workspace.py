@@ -331,6 +331,14 @@ class Workspace:
                     skipped += 1
                     continue
                 info = entry.stat(follow_symlinks=False)
+                if self._protected and stat.S_ISREG(info.st_mode):
+                    # DirEntry.stat() caches a link count of 1 on Windows, which would hide hardlinks.
+                    try:
+                        info = (os.stat(entry.name, dir_fd=fd, follow_symlinks=False) if fd is not None
+                                else (parent / entry.name).lstat())
+                    except FileNotFoundError:
+                        skipped += 1
+                        continue
                 if (_linked(info) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
                         or (self._protected and stat.S_ISREG(info.st_mode) and info.st_nlink > 1)):
                     skipped += 1

@@ -355,7 +355,7 @@ def test_open_prompt_folder_uses_library_root(panel, monkeypatch):
     opened = []
     monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()) or True)
     click(panel.folder_button)
-    assert opened == [str(panel.library.home)]
+    assert [Path(value) for value in opened] == [panel.library.home]
 
 
 @pytest.mark.parametrize("layer", ["0", "100"])

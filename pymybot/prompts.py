@@ -67,6 +67,10 @@ def _owned(info):
 def _private(fd, path, info, mode):
     """Tighten owned paths only, never add permissions to an existing path."""
     _owned(info)
+    if os.name != "posix":
+        # Python 3.13 exposes fchmod on Windows, but the call fails on read-only
+        # descriptors and Windows modes are not POSIX owner/group bits anyway.
+        return
     mode &= stat.S_IMODE(info.st_mode)
     if hasattr(os, "fchmod") and fd is not None:
         os.fchmod(fd, mode)

@@ -63,7 +63,7 @@ def test_constructor_defaults_listing_and_golden_core(tmp_path, monkeypatch):
 def test_bootstrap_preserves_existing_and_returns_only_created(tmp_path):
     root = tmp_path / "custom-prompts"
     root.mkdir()
-    (root / "010_core.md").write_text("operator core\n", encoding="utf-8")
+    (root / "010_core.md").write_bytes(b"operator core\n")
     (root / "unmanaged.txt").write_text("not owned by library", encoding="utf-8")
     library = prompts.PromptLibrary(home=root)
     result = library.ensure_home()
@@ -217,7 +217,7 @@ def test_restore_missing_only_preserves_changes_and_all_archives(library):
     assert library.read("97")["content"] == ""
 
 
-@pytest.mark.parametrize("bad", [b"not json", b"\xff\x00", b"x" * 40000])
+@pytest.mark.parametrize("bad", [b"not json", b"\xff\x00", pytest.param(b"x" * 40000, id="oversized")])
 def test_full_restore_repairs_opaque_corruption(library, bad):
     (library.home / "manifest.json").write_bytes(bad)
     (library.home / "000_safety_prefix.md").write_bytes(bad)
