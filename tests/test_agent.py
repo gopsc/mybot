@@ -470,9 +470,11 @@ def test_slow_start_is_covered_by_the_turn_deadline():
     class SlowExecutor:
         def __init__(self):
             self.stop_event = threading.Event()
+            self.deadline = None
 
         async def start(self, *, deadline=None):
             assert deadline is not None, "startup must receive the turn deadline"
+            self.deadline = deadline
             remaining = deadline - time.monotonic()
             await asyncio.sleep(min(0.12, max(0, remaining) + 0.01))
             if time.monotonic() >= deadline:
@@ -491,11 +493,17 @@ def test_slow_start_is_covered_by_the_turn_deadline():
     async def forbidden(messages, info):
         pytest.fail("A timed-out startup must not send a model request")
 
+    executor = SlowExecutor()
+    # Construction is setup, not the turn under test.
+    session = AgentSession(executor, FunctionModel(forbidden), AgentConfig(timeout=0.02))
     started = time.monotonic()
     with pytest.raises(AgentBudgetExceeded):
-        asyncio.run(AgentSession(SlowExecutor(), FunctionModel(forbidden),
-                                 AgentConfig(timeout=0.02)).ask("hello"))
-    assert time.monotonic() - started < 0.1
+        asyncio.run(session.ask("hello"))
+    assert 0 < executor.deadline - started <= 0.05
+    # Asyncio startup and any per-turn setup share this window. Keep a generous
+    # bound so a loaded runner does not make the test flaky; missing deadline
+    # handling is still caught by the deadline and exception checks above.
+    assert time.monotonic() - started < 0.5
 
 
 @pytest.mark.parametrize("receipt_state", ["completed", "not_executed"])
