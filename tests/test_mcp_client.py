@@ -57,7 +57,7 @@ if __name__ == "__main__":
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch):
     for key in list(os.environ):
-        if key.startswith(("BOT4CJ_", "MYBOT_", "OPENAI_", "ANTHROPIC_", "DEEPSEEK_")):
+        if key != "MYBOT_HOME" and key.startswith(("BOT4CJ_", "MYBOT_", "OPENAI_", "ANTHROPIC_", "DEEPSEEK_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
     from pydantic_ai import models

@@ -157,7 +157,7 @@ def test_agent_session_injects_operator_prompt_and_context(tmp_path):
 
     assert asyncio.run(scenario())["output"] == "ok"
     instructions = str(seen["instructions"])
-    assert "[OPERATOR]\nPROFILE-CONSTRAINT" in instructions
+    assert "PROFILE-CONSTRAINT" in instructions
     assert "relay-test.mt" in instructions
     assert "relay-test.sql" in instructions
 

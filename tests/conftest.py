@@ -18,9 +18,10 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
-def no_session_logs(monkeypatch):
-    """Tests must never append to the operator's real ~/.mybot/sessions."""
+def no_session_logs(monkeypatch, tmp_path):
+    """Keep persistent agent state out of the operator's home."""
     monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "mybot-home"))
 
 
 def usable_symlink(link, target):

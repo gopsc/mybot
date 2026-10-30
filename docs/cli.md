@@ -27,8 +27,50 @@ python -m pymybot doctor
 | `pymybot agent ...` | PydanticAI task/REPL | Via approved tools |
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
-| `pymybot doctor` | Environment/dependency/asset diagnostics | No |
+| `pymybot doctor` | Environment/dependency/asset diagnostics, including prompt manifest and safety hashes | No |
 | `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
+| `pymybot prompts list` | List runtime prompt layers, hashes and modification status | No |
+| `pymybot prompts restore [--missing-only \| --all --yes]` | Refill missing defaults, or back up and reset all layers | No |
+
+## Runtime prompts
+
+Prompt management needs neither `--robot` nor a model/API key:
+
+```sh
+pymybot prompts list
+pymybot prompts restore --missing-only    # default restore mode; keep existing edits
+pymybot prompts restore --all --yes       # back up first, then replace all defaults
+```
+
+The first list/agent use copies bundled defaults to `$MYBOT_HOME/prompts`
+(default `~/.mybot/prompts`). Existing files are never silently overwritten.
+Subsequent listing reports missing files rather than repairing them. The JSON
+result contains `root` and `layers`; each layer reports `id`, `file`, `editable`,
+`max_bytes`, `bytes`, `modified`, `mtime`, `sha256` and `missing`. Restore reports
+`root`, `created` and `backup` (the latter is populated for a full reset of an
+existing home). Full restore without `--yes` asks on a TTY; non-interactive use
+returns a `UsageError` (exit 2), without changing files. Full restore also recovers
+corrupt runtime safety files/manifests. Prompts and backups may contain private
+text; keep them out of shared workspaces and version control.
+
+| Layer | Ownership |
+| --- | --- |
+| 0 / 100 — safety prefix/suffix | Trusted bundled hashes; agent cannot change them |
+| 10 — core | Operator only |
+| 97 / 98 / 99 — SOUL / USER / STATS | Operator, or a separately approved `prompt:update_prompt` call |
+
+Action/file auto-approval never approves prompt updates. Updates check the
+previous hash (CAS), retain backups and record audit hashes. Automatic STATS is
+host-generated, sanitized metadata without arguments or secrets; disable it with
+`--no-prompt-stats` on `agent`/`gui` (default: automatic statistics enabled).
+The composed prompt is bounded to 128 KiB; its short hash identifies the snapshot
+shown by the GUI, while layer listings retain full SHA-256 hashes.
+
+Source checkouts use top-level `prompts/`; wheels, PyInstaller and Nuitka carry
+`pymybot/assets/prompts/`, resolved through `paths.asset_path('prompts')`.
+`doctor` validates the packaged manifest and safety hashes without initializing
+or inspecting the real runtime home; an invalid bundle makes `healthy` false.
+See [security.md](security.md#system-prompt-ownership) for the trust limits.
 
 ## Global options
 
@@ -143,7 +185,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `promptFile`, `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
 | `agent.reset` | — | closes the conversation and releases hardware |
 | `cancel` | `id` | cancels a request (`-32800` for the cancelled request) |
 | `shutdown` | — | cleanup and exit |
@@ -151,7 +193,10 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 Only one hardware operation runs at a time (`-32001` when busy). An active
 session and an agent conversation are mutually exclusive (`-32002` when the
 state is wrong). The server may send a `confirm` request to the client; only
-`{"approved": true}` executes a gated tool.
+`{"approved": true}` executes a gated tool. Changing `autoStats` changes the
+conversation configuration and reopens the agent, just like other configuration
+changes. Non-boolean values are rejected with `-32602`. Prompt updates always
+request a dedicated `prompt:update_prompt` confirmation, regardless of other grants.
 
 ## Agent options
 
@@ -164,16 +209,17 @@ Agent mode is documented in the README. The important flags are:
 | `--api-key-env NAME` | Environment variable holding the key; never pass the key itself. |
 | `--task TEXT` | One-shot task; without it, start the REPL. |
 | `--workspace-dir DIR` | Enable bounded file tools inside `DIR`. |
-| `--enable-shell` | Enable the shell tool inside the workspace; `--sandbox` selects bubblewrap or the workspace jail. |
+| `--enable-shell` | Enable the shell tool inside the workspace; protected prompts require usable bubblewrap, with no unisolated fallback. |
 | `--allow-actions` | Pre-approve action scripts/reads/captures for this session. |
 | `--allow-file-writes` | Pre-approve file creation/editing. |
 | `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
 | `--max-requests`, `--max-tool-calls`, `--max-history-bytes`, `--timeout` | Budgets. `--max-history-bytes` bounds retained conversation history (64 KiB–64 MiB, default 4 MiB). |
 | `--history-turns` | Complete turns retained across tasks (1–20, default 6). |
-| `--prompt-file FILE` | Operator-owned UTF-8 prompt appended as the USER layer (max 8 KiB); the safety SOUL layer stays first and cannot be replaced. |
+| `--prompt-file FILE` | Additional operator-owned UTF-8 profile (max 8 KiB); does not replace runtime USER or the safety prefix/suffix. |
+| `--no-prompt-stats` | Disable automatic host-generated STATS updates (also accepted by `gui`; default false). |
 | `--context-bytes N` | Budget for the generated project inventory (workspace top level, structures, scripts, drivers, skills); 0 disables it (0–64 KiB, default 4096). |
 | `--intent MODE` | `auto` (default), `off`, `chat`, `inspect`, `control`, `author` or `diagnose`. Auto narrows the tool allowlist and budget when the request clearly matches an intent; mixed requests union their tools; messages with no keywords stay unrestricted. |
-| `--sandbox MODE` | `auto` (default), `off` or `bwrap`. Auto probes bubblewrap and falls back to the workspace jail; `bwrap` fails instead of running unsandboxed. The sandbox mounts the host read-only, gives the workspace a read-write overlay, clears the environment and unshares network/PID/IPC/UTS namespaces. |
+| `--sandbox MODE` | `auto` (default), `off` or `bwrap`. Agent prompt protection requires usable bubblewrap: unavailable backends or `off` refuse shell execution. The host is read-only, the workspace is writable with prompt roots re-mounted read-only, the environment is cleared and network/PID/IPC/UTS namespaces are unshared. This protects prompt integrity, not host-file confidentiality. |
 | `--web` | Enable `web_fetch` (HTTPS only) and, with `--search-endpoint`, `web_search`. Requires `pymybot[web]`. Private/link-local/loopback targets, redirects past three hops, non-text content and oversized bodies are refused. |
 | `--allow-web` | Pre-approve web requests for this session (requires `--web`). |
 | `--search-endpoint URL` | SearXNG base URL used by `web_search`; no endpoint means no search tool. |

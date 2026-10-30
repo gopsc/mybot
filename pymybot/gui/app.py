@@ -28,7 +28,7 @@ from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog, PreviewDialog,
-                      ResourcePanel, SessionsDialog)
+                      PromptPanel, ResourcePanel, SessionsDialog)
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
@@ -211,6 +211,9 @@ class App(QMainWindow):
         self.status_agent = _label()
         self.status_busy = _label()
         self.status_notice = _label()
+        self.status_prompt = _label()
+        self.status_prompt.setToolTip("本轮实际使用的提示词版本（SHA-256 前 16 位）")
+        self.statusBar().addPermanentWidget(self.status_prompt)
         self.busy_progress = QProgressBar()
         self.busy_progress.setRange(0, 0)
         self.busy_progress.setFixedWidth(90)
@@ -825,8 +828,13 @@ class App(QMainWindow):
         kind = event.get("type")
         if kind == "text_delta":
             self._chat_delta(str(event.get("text") or ""))
+        elif kind == "prompt_version":
+            self._show_prompt_version(event.get("hash"))
         elif kind == "tool_call":
-            self._chat_line(f"→ {event.get('tool')} {_brief(event.get('arguments'))}", "tool")
+            tool = event.get("tool")
+            arguments = ("[提示词内容仅在审批窗口显示]" if tool in {"prompt:update_prompt", "update_prompt"}
+                         else _brief(event.get("arguments")))
+            self._chat_line(f"→ {tool} {arguments}", "tool")
         elif kind == "tool_result":
             tool, ok, state = event.get("tool"), event.get("ok"), event.get("state")
             status = "" if ok is None else ("ok" if ok else "失败")
@@ -888,6 +896,36 @@ class App(QMainWindow):
                 self._confirmed_grants.add(kind)
         if self._stopping or client is not self.serve or generation != self.generation or self.busy:
             return False
+        try:
+            # Revalidate just before dispatch, including when an earlier turn was
+            # valid. Backend validation remains authoritative for any later race.
+            from ..prompts import PromptLibrary
+            library = PromptLibrary()
+            library.ensure_home()
+            library.compose()
+        except Exception as exc:
+            self._message("发送已阻止：提示词安全校验失败",
+                          f"{exc}\n\n0 / 100 安全层必须保持完整。请到「设置 → 提示词」"
+                          "检查，必要时明确确认「恢复全部默认」修复后再发送。")
+            return False
+        params = self._agent_params(task)
+        try:
+            ident, future = client.start_request("agent.ask", params)
+        except RpcError as exc:
+            self._chat_line(str(exc), "error")
+            return False
+        self._chat_line(f"你：{task}", "user")
+        self.last_task = task
+        self.last_failed = False
+        self.turn_id = ident
+        self.turn_text = 0
+        self.at_line_start = True
+        self._set_busy(True)
+        self._background(lambda: future.result(),
+                         lambda value, error: self._turn_done(generation, ident, value, error))
+        return True
+
+    def _agent_params(self, task):
         workspace = self.cfg.workspace or default_workspace()
         use_workspace = self.file_tools_toggle.isChecked() or self.shell_tools_toggle.isChecked()
         params = {
@@ -907,6 +945,7 @@ class App(QMainWindow):
             "historyTurns": self.cfg.history_turns,
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "promptFile": _absolute(self.cfg.prompt_file, workspace),
+            "autoStats": self.cfg.auto_stats,
             "contextBytes": self.cfg.context_bytes,
             "intent": self.cfg.intent_mode,
             "sandbox": self.cfg.sandbox_mode,
@@ -920,22 +959,7 @@ class App(QMainWindow):
             value = getattr(self.cfg, name)
             if value:
                 params[key] = value
-        params = {key: value for key, value in params.items() if value not in ("", [], None)}
-        try:
-            ident, future = client.start_request("agent.ask", params)
-        except RpcError as exc:
-            self._chat_line(str(exc), "error")
-            return False
-        self._chat_line(f"你：{task}", "user")
-        self.last_task = task
-        self.last_failed = False
-        self.turn_id = ident
-        self.turn_text = 0
-        self.at_line_start = True
-        self._set_busy(True)
-        self._background(lambda: future.result(),
-                         lambda value, error: self._turn_done(generation, ident, value, error))
-        return True
+        return {key: value for key, value in params.items() if value not in ("", [], None)}
 
     def _turn_done(self, generation, ident, result, error):
         if self._stopping or generation != self.generation or ident != self.turn_id:
@@ -950,10 +974,14 @@ class App(QMainWindow):
             else:
                 self._chat_line(str(error), "error")
                 for event in getattr(error, "tool_events", []):
-                    self._chat_line(f"  {_brief(event, 200)}", "system")
+                    summary = ("prompt:update_prompt [内容已隐藏]"
+                               if event.get("tool") in {"prompt:update_prompt", "update_prompt", "read_prompt"}
+                               else _brief(event, 200))
+                    self._chat_line(f"  {summary}", "system")
             self._refresh_status()
             return
         result = result or {}
+        self._show_prompt_version((result.get("prompt_version") or {}).get("hash"))
         if self.turn_text == 0 and result.get("output"):
             self._chat_delta(str(result["output"]))
         usage = result.get("usage") or {}
@@ -967,6 +995,10 @@ class App(QMainWindow):
                 requests=usage.get("requests", "?"), tool_calls=usage.get("tool_calls", "?"),
                 input_tokens=usage.get("input_tokens", "?"), output_tokens=usage.get("output_tokens", "?")),
             "system")
+
+    def _show_prompt_version(self, digest):
+        if isinstance(digest, str) and len(digest) >= 16 and all(c in "0123456789abcdef" for c in digest.lower()):
+            self.status_prompt.setText(f"提示词：{digest[:16]}")
 
     def stop_turn(self):
         self.pending_task = ""
@@ -1140,11 +1172,33 @@ class App(QMainWindow):
             arguments = json.dumps(params.get("arguments"), indent=2, ensure_ascii=False, sort_keys=True)
         except (TypeError, ValueError):
             arguments = repr(params.get("arguments"))
-        if len(arguments) > MAX_DIALOG_ARGS:
-            self._message("拒绝：参数过长", f"工具 {tool} 的参数超过 {MAX_DIALOG_ARGS} 字符，无法完整审阅，已拒绝。")
+        is_prompt = tool == "prompt:update_prompt"
+        # Prompt diffs can exceed the ordinary small-tool bound. Never truncate
+        # approval content; an oversized request is denied instead.
+        limit = 2 * 1024 * 1024 if is_prompt else MAX_DIALOG_ARGS
+        if len(arguments) > limit:
+            self._message("拒绝：参数过长", f"工具 {tool} 的参数超过 {limit} 字符，无法完整审阅，已拒绝。")
             self._chat_line(f"{tool} 已拒绝（参数过长）", "toolerr")
             return False
-        dialog = ToolDialog(self, tool, arguments)
+        diff = None
+        if is_prompt:
+            try:
+                data = params.get("arguments") or {}
+                diff = data.get("diff")
+                if not isinstance(diff, str):
+                    from difflib import unified_diff
+                    from ..prompts import PromptLibrary
+                    library = PromptLibrary()
+                    library.ensure_home()
+                    before = library.read(data["layer"])
+                    diff = "".join(unified_diff(
+                        before["content"].splitlines(keepends=True),
+                        data["content"].splitlines(keepends=True),
+                        fromfile=before["file"], tofile=before["file"] + " (proposed)"))
+            except Exception:
+                self._message("拒绝：缺少完整差异", "无法生成提示词变更的完整 diff，已拒绝；请重新发起请求。")
+                return False
+        dialog = ToolDialog(self, tool, arguments, diff=diff)
         approved = self._exec_dialog(dialog) == QDialog.DialogCode.Accepted
         self._chat_line(f"{tool} {'已批准' if approved else '已拒绝'}", "tool")
         return approved
@@ -1327,7 +1381,7 @@ class App(QMainWindow):
 class ToolDialog(QDialog):
     """Native modal approval; reject, Escape and window close all deny."""
 
-    def __init__(self, parent, tool, arguments):
+    def __init__(self, parent, tool, arguments, *, diff=None):
         super().__init__(parent)
         _apply_theme(self)
         self.setWindowTitle("智能体请求调用工具")
@@ -1343,6 +1397,18 @@ class ToolDialog(QDialog):
         self.arguments.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.arguments.setPlainText(arguments)
         layout.addWidget(self.arguments, 1)
+        if tool == "prompt:update_prompt":
+            self.resize(820, 680)
+            self.warning = _label(
+                "警告：prompt:update_prompt 将持久修改提示词，影响后续模型行为。\n"
+                "请审阅完整差异；本次批准不授予未来自动修改权限。内容仅在此审批窗口显示。")
+            layout.addWidget(self.warning)
+            self.diff = QPlainTextEdit()
+            self.diff.setReadOnly(True)
+            self.diff.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+            self.diff.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+            self.diff.setPlainText(diff if diff else "（无文本差异）")
+            layout.addWidget(self.diff, 2)
         row = QHBoxLayout()
         row.addStretch()
         self.approve_button = _button("批准并执行", self.accept)
@@ -1368,7 +1434,7 @@ class SettingsDialog(QDialog):
         self.entries = {}
         self._workspace = workspace
         layout = QVBoxLayout(self)
-        tabs = QTabWidget()
+        self.tabs = tabs = QTabWidget()
         layout.addWidget(tabs, 1)
 
         general = QWidget()
@@ -1452,13 +1518,21 @@ class SettingsDialog(QDialog):
         advanced = QWidget()
         advanced_form = QFormLayout(advanced)
         self._field(advanced_form, cfg, "mcp_config", "MCP 配置（mcpServers JSON）", browse_file=True)
-        self._field(advanced_form, cfg, "prompt_file", "提示词文件（USER 层，≤8 KiB）",
-                    browse_file=True, caption="选择提示词文件",
+        self._field(advanced_form, cfg, "prompt_file", "可选操作者指导文件（OPERATOR，≤8 KiB）",
+                    browse_file=True, caption="选择操作者指导文件",
                     file_filter="Markdown/文本 (*.md *.txt);;所有文件 (*)")
         self._field(advanced_form, cfg, "search_endpoint", "SearXNG 搜索端点（留空仅抓取）")
         self._field(advanced_form, cfg, "vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）", kind="lines")
         advanced_form.addRow(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
         tabs.addTab(advanced, "高级 / MCP")
+
+        self.prompts = PromptPanel(
+            self, auto_stats=cfg.auto_stats,
+            operator_path=lambda: _absolute(self.entries["prompt_file"].text(),
+                                            self.entries["workspace"].text() or self._workspace))
+        tabs.addTab(self.prompts, "提示词")
+        tabs.currentChanged.connect(
+            lambda _index: self.prompts.ensure_loaded() if tabs.currentWidget() is self.prompts else None)
 
         layout.addWidget(_label("运行时权限以左侧栏为准；这里保存偏好与预算。", secondary=True))
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -1538,6 +1612,8 @@ class SettingsDialog(QDialog):
         if self.shell_grant.isChecked() and not self.shell_tools.isChecked():
             self._message("需要 Shell 工具", "自动批准 Shell 前，先启用 Shell 工具。")
             return
+        if self.prompts.editor.document().isModified() and not self.prompts.save():
+            return
         values = {}
         for name, widget in self.entries.items():
             if name == "module_paths":
@@ -1556,6 +1632,7 @@ class SettingsDialog(QDialog):
                       intent_mode=self.intent_box.currentData(),
                       sandbox_mode=self.sandbox_box.currentData(),
                       session_log=self.session_log.isChecked(),
+                      auto_stats=self.prompts.auto_stats.isChecked(),
                       enable_file_tools=self.file_tools.isChecked(),
                       enable_shell=self.shell_tools.isChecked(),
                       enable_web=self.web_tools.isChecked(),

@@ -115,17 +115,21 @@ def test_prompt_and_project_context_reach_the_model(tmp_path):
     scripts.mkdir()
     (scripts / "relay-test.mt").write_text("x", encoding="utf-8")
 
+    seen = []
+
+    async def respond(messages, info):
+        seen.append(info.instructions)
+        return ModelResponse(parts=[TextPart("done")])
+
     async def scenario():
-        session = AgentSession(_Executor(robot=robot, scripts=scripts), _model(),
+        session = AgentSession(_Executor(robot=robot, scripts=scripts), FunctionModel(respond),
                                AgentConfig(prompt_file=str(profile)))
         try:
-            return session
+            await session.ask("hello")
         finally:
             await session.close()
 
-    session = _run(scenario())
-    raw = (session.agent._instructions() if callable(session.agent._instructions)
-           else session.agent._instructions)
-    instructions = "\n".join(getattr(item, "instruction", str(item)) for item in raw)
-    assert "[SOUL]" in instructions and "[OPERATOR]\nPROFILE-CONSTRAINT" in instructions
+    _run(scenario())
+    instructions = seen[0]
+    assert "PROFILE-CONSTRAINT" in instructions
     assert "relay-test.mt" in instructions and "relay-test.sql" in instructions

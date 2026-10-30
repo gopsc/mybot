@@ -14,6 +14,7 @@ class BuildPy(build_py):
         for name, suffix in (
             ("modules", ".py"), ("modules", ".lua"),
             ("robots", ".sql"), ("scripts", ".mt"), ("skills", ".md"),
+            ("prompts", ".md"), ("prompts", ".json"),
         ):
             for source in sorted((root / name).rglob("*" + suffix)):
                 target = destination / source.relative_to(root)

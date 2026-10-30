@@ -5,6 +5,7 @@ recursive-include modules *.py *.lua
 recursive-include robots *.sql
 recursive-include scripts *.mt
 recursive-include skills *.md
+recursive-include prompts *.md *.json
 recursive-include docs *.md *.png
 recursive-include tools *.py *.spec *.ps1 *.ico
 recursive-include tests *.py

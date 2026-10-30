@@ -131,7 +131,17 @@ Agent 也能通过 `--mcp-config` 接外部 MCP 服务，把它们的工具放�
   --mcp-config ./mcp.json
 ```
 
-提示词分四层：不可变的安全约束、操作员的 `--prompt-file`、有界的工程上下文（工作区/结构/脚本清单），以及运行时的技能/MCP 说明。`--context-bytes` 控制上下文预算（0 关闭，默认 4096）。`--intent auto` 会先判断这次请求是查看、控制、编写还是诊断，只开放对应的工具并收紧预算；混合请求取工具并集，识别不出的闲聊保持原样。
+提示词按 manifest 分层：0/100 是与可信打包哈希校验的安全前后缀，10 是仅操作员可改的 core，97/98/99 是 SOUL/USER/STATS；再组合 `--prompt-file`、工程上下文及技能/MCP 说明，总预算 128 KiB。默认文件随源码、wheel 和冻结程序分发，首次使用复制到 `$MYBOT_HOME/prompts`（默认 `~/.mybot/prompts`），已有修改不会被静默覆盖。GUI 显示当前组合的短哈希，并提供提示词查看、编辑和恢复入口。
+
+```sh
+pymybot prompts list                         # 不需要机器人或模型，输出层状态和完整 SHA-256
+pymybot prompts restore --missing-only       # 只补缺失文件，保留修改
+pymybot prompts restore --all --yes          # 先备份，再恢复全部默认层
+```
+
+不带 `--yes` 的全量恢复只允许终端交互确认，非交互调用会拒绝；安全文件或运行时 manifest 损坏也可用全量恢复修复。`doctor` 检查打包 manifest 和安全哈希，不创建用户运行目录。Agent 只能通过逐次审批的 `prompt:update_prompt` 修改 97/98/99，动作/文件自动批准不能绕过；写入有 CAS 哈希检查、备份和审计哈希。自动 STATS 仅由宿主生成脱敏统计，不含参数或密钥；`--no-prompt-stats`、GUI 开关或 serve 的 `autoStats: false` 可关闭。详见 [CLI 提示词管理](docs/cli.md#runtime-prompts)。
+
+`--context-bytes` 控制工程上下文预算（0 关闭，默认 4096）。`--intent auto` 会先判断这次请求是查看、控制、编写还是诊断，只开放对应的工具并收紧预算；混合请求取工具并集，识别不出的闲聊保持原样。
 
 联网工具默认关闭：`--web` 打开 HTTPS 抓取，配了 `--search-endpoint` 才有 SearXNG 搜索。私网/回环地址、超长正文和重定向都会被拒绝，每次请求仍然要审批（`--allow-web` 可以预先批准）。
 
@@ -287,7 +297,7 @@ TCP 可直接由 MT 控制：[结构示例](robots/tcp.sql) 只配置 `name`、`
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
 | Agent 外部 MCP 工具 | 逐次确认 | `--allow-mcp-tools`（外部服务不是沙箱） |
 
-**Agent Shell 默认尝试 bubblewrap（可用时）；不可用时退回工作区牢笼，两者都要显式启用和审批。**
+**Agent Shell 必须显式启用和审批，并使用可用的 bubblewrap 以只读方式保护运行时和打包提示词目录；不可用或 `--sandbox off` 时拒绝执行，不回退到无隔离 shell。** 通用工作区工具不能读写提示词根目录，须走专用提示词工具。只读挂载保护完整性，不代表宿主文件或提示词内容无法被 shell 读取。
 Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 import 和直接原生 I/O 不受限制，上表的 HAL 权限也管不到这类直接访问。Python 的预算/取消是协作式的：长循环应该调用 `context.check()`；阻塞的原生调用或不合作的 Python 循环没法被硬中断。只运行你审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](docs/security.md)。
 
 ## 兼容性
@@ -308,6 +318,7 @@ modules/                  Python 原生驱动、保留的 Lua 驱动和公共库
 robots/                   结构 SQL 示例（含虚拟设备）
 scripts/                  MT 动作示例
 skills/                   Agent 参考技能
+prompts/                  默认提示词层及 manifest（运行时副本位于 MYBOT_HOME/prompts）
 tests/                    pytest 与逐驱动虚拟夹具
 docs/                     架构、CLI、GUI、开发、测试、发布、安全文档
 docs/history/             已完成的迁移与调试记录
