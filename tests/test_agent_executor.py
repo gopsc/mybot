@@ -1157,6 +1157,50 @@ def test_cancel_while_queued_prevents_dispatch(setup):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("pattern", ["if", "while", "Action", "mixed", "reflex"])
+@pytest.mark.parametrize("included", [False, True])
+def test_max_depth_nested_controls_survive_agent_freeze(tmp_path, pattern, included):
+    from pymybot.matrix import MAX_BLOCK_DEPTH
+
+    names = {"if": ["if(count<1)"], "while": ["while(count<1)"], "Action": ["Action"],
+             "mixed": ["Action", "if(count<1)", "while(count<1)"], "reflex": ["if(count<1)"]}[pattern]
+    depth = MAX_BLOCK_DEPTH - (pattern == "reflex")
+    script = ("".join(f"@{names[index % len(names)]}\n" for index in range(depth))
+              + "timer-0.delay timer-0.capture;\n1 $count=slept;\n" + "@\n" * depth)
+    if pattern == "reflex":
+        script = "@Reflex(step)\n" + script + "@\n@Action\nstep.unused;\n0;\n@\n"
+    script = "@Vars\nname value;\ncount 0;\n@\n" + script
+    parsed = parse_matrices(script)
+    with Robot((ROOT / "robots/relay-test.sql").read_text(encoding="utf-8")) as robot:
+        assert [item["slept"] for item in robot.run(script)] == [1]
+    path = tmp_path / "nested.mt"
+    path.write_text(script, encoding="utf-8")
+    if included:
+        path = tmp_path / "main.mt"
+        path.write_text("@Include\npath;\nnested.mt;\n@\n", encoding="utf-8")
+    frozen, _ = executor_module._Scripts(tmp_path).prepare(path.name, lambda: None)
+    assert parse_matrices(frozen) == parsed
+
+    async def scenario():
+        executor = RobotExecutor(ROOT / "robots/relay-test.sql", scripts_dir=tmp_path)
+        try:
+            result = await executor.call("run_action_script", {"script": path.name})
+            assert result["ok"], result
+            assert [item["slept"] for item in result["data"]["outputs"]] == [1]
+        finally:
+            await executor.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("parent", ["Action", "if(1>0)", "while(0>1)", "Reflex(step)"])
+@pytest.mark.parametrize("contents", ["@Action\n@\n", ACTION, ACTION + ACTION, ACTION + "@Action\n@\n"])
+def test_freeze_preserves_empty_and_adjacent_action_boundaries(setup, parent, contents):
+    script = f"@{parent}\n{contents}@\n"
+    (setup.scripts / "action.mt").write_text(script, encoding="utf-8")
+    frozen, _ = executor_module._Scripts(setup.scripts).prepare("action.mt", lambda: None)
+    assert parse_matrices(frozen) == parse_matrices(script)
+
+
 def test_include_merge_and_control_frozen_for_real_robot(tmp_path):
     (tmp_path / "main.mt").write_text(
         "@Include\npath;\nbody.mt;\n@", encoding="utf-8")
