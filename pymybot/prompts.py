@@ -92,7 +92,8 @@ def _directory(path, *, create=False, private=False):
         if _linked(info) or not stat.S_ISDIR(info.st_mode):
             raise SecurityError("Prompt ancestor is not a non-linked directory")
         if _DIR_FD:
-            fd = os.open(current, flags)
+            # Closed by the finally block below, including on guard failures.
+            fd = os.open(current, flags)  # lgtm[py/file-not-closed]
             opened.append(fd)
         identities.append((current, _identity(info)))
         for part in path.parts[1:]:
@@ -116,7 +117,7 @@ def _directory(path, *, create=False, private=False):
             if _linked(info) or not stat.S_ISDIR(info.st_mode):
                 raise SecurityError("Linked prompt ancestors, junctions and non-directories are forbidden")
             if fd is not None:
-                child = os.open(part, flags, dir_fd=fd)
+                child = os.open(part, flags, dir_fd=fd)  # lgtm[py/file-not-closed]
                 opened.append(child)
                 fd = child
                 if _identity(info) != _identity(os.fstat(fd)):
@@ -265,7 +266,7 @@ def _atomic(directory, name, data, before=None):
                 directory.guard()
             _unlink_at(directory.path, directory.fd, temporary)
         except (OSError, SecurityError):
-            pass
+            pass  # Cleanup only: the write already failed or the temp file is gone.
 
 
 def _json(data):
@@ -279,7 +280,7 @@ def _json(data):
 
     try:
         return json.loads(_decode(data), object_pairs_hook=unique,
-                          parse_constant=lambda value: _invalid_constant(value))
+                          parse_constant=_invalid_constant)
     except (ValueError, RecursionError) as exc:
         raise SecurityError(f"Invalid prompt manifest: {exc}") from None
 

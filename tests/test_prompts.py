@@ -11,8 +11,8 @@ import sys
 
 import pytest
 
+import pymybot.prompts as prompts
 from pymybot.paths import asset_path
-from pymybot.prompts import MAX_PROMPT_TOTAL, PromptLibrary
 from pymybot.security import SecurityError
 
 CORE_SHA = "f83f1fbcf091c5aed6f38f0837bef32c2d408f96bc510838bc328430488939b8"
@@ -29,7 +29,7 @@ def write_manifest(root, manifest):
 
 @pytest.fixture
 def library(tmp_path):
-    result = PromptLibrary(home=tmp_path / "runtime" / "prompts")
+    result = prompts.PromptLibrary(home=tmp_path / "runtime" / "prompts")
     result.ensure_home()
     return result
 
@@ -43,7 +43,7 @@ def bundle(tmp_path):
 
 def test_constructor_defaults_listing_and_golden_core(tmp_path, monkeypatch):
     monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "configured"))
-    library = PromptLibrary()
+    library = prompts.PromptLibrary()
     assert library.home == tmp_path / "configured" / "prompts"
     assert library.defaults == asset_path("prompts")
     assert not library.home.parent.exists()
@@ -57,7 +57,7 @@ def test_constructor_defaults_listing_and_golden_core(tmp_path, monkeypatch):
     assert not library.home.parent.exists()
     monkeypatch.delenv("MYBOT_HOME")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    assert PromptLibrary().home == tmp_path / ".mybot" / "prompts"
+    assert prompts.PromptLibrary().home == tmp_path / ".mybot" / "prompts"
 
 
 def test_bootstrap_preserves_existing_and_returns_only_created(tmp_path):
@@ -65,7 +65,7 @@ def test_bootstrap_preserves_existing_and_returns_only_created(tmp_path):
     root.mkdir()
     (root / "010_core.md").write_text("operator core\n", encoding="utf-8")
     (root / "unmanaged.txt").write_text("not owned by library", encoding="utf-8")
-    library = PromptLibrary(home=root)
+    library = prompts.PromptLibrary(home=root)
     result = library.ensure_home()
     assert result["root"] == str(root)
     assert len(result["created"]) == 6
@@ -84,16 +84,18 @@ def test_bootstrap_preserves_existing_and_returns_only_created(tmp_path):
 def test_private_modes_and_ancestors_are_not_chmodded(tmp_path):
     ancestor = tmp_path / "operator-owned-ancestor"
     ancestor.mkdir(mode=0o755)
-    os.chmod(ancestor, 0o755)
+    # Fixture: a deliberately world-readable ancestor, to prove it stays untouched.
+    os.chmod(ancestor, 0o755)  # lgtm[py/overly-permissive-file]
     root = ancestor / "state" / "prompts"
-    library = PromptLibrary(home=root)
+    library = prompts.PromptLibrary(home=root)
     library.ensure_home()
     assert stat.S_IMODE(ancestor.stat().st_mode) == 0o755
     assert stat.S_IMODE(root.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(root.stat().st_mode) == 0o700
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in root.iterdir())
-    os.chmod(root, 0o755)
-    os.chmod(root / "010_core.md", 0o644)
+    # Fixture: loosen the runtime root and one layer, to prove seeding tightens both.
+    os.chmod(root, 0o755)  # lgtm[py/overly-permissive-file]
+    os.chmod(root / "010_core.md", 0o644)  # lgtm[py/overly-permissive-file]
     library.ensure_home()
     assert stat.S_IMODE(root.stat().st_mode) == 0o700
     assert stat.S_IMODE((root / "010_core.md").stat().st_mode) == 0o600
@@ -170,7 +172,7 @@ def test_old_manifest_upgrade_adds_layers_without_replacing_content(library, bun
     write_manifest(library.home, old)
     (library.home / "097_soul.md").unlink()
     (library.home / "098_user.md").write_text("retained user memory", encoding="utf-8")
-    upgraded = PromptLibrary(home=library.home, defaults=bundle)
+    upgraded = prompts.PromptLibrary(home=library.home, defaults=bundle)
     result = upgraded.ensure_home()
     assert result["created"] == ["097_soul.md"]
     assert upgraded.read("98")["content"] == "retained user memory"
@@ -275,9 +277,9 @@ def test_composition_order_total_utf8_safety_and_hashes(library):
     assert result.digest == sha(result.text.encode("utf-8"))
     assert result.layer_hashes == {identity: library.read(identity)["sha256"] for identity in IDS}
     assert result.truncated == []
-    capped = library.compose(operator="界" * MAX_PROMPT_TOTAL, project="context" * MAX_PROMPT_TOTAL,
-                             intent="intent" * MAX_PROMPT_TOTAL)
-    assert len(capped.text.encode("utf-8")) <= MAX_PROMPT_TOTAL
+    capped = library.compose(operator="界" * prompts.MAX_PROMPT_TOTAL, project="context" * prompts.MAX_PROMPT_TOTAL,
+                             intent="intent" * prompts.MAX_PROMPT_TOTAL)
+    assert len(capped.text.encode("utf-8")) <= prompts.MAX_PROMPT_TOTAL
     assert capped.truncated == ["operator", "project", "intent"]
     assert capped.text.endswith(library.read("100")["content"])
     for identity in IDS:
@@ -290,7 +292,7 @@ def test_required_layers_never_silently_truncated(tmp_path, bundle):
     for layer in manifest["layers"]:
         layer["max_bytes"] = 65536
     write_manifest(bundle, manifest)
-    library = PromptLibrary(home=tmp_path / "runtime", defaults=bundle)
+    library = prompts.PromptLibrary(home=tmp_path / "runtime", defaults=bundle)
     library.ensure_home()
     library.update("10", "a" * 65536)
     library.update("97", "b" * 65536)
@@ -320,16 +322,16 @@ def test_symlinked_roots_ancestors_and_defaults_rejected(tmp_path, bundle):
     real.mkdir()
     link = tmp_path / "linked"
     symlink_or_skip(link, real)
-    library = PromptLibrary(home=link / "prompts")
+    library = prompts.PromptLibrary(home=link / "prompts")
     assert not (real / "prompts").exists()
     for action in (library.ensure_home, library.list_layers, lambda: library.restore(False)):
         with pytest.raises((SecurityError, OSError)):
             action()
     symlink_or_skip(tmp_path / "linked-bundle", bundle)
     with pytest.raises((SecurityError, OSError)):
-        PromptLibrary(defaults=tmp_path / "linked-bundle")
+        prompts.PromptLibrary(defaults=tmp_path / "linked-bundle")
     with pytest.raises(SecurityError, match="traversal"):
-        PromptLibrary(home=real / ".." / "elsewhere")
+        prompts.PromptLibrary(home=real / ".." / "elsewhere")
 
 
 @pytest.mark.parametrize("name", ["097_soul.md", "000_safety_prefix.md", "manifest.json", ".prompts.lock"])
@@ -398,7 +400,7 @@ def test_trusted_manifest_validation(tmp_path, bundle, mutation):
         manifest["layers"].pop()
     write_manifest(bundle, manifest)
     with pytest.raises(SecurityError):
-        PromptLibrary(home=tmp_path / "untouched", defaults=bundle)
+        prompts.PromptLibrary(home=tmp_path / "untouched", defaults=bundle)
     assert not (tmp_path / "untouched").exists()
 
 
@@ -408,13 +410,13 @@ def test_default_file_links_and_duplicate_keys_rejected(tmp_path, bundle):
     path.rename(outside)
     os.link(outside, path)
     with pytest.raises(SecurityError, match="Hardlinked"):
-        PromptLibrary(defaults=bundle)
+        prompts.PromptLibrary(defaults=bundle)
     path.unlink()
     path.write_bytes(outside.read_bytes())
     manifest = bundle / "manifest.json"
     manifest.write_text(manifest.read_text().replace('"version": 1', '"version": 1, "version": 1'))
     with pytest.raises(SecurityError, match="Duplicate"):
-        PromptLibrary(defaults=bundle)
+        prompts.PromptLibrary(defaults=bundle)
 
 
 def test_public_layer_metadata_cannot_weaken_authority(library):
@@ -432,7 +434,7 @@ def test_threaded_cas_has_exactly_one_winner(library):
     expected = library.read("97")["sha256"]
 
     def save(index):
-        other = PromptLibrary(home=library.home)
+        other = prompts.PromptLibrary(home=library.home)
         try:
             other.update("97", str(index), expected_hash=expected)
             return "saved"
@@ -470,7 +472,6 @@ except SecurityError as exc:
 
 
 def test_replace_failure_keeps_original_and_backup(library, monkeypatch):
-    import pymybot.prompts as prompts
     old = library.read("97")
     original_replace = prompts.os.replace
 
@@ -488,7 +489,6 @@ def test_replace_failure_keeps_original_and_backup(library, monkeypatch):
 
 
 def test_postpublish_failure_reports_unknown_outcome(library, monkeypatch):
-    import pymybot.prompts as prompts
     if not prompts._DIR_FD:
         pytest.skip("Directory fsync requires POSIX descriptors")
     identity = library.home.stat().st_ino
@@ -506,14 +506,13 @@ def test_postpublish_failure_reports_unknown_outcome(library, monkeypatch):
 
 
 def test_lock_contention_fails_without_blocking(library):
-    other = PromptLibrary(home=library.home)
+    other = prompts.PromptLibrary(home=library.home)
     with library._locked():
         with pytest.raises(SecurityError, match="lock conflict"):
             other.read("97")
 
 
 def test_manifest_and_files_are_bounded_before_decoding(library, bundle, monkeypatch):
-    import pymybot.prompts as prompts
     cap = next(layer["max_bytes"] for layer in library.layers if layer["id"] == "97")
     with (library.home / "097_soul.md").open("wb") as stream:
         stream.truncate(cap + 1)
@@ -529,11 +528,11 @@ def test_manifest_and_files_are_bounded_before_decoding(library, bundle, monkeyp
         library.read("97")
     (bundle / "manifest.json").write_bytes(b" " * (32 * 1024 + 1))
     with pytest.raises(SecurityError, match="byte limit"):
-        PromptLibrary(defaults=bundle)
+        prompts.PromptLibrary(defaults=bundle)
 
 
 def test_bundle_can_be_inspected_but_not_mutated(bundle):
-    library = PromptLibrary(home=bundle, defaults=bundle)
+    library = prompts.PromptLibrary(home=bundle, defaults=bundle)
     before = (bundle / "manifest.json").stat().st_mode
     assert library.validate_defaults()["version"] == 1
     with pytest.raises(SecurityError, match="trusted bundle"):

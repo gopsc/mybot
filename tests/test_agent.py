@@ -800,18 +800,22 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
 
 
 def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
-    from pymybot import cli
+    from pymybot import cli, sandbox
     from pymybot.robot import Robot
 
     robot = tmp_path / "robot.sql"
     robot.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
-    calls = iter([
+    # Protected prompts require usable bubblewrap for the agent shell, so hosts
+    # without namespaces exercise file tools only instead of an unisolated shell.
+    shell = sandbox.bwrap_usable()
+    requests = [
         ToolCallPart("write_file", {"path": "note.txt", "content": "before\n"}),
         ToolCallPart("edit_file", {"path": "note.txt", "old_string": "before", "new_string": "after"}),
         ToolCallPart("read_file", {"path": "note.txt"}),
-        ToolCallPart("shell", {"command": "echo shell-ok"}),
-        TextPart("completed"),
-    ])
+    ]
+    if shell:
+        requests.append(ToolCallPart("shell", {"command": "echo shell-ok"}))
+    calls = iter([*requests, TextPart("completed")])
     receipts = []
 
     async def respond(messages, info):
@@ -834,17 +838,19 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
         pytest.fail("Workspace tools must not activate hardware")
     monkeypatch.setattr(Robot, "active", forbidden_activation)
     monkeypatch.setattr(agent_module, "create_model", lambda _: (FunctionModel(respond, stream_function=stream), None))
+    flags = ["--enable-shell", "--allow-shell"] if shell else []
     code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),
-                     "--workspace-dir", str(tmp_path), "--enable-shell", "--allow-shell",
+                     "--workspace-dir", str(tmp_path), *flags,
                      "--allow-file-writes", "--task", "write, edit, read and run shell"])
     captured = capsys.readouterr()
     assert code == 0 and len(captured.out.splitlines()) == 1, captured.out + captured.err
     assert json.loads(captured.out)["output"] == "completed"
     assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "after\n"
     assert receipts[2]["data"]["content"] == "after\n"
-    assert receipts[3]["data"]["exit_code"] == 0
-    assert "shell-ok" in receipts[3]["data"]["stdout"]
-    assert "Shell enabled:" in captured.err
+    if shell:
+        assert receipts[3]["data"]["exit_code"] == 0
+        assert "shell-ok" in receipts[3]["data"]["stdout"]
+        assert "Shell enabled:" in captured.err
 
 
 def test_provider_error_is_sanitized_and_not_retried(tmp_path, monkeypatch, capsys):

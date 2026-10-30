@@ -379,7 +379,7 @@ def test_send_guard_blocks_tampered_safety_before_rpc(window, library, layer):
                 assert "发送已阻止" in dialog.windowTitle()
                 assert "0 / 100" in dialog.text() and "设置 → 提示词" in dialog.text()
                 click(dialog.button(QMessageBox.StandardButton.Ok))
-            except BaseException as exc:
+            except Exception as exc:
                 failures.append(exc)
                 if dialog:
                     dialog.reject()
@@ -410,7 +410,7 @@ def test_prompt_approval_shows_complete_diff_without_retaining_content(window, a
             assert dialog.diff.toPlainText() == diff
             assert dialog.deny_button.isDefault()
             click(dialog.approve_button if approve else dialog.deny_button)
-        except BaseException as exc:
+        except Exception as exc:
             failures.append(exc)
             if dialog:
                 dialog.reject()
