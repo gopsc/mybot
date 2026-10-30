@@ -42,16 +42,16 @@ pymybot prompts restore --missing-only    # default restore mode; keep existing 
 pymybot prompts restore --all --yes       # back up first, then replace all defaults
 ```
 
-The first list/agent use copies bundled defaults to `$MYBOT_HOME/prompts`
-(default `~/.mybot/prompts`). Existing files are never silently overwritten.
-Subsequent listing reports missing files rather than repairing them. The JSON
-result contains `root` and `layers`; each layer reports `id`, `file`, `editable`,
-`max_bytes`, `bytes`, `modified`, `mtime`, `sha256` and `missing`. Restore reports
-`root`, `created` and `backup` (the latter is populated for a full reset of an
-existing home). Full restore without `--yes` asks on a TTY; non-interactive use
-returns a `UsageError` (exit 2), without changing files. Full restore also recovers
-corrupt runtime safety files/manifests. Prompts and backups may contain private
-text; keep them out of shared workspaces and version control.
+The first `prompts list` or agent turn bootstraps `$MYBOT_HOME/prompts`
+(default `~/.mybot/prompts`) from the bundled defaults. Existing files are never
+silently overwritten. Later listings only report missing files; they do not
+repair them. The JSON list result contains `root` and `layers`; each layer reports
+`id`, `file`, `editable`, `max_bytes`, `bytes`, `modified`, `mtime`, `sha256` and
+`missing`. Restore reports `root`, `created` and `backup` (the latter is populated
+for a full reset of an existing home). Full restore without `--yes` asks on a TTY;
+non-interactive use returns a `UsageError` (exit 2), without changing files. Full
+restore also recovers corrupt runtime safety files/manifests. Prompts and backups
+may contain private text; keep them out of shared workspaces and version control.
 
 | Layer | Ownership |
 | --- | --- |

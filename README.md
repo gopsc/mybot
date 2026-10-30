@@ -131,15 +131,17 @@ Agent 也能通过 `--mcp-config` 接外部 MCP 服务，把它们的工具放�
   --mcp-config ./mcp.json
 ```
 
-提示词按 manifest 分层：0/100 是与可信打包哈希校验的安全前后缀，10 是仅操作员可改的 core，97/98/99 是 SOUL/USER/STATS；再组合 `--prompt-file`、工程上下文及技能/MCP 说明，总预算 128 KiB。默认文件随源码、wheel 和冻结程序分发，首次使用复制到 `$MYBOT_HOME/prompts`（默认 `~/.mybot/prompts`），已有修改不会被静默覆盖。GUI 显示当前组合的短哈希，并提供提示词查看、编辑和恢复入口。
+提示词和普通配置不太一样：它直接决定模型能做什么，所以不能随便改。`prompts/` 下的六层按 `manifest.json` 排顺序。0 和 100 是安全前后缀，校验的是打包时写死的哈希，改一个字节就会失败；10 是 core，只有操作员能改；97/98/99 是 SOUL、USER、STATS。Agent 想改这三层，每次都要单独确认（GUI 弹窗、CLI 终端提示），动作和文件的自动批准管不到这里。
+
+第一次用到提示词时，默认文件会复制到 `$MYBOT_HOME/prompts`（默认 `~/.mybot/prompts`），你已经改过的文件不会被悄悄覆盖。整个组合上限 128 KiB。GUI 状态栏显示这一轮实际使用的提示词短哈希，设置里的「提示词」页可以查看、编辑 97/98/99，也能补齐缺失或整库恢复。
 
 ```sh
 pymybot prompts list                         # 不需要机器人或模型，输出层状态和完整 SHA-256
-pymybot prompts restore --missing-only       # 只补缺失文件，保留修改
+pymybot prompts restore --missing-only       # 只补缺失文件，保留你的修改
 pymybot prompts restore --all --yes          # 先备份，再恢复全部默认层
 ```
 
-不带 `--yes` 的全量恢复只允许终端交互确认，非交互调用会拒绝；安全文件或运行时 manifest 损坏也可用全量恢复修复。`doctor` 检查打包 manifest 和安全哈希，不创建用户运行目录。Agent 只能通过逐次审批的 `prompt:update_prompt` 修改 97/98/99，动作/文件自动批准不能绕过；写入有 CAS 哈希检查、备份和审计哈希。自动 STATS 仅由宿主生成脱敏统计，不含参数或密钥；`--no-prompt-stats`、GUI 开关或 serve 的 `autoStats: false` 可关闭。详见 [CLI 提示词管理](docs/cli.md#runtime-prompts)。
+全量恢复不带 `--yes` 时只认终端确认，脚本里调用会直接拒绝，免得误清空。安全层或运行时 manifest 坏了，也用这条命令修。改 97/98/99 会先比对旧哈希，留备份；审计里记前后哈希和修改理由，不写提示词正文。自动 STATS 由宿主生成，只记脱敏后的统计，不含参数和密钥；`--no-prompt-stats`、设置里的开关或 serve 的 `autoStats: false` 都能关。`doctor` 只检查打包的 manifest 和安全哈希，不会创建你的运行目录。完整说明在 [CLI 提示词管理](docs/cli.md#runtime-prompts)。
 
 `--context-bytes` 控制工程上下文预算（0 关闭，默认 4096）。`--intent auto` 会先判断这次请求是查看、控制、编写还是诊断，只开放对应的工具并收紧预算；混合请求取工具并集，识别不出的闲聊保持原样。
 

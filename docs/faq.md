@@ -42,12 +42,15 @@ Yes. `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, the
 GUI’s hardware view and the virtual-bus tests need no model. Only the agent
 needs a provider key.
 
-## Why can’t the GUI change the system prompt?
+## Can the GUI change the system prompt?
 
-The system prompt is operator-owned. A model or remote app must not be able to
-rewrite its own safety instructions. Put custom instructions in the operator
-configuration/skill files and restart the session; do not expose a
-“model sets the prompt” tool.
+Only the parts that are meant to be edited. Layers 0 and 100 (the safety prefix
+and suffix) are pinned to hashes shipped with the build; change a byte and
+validation fails, which blocks sending until you restore them. Layer 10 (core)
+is operator-only and stays out of the GUI editor. 设置 → 提示词 can edit 97, 98
+and 99 (SOUL/USER/STATS). When the model proposes a change to one of those, it
+opens a dedicated `prompt:update_prompt` approval with the full diff; approved
+actions or file writes do not cover it.
 
 ## Hardware is not detected
 

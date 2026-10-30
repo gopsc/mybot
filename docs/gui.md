@@ -54,7 +54,7 @@ The GUI exposes the backend surface described in [cli.md](cli.md) and
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 权限 / 高级·MCP / 提示词: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, tool permissions (files, Shell, web, MCP), MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
+| 设置 | Tabs for 通用 / 模型与预算 / 权限 / 高级 / MCP / 提示词: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, tool permissions (files, Shell, web, MCP), MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
@@ -112,10 +112,11 @@ is not interrupted by new tokens.
 (default `~/.mybot/prompts`). Defaults ship with the source, wheel and frozen
 application; the first use copies missing files without overwriting custom text.
 
-- The layer table shows filename, bytes/limit, modification, ownership and mtime.
-  Layers 0/10/100 are read-only in this editor; operators maintain core externally,
-  while safety 0/100 must match trusted bundled hashes. Only 97/98/99 can be saved
-  here, with backup and a compare-and-swap hash check to catch intervening edits.
+- The layer table shows filename, bytes/limit, modified flag, permissions, mtime
+  and status. Layers 0/10/100 are read-only in this editor; operators maintain
+  core externally, while safety 0/100 must match trusted bundled hashes. Only
+  97/98/99 can be saved here, with backup and a compare-and-swap hash check to
+  catch intervening edits.
 - **仅补齐缺失** preserves existing text; **恢复全部默认…** requires confirmation,
   backs up the current library, and can recover a corrupt runtime manifest or
   safety layer. The backup location is displayed. These writes take effect

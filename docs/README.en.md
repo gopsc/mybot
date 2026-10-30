@@ -54,6 +54,10 @@ rules do not change with the entry point. See [mcp.md](mcp.md).
 - **An open-by-default bridge.** Physical buses, non-loopback HTTP/TCP and the Shell
   driver require an explicit opt-in. HAL gates those entry points; the driver
   itself is trusted code, not a sandbox.
+- **A shell that quietly drops its isolation.** Agent shell needs a usable
+  bubblewrap with the prompt directories mounted read-only. If that cannot be set
+  up — Windows included — it refuses to run instead of falling back to an
+  unisolated workspace.
 - **Actions as arbitrary code.** An action script is matrix data. Every dispatch,
   capture and result has a JSON receipt.
 - **Pretending failures are clean.** If an exception happens after an action has
@@ -102,6 +106,35 @@ never read into the transcript). Disable with `--no-session-log`,
 `MYBOT_SESSION_LOG=0`, or the GUI settings toggle; list and prune with
 `pymybot sessions [--prune --keep N --yes]`; see
 [the CLI guide](cli.md#session-transcripts).
+
+## Prompt layers
+
+The agent's instructions live in `prompts/`: six Markdown layers ordered by
+`manifest.json`. Layers 0 and 100 are the safety prefix and suffix, pinned to
+hashes baked into the build — change one byte and validation fails. 10 is the
+operator's core. 97, 98 and 99 are SOUL, USER and STATS, and those are the only
+layers the model may touch, each time through a dedicated `prompt:update_prompt`
+approval. Auto-approved actions or file writes do not cover it.
+
+First use copies the defaults to `$MYBOT_HOME/prompts` (default
+`~/.mybot/prompts`) without overwriting files you already changed. The composed
+prompt is capped at 128 KiB. The status bar shows a short hash of the snapshot
+actually used for the turn; 设置 → 提示词 lets you read the layers, edit 97/98/99,
+refill missing files, or restore everything.
+
+```sh
+pymybot prompts list                     # no robot, no model
+pymybot prompts restore --missing-only   # keep edits, fill gaps
+pymybot prompts restore --all --yes      # back up first, then reset all layers
+```
+
+Without `--yes`, a full restore only asks on a terminal; scripts get a refusal.
+Updates compare the previous hash, keep a backup, and record before/after hashes
+and the reason in the audit trail — not the prompt text.
+STATS is host-generated and sanitized — no arguments or secrets — and can be
+turned off with `--no-prompt-stats`, the GUI toggle, or `autoStats: false` on
+serve. `doctor` validates the bundled manifest and safety hashes without creating
+your runtime directory.
 
 ## Design
 
