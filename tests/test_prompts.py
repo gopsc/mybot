@@ -80,6 +80,17 @@ def test_bootstrap_preserves_existing_and_returns_only_created(tmp_path):
     assert not rows[0]["modified"]
 
 
+def test_windows_stamps_ignore_creation_versus_change_time(tmp_path, monkeypatch):
+    # os.stat and os.fstat disagree on st_ctime_ns on Windows (CPython #157671).
+    layer = tmp_path / "097_soul.md"
+    layer.write_text("x", encoding="utf-8")
+    info = layer.stat()
+    monkeypatch.setattr(prompts.os, "name", "nt")
+    assert prompts._stamp(info) == (prompts._version(info), info.st_nlink)
+    monkeypatch.setattr(prompts.os, "name", "posix")
+    assert prompts._stamp(info) == (prompts._version(info), info.st_nlink, info.st_ctime_ns)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits")
 def test_private_modes_and_ancestors_are_not_chmodded(tmp_path):
     ancestor = tmp_path / "operator-owned-ancestor"

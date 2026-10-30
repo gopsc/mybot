@@ -152,7 +152,12 @@ def _stat(directory, name):
 
 
 def _stamp(info):
-    return None if info is None else (_version(info), info.st_ctime_ns, info.st_nlink)
+    if info is None:
+        return None
+    # Windows reports a different st_ctime_ns from path and handle stats for the
+    # same file (CPython #157671), so cross-API identity uses the other fields.
+    stamp = (_version(info), info.st_nlink)
+    return stamp if os.name == "nt" else (*stamp, info.st_ctime_ns)
 
 
 def _decode(data):
