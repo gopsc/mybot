@@ -22,7 +22,7 @@ TOOLS_BY_INTENT = {
     "chat": READ_TOOLS,
     "inspect": READ_TOOLS,
     "control": READ_TOOLS | {"run_action_script", "read_variables", "capture_image"},
-    "author": READ_TOOLS | {"write_file", "edit_file", "update_prompt"},
+    "author": READ_TOOLS | {"write_file", "edit_file", "update_prompt", "create_skill"},
     "diagnose": READ_TOOLS | {"shell"},
 }
 BUDGETS = {"chat": (3, 4), "inspect": (4, 8), "control": (8, 16),

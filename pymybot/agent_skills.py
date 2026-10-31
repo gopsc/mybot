@@ -141,6 +141,57 @@ class SkillsLibrary:
                   for name, item in sorted(self.skills.items())]
         return {"skills": skills, "truncated": len(skills) == MAX_LIST}
 
+    def create(self, name, description, content, *, started=None):
+        """Create one approved skill and make it readable immediately."""
+        if self.root is None:
+            raise SecurityError("Skills root does not exist")
+        checked_text(name, 64)
+        if not _NAME.fullmatch(name):
+            raise SecurityError("Skill name must be 1..64 lowercase letters, digits, '.', '_' or '-'")
+        checked_text(description, MAX_DESCRIPTION)
+        description = description.strip()
+        if not description or "\n" in description or "\r" in description:
+            raise SecurityError("Skill description must be a nonempty single line")
+        checked_text(content, MAX_SKILL_FILE)
+        if not content.strip():
+            raise SecurityError("Skill content must not be empty")
+        document = (f"---\nname: {name}\ndescription: {description}\n---\n\n"
+                    + content.strip() + "\n")
+        if len(document.encode("utf-8")) > MAX_SKILL_FILE:
+            raise SecurityError("SKILL.md exceeds the file size limit")
+        _no_links(self.root, self.root)
+        path = self.root / name
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise SecurityError("Cannot inspect skill path") from exc
+        else:
+            raise SecurityError(f"Skill '{name}' already exists")
+        try:
+            path.mkdir()
+            _no_links(path, self.root)
+        except FileExistsError:
+            raise SecurityError(f"Skill '{name}' already exists") from None
+        except OSError as exc:
+            raise SecurityError("Cannot create skill directory") from exc
+        if started is not None:
+            started()
+        target = path / "SKILL.md"
+        try:
+            with target.open("x", encoding="utf-8", newline="\n") as stream:
+                stream.write(document)
+        except Exception:
+            try:
+                target.unlink()
+                path.rmdir()
+            except OSError:
+                pass
+            raise
+        self._scan()
+        return {"name": name, "file": "SKILL.md", "description": description}
+
     def read(self, name, file):
         checked_text(name)
         entry = self.skills.get(name)

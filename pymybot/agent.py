@@ -269,6 +269,11 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         """Read one markdown file from an operator-provided reference skill."""
         return await ctx.deps.dispatch("read_skill", {"name": name, "file": file})
 
+    async def create_skill(ctx: RunContext[AgentSession], name: str, description: str, content: str) -> dict:
+        """Create a reusable skill after host approval; content is Markdown body without frontmatter."""
+        return await ctx.deps.dispatch("create_skill", {
+            "name": name, "description": description, "content": content})
+
     async def list_files(ctx: RunContext[AgentSession], path: str = ".") -> dict:
         """List one workspace directory, without recursion."""
         return await ctx.deps.dispatch("list_files", {"path": path})
@@ -321,13 +326,16 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         if web_search_enabled:
             functions.append(web_search)
     guide = []
-    if skills is not None and skills.enabled:
-        functions.extend((list_skills, read_skill))
-        index = skills.index()["skills"]
-        guide.append("Operator-provided reference skills (trusted, curated documentation):")
-        guide.extend(f"- {skill['name']}: {skill['description']}" for skill in index)
-        guide.append("Consult them with read_skill(name, file) before writing or diagnosing")
-        guide.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
+    if skills is not None and skills.root is not None:
+        functions.extend((list_skills, read_skill, create_skill))
+        if skills.enabled:
+            index = skills.index()["skills"]
+            guide.append("Operator-provided reference skills (trusted, curated documentation):")
+            guide.extend(f"- {skill['name']}: {skill['description']}" for skill in index)
+            guide.append("Consult them with read_skill(name, file) before writing or diagnosing")
+            guide.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
+        guide.append("Create reusable skills with create_skill(name, description, content) after approval; "
+                     "content is the Markdown body without frontmatter. New skills are immediately readable.")
     guide.append(f"Runtime gates: workspace={'enabled' if workspace else 'disabled'}, "
                  f"shell={'enabled' if enable_shell else 'disabled'}.")
     if enable_shell:
@@ -701,7 +709,8 @@ class AgentSession:
         needs_approval = ((name in IO_TOOLS and not self.config.allow_actions)
                           or (name in FILE_WRITE_TOOLS and not self.config.allow_file_writes)
                           or (name in WEB_TOOLS and not self.config.allow_web)
-                          or (name == "shell" and not self.config.allow_shell))
+                          or (name == "shell" and not self.config.allow_shell)
+                          or name == "create_skill")
         if needs_approval:
             approved = self.confirm is not None and await self.confirm(name, arguments)
             self._check()
@@ -921,7 +930,8 @@ async def confirm_console(name, arguments, stop):
         return answer is not None and answer.strip().lower() in {"y", "yes"}
     # Never approve hidden/truncated arguments. repr neutralizes terminal controls.
     description = repr(dumps(arguments))
-    if len(description) > 2000:
+    limit = 512 * 1024 if name == "create_skill" else 2000
+    if len(description) > limit:
         print("Approval denied: arguments too long to display completely; reduce the request.", file=sys.stderr)
         return False
     if name.startswith("mcp:"):
@@ -930,6 +940,8 @@ async def confirm_console(name, arguments, stop):
     elif name == "shell":
         warning = ("Host shell runs inside the configured sandbox; a workspace jail alone is not "
                    "an OS boundary, and hardware access is not limited by --allow-hardware.")
+    elif name == "create_skill":
+        warning = "This creates trusted reference instructions that will influence later model requests."
     elif name in FILE_WRITE_TOOLS:
         warning = "This changes workspace files, potentially including executable scripts or drivers."
     else:

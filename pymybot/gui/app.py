@@ -1308,9 +1308,9 @@ class App(QMainWindow):
         except (TypeError, ValueError):
             arguments = repr(params.get("arguments"))
         is_prompt = tool == "prompt:update_prompt"
-        # Prompt diffs can exceed the ordinary small-tool bound. Never truncate
-        # approval content; an oversized request is denied instead.
-        limit = 2 * 1024 * 1024 if is_prompt else MAX_DIALOG_ARGS
+        # Prompt diffs and skill documents can exceed the ordinary small-tool
+        # bound. Never truncate approval content; oversized requests are denied.
+        limit = 2 * 1024 * 1024 if is_prompt else (512 * 1024 if tool == "create_skill" else MAX_DIALOG_ARGS)
         if len(arguments) > limit:
             self._message("拒绝：参数过长", f"工具 {tool} 的参数超过 {limit} 字符，无法完整审阅，已拒绝。")
             self._chat_line(f"{tool} 已拒绝（参数过长）", "toolerr")

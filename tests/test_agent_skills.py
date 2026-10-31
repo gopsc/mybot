@@ -50,6 +50,33 @@ def test_index_and_read(tmp_path):
     assert library.read("demo-skill", "references/a.md") == "Reference A"
 
 
+def test_create_skill_refreshes_empty_library(tmp_path):
+    root = tmp_path / "skills"
+    root.mkdir()
+    library = SkillsLibrary(root)
+    assert not library.enabled
+    created = library.create("relay-guide", "Operate relays safely.", "# Relay\n\nUse the approved script.")
+    assert created == {"name": "relay-guide", "file": "SKILL.md",
+                       "description": "Operate relays safely."}
+    assert library.enabled
+    assert library.index()["skills"][0]["name"] == "relay-guide"
+    content = library.read("relay-guide", "SKILL.md")
+    assert "name: relay-guide" in content and "# Relay" in content
+    with pytest.raises(SecurityError, match="already exists"):
+        library.create("relay-guide", "Duplicate.", "Body")
+
+
+@pytest.mark.parametrize("name, description, content", [
+    ("Bad Name", "Description.", "Body"),
+    ("demo-skill", "two\nlines", "Body"),
+    ("demo-skill", "Description.", "   "),
+])
+def test_create_skill_rejects_invalid_documents(tmp_path, name, description, content):
+    library = SkillsLibrary(make_root(tmp_path))
+    with pytest.raises(SecurityError):
+        library.create(name, description, content)
+
+
 def test_frontmatter_rejects_name_mismatch(tmp_path):
     bad = "---\nname: other-skill\ndescription: x.\n---\n"
     with pytest.raises(SecurityError, match="must match the directory"):
@@ -180,6 +207,32 @@ def test_executor_skills_disabled(tmp_path):
     assert read["ok"] is False and read["state"] == "not_executed"
 
 
+def test_executor_creates_skill_in_empty_root(tmp_path):
+    root = tmp_path / "skills"
+    root.mkdir()
+    robot = tmp_path / "robot.sql"
+    robot.write_text(SQL, encoding="utf-8")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+
+    async def scenario():
+        executor = RobotExecutor(robot, module_paths=[ROOT / "modules"], scripts_dir=scripts,
+                                 skills=SkillsLibrary(root))
+        try:
+            created = await executor.call("create_skill", {
+                "name": "new-skill", "description": "Created by the agent.", "content": "# New\n\nBody."})
+            read = await executor.call("read_skill", {"name": "new-skill"})
+            listed = await executor.call("list_skills", {})
+        finally:
+            await executor.close()
+        return created, read, listed
+
+    created, read, listed = asyncio.run(scenario())
+    assert created["ok"] is True and created["executed"] is True
+    assert read["ok"] is True and "# New" in read["data"]["content"]
+    assert [item["name"] for item in listed["data"]["skills"]] == ["new-skill"]
+
+
 def test_real_repository_skill_loads():
     library = SkillsLibrary(ROOT / "skills")
     assert "pymybot-scripting" in library.skills
@@ -218,5 +271,38 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "Operator-provided reference skills" in instructions
     assert "Operator-provided reference skills" not in without
     base_tools = ["list_hardware", "list_action_scripts", "query_sql", "run_action_script", "read_prompt", "update_prompt"]
-    assert sorted(agent._function_toolset.tools) == sorted(base_tools + ["list_skills", "read_skill"])
+    assert sorted(agent._function_toolset.tools) == sorted(base_tools + ["list_skills", "read_skill", "create_skill"])
     assert sorted(plain._function_toolset.tools) == sorted(base_tools)
+
+
+def test_create_skill_requires_host_approval(tmp_path):
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai.models.test import TestModel
+
+    from pymybot.agent import AgentSession
+
+    root = tmp_path / "skills"
+    root.mkdir()
+    library = SkillsLibrary(root)
+
+    async def scenario():
+        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=ROOT / "scripts", skills=library)
+
+        async def confirm(name, _arguments):
+            return name == "create_skill" and _arguments["name"] == "approved-skill"
+
+        session = AgentSession(executor, TestModel(custom_output_text="done"), skills=library, confirm=confirm)
+        try:
+            denied = await session.dispatch("create_skill", {
+                "name": "denied-skill", "description": "Denied.", "content": "Body"})
+            approved = await session.dispatch("create_skill", {
+                "name": "approved-skill", "description": "Approved.", "content": "Body"})
+        finally:
+            await session.close()
+        return denied, approved
+
+    denied, approved = asyncio.run(scenario())
+    assert denied["ok"] is False and denied["state"] == "not_executed"
+    assert approved["ok"] is True and approved["executed"] is True
+    assert not (root / "denied-skill").exists()
+    assert (root / "approved-skill" / "SKILL.md").is_file()

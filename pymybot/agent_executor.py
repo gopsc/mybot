@@ -47,6 +47,7 @@ _TOOLS = {
     "capture_image": ({"name"}, {"name"}),
     "list_skills": (set(), set()),
     "read_skill": ({"name"}, {"name", "file"}),
+    "create_skill": ({"name", "description", "content"}, {"name", "description", "content"}),
     **WORKSPACE_TOOLS,
 }
 EXECUTION_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
@@ -625,6 +626,9 @@ class RobotExecutor:
             checked_text(arguments["name"])
             if "file" in arguments:
                 checked_text(arguments["file"])
+        elif name == "create_skill":
+            for field in ("name", "description", "content"):
+                checked_text(arguments[field])
 
     def _preflight_io(self, name, arguments):
         # Host approval belongs to AgentSession. This flag is passed to Robot,
@@ -700,15 +704,20 @@ class RobotExecutor:
             elif name == "query_sql":
                 data = {"output": self._robot.query_sql(arguments["sql"])}
             elif name == "list_skills":
-                if self._skills is None or not self._skills.enabled:
+                if self._skills is None or self._skills.root is None:
                     raise SecurityError("Skills are not configured")
                 data = self._skills.index()
             elif name == "read_skill":
-                if self._skills is None or not self._skills.enabled:
+                if self._skills is None or self._skills.root is None:
                     raise SecurityError("Skills are not configured")
                 file = arguments.get("file", "SKILL.md")
                 data = {"name": arguments["name"], "file": file,
                         "content": self._skills.read(arguments["name"], file)}
+            elif name == "create_skill":
+                if self._skills is None or self._skills.root is None:
+                    raise SecurityError("Skills are not configured")
+                data = self._skills.create(arguments["name"], arguments["description"],
+                                           arguments["content"], started=started)
             elif name in WORKSPACE_TOOLS:
                 if self._workspace is None:
                     raise SecurityError("Workspace tools are not configured")
