@@ -1,9 +1,10 @@
 # Documentation index
 
-[中文 README](../README.md) · [English README](README.en.md)
+[中文 README](../README.md) · [中文使用指南](Introduce.md) · [English README](README.en.md)
 
 | Document | Read it when you want to… |
 | --- | --- |
+| [使用指南 (Chinese)](Introduce.md) | install, run a first action, and use the GUI, agent and MCP entries |
 | [Architecture](architecture.md) | understand the layers, runtime flow and package map |
 | [CLI reference](cli.md) | run commands, parse JSON, use `serve` |
 | [MCP](mcp.md) | expose pymybot to MCP clients and give the agent external MCP tools |

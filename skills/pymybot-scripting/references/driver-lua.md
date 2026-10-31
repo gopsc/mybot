@@ -26,7 +26,7 @@ Source: 驱动契约与信任边界的权威是 [docs/architecture.md](../../../
   **Daemon chunk 仍只加载 Lua 驱动**，按根顺序选中 Python 时静态检查报
   `Lua daemon requires a Lua driver, not Python: <驱动>`。
 
-可运行的 Python + SQL + MT 回环示例见 [README](../../../README.md#写一个驱动)。
+可运行的 Python + SQL + MT 回环示例见 [使用指南：写一个驱动](../../../docs/Introduce.md#写一个驱动)。
 
 ## TCP 的 MT 接口
 

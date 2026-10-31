@@ -3,7 +3,7 @@
 **A three-layer robot controller — structure SQL, Python/Lua drivers and MT action
 scripts — with one backend for the GUI, CLI, AI agent and MCP.**
 
-[中文 README](../README.md) · [Documentation](README.md) · [Roadmap](roadmap.md) · [Security](../.github/SECURITY.md)
+[中文 README](../README.md) · [中文使用指南](Introduce.md) · [Documentation](README.md) · [Roadmap](roadmap.md) · [Security](../.github/SECURITY.md)
 
 ![pymybot GUI](screenshots/gui.png)
 
