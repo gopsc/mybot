@@ -52,12 +52,15 @@ TCP declares only name/host/port; activation validates without connecting, and M
 explicitly controls connect/close, timeout/num_recv and hexadecimal/UTF-8 I/O.
 Each TCP row opens its own stream; no endpoint-level connection sharing or replay.
 HAL-backed buses expose the existing HAL handles to Lua device drivers rather
-than creating a separate bus backend. I2C/SPI/UART declare `LUA_VIRTUAL_DRIVER`:
-`proto=virt` or a `virt-*` path explicitly selects their retained Lua virtual
-implementation with physical access disabled, never as an error fallback.
-Other Python drivers do not automatically gain Lua virtual models. Existing
-Daemon chunks remain Lua-only; static validation rejects a Python-selected
-`driver` or `devices` entry rather than silently selecting a different source.
+than creating a separate bus backend. Python I2C/SPI/UART drivers open buses
+with `proto=virt` or a `virt-*` path as in-memory HAL handles with physical
+access disabled, including legacy device-looking paths under explicit
+`proto=virt`; they never fall back to physical hardware.
+Lua device drivers retain their existing `virtbus` models and per-runtime
+isolation. Other Python drivers do not automatically gain Lua virtual models.
+Existing Daemon chunks remain Lua-only; static validation rejects a
+Python-selected `driver` or `devices` entry rather than silently selecting a
+different source.
 
 ## Runtime flow
 

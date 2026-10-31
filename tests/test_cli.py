@@ -552,7 +552,15 @@ def test_invalid_vars_are_usage_errors(workspace, capsys, binding):
 
 def test_virtual_bus_does_not_reach_physical_hal(workspace, monkeypatch, capsys):
     (workspace / "robot.sql").write_text(PHYSICAL_SQL.replace("/dev/i2c-99", "virt-cli"))
-    monkeypatch.setattr(HALManager, "_i2c_open", forbid)
+    original = HALManager._bus_open
+
+    def checked(self, kind, path, baud=None, virtual=False):
+        assert kind == "i2c" and path == "virt-cli"
+        handle = original(self, kind, path, baud, virtual)
+        assert self._handles[handle].backend == "virtual"
+        return handle
+
+    monkeypatch.setattr(HALManager, "_bus_open", checked)
     code, result, _ = invoke(capsys, "sample", "--robot", workspace / "robot.sql", "--name", "bus")
     assert code == 0 and result["samples"][0]["result"] == "OK"
 

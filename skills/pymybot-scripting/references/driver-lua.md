@@ -21,8 +21,9 @@ Source: 驱动契约与信任边界的权威是 [docs/architecture.md](../../../
   `check` 只编译源码，不执行导入、构造器或生命周期方法，入口是否齐全在激活时才检查。
   权限边界与 `--allow-hardware` 的作用范围见 docs/security.md 的 Native driver trust 一节。
 - 内置 I2C/SPI/UART/TCP/HTTP/Camera/Shell 普通表已是 Python，HAL 总线句柄仍与 Lua 器件驱动共享。
-  I2C/SPI/UART 用 `LUA_VIRTUAL_DRIVER` 指向保留的 Lua 虚拟实现：`proto=virt` 或 `virt-*`
-  路径显式选中并禁止物理访问，不是 Python 失败后的兜底；其他原生模块没有自动虚拟模型。
+  Python I2C/SPI/UART 将显式 `proto=virt` 或 `virt-*` 路径的总线打开为纯内存 HAL 句柄并禁止
+  物理访问；既有 `proto=virt` 搭配 `/dev/...` 路径写法仍保持虚拟语义，绝不回落真机。
+  Lua 器件驱动继续复用现有 `virtbus` 模型和逐运行时隔离；其他原生模块没有自动虚拟模型。
   **Daemon chunk 仍只加载 Lua 驱动**，按根顺序选中 Python 时静态检查报
   `Lua daemon requires a Lua driver, not Python: <驱动>`。
 

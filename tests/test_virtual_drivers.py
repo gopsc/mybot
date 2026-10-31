@@ -7,6 +7,7 @@ from pymybot.errors import ControllerError
 from pymybot.hal import HALManager
 from pymybot.hardware import Registry
 from pymybot.robot import Robot
+from pymybot.native import PythonState
 from pymybot.runtime import LuaState
 
 PROTOCOLS = ["I2C", "SPI", "UART"]
@@ -37,9 +38,18 @@ def model_expression(protocol, path="virt-synthetic"):
 
 @pytest.fixture(autouse=True)
 def no_hardware(monkeypatch):
-    def forbidden(*args, **kwargs):
-        pytest.fail("Synthetic protocol tests must never reach physical HAL")
-    monkeypatch.setattr(HALManager, "call", forbidden)
+    original = HALManager.call
+
+    def checked(hal, operation, *args, **kwargs):
+        if operation in {"i2c_open", "spi_open", "uart_open"}:
+            path = args[0] if args else None
+            virtual = bool(args and args[-1] is True)
+            virtual |= isinstance(path, str) and path.startswith("virt-") or path == "loop://"
+            if not virtual:
+                pytest.fail("Synthetic protocol tests must never reach physical HAL")
+        return original(hal, operation, *args, **kwargs)
+
+    monkeypatch.setattr(HALManager, "call", checked)
 
 
 @pytest.fixture
@@ -62,6 +72,10 @@ def closed_states(monkeypatch):
 @pytest.mark.parametrize("protocol", PROTOCOLS)
 def test_synthetic_direct_actions_and_instance_isolation(protocol, synthetic_modules, closed_states):
     with Robot(direct_sql(protocol), module_paths=synthetic_modules) as robot:
+        bus_runtime = robot.registry["bus"].runtime
+        assert isinstance(bus_runtime, PythonState) and bus_runtime._virtual is None
+        bus_fd = robot.registry["bus"].read()["fd"]
+        assert robot.hal._handles[bus_fd].backend == "virtual"
         outputs = robot.run("@Action\na.read b.read;\n1 1;\n@")
         assert outputs == [dict(result="OK", COUNT=40961, VALUE=10240.25, TAG=tag,
                                 WORD="synthetic", CRC_OK=1) for tag in (11, 29)]
@@ -76,8 +90,20 @@ def test_synthetic_direct_actions_and_instance_isolation(protocol, synthetic_mod
             assert state.globals.call(state.lua.table())["result"] == "ERR"
     assert robot.state == "Inactive"
     assert all(variable.runtime is None for variable in robot.registry.values())
-    assert len(closed_states) == 3 and all(count == 0 for count, _ in closed_states)
+    assert len(closed_states) == 2 and all(count == 0 for count, _ in closed_states)
     assert not robot.hal._handles and not robot.hal._buses
+
+
+@pytest.mark.parametrize("protocol,path", [
+    ("I2C", "/dev/i2c-1"),
+    ("SPI", "/dev/spidev0.0"),
+    ("UART", "/dev/ttyUSB0"),
+])
+def test_virtual_bus_proto_uses_virtual_backend_for_legacy_path(protocol, path, synthetic_modules):
+    sql = direct_sql(protocol).replace("'virt-synthetic'", f"'{path}'", 1)
+    with Robot(sql, module_paths=synthetic_modules, allow_hardware=True) as robot:
+        fd = robot.registry["bus"].read()["fd"]
+        assert robot.hal._handles[fd].backend == "virtual"
 
 
 @pytest.mark.parametrize("protocol,fault,message", [
@@ -103,7 +129,7 @@ def test_synthetic_direct_errors_recover_and_remain_isolated(protocol, fault, me
             fd = robot.registry["bus"].read()["fd"]
             state.lua.execute(f"assert(uart_flush({fd}) == 0)")
         assert robot.run("@Action\na.read;\n1;\n@")[0]["TAG"] == 11
-    assert len(closed_states) == 3 and all(count == 0 for count, _ in closed_states)
+    assert len(closed_states) == 2 and all(count == 0 for count, _ in closed_states)
 
 
 @pytest.mark.parametrize("reply,message", [

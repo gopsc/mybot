@@ -95,8 +95,10 @@ class DriverRuntime:
         try:
             self._check()
             if not self.allow_hardware:
-                physical = operation in {"i2c_open", "spi_open"}
-                physical |= operation == "uart_open" and (not values or values[0] != "loop://")
+                virtual_bus = bool(values and (values[-1] is True or isinstance(values[0], str)
+                                   and re.fullmatch(r"virt-\w[\w_./-]*", values[0])))
+                physical = operation in {"i2c_open", "spi_open"} and not virtual_bus
+                physical |= operation == "uart_open" and (not values or values[0] != "loop://" and not virtual_bus)
                 if operation == "camera_capture":
                     options = values[1] if len(values) > 1 and isinstance(values[1], dict) else {}
                     physical |= not bool(options.get("src"))

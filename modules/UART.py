@@ -1,8 +1,5 @@
 import math
 
-LUA_VIRTUAL_DRIVER = "UART.lua"
-
-
 def _finite(value):
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return None
@@ -36,13 +33,12 @@ class Driver:
         path = data.get("path")
         if path is None:
             return {"result": "ERR", "message": "Invalid Arguments: path"}
-        if data.get("proto") == "virt" or isinstance(path, str) and path.startswith("virt-"):
-            return {"result": "ERR", "message": "Virtual UART buses require the Lua driver"}
         baud = _finite(data.get("baud"))
         if baud is None or baud <= 0:
             return {"result": "ERR", "message": "Invalid Arguments: baud (positive number)"}
         self._close()
-        opened = self.context.call("uart_open", path, baud)
+        opened = (self.context.call("uart_open", path, baud, True) if data.get("proto") == "virt"
+                  else self.context.call("uart_open", path, baud))
         if isinstance(opened, bool) or not isinstance(opened, int) or opened < 0:
             return {"result": "ERR", "message": "Failed to open UART file"}
         self.fd = opened

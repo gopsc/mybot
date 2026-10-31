@@ -1,6 +1,3 @@
-LUA_VIRTUAL_DRIVER = "I2C.lua"
-
-
 class Driver:
     def __init__(self, context):
         self.context = context
@@ -18,10 +15,9 @@ class Driver:
         path = data.get("path")
         if path is None:
             return {"result": "ERR", "message": "No I2C path"}
-        if data.get("proto") == "virt" or isinstance(path, str) and path.startswith("virt-"):
-            return {"result": "ERR", "message": "Virtual I2C buses require the Lua driver"}
         self._close()
-        opened = self.context.call("i2c_open", path)
+        opened = (self.context.call("i2c_open", path, True) if data.get("proto") == "virt"
+                  else self.context.call("i2c_open", path))
         if isinstance(opened, bool) or not isinstance(opened, int) or opened < 0:
             return {"result": "ERR", "message": "Failed to open I2C file"}
         self.fd = opened

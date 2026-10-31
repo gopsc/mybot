@@ -3,7 +3,6 @@ from __future__ import annotations
 import builtins
 import math
 from pathlib import Path
-import re
 import sys
 from types import ModuleType
 from uuid import uuid4
@@ -103,12 +102,6 @@ class PythonState(DriverRuntime):
             raise DriverError(f"Python function '{name}' is not available")
         if budget is None:
             budget = Budget(timeout=30) if name == "destroy" else Budget(self.stop_event, 30)
-        virtual_driver = getattr(self.module, "LUA_VIRTUAL_DRIVER", None)
-        if name == "build" and self._virtual is None and virtual_driver and data and (
-                data.get("proto") == "virt" or re.fullmatch(r"virt-\w[\w_./-]*", str(data.get("path", "")))):
-            from .runtime import LuaState
-            self._virtual = LuaState(self.module_paths, self.hal, self.stop_event, allow_hardware=False)
-            self._virtual.load(self._resolve(virtual_driver))
         if self._virtual is not None:
             return self._virtual.call(name, data, budget=budget)
         previous = self.budget

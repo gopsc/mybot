@@ -196,7 +196,7 @@ SQL 普通表名会选择 `modules/<表名>.py` 或 `.lua`（`Alias` / `Vars` / 
 - 必需方法：`build(data)`、`call(data)`；可选 `read(data)`（缺省回退到 `call`）和 `destroy(data)`。
 - `data` 是结构元数据、动作参数和触发结果组成的字典；返回非空字典。`result` 可以省略，或用 `"OK"` 表示成功、用 `"ERR"` + `message` 报错。
 - `context.call(operation, *args)` 调用已有的 HAL 操作，权限检查、句柄归属和取消检查都还在；`context.check()` 检查协作预算。`check` 只编译 Python 源码，不执行模块、构造器或驱动方法。
-- 内置的 I2C/SPI/UART/HTTP/Camera/Shell 普通表已经迁到 Python；HAL 总线句柄仍然可以给 Lua 器件驱动用。I2C/SPI/UART 的 `proto=virt` / `virt-*` 会显式使用保留的 Lua 虚拟实现，不会悄悄回落到真实硬件。既有 Daemon chunk 仍只支持 Lua；如果选中 Python 驱动，静态检查会直接拒绝。
+- 内置的 I2C/SPI/UART/HTTP/Camera/Shell 普通表已经迁到 Python；HAL 总线句柄仍然可以给 Lua 器件驱动用。Python I2C/SPI/UART 会把显式 `proto=virt` 或 `virt-*` 路径的总线打开为纯内存 HAL 句柄，禁止物理访问；既有的 `proto=virt` 搭配 `/dev/...` 路径写法仍保持虚拟语义，不会悄悄回落到真实硬件。Lua 器件驱动继续复用现有 `virtbus` 模型与实例隔离。既有 Daemon chunk 仍只支持 Lua；如果选中 Python 驱动，静态检查会直接拒绝。
 
 仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件、模型或凭据。结构 [`robots/uart-loopback.sql`](../robots/uart-loopback.sql)：
 

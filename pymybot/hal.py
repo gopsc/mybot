@@ -93,7 +93,7 @@ class HALManager:
              230400, 460800, 500000, 921600, 1000000}
     _OPERATIONS = {
         "i2c_open", "i2c_transfer", "spi_open", "spi_setup", "spi_transfer",
-        "uart_open", "uart_write", "uart_read", "uart_flush",
+        "uart_open", "uart_write", "uart_read", "uart_flush", "virt_attach",
         "tcp_open", "tcp_write", "tcp_read",
         "http_open", "http_request",
         "shell_open", "shell_run",
@@ -223,10 +223,25 @@ class HALManager:
                 context.cancelled = True
             raise
 
+    def _release_virtual_owner(self, owner, resource=None):
+        """Drop one runtime's models and queued input without closing a borrowed bus."""
+        if resource is not None:
+            resources = [resource]
+        else:
+            with self._lock:
+                resources = list({id(item): item for item in self._handles.values()}.values())
+        for item in resources:
+            if item.backend != "virtual":
+                continue
+            with item.lock:
+                item.state["models"].pop(owner, None)
+                item.state["rings"].pop(owner, None)
+
     def release_owner(self, owner):
-        """Close handles opened under one owner; shared buses wait for their last ref."""
+        """Close owned handles and detach models borrowed from other runtimes."""
         if owner is None:
             return
+        self._release_virtual_owner(owner)
         with self._lock:
             handles = [handle for handle, held in self._owners.items() if held is owner]
         for handle in handles:
@@ -234,6 +249,27 @@ class HALManager:
                 self._close_handle(handle)
             except Exception as exc:
                 self._errors.message = f"release_owner: {exc}"
+
+    def _current_owner(self):
+        context = getattr(self._calls, "current", None)
+        return context.owner if context is not None else None
+
+    def _virtual_model(self, resource, identity):
+        models = resource.state["models"].get(self._current_owner(), {})
+        return models.get(identity)
+
+    def _virt_attach(self, handle, kind, identity, model):
+        resource = self._get(handle, kind)
+        if resource.backend != "virtual" or not isinstance(model, dict):
+            raise ValueError("virtual model requires a matching virtual bus and callback table")
+        if kind == "i2c":
+            identity = self._integer(identity, 0, 127)
+        elif not isinstance(identity, str) or identity != resource.key[2]:
+            raise ValueError("SPI/UART model identity must match the virtual bus path")
+        with resource.lock:
+            self._live(resource)
+            resource.state["models"].setdefault(self._current_owner(), {})[identity] = model
+        return 0
 
     def _get(self, handle, kind=None):
         handle = self._integer(handle, 0, (1 << 53) - 1)
@@ -248,7 +284,7 @@ class HALManager:
         if resource.closed:
             raise ValueError("hardware handle is closed")
 
-    def _bus_open(self, kind, path, baud=None):
+    def _bus_open(self, kind, path, baud=None, virtual=False):
         if not isinstance(path, str):
             raise ValueError("device path must be text")
         cs = 0
@@ -256,11 +292,14 @@ class HALManager:
             baud = self._integer(baud, 1)
             if baud not in self.BAUDS:
                 raise ValueError("unsupported UART baud")
+            virtual = virtual or re.fullmatch(r"virt-\w[\w_./-]*", path) is not None
             if re.fullmatch(r"(?:\\\\\.\\)?COM[1-9][0-9]*", path, re.I):
                 path = path.upper()
-            elif path != "loop://" and not re.fullmatch(r"/dev/(?:tty[A-Za-z0-9._-]+|cu\.[A-Za-z0-9._-]+|serial[0-9]+)", path):
-                raise ValueError("UART requires COMn, a serial device, or loop://")
-            backend, endpoint = "serial", path
+            elif path != "loop://" and not virtual and not re.fullmatch(r"/dev/(?:tty[A-Za-z0-9._-]+|cu\.[A-Za-z0-9._-]+|serial[0-9]+)", path):
+                raise ValueError("UART requires COMn, a serial device, loop://, or a virt-* path")
+            backend, endpoint = ("virtual", path) if virtual else ("serial", path)
+        elif virtual or re.fullmatch(r"virt-\w[\w_./-]*", path):
+            backend, endpoint = "virtual", path
         elif path.startswith("ftdi://"):
             endpoint, cs = self._ftdi_path(path, kind == "spi")
             backend = "ftdi"
@@ -286,7 +325,9 @@ class HALManager:
                 return self._register(r, cs=cs, mode=0, bits=8, speed=1000000)
             device = None
             try:
-                if backend == "serial":
+                if backend == "virtual":
+                    pass  # Models and streams are attached by each runtime owner.
+                elif backend == "serial":
                     serial = importlib.import_module("serial")
                     device = serial.serial_for_url(path, baudrate=baud, timeout=0,
                                                    write_timeout=1, bytesize=8,
@@ -305,7 +346,7 @@ class HALManager:
                     bus, chip = path.removeprefix("/dev/spidev").split(".")
                     device.open(int(bus), int(chip))
                 r = _Resource(kind, key, backend, device, baud=baud, cs=cs,
-                              mode=0, bits=8, speed=1000000)
+                              mode=0, bits=8, speed=1000000, models={}, rings={})
                 self._buses[key] = r
                 return self._register(r, cs=cs, mode=0, bits=8, speed=1000000)
             except Exception:
@@ -316,14 +357,15 @@ class HALManager:
                         pass
                 raise
 
-    def _i2c_open(self, path):
-        return self._bus_open("i2c", path)
+    def _i2c_open(self, path, virtual=False):
+        return self._bus_open("i2c", path, virtual=True) if virtual else self._bus_open("i2c", path)
 
-    def _spi_open(self, path):
-        return self._bus_open("spi", path)
+    def _spi_open(self, path, virtual=False):
+        return self._bus_open("spi", path, virtual=True) if virtual else self._bus_open("spi", path)
 
-    def _uart_open(self, path, baud):
-        return self._bus_open("uart", path, baud)
+    def _uart_open(self, path, baud, virtual=False):
+        return (self._bus_open("uart", path, baud, virtual=True) if virtual
+                else self._bus_open("uart", path, baud))
 
     def _i2c_transfer(self, handle, address, write, read_count):
         address = self._integer(address, 0, 127)
@@ -334,7 +376,20 @@ class HALManager:
         r = self._get(handle, "i2c")
         with r.lock:
             self._live(r)
-            if r.backend == "ftdi":
+            if r.backend == "virtual":
+                model = self._virtual_model(r, address)
+                if model is None:
+                    raise IOError("virtual I2C device is not attached")
+                if write and model.get("write") is not None:
+                    if not callable(model["write"]) or model["write"](list(write)) is False:
+                        raise IOError("virtual I2C write NACK")
+                if n:
+                    reader = model.get("read")
+                    reply = [0] * n if reader is None else reader(n)
+                    out = self._bytes(reply, n, n)
+                else:
+                    out = b""
+            elif r.backend == "ftdi":
                 port = r.device.get_port(address)
                 if write and n:
                     out = port.exchange(write, n)  # repeated START, one locked transaction
@@ -362,7 +417,9 @@ class HALManager:
         with r.lock:
             self._live(r)
             config = self._settings[int(handle)]
-            if r.backend == "ftdi":
+            if r.backend == "virtual":
+                pass  # Controller setup succeeds without an attached SPI model.
+            elif r.backend == "ftdi":
                 if bits != 8:
                     raise ValueError("pyftdi SPI supports 8-bit words only")
                 port = r.device.get_port(cs=config["cs"], freq=speed, mode=mode)
@@ -380,7 +437,17 @@ class HALManager:
         with r.lock:
             self._live(r)
             config = self._settings[int(handle)]
-            if r.backend == "ftdi":
+            if r.backend == "virtual":
+                model = self._virtual_model(r, r.key[2])
+                if model is None:
+                    raise IOError("virtual SPI device is not attached")
+                transfer = model.get("xfer")
+                reply = [0] * len(data) if transfer is None else transfer(list(data))
+                if not isinstance(reply, (list, tuple)):
+                    raise IOError("virtual SPI transfer failed")
+                normalized = list(reply[:len(data)]) + [0] * max(0, len(data) - len(reply))
+                out = self._bytes(normalized, len(data), len(data))
+            elif r.backend == "ftdi":
                 port = r.device.get_port(cs=config["cs"], freq=config["speed"], mode=config["mode"])
                 port.set_frequency(config["speed"])
                 port.set_mode(config["mode"])
@@ -405,6 +472,17 @@ class HALManager:
         r = self._get(handle, "uart")
         with r.lock:
             self._live(r)
+            if r.backend == "virtual":
+                model = self._virtual_model(r, r.key[2])
+                if model is None or model.get("on_write") is None:
+                    return len(data)
+                reply = model["on_write"](list(data))
+                if reply is False:
+                    raise IOError("virtual UART write failed")
+                if reply is not None:
+                    r.state["rings"].setdefault(self._current_owner(), bytearray()).extend(
+                        self._bytes(reply, self.UART_MAX_BYTES))
+                return len(data)
             n = r.device.write(data)
             if n != len(data):
                 raise IOError("short UART write")
@@ -420,6 +498,13 @@ class HALManager:
         out = bytearray()
         with r.lock:
             self._live(r)
+            if r.backend == "virtual":
+                ring = r.state["rings"].get(self._current_owner())
+                if not ring:
+                    return []
+                out = list(ring[:n])
+                del ring[:n]
+                return out
             while True:
                 self._tick_cancel()
                 part = r.device.read(n - len(out))  # timeout=0: portable nonblocking read
@@ -435,7 +520,10 @@ class HALManager:
         r = self._get(handle, "uart")
         with r.lock:
             self._live(r)
-            r.device.reset_input_buffer()
+            if r.backend == "virtual":
+                r.state["rings"].pop(self._current_owner(), None)
+            else:
+                r.device.reset_input_buffer()
         return 0
 
     @classmethod
@@ -1011,6 +1099,11 @@ class HALManager:
     def _close_handle(self, handle):
         with self._lock:
             r = self._get(handle)
+            owner = self._current_owner()
+            if (r.backend == "virtual" and owner is not None
+                    and self._owners.get(int(handle)) is not owner):
+                self._release_virtual_owner(owner, r)
+                return 0
             del self._handles[int(handle)]
             self._settings.pop(int(handle), None)
             self._owners.pop(int(handle), None)
@@ -1021,6 +1114,9 @@ class HALManager:
                 self._buses.pop(r.key, None)
             with r.lock:
                 r.closed = True
+                if r.backend == "virtual":
+                    r.state["models"].clear()
+                    r.state["rings"].clear()
                 if r.device is not None:
                     if r.backend == "ftdi":
                         r.device.terminate()

@@ -1,8 +1,5 @@
 import math
 
-LUA_VIRTUAL_DRIVER = "SPI.lua"
-
-
 def _finite(value):
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return None
@@ -34,8 +31,6 @@ class Driver:
         path = data.get("path")
         if path is None:
             return {"result": "ERR", "message": "Invalid Arguments: path"}
-        if data.get("proto") == "virt" or isinstance(path, str) and path.startswith("virt-"):
-            return {"result": "ERR", "message": "Virtual SPI buses require the Lua driver"}
         mode = _finite(data.get("spi_mode"))
         if mode is None or not 0 <= mode <= 3 or not mode.is_integer():
             return {"result": "ERR", "message": "Invalid Arguments: spi_mode (0~3)"}
@@ -49,7 +44,8 @@ class Driver:
         if delay is None or delay < 0:
             return {"result": "ERR", "message": "Invalid Arguments: delay (>=0)"}
         self._close()
-        opened = self.context.call("spi_open", path)
+        opened = (self.context.call("spi_open", path, True) if data.get("proto") == "virt"
+                  else self.context.call("spi_open", path))
         if isinstance(opened, bool) or not isinstance(opened, int) or opened < 0:
             return {"result": "ERR", "message": "Failed to open SPI file"}
         self.fd = opened
