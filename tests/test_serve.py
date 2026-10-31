@@ -344,6 +344,18 @@ def test_eof_without_newline_processes_final_line(workspace, client_factory):
     assert "Fatal Python error" not in "".join(client.stderr)
 
 
+def test_role_management_over_json_rpc(workspace, client_factory, monkeypatch):
+    monkeypatch.setenv("MYBOT_HOME", str(workspace / "home"))
+    client = client_factory(workspace)
+    created = client.call("roles.create", {"name": "tech", "description": "Robot technician"})
+    assert created["name"] == "tech" and created["history_turns"] == 0
+    listed = client.call("roles.list")
+    assert [item["name"] for item in listed["roles"]] == ["tech"]
+    assert client.call("roles.show", {"name": "tech"})["prompts_dir"].endswith("prompts")
+    assert client.call("roles.clear_history", {"name": "tech"})["history_turns"] == 0
+    assert client.close() == 0
+
+
 class Out:
     def __init__(self):
         self.lines = queue.Queue()

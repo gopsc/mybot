@@ -457,6 +457,26 @@ def attach_client(app):
     return client
 
 
+def test_role_selector_binds_agent_params_and_reset(app_factory, monkeypatch, tmp_path):
+    from pymybot.roles import create_role
+
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "home"))
+    role = create_role("tech")
+    config = GuiConfig(workspace=str(ROOT), robot=str(ROOT / "robots" / "relay-test.sql"),
+                       role=role.name, skills_dir="global-skills", mcp_config="global-mcp.json")
+    gui, app = app_factory(config=config)
+    assert app.role_box.currentData() == "tech"
+    assert app.context_entries["skills_dir"].text() == str(role.skills_dir)
+    assert not app.context_entries["skills_dir"].isEnabled()
+    params = app._agent_params("hello")
+    assert params["role"] == "tech"
+    assert "skillsDir" not in params and "mcpConfig" not in params
+
+    client = attach_client(app)
+    app.new_conversation()
+    assert client.requests[-1] == ("agent.reset", {"clearHistory": True, "role": "tech"})
+
+
 def test_window_builds_with_robot_context(ui):
     gui, app = ui
     assert isinstance(app, gui.QMainWindow)

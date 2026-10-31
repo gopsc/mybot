@@ -9,6 +9,7 @@
 | [CLI reference](cli.md) | run commands, parse JSON, use `serve` |
 | [MCP](mcp.md) | expose pymybot to MCP clients and give the agent external MCP tools |
 | [GUI guide](gui.md) | install, configure and operate the window |
+| [Agent roles](roles.md) | create and load role-owned prompts, skills, MCP and resumable history |
 | [Development](development.md) | set up, test, lint, package and freeze |
 | [Testing](testing.md) | understand the test layers and CI channels |
 | [Release](release.md) | cut a reproducible release |

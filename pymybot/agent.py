@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import dataclass
 import difflib
 import hashlib
+import json
 import math
 import os
 from pathlib import Path
@@ -35,6 +36,7 @@ from .agent_skills import SkillsLibrary, default_skills_root
 from .errors import AgentInterrupted
 from .paths import asset_path
 from .prompts import PromptLibrary, PromptWriteError
+from .roles import read_history, write_history
 from .sandbox import SANDBOX_MODES, describe_backend
 from .security import SecurityError, checked_text, dumps
 from .session_log import SessionLog, create_session_log
@@ -447,8 +449,9 @@ def _bounded_mcp(value, budget=None, depth=0):
 class AgentSession:
     def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(), camera_vars=(),
                  on_event=None, skills=None, workspace=False, enable_shell=False, session_log=None,
-                 mcp_servers=()):
+                 mcp_servers=(), role=None):
         self.executor = executor
+        self.role = role
         self.config = config or AgentConfig()
         self.confirm = confirm
         self.on_event = on_event
@@ -460,7 +463,7 @@ class AgentSession:
         self.prompt_version = None
         try:
             read_operator_prompt(self.config.prompt_file)
-            self.prompts = PromptLibrary()
+            self.prompts = role.prompt_library() if role is not None else PromptLibrary()
             self.prompts.ensure_home()
             self.prompt_snapshot = self.prompts.compose()
         except (SecurityError, OSError) as exc:
@@ -481,11 +484,51 @@ class AgentSession:
         self.context = None
         self.intent = None
         self.turns = []
+        self._load_history()
         self.events = []
         self.deadline = None
         self._asking = False
         self._last_call = None
         self._repeat_count = 0
+
+    def _prune_history(self):
+        # Prune complete turns only: never orphan a tool call from its receipt.
+        while self.turns and (
+                len(self.turns) > self.config.history_turns
+                or sum(len(ModelMessagesTypeAdapter.dump_json(t)) for t in self.turns)
+                > self.config.history_bytes):
+            self.turns.pop(0)
+
+    def _load_history(self):
+        if self.role is None:
+            return
+        try:
+            raw_turns = read_history(self.role.history_file)
+            self.turns = [ModelMessagesTypeAdapter.validate_python(turn) for turn in raw_turns]
+            self._prune_history()
+        except (SecurityError, OSError, ValueError, TypeError) as exc:
+            raise AgentConfigurationError(
+                f"Cannot load role '{self.role.name}' history: {exc}; no model request was sent") from None
+
+    def _save_history(self):
+        if self.role is None:
+            return
+        try:
+            turns = [json.loads(ModelMessagesTypeAdapter.dump_json(turn)) for turn in self.turns]
+            write_history(self.role.history_file, turns)
+        except (SecurityError, OSError, ValueError, TypeError) as exc:
+            raise AgentError(
+                f"Role history could not be saved ({type(exc).__name__}); the completed turn was not rolled back") from None
+
+    def clear_history(self):
+        self.turns = []
+        self.events = []
+        if self.role is not None:
+            try:
+                write_history(self.role.history_file, [])
+            except (OSError, SecurityError) as exc:
+                raise AgentError(f"Cannot clear role history: {exc}") from None
+        self._log("history_clear", role=self.role.name if self.role is not None else None)
 
     async def start(self):
         context = await self.executor.start(deadline=self.deadline)
@@ -799,20 +842,17 @@ class AgentSession:
             result = task.result()
             checked_text(result.output, MAX_TEXT)
             self.turns.append(result.new_messages())
-            # Prune complete turns only: never orphan a tool call from its receipt.
-            while self.turns and (
-                    len(self.turns) > self.config.history_turns
-                    or sum(len(ModelMessagesTypeAdapter.dump_json(t)) for t in self.turns)
-                    > self.config.history_bytes):
-                self.turns.pop(0)
+            self._prune_history()
             usage = {
                 "requests": result.usage.requests, "tool_calls": result.usage.tool_calls,
                 "input_tokens": result.usage.input_tokens, "output_tokens": result.usage.output_tokens}
             self._log("assistant", text=result.output)
             self._log("usage", **usage)
             self._update_stats(started, first_event, self.prompt_snapshot.layer_hashes["99"])
+            self._save_history()
             return {"output": result.output, "usage": usage, "intent": self.intent.as_dict(),
-                    "prompt_version": self.prompt_version}
+                    "prompt_version": self.prompt_version,
+                    "role": self.role.name if self.role is not None else None}
         except BaseException as exc:
             # Do not resume a partially executed turn after cancellation, model
             # failure or a limit exception. No tool/action replay is attempted.
@@ -959,6 +999,10 @@ async def _conversation(session, args, stop, renderer=None):
             break
         if not prompt.strip():
             continue
+        if prompt.strip() == "/clear":
+            session.clear_history()
+            print("Conversation history cleared; hardware remains owned by this session.", file=sys.stderr)
+            continue
         result = await session.ask(prompt)
         streamed = renderer.end_turn() if renderer is not None else False
         last = result["output"]
@@ -976,6 +1020,13 @@ async def run_cli_agent(args, stop):
     failure = result = None
     cleanup_errors = []
     try:
+        try:
+            from .roles import load_role
+            role = load_role(args.role) if getattr(args, "role", None) else None
+        except (OSError, SecurityError) as exc:
+            raise AgentConfigurationError(f"Cannot load role: {exc}; no model request was sent") from None
+        mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
+                      else getattr(args, "mcp_config", None) if role is None else None)
         config = AgentConfig(model=args.model or os.environ.get("MYBOT_MODEL", ""),
                              base_url=args.base_url or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=args.api_key_env, timeout=args.timeout,
@@ -984,7 +1035,7 @@ async def run_cli_agent(args, stop):
                              history_bytes=args.max_history_bytes,
                              allow_actions=args.allow_actions, allow_shell=args.allow_shell,
                              allow_file_writes=args.allow_file_writes,
-                             mcp_config=getattr(args, "mcp_config", None),
+                             mcp_config=mcp_config,
                              allow_mcp_tools=getattr(args, "allow_mcp_tools", False),
                              prompt_file=getattr(args, "prompt_file", None),
                              context_bytes=getattr(args, "context_bytes", DEFAULT_CONTEXT_BYTES),
@@ -1002,10 +1053,11 @@ async def run_cli_agent(args, stop):
                 f"Cannot load MCP configuration: {exc}; no model request was sent") from None
         model, client = create_model(config)
         session_log = create_session_log(enabled=not getattr(args, "no_session_log", False),
-                                         robot=args.robot, model=config.model, mode="cli")
+                                         robot=args.robot, model=config.model, mode="cli",
+                                         role=role.name if role is not None else "")
         try:
-            skills = SkillsLibrary(args.skills_dir or default_skills_root(),
-                                   required=args.skills_dir is not None)
+            skills_dir = role.skills_dir if role is not None else (args.skills_dir or default_skills_root())
+            skills = SkillsLibrary(skills_dir, required=role is not None or args.skills_dir is not None)
         except SecurityError as exc:
             raise AgentConfigurationError(
                 f"Cannot load skills configuration: {exc}; no model request was sent") from None
@@ -1027,7 +1079,7 @@ async def run_cli_agent(args, stop):
                                read_vars=args.read_var, camera_vars=args.camera_var,
                                on_event=renderer, skills=skills, workspace=args.workspace_dir is not None,
                                enable_shell=args.enable_shell, session_log=session_log,
-                               mcp_servers=mcp_servers)
+                               mcp_servers=mcp_servers, role=role)
         result = await _conversation(session, args, stop, renderer)
     except BaseException as exc:
         failure = exc

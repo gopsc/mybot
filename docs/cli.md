@@ -31,6 +31,24 @@ python -m pymybot doctor
 | `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
 | `pymybot prompts list` | List runtime prompt layers, hashes and modification status | No |
 | `pymybot prompts restore [--missing-only \| --all --yes]` | Refill missing defaults, or back up and reset all layers | No |
+| `pymybot roles list/create/show/clear-history` | Manage role-owned prompts, skills, MCP and resumable history | No |
+
+## Agent roles
+
+See [roles.md](roles.md) for the directory format, GUI behavior and history
+semantics. Typical usage:
+
+```sh
+pymybot roles create technician --description "Field technician"
+pymybot roles list
+pymybot agent --role technician --robot robots/relay-test.sql --task "列出硬件"
+pymybot roles clear-history technician --yes
+```
+
+Creation copies the bundled prompt baseline. Optional `--skills-dir` and
+`--mcp-config` on `roles create` import those capabilities into the role. Once
+loaded, `--role` owns these resources and is therefore not combined with the
+agent-level `--skills-dir`/`--mcp-config` overrides.
 
 ## Runtime prompts
 
@@ -185,8 +203,11 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
-| `agent.reset` | — | closes the conversation and releases hardware |
+| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested |
+| `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
+| `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |
+| `roles.clear_history` | `name` | clear an inactive role's resumable history |
 | `cancel` | `id` | cancels a request (`-32800` for the cancelled request) |
 | `shutdown` | — | cleanup and exit |
 
@@ -207,7 +228,8 @@ Agent mode is documented in the README. The important flags are:
 | `--model PROVIDER:MODEL` | `openai`, `openai-chat`, `anthropic` or `deepseek`; defaults to `MYBOT_MODEL`. |
 | `--base-url URL` | Custom OpenAI-compatible endpoint; HTTPS required except loopback. |
 | `--api-key-env NAME` | Environment variable holding the key; never pass the key itself. |
-| `--task TEXT` | One-shot task; without it, start the REPL. |
+| `--task TEXT` | One-shot task; without it, start the REPL. `/clear` explicitly clears the current role history. |
+| `--role NAME` | Load role-owned prompts, skills, MCP and resumable model history from `~/.mybot/roles/NAME`. |
 | `--workspace-dir DIR` | Enable bounded file tools inside `DIR`. |
 | `--enable-shell` | Enable the shell tool inside the workspace; protected prompts require usable bubblewrap, with no unisolated fallback. |
 | `--allow-actions` | Pre-approve action scripts/reads/captures for this session. |
@@ -224,7 +246,7 @@ Agent mode is documented in the README. The important flags are:
 | `--allow-web` | Pre-approve web requests for this session (requires `--web`). |
 | `--search-endpoint URL` | SearXNG base URL used by `web_search`; no endpoint means no search tool. |
 | `--mcp-config FILE` | Operator `mcpServers` JSON; exposes external MCP tools to the model. See [mcp.md](mcp.md). |
-| `--allow-mcp-tools` | Pre-approve external MCP tool calls (requires `--mcp-config`). |
+| `--allow-mcp-tools` | Pre-approve external MCP tool calls (requires `--mcp-config` or `--role`). |
 | `--var`, `--var-env` | Structure `Alias`/`Vars` overrides and action-script bindings, as described above. |
 | `--no-session-log` | Do not write a session transcript (also accepted by `serve`). |
 
@@ -254,7 +276,8 @@ resources, client configuration and the agent-side MCP client are documented in
 
 Transcripts are for review and audit only. They are **not** resumable: hardware
 state, unfinished actions and model context are never restored from them, and
-the GUI has no history browser.
+the GUI has no history browser. Resumable model messages are instead stored in
+the selected role's `history.json`; see [roles.md](roles.md#resumable-history).
 
 Disable with `--no-session-log` (`agent`, `serve`) or `MYBOT_SESSION_LOG=0`,
 which the GUI's `serve` child inherits. `MYBOT_HOME` overrides the root

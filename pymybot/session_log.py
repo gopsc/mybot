@@ -95,7 +95,7 @@ def _encode(record):
 
 
 class SessionLog:
-    def __init__(self, *, robot="", model="", mode="cli"):
+    def __init__(self, *, robot="", model="", mode="cli", role=""):
         root = session_root()
         root.mkdir(parents=True, exist_ok=True)
         _restrict(root, 0o700)
@@ -117,6 +117,7 @@ class SessionLog:
             "robot": str(robot),
             "model": str(model),
             "mode": str(mode),
+            "role": str(role),
             "cwd": os.getcwd(),
             "pid": os.getpid(),
             "version": __version__,
@@ -127,7 +128,7 @@ class SessionLog:
         self._file = open(self.path / "transcript.jsonl", "a", encoding="utf-8",
                           newline="\n", buffering=1)
         _restrict(self.path / "transcript.jsonl", 0o600)
-        self.write("session_start", robot=str(robot), model=str(model), mode=str(mode))
+        self.write("session_start", robot=str(robot), model=str(model), mode=str(mode), role=str(role))
 
     def write(self, kind, **fields):
         record = {"ts": _now(), "type": kind, **fields}
@@ -201,11 +202,11 @@ class SessionLog:
                 pass
 
 
-def create_session_log(*, enabled=True, robot="", model="", mode="cli"):
+def create_session_log(*, enabled=True, robot="", model="", mode="cli", role=""):
     if not enabled or not _enabled():
         return None
     try:
-        log = SessionLog(robot=robot, model=model, mode=mode)
+        log = SessionLog(robot=robot, model=model, mode=mode, role=role)
     except (OSError, RuntimeError) as exc:
         print(f"mybot: session log unavailable: {exc}", file=sys.stderr)
         return None
@@ -290,6 +291,7 @@ def _session_info(path: Path):
         "path": str(path),
         "started_at": meta.get("started_at", ""),
         "mode": meta.get("mode", ""),
+        "role": meta.get("role", ""),
         "robot": meta.get("robot", ""),
         "model": meta.get("model", ""),
         "pid": meta.get("pid"),

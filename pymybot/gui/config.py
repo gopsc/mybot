@@ -68,6 +68,7 @@ class GuiConfig:
     workspace: str = ""
     python: str = ""
     robot: str = ""
+    role: str = ""
     task: str = ""
     scripts_dir: str = ""
     skills_dir: str = ""
@@ -109,6 +110,7 @@ class GuiConfig:
             workspace=_text(self.workspace),
             python=_text(self.python),
             robot=_text(self.robot),
+            role=_text(self.role, 64),
             task=_text(self.task, 16 * 1024),
             scripts_dir=_text(self.scripts_dir),
             skills_dir=_text(self.skills_dir),
@@ -147,7 +149,7 @@ class GuiConfig:
             allow_actions=bool(self.allow_actions),
             allow_file_writes=bool(self.allow_file_writes and (self.enable_file_tools or self.enable_shell)),
             allow_shell=bool(self.allow_shell and self.enable_shell),
-            allow_mcp_tools=bool(self.allow_mcp_tools and self.mcp_config),
+            allow_mcp_tools=bool(self.allow_mcp_tools and (self.mcp_config or self.role)),
         )
 
     def store(self, path):
@@ -190,6 +192,7 @@ def merge_args(cfg, args):
     overrides = {
         "workspace": getattr(args, "workspace_dir", None),
         "robot": getattr(args, "robot", None),
+        "role": getattr(args, "role", None),
         "task": getattr(args, "task", None),
         "scripts_dir": getattr(args, "scripts_dir", None),
         "skills_dir": getattr(args, "skills_dir", None),

@@ -132,9 +132,28 @@ def parser():
         "doctor": "Check the interpreter, optional dependencies and bundled assets without touching hardware",
         "sessions": "List or prune conversation transcripts under ~/.mybot/sessions",
         "prompts": "List or restore runtime prompt layers without a robot or model",
+        "roles": "Create, inspect and clear self-contained Agent roles under ~/.mybot/roles",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
+        if name == "roles":
+            command.add_argument("--no-agent", action="store_true",
+                                 help="accepted for CLI consistency; role management never uses a model")
+            actions = command.add_subparsers(dest="role_action", required=True)
+            actions.add_parser("list", help="list valid roles", allow_abbrev=False)
+            create = actions.add_parser("create", help="create a role from the bundled prompt baseline",
+                                        allow_abbrev=False)
+            create.add_argument("name", help="role directory and display name")
+            create.add_argument("--description", default="", help="operator description (not a prompt)")
+            create.add_argument("--skills-dir", metavar="DIR", help="import Markdown skills from this root")
+            create.add_argument("--mcp-config", metavar="FILE", help="import an mcpServers JSON configuration")
+            show = actions.add_parser("show", help="show role paths and bound capabilities", allow_abbrev=False)
+            show.add_argument("name")
+            clear = actions.add_parser("clear-history", help="clear a role's persistent model history",
+                                       allow_abbrev=False)
+            clear.add_argument("name")
+            clear.add_argument("--yes", action="store_true", help="confirm permanent history removal")
+            continue
         if name == "prompts":
             command.add_argument("--no-agent", action="store_true",
                                  help="accepted for CLI consistency; prompts never uses a model")
@@ -150,6 +169,8 @@ def parser():
                                  help="approve --all without an interactive confirmation")
             continue
         if name in {"agent", "gui"}:
+            command.add_argument("--role", metavar="NAME",
+                                 help="load prompts, skills, MCP and persistent history from ~/.mybot/roles/NAME")
             command.add_argument("--no-prompt-stats", action="store_true",
                                  help="disable automatic host-generated prompt statistics")
         if name == "gui":
@@ -326,7 +347,7 @@ def parse_args(argv=None):
         print(f"pymybot {__version__}")
         raise SystemExit(0)
     commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql",
-                "agent", "gui", "serve", "mcp", "doctor", "sessions", "prompts"}
+                 "agent", "gui", "serve", "mcp", "doctor", "sessions", "prompts", "roles"}
     # --no-gui is a top-level switch: the GUI is the default entry, so drop it
     # before choosing a command, and let a subcommand keep its own semantics.
     no_gui = "--no-gui" in arguments
@@ -356,8 +377,8 @@ def parse_args(argv=None):
         if (args.task is not None or args.model or args.base_url or args.api_key_env
                 or args.allow_actions or args.read_var or args.camera_var or args.workspace_dir
                 or args.enable_shell or args.allow_shell or args.allow_file_writes
-                or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
-                or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
+                 or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
+                 or args.role or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
         if not args.input:
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
@@ -365,14 +386,16 @@ def parse_args(argv=None):
         return args
     if (args.enable_shell or args.allow_file_writes) and not args.workspace_dir:
         raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir")
+    if args.role and (args.skills_dir or args.mcp_config):
+        raise UsageError("--role owns its skills and MCP configuration; do not combine it with --skills-dir/--mcp-config")
     if args.allow_shell and not args.enable_shell:
         raise UsageError("--allow-shell requires --enable-shell")
     if args.allow_web and not args.web:
         raise UsageError("--allow-web requires --web")
     if args.search_endpoint and not args.web:
         raise UsageError("--search-endpoint requires --web")
-    if args.allow_mcp_tools and not args.mcp_config:
-        raise UsageError("--allow-mcp-tools requires --mcp-config")
+    if args.allow_mcp_tools and not (args.mcp_config or args.role):
+        raise UsageError("--allow-mcp-tools requires --mcp-config or --role")
     if args.input:
         raise UsageError("--input requires --no-agent or the run command; use --task for an agent")
     if args.task is None and not sys.stdin.isatty():
@@ -544,11 +567,27 @@ def prompt_command(args):
     return library.restore(missing_only=not args.restore_all)
 
 
+def role_command(args):
+    from .roles import clear_role_history, create_role, list_roles, load_role, roles_root
+    if args.role_action == "list":
+        return {"root": str(roles_root()), "roles": list_roles()}
+    if args.role_action == "create":
+        return create_role(args.name, description=args.description,
+                           skills_from=args.skills_dir, mcp_from=args.mcp_config).info()
+    if args.role_action == "show":
+        return load_role(args.name).info()
+    if not args.yes:
+        raise UsageError("roles clear-history requires --yes")
+    return clear_role_history(args.name)
+
+
 def execute(args, stop):
     if args.command == "doctor":
         return doctor()
     if args.command == "prompts":
         return prompt_command(args)
+    if args.command == "roles":
+        return role_command(args)
     if args.command == "sessions":
         from .session_log import delete_sessions, list_sessions, prune_sessions, session_root
         if args.prune and args.delete:

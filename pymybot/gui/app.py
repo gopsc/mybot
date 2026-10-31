@@ -15,7 +15,8 @@ from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDataba
                            QKeySequence, QShortcut, QTextCharFormat, QTextCursor)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+    QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog,
+    QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
     QScrollArea, QSpinBox, QSplitter, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from ..paths import source_root
 from ..robot import module_roots
+from ..roles import create_role as create_role_profile, list_roles, role_path
 from ..session_log import session_root
 from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
@@ -147,6 +149,7 @@ class App(QMainWindow):
         self._hardware_timer = QTimer(self)
         self._hardware_timer.setSingleShot(True)
         self._hardware_timer.timeout.connect(self._refresh_hardware)
+        self._load_role_list()
         self._load_robot_list()
         self._refresh_hardware()
         self._start_timer.start(120)
@@ -173,6 +176,13 @@ class App(QMainWindow):
         self.workspace_label.setWordWrap(False)
         self.workspace_label.setMaximumWidth(180)
         toolbar.addWidget(self.workspace_label)
+        toolbar.addWidget(_label("角色"))
+        self.role_box = QComboBox()
+        self.role_box.setMinimumWidth(130)
+        self.role_box.activated.connect(self.on_role_changed)
+        toolbar.addWidget(self.role_box)
+        self.create_role_button = _button("新建", self.new_role)
+        toolbar.addWidget(self.create_role_button)
         toolbar.addWidget(_label("结构"))
         self.robot_box = QComboBox()
         self.robot_box.setMinimumWidth(160)
@@ -423,8 +433,7 @@ class App(QMainWindow):
 
     def show_resources(self):
         modules = self._module_paths() or [str(path) for path in module_roots()]
-        roots = (self._scripts_root(),
-                 _absolute(self.cfg.skills_dir, self.cfg.workspace or default_workspace()),
+        roots = (self._scripts_root(), self._skills_root(),
                  self._robots_root(), tuple(modules))
         if roots != self._resource_roots:
             self._resource_roots = roots
@@ -533,6 +542,8 @@ class App(QMainWindow):
 
     def _sync_config(self):
         for name, entry in self.context_entries.items():
+            if self.cfg.role and name in {"skills_dir", "mcp_config"}:
+                continue
             value = entry.text().strip()
             setattr(self.cfg, name, [item.strip() for item in value.split(os.pathsep) if item.strip()]
                     if name == "module_paths" else value)
@@ -567,7 +578,7 @@ class App(QMainWindow):
         self.web_tools_toggle.setChecked(bool(self.cfg.enable_web))
         self.web_grant_toggle.setChecked(bool(self.cfg.allow_web))
         self.mcp_tools_toggle.setChecked(bool(self.cfg.allow_mcp_tools))
-        self.on_permission_toggle()
+        self._sync_role_paths()
 
     def _browse_into(self, entry):
         chosen = QFileDialog.getExistingDirectory(self, "选择目录", self.cfg.workspace or default_workspace())
@@ -596,6 +607,74 @@ class App(QMainWindow):
         if chosen and not self._stopping:
             self.cfg.robot = chosen
             self.refresh_context()
+
+    def _load_role_list(self):
+        current = self.cfg.role
+        try:
+            roles = list_roles()
+        except OSError:
+            roles = []
+        self.role_box.blockSignals(True)
+        self.role_box.clear()
+        self.role_box.addItem("默认（全局 Prompt）", "")
+        for item in roles:
+            self.role_box.addItem(item["name"], item["name"])
+            index = self.role_box.count() - 1
+            self.role_box.setItemData(index, item.get("description") or item["root"],
+                                      Qt.ItemDataRole.ToolTipRole)
+        index = self.role_box.findData(current)
+        self.role_box.setCurrentIndex(index if index >= 0 else 0)
+        self.cfg.role = self.role_box.currentData() or ""
+        self.role_box.blockSignals(False)
+        self._sync_role_paths()
+
+    def _sync_role_paths(self):
+        role = self.cfg.role
+        if role:
+            root = role_path(role)
+            values = {"skills_dir": str(root / "skills"), "mcp_config": str(root / "mcp.json")}
+        else:
+            values = {name: getattr(self.cfg, name) for name in ("skills_dir", "mcp_config")}
+        for name, value in values.items():
+            entry = self.context_entries[name]
+            entry.blockSignals(True)
+            entry.setText(value)
+            entry.setToolTip(value)
+            entry.setEnabled(not role)
+            entry.blockSignals(False)
+        self.on_permission_toggle()
+
+    def on_role_changed(self):
+        self.cfg.role = self.role_box.currentData() or ""
+        self._sync_role_paths()
+        self._save()
+        self._notice(f"已选择角色：{self.cfg.role}" if self.cfg.role else "已使用全局 Prompt 与默认能力")
+
+    def new_role(self):
+        if self._stopping or self.busy:
+            return
+        name, accepted = QInputDialog.getText(self, "新建 Agent 角色", "角色名（字母、数字、中文、_、-、.）：")
+        name = name.strip()
+        if not accepted or not name:
+            return
+        workspace = self.cfg.workspace or default_workspace()
+        skills = self._skills_root()
+        mcp = self._mcp_root()
+        try:
+            role = create_role_profile(
+                name,
+                skills_from=skills if skills and Path(skills).is_dir() else None,
+                mcp_from=mcp if mcp and Path(mcp).is_file() else None,
+            )
+        except Exception as exc:
+            self._message("新建角色失败", str(exc))
+            return
+        self.cfg.role = role.name
+        self._load_role_list()
+        self._save()
+        self._notice(f"角色 {role.name} 已创建：{role.root}")
+        if workspace:
+            self._resource_roots = None
 
     def _load_robot_list(self):
         root = Path(self.cfg.workspace or default_workspace()).absolute()
@@ -633,6 +712,16 @@ class App(QMainWindow):
             return configured
         candidate = Path(root).absolute() / "scripts"
         return str(candidate if candidate.is_dir() else Path(root).absolute())
+
+    def _skills_root(self):
+        if self.cfg.role:
+            return str(role_path(self.cfg.role) / "skills")
+        return _absolute(self.cfg.skills_dir, self.cfg.workspace or default_workspace())
+
+    def _mcp_root(self):
+        if self.cfg.role:
+            return str(role_path(self.cfg.role) / "mcp.json")
+        return _absolute(self.cfg.mcp_config, self.cfg.workspace or default_workspace())
 
     def _module_paths(self):
         root = self.cfg.workspace or default_workspace()
@@ -900,7 +989,7 @@ class App(QMainWindow):
             # Revalidate just before dispatch, including when an earlier turn was
             # valid. Backend validation remains authoritative for any later race.
             from ..prompts import PromptLibrary
-            library = PromptLibrary()
+            library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None)
             library.ensure_home()
             library.compose()
         except Exception as exc:
@@ -929,10 +1018,11 @@ class App(QMainWindow):
         workspace = self.cfg.workspace or default_workspace()
         use_workspace = self.file_tools_toggle.isChecked() or self.shell_tools_toggle.isChecked()
         params = {
-            "task": task, "robot": self._robot_path(), "scriptsDir": self._scripts_root(),
+            "task": task, "role": self.cfg.role or None,
+            "robot": self._robot_path(), "scriptsDir": self._scripts_root(),
             "cameraSrcDir": _absolute(self.cfg.camera_src_dir, workspace),
-            "skillsDir": _absolute(self.cfg.skills_dir, workspace),
-            "mcpConfig": _absolute(self.cfg.mcp_config, workspace),
+            "skillsDir": "" if self.cfg.role else self._skills_root(),
+            "mcpConfig": "" if self.cfg.role else self._mcp_root(),
             "readVars": self.cfg.read_vars, "cameraVars": self.cfg.camera_vars,
             "vars": self.cfg.vars or None,
             "allowActions": self.actions_toggle.isChecked(),
@@ -1018,8 +1108,9 @@ class App(QMainWindow):
             self._start_server()
             return
         generation = self.generation
+        params = ({"clearHistory": True, "role": self.cfg.role} if self.cfg.role else {})
         try:
-            _, future = self.serve.start_request("agent.reset", {})
+            _, future = self.serve.start_request("agent.reset", params)
         except RpcError as exc:
             self._on_reset(generation, exc)
             return
@@ -1065,12 +1156,12 @@ class App(QMainWindow):
             return
         self._sync_config()
         workspace = self.cfg.workspace or default_workspace()
-        path = _absolute(self.cfg.mcp_config, workspace)
-        dialog = McpConfigDialog(self, path, base_dir=workspace)
+        path = self._mcp_root()
+        dialog = McpConfigDialog(self, path, base_dir=Path(path).parent if self.cfg.role else workspace)
         if self._exec_dialog(dialog) == QDialog.DialogCode.Accepted and dialog.saved_path:
-            self.cfg.mcp_config = dialog.saved_path
-            self.context_entries["mcp_config"].setText(dialog.saved_path)
-            self.on_permission_toggle()
+            if not self.cfg.role:
+                self.cfg.mcp_config = dialog.saved_path
+            self._sync_role_paths()
             self._save()
             self._notice("MCP 配置已保存")
 
@@ -1136,7 +1227,8 @@ class App(QMainWindow):
             self.web_grant_toggle.setEnabled(web)
             if not web:
                 self.web_grant_toggle.setChecked(False)
-            has_mcp = bool(self.context_entries["mcp_config"].text().strip())
+            has_mcp = (Path(self._mcp_root()).is_file() if self.cfg.role
+                       else bool(self.context_entries["mcp_config"].text().strip()))
             self.mcp_tools_toggle.setEnabled(has_mcp)
             if not has_mcp:
                 self.mcp_tools_toggle.setChecked(False)
@@ -1188,7 +1280,7 @@ class App(QMainWindow):
                 if not isinstance(diff, str):
                     from difflib import unified_diff
                     from ..prompts import PromptLibrary
-                    library = PromptLibrary()
+                    library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None)
                     library.ensure_home()
                     before = library.read(data["layer"])
                     diff = "".join(unified_diff(
@@ -1206,6 +1298,7 @@ class App(QMainWindow):
     def refresh_context(self):
         self._sync_config()
         self._hardware_timer.stop()
+        self._load_role_list()
         self._load_robot_list()
         self._refresh_hardware()
 
@@ -1329,6 +1422,8 @@ class App(QMainWindow):
         self.busy = busy
         self.send_button.setEnabled(not busy)
         self.new_button.setEnabled(not busy)
+        self.role_box.setEnabled(not busy)
+        self.create_role_button.setEnabled(not busy)
         self.busy_progress.setVisible(busy)
         self._refresh_status()
 
@@ -1528,6 +1623,7 @@ class SettingsDialog(QDialog):
 
         self.prompts = PromptPanel(
             self, auto_stats=cfg.auto_stats,
+            home=role_path(cfg.role) / "prompts" if cfg.role else None,
             operator_path=lambda: _absolute(self.entries["prompt_file"].text(),
                                             self.entries["workspace"].text() or self._workspace))
         tabs.addTab(self.prompts, "提示词")

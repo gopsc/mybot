@@ -483,6 +483,36 @@ class Server:
             for var, old in previous:
                 var.budget = old
 
+    # -- roles -------------------------------------------------------------
+    async def m_roles_list(self, ident, params, cancel):
+        from .roles import list_roles, roles_root
+        roles = await asyncio.to_thread(list_roles)
+        return {"root": str(roles_root()), "roles": roles}
+
+    async def m_roles_create(self, ident, params, cancel):
+        from .roles import create_role
+        name = params.text("name", required=True, cap=64)
+        description = params.text("description", "", cap=1024)
+        skills_dir = params.text("skillsDir", cap=4096)
+        mcp_config = params.text("mcpConfig", cap=4096)
+        role = await asyncio.to_thread(create_role, name, description=description,
+                                       skills_from=skills_dir or None, mcp_from=mcp_config or None)
+        return role.info()
+
+    async def m_roles_show(self, ident, params, cancel):
+        from .roles import load_role
+        name = params.text("name", required=True, cap=64)
+        role = await asyncio.to_thread(load_role, name)
+        return role.info()
+
+    async def m_roles_clear_history(self, ident, params, cancel):
+        from .roles import clear_role_history
+        name = params.text("name", required=True, cap=64)
+        if self.agent is not None and getattr(self.agent["session"], "role", None) is not None \
+                and self.agent["session"].role.name == name:
+            raise RpcError(WRONG_STATE, "Close this role's Agent conversation before clearing its history")
+        return await asyncio.to_thread(clear_role_history, name)
+
     # -- agent -------------------------------------------------------------
     async def m_agent_ask(self, ident, params, cancel):
         if not self.enable_agent:
@@ -491,6 +521,7 @@ class Server:
         if not task.strip():
             raise RpcError(INVALID_PARAMS, "'task' must not be empty")
         key = {
+            "role": params.text("role", cap=64),
             "robot": params.text("robot", required=True), "modulePaths": params.strings("modulePaths"),
             "cameraSrcDir": params.text("cameraSrcDir"), "scriptsDir": params.text("scriptsDir", required=True),
             "skillsDir": params.text("skillsDir"), "model": params.text("model", "", cap=1024),
@@ -561,6 +592,13 @@ class Server:
         from .agent_executor import RobotExecutor
         from .agent_skills import SkillsLibrary, default_skills_root
         from .session_log import create_session_log
+        from .roles import load_role
+        try:
+            role = load_role(key["role"]) if key.get("role") else None
+        except (OSError, SecurityError) as exc:
+            raise AgentConfigurationError(f"Cannot load role: {exc}; no model request was sent") from None
+        mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
+                      else key["mcpConfig"] or None if role is None else None)
         workspace = Path(key["workspaceDir"]).absolute() if key["workspaceDir"] else None
         if key["enableShell"] and workspace is None:
             raise AgentConfigurationError("Shell tools require a workspace; no model request was sent")
@@ -575,7 +613,7 @@ class Server:
                              history_turns=key["historyTurns"], history_bytes=key["maxHistoryBytes"],
                              allow_actions=key["allowActions"],
                              allow_shell=key["allowShell"], allow_file_writes=key["allowFileWrites"],
-                             mcp_config=key["mcpConfig"] or None,
+                             mcp_config=mcp_config,
                              allow_mcp_tools=key["allowMcpTools"],
                              prompt_file=key.get("promptFile") or None,
                              auto_stats=key.get("autoStats", True),
@@ -596,8 +634,10 @@ class Server:
         session_log = None
         try:
             session_log = create_session_log(enabled=self.enable_session_log, robot=key["robot"],
-                                             model=config.model, mode="serve")
-            skills = SkillsLibrary(key["skillsDir"] or default_skills_root(), required=key["skillsDir"] is not None)
+                                             model=config.model, mode="serve",
+                                             role=role.name if role is not None else "")
+            skills_dir = role.skills_dir if role is not None else (key["skillsDir"] or default_skills_root())
+            skills = SkillsLibrary(skills_dir, required=role is not None or key["skillsDir"] is not None)
             executor = RobotExecutor(key["robot"], module_paths=key["modulePaths"] or None,
                                      camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"],
                                      allow_hardware=key["allowHardware"], read_vars=key["readVars"],
@@ -612,7 +652,7 @@ class Server:
             session = AgentSession(executor, model, config, confirm=confirm, read_vars=key["readVars"],
                                    camera_vars=key["cameraVars"], skills=skills, session_log=session_log,
                                    workspace=workspace is not None, enable_shell=key["enableShell"],
-                                   mcp_servers=mcp_servers)
+                                   mcp_servers=mcp_servers, role=role)
             return {"session": session, "client": client}
         except BaseException as exc:
             try:
@@ -653,11 +693,19 @@ class Server:
             raise asyncio.CancelledError
 
     async def m_agent_reset(self, ident, params, cancel):
+        clear_history = params.flag("clearHistory")
+        role_name = params.text("role", cap=64)
         if self.agent_lock.locked():
             raise RpcError(BUSY, "Cancel the running agent turn first")
         async with self.agent_lock:
             try:
+                active_role = getattr(self.agent["session"], "role", None) if self.agent is not None else None
+                if active_role is not None:
+                    role_name = active_role.name
                 await self.close_agent()
+                if clear_history and role_name:
+                    from .roles import clear_role_history
+                    await asyncio.to_thread(clear_role_history, role_name)
             finally:
                 if self.owner == "agent":
                     self.owner = None

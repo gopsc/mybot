@@ -119,6 +119,7 @@ Key invariants:
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
 | `pymybot/agent.py` | PydanticAI agent, model configuration, tool loop |
 | `pymybot/prompts.py` | Manifest-ordered runtime prompt layers, trusted safety hashes, bounded composition, CAS/backups and private storage |
+| `pymybot/roles.py` | Role creation/loading, role-owned prompt/skills/MCP paths and bounded atomic model-history persistence |
 | `pymybot/agent_prompt.py` | Operator profile validation and legacy prompt composition compatibility |
 | `pymybot/agent_context.py` | Bounded, mtime-cached project inventory injected as untrusted data |
 | `pymybot/agent_intent.py` | Deterministic bilingual intent routing, tool allowlists and budgets |
@@ -158,6 +159,9 @@ flowchart TB
   and marshals all callbacks onto the Qt GUI thread.
 - **Agent modes** execute tools through `RobotExecutor`, which runs hardware
   work on a dedicated owner thread and asks for approval through a callback.
+  An optional role under `~/.mybot/roles` supplies the session's PromptLibrary,
+  Skills, MCP configuration and resumable model history; it does not change
+  hardware ownership or approval boundaries.
   External MCP tools stay outside that owner thread and are surfaced by
   PydanticAI toolsets, but approval, result bounding and transcripts use the
   same session rules.

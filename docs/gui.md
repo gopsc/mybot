@@ -31,8 +31,8 @@ About dialog mark.
 - **Menu bar** — 文件 (workspace, structure, refresh, settings, quit),
   工具 (MCP editor, sessions, diagnostics, resources, session folder, clear/copy
   chat) and 帮助 (docs, about). Every entry has a shortcut.
-- **Toolbar** — workspace picker, structure SQL selector, refresh, a 管理 menu,
-  new conversation, stop and settings.
+- **Toolbar** — workspace picker, Agent role selector/create, structure SQL
+  selector, refresh, a 管理 menu, new conversation, stop and settings.
 - **Robot context** — scripts root, skills directory, module path, image source
   directory and MCP configuration.
 - **Hardware tree** — variables, driver type and configured metadata, read from
@@ -106,9 +106,23 @@ is not interrupted by new tokens.
 4. Type a task. Tool calls that can move hardware, write files or run shell
    commands show a confirmation dialog; closing the dialog means deny.
 
+## Agent roles
+
+The toolbar's **角色** selector chooses either the global default or a role from
+`~/.mybot/roles`. **新建** copies the bundled prompt baseline and imports the
+currently configured Skills/MCP when present. Role-owned paths replace the
+Skills/MCP context fields; the MCP editor and Prompt settings operate on the
+selected role. The role name is a saved preference, never a permission grant.
+
+Each successful turn updates the role's resumable model history. Switching roles
+preserves both roles' histories. **新对话** clears the selected role's saved
+history and releases hardware; **清空对话** only clears the visible window. See
+[roles.md](roles.md) for the format and CLI/JSON-RPC equivalents.
+
 ## Runtime prompt management
 
-**设置 → 提示词** lazily opens the runtime library in `$MYBOT_HOME/prompts`
+**设置 → 提示词** lazily opens the selected role's `prompts` library, or the
+global runtime library in `$MYBOT_HOME/prompts` when no role is selected
 (default `~/.mybot/prompts`). Defaults ship with the source, wheel and frozen
 application; the first use copies missing files without overwriting custom text.
 
