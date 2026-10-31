@@ -173,7 +173,10 @@ class App(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
+        layout.setContentsMargins(16, 14, 16, 12)
+        layout.setSpacing(12)
         toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
         layout.addLayout(toolbar)
         brand = QLabel()
         brand.setPixmap(logo_pixmap(24))
@@ -211,6 +214,7 @@ class App(QMainWindow):
         toolbar.addWidget(_button("设置", self.open_settings))
 
         body = QSplitter(Qt.Orientation.Horizontal)
+        body.setHandleWidth(6)
         layout.addWidget(body, 1)
         side_scroll = QScrollArea()
         side_scroll.setWidgetResizable(True)
@@ -295,6 +299,8 @@ class App(QMainWindow):
 
     def _build_side(self, side):
         layout = QVBoxLayout(side)
+        layout.setContentsMargins(0, 0, 4, 0)
+        layout.setSpacing(12)
         robot = QGroupBox("机器人上下文")
         form = QFormLayout(robot)
         self.context_entries = {}
@@ -392,6 +398,7 @@ class App(QMainWindow):
     def _build_chat(self, right):
         layout = QVBoxLayout(right)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
         self.notebook = QTabWidget()
         self.chat = ChatTranscript()
         self.chat.setReadOnly(True)
@@ -410,11 +417,14 @@ class App(QMainWindow):
         self.notebook.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.notebook, 1)
         composer = QHBoxLayout()
+        composer.setSpacing(10)
         self.task_box = QPlainTextEdit()
         self.task_box.setPlaceholderText("与机器人对话…")
+        self.task_box.setMinimumHeight(64)
         self.task_box.setMaximumHeight(100)
         composer.addWidget(self.task_box, 1)
         buttons = QVBoxLayout()
+        buttons.setSpacing(8)
         self.send_button = _button("发送", self.send_task, role="primary")
         buttons.addWidget(self.send_button)
         self.composer_retry = _button("重试", self.retry_task)

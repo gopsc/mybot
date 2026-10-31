@@ -11,24 +11,25 @@ from .. import __version__
 from .branding import logo_pixmap
 
 SPLASH_STYLE = """
-QWidget { color: #d7e6ea; }
+QWidget { color: #334155; }
+QLabel { background: transparent; }
 QLabel#splashTitle {
-    color: #f2f6f7; font-weight: 700; letter-spacing: 6px;
+    color: #0f172a; font-weight: 700; letter-spacing: 4px;
 }
-QLabel#splashSubtitle { color: #63d7c4; letter-spacing: 2px; }
-QLabel#splashStatus { color: #c6d6dc; }
-QLabel#splashDetail { color: #7e97a1; }
+QLabel#splashSubtitle { color: #2563eb; letter-spacing: 1px; }
+QLabel#splashStatus { color: #334155; }
+QLabel#splashDetail { color: #64748b; }
 QProgressBar {
-    background: #0d1a22; border: 1px solid #284a57; border-radius: 3px;
+    background: #e2e8f0; border: none; border-radius: 4px;
     max-height: 8px; min-height: 8px;
 }
-QProgressBar::chunk { background: #63d7c4; border-radius: 2px; }
+QProgressBar::chunk { background: #2563eb; border-radius: 4px; }
 QPushButton#enterButton {
-    background: #e8a33d; color: #141c22; border: 1px solid #f0b766;
-    border-radius: 5px; padding: 9px 26px; font-weight: 700;
+    background: #2563eb; color: #ffffff; border: 1px solid #2563eb;
+    border-radius: 6px; padding: 9px 26px; font-weight: 600;
 }
-QPushButton#enterButton:hover { background: #f0b766; }
-QPushButton#enterButton:pressed { background: #cf8c2c; }
+QPushButton#enterButton:hover { background: #1d4ed8; border-color: #1d4ed8; }
+QPushButton#enterButton:pressed { background: #1e40af; border-color: #1e40af; }
 """
 
 
@@ -174,27 +175,21 @@ class SplashScreen(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setBrush(QColor("#0b1118"))
-        painter.setPen(QPen(QColor("#2a5563"), 1))
+        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(QPen(QColor("#dbe3ec"), 1))
         painter.drawRoundedRect(rect, 16, 16)
         painter.setClipRect(rect)
-        grid = QPen(QColor("#17303a"))
-        grid.setWidth(1)
-        painter.setPen(grid)
-        for x in range(0, self.width(), 34):
-            painter.drawLine(x, 0, x, self.height())
-        for y in range(0, self.height(), 34):
-            painter.drawLine(0, y, self.width(), y)
         scan_y = int(self._phase * self.height())
-        gradient = QLinearGradient(0, scan_y - 26, 0, scan_y + 26)
-        gradient.setColorAt(0.0, QColor(99, 215, 196, 0))
-        gradient.setColorAt(0.5, QColor(99, 215, 196, 42))
-        gradient.setColorAt(1.0, QColor(99, 215, 196, 0))
+        gradient = QLinearGradient(0, scan_y - 32, 0, scan_y + 32)
+        gradient.setColorAt(0.0, QColor(37, 99, 235, 0))
+        gradient.setColorAt(0.5, QColor(37, 99, 235, 14))
+        gradient.setColorAt(1.0, QColor(37, 99, 235, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(gradient)
-        painter.drawRect(0, scan_y - 26, self.width(), 52)
-        accent = QPen(QColor("#63d7c4"))
-        accent.setWidth(2)
+        painter.drawRect(0, scan_y - 32, self.width(), 64)
+        accent = QPen(QColor("#2563eb"))
+        accent.setWidth(3)
+        accent.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(accent)
         painter.drawLine(46, self.height() - 22, 46 + 120, self.height() - 22)
         painter.end()
