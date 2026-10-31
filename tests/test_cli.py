@@ -41,6 +41,10 @@ def test_doctor_reports_dependencies_and_assets(capsys):
     assert checks["lupa.luajit21"] == "ok"
     assert checks["sqlparse"] == "ok"
     assert "PySide6.QtWidgets" in checks and "tkinter" not in checks
+    if sys.platform.startswith("linux"):
+        # smbus2 is a base dependency; spidev stays an opt-in extra.
+        assert checks["smbus2"] == "ok"
+        assert checks["spidev"] in {"ok", "warning"}
     assert payload["assets"]["modules"]["files"] > 0
     assert payload["assets"]["scripts"]["files"] > 0
 
@@ -62,6 +66,28 @@ def test_doctor_reports_import_failure(monkeypatch, capsys, module):
     assert payload["healthy"] is True
     if module == "PySide6.QtWidgets":
         assert "pymybot[gui]" in check["hint"]
+
+
+@pytest.mark.parametrize("module, required", [("smbus2", True), ("spidev", False)])
+def test_doctor_checks_linux_bus_modules(monkeypatch, capsys, module, required):
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+    real = cli.importlib.import_module
+
+    def fake(name, package=None):
+        if name == module:
+            raise ImportError("missing shared library")
+        if name in {"smbus2", "spidev"}:
+            return object()
+        return real(name, package)
+
+    monkeypatch.setattr(cli.importlib, "import_module", fake)
+    code = cli.main(["doctor"])
+    payload = json.loads(capsys.readouterr().out)
+    check = next(item for item in payload["checks"] if item["name"] == module)
+    assert code == 0
+    assert check["status"] == ("missing" if required else "warning")
+    assert payload["healthy"] is (not required)
+    assert module in check["hint"]
 
 
 def test_cli_and_gui_diagnostic_without_qt():

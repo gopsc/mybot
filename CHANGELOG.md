@@ -8,6 +8,9 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The headless Docker image copies `prompts/`, so the packaged defaults are
+  present and validate; the Docker CI job now fails when `doctor` is unhealthy
+  or the prompt bundle is incomplete.
 - Keep legal 32-level `if`/`while` nesting executable through Agent/serve/MCP
   snapshots: freezing a control body no longer adds an extra `@Action` wrapper
   around its sole nonempty matrix. Empty blocks and adjacent matrix boundaries
@@ -105,6 +108,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `smbus2` is now a base dependency on Linux, so `/dev/i2c-*` works after a
+  normal install instead of requiring the `linux` extra. `spidev` stays opt-in
+  because most Linux/Python combinations build it from source. `doctor` now
+  reports both before a driver open fails, and treats a missing `smbus2` as
+  unhealthy while `spidev` stays a warning.
 - Pin the MCP SDK to `>=1.30,<2`. SDK 2 renamed the low-level `Server` callbacks
   and `McpError`, which breaks the `pymybot mcp` stdio server; Dependabot now
   ignores major MCP bumps until the adapter is ported. The agent-side client

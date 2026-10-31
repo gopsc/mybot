@@ -15,6 +15,7 @@ COPY modules ./modules
 COPY robots ./robots
 COPY scripts ./scripts
 COPY skills ./skills
+COPY prompts ./prompts
 
 RUN if [ -n "$EXTRAS" ]; then pip install ".[$EXTRAS]"; else pip install .; fi
 

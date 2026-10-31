@@ -430,6 +430,17 @@ def doctor():
     checks = [module_check(module, distribution, label) for module, distribution, label in required]
     checks.extend(module_check(module, distribution, label, optional_check=True, hint=hint)
                   for module, distribution, label, hint in optional)
+    if sys.platform.startswith("linux"):
+        # smbus2 ships in the base Linux install; spidev stays opt-in because it
+        # usually builds from source. Report both before a driver open fails.
+        i2c = module_check("smbus2", "smbus2", "I2C (/dev/i2c-*)")
+        if i2c["status"] != "ok":
+            i2c["hint"] = "Install the Linux I2C dependency: pip install 'smbus2>=0.5'"
+        checks.append(i2c)
+        checks.append(module_check(
+            "spidev", "spidev", "SPI (/dev/spidev*)", optional_check=True,
+            hint="SPI needs spidev: pip install 'spidev>=3.6' "
+                 "(source checkout: pip install -e '.[linux]')"))
     from .sandbox import backend_status
     checks.append(backend_status())
 

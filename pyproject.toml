@@ -31,6 +31,7 @@ dependencies = [
   "pyserial>=3.5,<4",
   "pyftdi>=0.57.2,<1",
   "pillow>=13,<14",
+  "smbus2>=0.5,<1; sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]
@@ -45,7 +46,9 @@ agent = [
   "anthropic>=2.3,<3",
   "mcp>=1.30,<2",
 ]
-linux = ["smbus2>=0.5; sys_platform == 'linux'", "spidev>=3.6; sys_platform == 'linux'"]
+# spidev publishes source-first releases for most Linux/Python combinations, so it
+# stays opt-in; smbus2 is pure Python and ships as a base Linux dependency.
+linux = ["spidev>=3.6,<4; sys_platform == 'linux'"]
 package = ["pyinstaller>=6.22,<7", "PySide6>=6.10,<7"]
 
 [project.urls]

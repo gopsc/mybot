@@ -54,8 +54,11 @@ configuration/skill files and restart the session; do not expose a
 - UART: check the port name (`COMn`, `/dev/tty*`) and permissions.
 - I2C/SPI: pymybot uses pyftdi/MPSSE; install the FTDI driver and use
   `ftdi://ftdi:232h/1`.
-- Linux `/dev/i2c-*` / `/dev/spidev*`: install `.[linux]` and add the user to
-  the `i2c`/`spi` groups.
+- Linux `/dev/i2c-*`: `smbus2` comes with the base install; make sure the bus
+  is enabled (`/dev/i2c-*` exists) and add the user to the `i2c` group.
+- Linux `/dev/spidev*`: install `.[linux]` for `spidev` (it usually builds from
+  source, so you may need gcc and kernel headers) and add the user to the `spi`
+  group.
 - Camera: install `.[camera]`; on Windows the device index (`0`) must be
   correct and some cameras need administrator access.
 - Remember that physical access requires `--allow-hardware` (CLI) or the GUI

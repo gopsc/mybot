@@ -163,3 +163,6 @@ jobs:
         run: docker build -t pymybot:ci .
       - name: Run doctor in the image
         run: docker run --rm pymybot:ci doctor
+      - name: Validate packaged prompts
+        run: |
+          docker run --rm pymybot:ci doctor | python3 -c "import json,sys; r=json.load(sys.stdin); assert r['healthy'], r; p=r['assets']['prompts']; assert p['valid'] and p['files'] >= 7, r"
