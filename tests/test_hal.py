@@ -215,6 +215,10 @@ def test_failed_configure_cleans_up(manager, ftdi):
 
 def test_windows_uses_portable_routes_only(manager, ftdi, monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
+    # smbus2 is a base Linux dependency, so earlier tests may have imported it.
+    # Forget that state to prove this code path never reaches the Linux backends.
+    monkeypatch.delitem(sys.modules, "smbus2", raising=False)
+    monkeypatch.delitem(sys.modules, "spidev", raising=False)
     assert manager.call("i2c_open", "/dev/i2c-1") == -1
     assert manager.call("spi_open", "/dev/spidev0.0") == -1
     assert manager.call("i2c_open", I2C_URL) >= 0
