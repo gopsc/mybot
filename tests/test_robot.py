@@ -33,6 +33,26 @@ def probe_sql(extra=""):
     return "CREATE TABLE Probe(name String, fail String); INSERT INTO Probe(name,fail) VALUES('dev','no');" + extra
 
 
+@pytest.mark.parametrize("declared,expected", [(None, "H"), ("H2", "H2")])
+def test_lua_structure_mode_is_not_replaced_by_entrypoint(modules, declared, expected):
+    (modules[0] / "ModeProbe.lua").write_text('''
+function build(d)
+    local value = d.mode or "H"
+    if value ~= d.expected then return {result="ERR", message="structure mode was replaced"} end
+    return {result="OK"}
+end
+function call(d) return {result="OK", mode=d.mode or "H"} end
+function destroy(d) return {result="OK"} end
+''', encoding="utf-8")
+    column = ", mode String" if declared is not None else ""
+    insert = ", mode" if declared is not None else ""
+    value = f", '{declared}'" if declared is not None else ""
+    sql = (f"CREATE TABLE ModeProbe(name String, expected String{column});"
+           f"INSERT INTO ModeProbe(name, expected{insert}) VALUES('dev', '{expected}'{value});")
+    with Robot(sql, module_paths=modules) as robot:
+        assert robot.registry["dev"].read() == {"result": "OK", "mode": expected}
+
+
 def test_relay_controller_chain():
     with Robot.from_file(ROOT / "robots" / "relay-test.sql") as robot:
         result = robot.run("@Action\nrelay0.test;\n1;\n@")

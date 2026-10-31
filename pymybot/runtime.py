@@ -248,7 +248,8 @@ class LuaState(DriverRuntime):
             if data is None:
                 value = self.globals[name]()
             else:
-                value = self.globals[name](self.to_lua(dict(data, mode=name)))
+                # Lua structure metadata may own a mode column (for example BH1750).
+                value = self.globals[name](self.to_lua(data))
             if isinstance(value, tuple):
                 value = value[0] if value else None
             if name in {"daemon_tick", "daemon_cleanup"}:
