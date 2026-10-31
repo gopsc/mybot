@@ -1080,7 +1080,8 @@ def test_open_agent_wires_workspace_shell_and_file_write_grants(monkeypatch, tmp
         "skillsDir": "", "model": "", "baseUrl": "", "apiKeyEnv": "", "readVars": [],
         "cameraVars": [], "allowActions": False, "allowHardware": False, "vars": {},
         "timeout": 10, "maxRequests": 1, "maxToolCalls": 1, "historyTurns": 6,
-        "maxHistoryBytes": 65536, "mcpConfig": "", "allowMcpTools": False,
+        "maxHistoryBytes": 65536, "maxContextTokens": 32768, "contextReserveTokens": 1024,
+        "mcpConfig": "", "allowMcpTools": False,
         "workspaceDir": str(tmp_path), "enableShell": True, "allowShell": True,
         "allowFileWrites": True,
     }
@@ -1089,6 +1090,8 @@ def test_open_agent_wires_workspace_shell_and_file_write_grants(monkeypatch, tmp
     assert calls["executor"]["enable_shell"] is True
     assert calls["config"].allow_shell is True and calls["config"].allow_file_writes is True
     assert calls["config"].history_bytes == 65536
+    assert calls["config"].max_context_tokens == 32768
+    assert calls["config"].context_reserve_tokens == 1024
     assert calls["session"]["workspace"] is True
     assert calls["session"]["enable_shell"] is True
 

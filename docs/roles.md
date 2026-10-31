@@ -78,7 +78,10 @@ After each complete successful turn, `AgentSession` serializes the full
 PydanticAI message history to `history.json` with an atomic replacement. The
 next CLI, GUI or JSON-RPC session using that role restores it before the first
 model request. Existing `history_turns` and `history_bytes` limits prune whole
-turns, preserving tool-call/receipt pairs.
+turns, preserving tool-call/receipt pairs. An optional `max_context_tokens`
+limit also prunes old complete turns before each model request; the current
+turn is never partially rewritten and instead fails explicitly if it alone
+exceeds the remaining input budget.
 
 Failed, cancelled or partially executed turns are not appended. Corrupt or
 unsupported history blocks the model request instead of silently starting with

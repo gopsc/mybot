@@ -125,6 +125,7 @@ Key invariants:
 | `pymybot/roles.py` | Role creation/loading, role-owned prompt/skills/MCP paths and bounded atomic model-history persistence |
 | `pymybot/agent_prompt.py` | Operator profile validation and legacy prompt composition compatibility |
 | `pymybot/agent_context.py` | Bounded, mtime-cached project inventory injected as untrusted data |
+| `pymybot/agent_memory.py` | Conservative request-token estimation across messages, instructions and tool schemas |
 | `pymybot/agent_intent.py` | Deterministic bilingual intent routing, tool allowlists and budgets |
 | `pymybot/agent_executor.py` | Approval-gated tool implementations |
 | `pymybot/agent_workspace.py` | Bounded, link-safe workspace file tools and shell |

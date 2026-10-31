@@ -86,6 +86,8 @@ class GuiConfig:
     max_tool_calls: int = 16
     history_turns: int = 6
     max_history_bytes: int = 4 * 1024 * 1024
+    max_context_tokens: int | None = None
+    context_reserve_tokens: int = 2048
     prompt_file: str = ""
     auto_stats: bool = True
     context_bytes: int = 4 * 1024
@@ -130,6 +132,10 @@ class GuiConfig:
             max_history_bytes=(self.max_history_bytes if isinstance(self.max_history_bytes, int)
                                and 64 * 1024 <= self.max_history_bytes <= 64 * 1024 * 1024
                                else 4 * 1024 * 1024),
+            max_context_tokens=(self.max_context_tokens if type(self.max_context_tokens) is int
+                                and 1024 <= self.max_context_tokens <= 2 * 1024 * 1024 else None),
+            context_reserve_tokens=(self.context_reserve_tokens if type(self.context_reserve_tokens) is int
+                                    and 0 <= self.context_reserve_tokens <= 64 * 1024 else 2048),
             prompt_file=_text(self.prompt_file),
             auto_stats=self.auto_stats if isinstance(self.auto_stats, bool) else True,
             context_bytes=(self.context_bytes if isinstance(self.context_bytes, int)

@@ -319,6 +319,11 @@ def parser():
             command.add_argument("--max-history-bytes", type=bounded_int(64 * 1024, 64 * 1024 * 1024),
                                  default=4 * 1024 * 1024,
                                  help="upper bound for retained conversation history (default: 4 MiB)")
+            command.add_argument("--max-context-tokens", type=bounded_int(1024, 2 * 1024 * 1024),
+                                 default=None,
+                                 help="model context window including input, output and reserve; disabled by default")
+            command.add_argument("--context-reserve-tokens", type=bounded_int(0, 64 * 1024), default=2048,
+                                 help="safety reserve inside --max-context-tokens (default: 2048)")
             command.add_argument("--prompt-file", metavar="FILE",
                                  help="additional operator prompt/profile (UTF-8, max 8 KiB); does not replace runtime USER")
             command.add_argument("--context-bytes", type=bounded_int(0, 64 * 1024), default=4 * 1024,

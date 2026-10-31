@@ -96,6 +96,8 @@ is not interrupted by new tokens.
      **工具 → 会话管理** or `pymybot sessions` to inspect or prune transcripts;
    - the retained history turns and history byte cap (`--history-turns`,
      `--max-history-bytes`);
+   - the optional model context-window and safety-reserve token budgets
+     (`--max-context-tokens`, `--context-reserve-tokens`);
    - advanced tool permissions and the MCP configuration file. The JSON editor
      validates with the same loader as the agent and never displays environment
      variable values.

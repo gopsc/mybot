@@ -81,6 +81,20 @@ def test_agent_accepts_session_bindings(files, capsys, monkeypatch):
     assert code == 0 and called[0].bindings == {"user": "alice", "pass": "from-env"}
 
 
+def test_agent_accepts_context_token_budget(files, capsys, monkeypatch):
+    called = []
+
+    async def run_cli_agent(args, stop):
+        called.append(args)
+        return {"mode": "agent", "output": "offline mock", "tool_events": []}
+
+    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
+    code, _, _ = invoke(capsys, "--robot", files[0], "--task", "t",
+                        "--max-context-tokens", "32768", "--context-reserve-tokens", "1024")
+    assert code == 0
+    assert called[0].max_context_tokens == 32768 and called[0].context_reserve_tokens == 1024
+
+
 def test_input_is_not_implicitly_a_model_task(files, capsys, no_agent_import):
     code, result, _ = invoke(capsys, "--robot", files[0], "--input", files[1])
     assert code == 2 and "--no-agent" in result["error"]["message"]

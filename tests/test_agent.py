@@ -466,6 +466,82 @@ def test_history_byte_budget_is_bounded():
         AgentConfig(history_bytes=65 * 1024 * 1024)
 
 
+def test_context_budget_prunes_old_turns_inside_tool_loop(monkeypatch):
+    executor = FakeExecutor()
+    requests = []
+    calls = 0
+
+    async def respond(messages, info):
+        nonlocal calls
+        calls += 1
+        requests.append(messages)
+        if calls == 2:
+            return ModelResponse(parts=[ToolCallPart("list_hardware", {}, "context-call")])
+        return ModelResponse(parts=[TextPart("done")])
+
+    # The second turn starts with three messages and grows to five after its
+    # tool receipt. The 4096-token input budget must prune the old two-message
+    # turn from both the current request and later requests in the same run.
+    monkeypatch.setattr(agent_module, "estimate_request_tokens",
+                        lambda request_context: 1000 * len(request_context.messages))
+
+    async def scenario():
+        config = AgentConfig(max_context_tokens=8192, context_reserve_tokens=0)
+        session = AgentSession(executor, FunctionModel(respond), config)
+        try:
+            await session.ask("old")
+            assert (await session.ask("new"))["output"] == "done"
+            assert len(session.turns) == 1
+        finally:
+            await session.close()
+
+    asyncio.run(scenario())
+    final_prompts = [part.content for message in requests[-1] for part in message.parts
+                     if isinstance(part, UserPromptPart)]
+    receipts = [part for message in requests[-1] for part in message.parts
+                if isinstance(part, ToolReturnPart)]
+    assert "old" not in final_prompts and "new" in final_prompts
+    assert [part.tool_call_id for part in receipts] == ["context-call"]
+
+
+def test_context_budget_rejects_oversized_current_turn_before_model(monkeypatch):
+    executor = FakeExecutor()
+    called = []
+
+    async def forbidden(messages, info):
+        called.append(True)
+        return ModelResponse(parts=[TextPart("unreachable")])
+
+    monkeypatch.setattr(agent_module, "estimate_request_tokens", lambda request_context: 5000)
+    config = AgentConfig(max_context_tokens=8192, context_reserve_tokens=1024)
+    session = AgentSession(executor, FunctionModel(forbidden), config)
+    with pytest.raises(AgentBudgetExceeded, match="only 3072 remain"):
+        asyncio.run(session.ask("current turn alone is too large"))
+    assert called == [] and session.turns == [] and executor.stop_event.is_set()
+
+
+def test_context_budget_real_estimator_supports_model_request():
+    config = AgentConfig(max_context_tokens=32768)
+
+    async def scenario():
+        session = AgentSession(FakeExecutor(), scripted_model([TextPart("done")]), config)
+        try:
+            assert (await session.ask("hello"))["output"] == "done"
+        finally:
+            await session.close()
+
+    asyncio.run(scenario())
+
+
+def test_context_token_configuration_is_validated():
+    assert AgentConfig(max_context_tokens=None).max_context_tokens is None
+    assert AgentConfig(max_context_tokens=8192).context_reserve_tokens == 2048
+    with pytest.raises(AgentConfigurationError, match="max_context_tokens"):
+        AgentConfig(max_context_tokens=4096)
+    with pytest.raises(AgentConfigurationError, match="context_reserve_tokens"):
+        AgentConfig(context_reserve_tokens=-1)
+
+
 def test_slow_start_is_covered_by_the_turn_deadline():
     class SlowExecutor:
         def __init__(self):

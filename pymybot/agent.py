@@ -6,7 +6,7 @@ into a Lua state. A host-owned executor supplies serialization and fault latchin
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import difflib
 import hashlib
 import json
@@ -31,6 +31,7 @@ from pydantic_ai.usage import UsageLimits
 from .agent_context import build_project_context
 from .agent_executor import RobotExecutor
 from .agent_intent import MODES, classify_intent
+from .agent_memory import estimate_request_tokens
 from .agent_prompt import DEFAULT_CONTEXT_BYTES, read_operator_prompt
 from .agent_skills import SkillsLibrary, default_skills_root
 from .errors import AgentInterrupted
@@ -52,6 +53,8 @@ def _display_text(text):
     return _TERMINAL_CONTROLS.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
 MAX_PROMPT = 16 * 1024
 MAX_HISTORY = 4 * 1024 * 1024
+MAX_OUTPUT_TOKENS = 4096
+MAX_CONTEXT_TOKENS = 2 * 1024 * 1024
 IO_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
 FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
 WEB_TOOLS = frozenset({"web_fetch", "web_search"})
@@ -87,6 +90,8 @@ class AgentConfig:
     tool_calls_limit: int = 16
     history_turns: int = 6
     history_bytes: int = MAX_HISTORY
+    max_context_tokens: int | None = None
+    context_reserve_tokens: int = 2048
     allow_actions: bool = False
     allow_shell: bool = False
     allow_file_writes: bool = False
@@ -112,6 +117,16 @@ class AgentConfig:
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise AgentConfigurationError(f"{name} must be in {low}..{high}")
+        reserve = self.context_reserve_tokens
+        if type(reserve) is not int or not 0 <= reserve <= 64 * 1024:
+            raise AgentConfigurationError("context_reserve_tokens must be in 0..65536")
+        limit = self.max_context_tokens
+        if limit is not None:
+            if type(limit) is not int or not 1024 <= limit <= MAX_CONTEXT_TOKENS:
+                raise AgentConfigurationError(f"max_context_tokens must be in 1024..{MAX_CONTEXT_TOKENS} or None")
+            if limit <= MAX_OUTPUT_TOKENS + reserve:
+                raise AgentConfigurationError(
+                    "max_context_tokens must exceed the 4096 output tokens plus context_reserve_tokens")
         if self.prompt_file is not None and (not isinstance(self.prompt_file, str)
                                              or not self.prompt_file.strip()):
             raise AgentConfigurationError("prompt_file must be a non-empty path or None")
@@ -361,12 +376,12 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
 
     async def before_model_request(ctx, request_context):
         ctx.deps._check()
-        return request_context
+        return ctx.deps._fit_context(ctx, request_context)
 
     agent = Agent(model, deps_type=AgentSession, retries=0,
                   tools=[Tool(fn, sequential=True, max_retries=0) for fn in functions],
                   toolsets=list(toolsets) if toolsets else None,
-                  model_settings={"parallel_tool_calls": False, "max_tokens": 4096},
+                  model_settings={"parallel_tool_calls": False, "max_tokens": MAX_OUTPUT_TOKENS},
                   capabilities=[Caching(), Hooks(before_model_request=before_model_request)], name="mybot")
 
     @agent.instructions
@@ -498,6 +513,39 @@ class AgentSession:
         self._asking = False
         self._last_call = None
         self._repeat_count = 0
+
+    def _fit_context(self, ctx, request_context):
+        """Fit every outbound request, including requests inside the current tool loop."""
+        limit = self.config.max_context_tokens
+        if limit is None:
+            return request_context
+        settings = request_context.model_settings or {}
+        output_tokens = settings.get("max_tokens") or MAX_OUTPUT_TOKENS
+        input_limit = limit - output_tokens - self.config.context_reserve_tokens
+        if input_limit <= 0:
+            raise AgentConfigurationError("max_context_tokens leaves no input budget after output and reserve tokens")
+        before = estimated = estimate_request_tokens(request_context)
+        dropped = 0
+        while self.turns and estimated > input_limit:
+            count = len(self.turns[0])
+            if len(ctx.messages) < count or len(request_context.messages) < count:
+                raise AgentError("Cannot align retained turns with the model request history")
+            self.turns.pop(0)
+            # The request list is request-only; RunContext.messages feeds later
+            # requests in this tool loop and must be trimmed as well.
+            ctx.messages[:] = ctx.messages[count:]
+            request_context = replace(request_context, messages=request_context.messages[count:])
+            dropped += 1
+            estimated = estimate_request_tokens(request_context)
+        if dropped:
+            self._log("context_prune", dropped_turns=dropped, estimated_tokens_before=before,
+                      estimated_tokens_after=estimated, input_token_limit=input_limit)
+        if estimated > input_limit:
+            raise AgentBudgetExceeded(
+                f"Model request needs approximately {estimated} input tokens, but only {input_limit} remain "
+                f"within max_context_tokens={limit} after output/reserve budgets; reduce the current turn, "
+                "tool results or attachments, or increase the context limit")
+        return request_context
 
     def _prune_history(self):
         # Prune complete turns only: never orphan a tool call from its receipt.
@@ -1045,6 +1093,8 @@ async def run_cli_agent(args, stop):
                              request_limit=args.max_requests, tool_calls_limit=args.max_tool_calls,
                              history_turns=getattr(args, "history_turns", 6),
                              history_bytes=args.max_history_bytes,
+                             max_context_tokens=getattr(args, "max_context_tokens", None),
+                             context_reserve_tokens=getattr(args, "context_reserve_tokens", 2048),
                              allow_actions=args.allow_actions, allow_shell=args.allow_shell,
                              allow_file_writes=args.allow_file_writes,
                              mcp_config=mcp_config,

@@ -1075,6 +1075,8 @@ class App(QMainWindow):
             "allowFileWrites": self.file_writes_toggle.isChecked(),
             "historyTurns": self.cfg.history_turns,
             "maxHistoryBytes": self.cfg.max_history_bytes,
+            "maxContextTokens": self.cfg.max_context_tokens,
+            "contextReserveTokens": self.cfg.context_reserve_tokens,
             "promptFile": _absolute(self.cfg.prompt_file, workspace),
             "autoStats": self.cfg.auto_stats,
             "contextBytes": self.cfg.context_bytes,
@@ -1597,10 +1599,23 @@ class SettingsDialog(QDialog):
         self.tools = _spin(cfg.max_tool_calls, 1000)
         self.history_turns = _spin(cfg.history_turns, 20)
         self.history_bytes = _spin(max(1, cfg.max_history_bytes // 1024), 65536)
+        self.max_context_enabled = QCheckBox("限制模型上下文窗口")
+        self.max_context_enabled.setChecked(cfg.max_context_tokens is not None)
+        self.max_context_tokens = _spin(cfg.max_context_tokens or 32768, 2 * 1024 * 1024)
+        self.max_context_tokens.setMinimum(1024)
+        self.context_reserve_tokens = _spin(cfg.context_reserve_tokens, 64 * 1024)
+        self.context_reserve_tokens.setMinimum(0)
+        self.max_context_tokens.setEnabled(self.max_context_enabled.isChecked())
+        self.context_reserve_tokens.setEnabled(self.max_context_enabled.isChecked())
+        self.max_context_enabled.toggled.connect(self.max_context_tokens.setEnabled)
+        self.max_context_enabled.toggled.connect(self.context_reserve_tokens.setEnabled)
         for label, widget in (("超时（秒）", self.timeout), ("请求预算", self.requests),
                               ("工具预算", self.tools), ("历史轮数", self.history_turns),
-                              ("历史上限（KiB）", self.history_bytes)):
+                              ("历史上限（KiB）", self.history_bytes),
+                              ("最大上下文（tokens）", self.max_context_tokens),
+                              ("上下文预留（tokens）", self.context_reserve_tokens)):
             model_form.addRow(label, widget)
+        model_form.addRow("", self.max_context_enabled)
         self.context_enabled = QCheckBox("注入工程上下文（工作区/结构/脚本清单）")
         self.context_enabled.setChecked(bool(cfg.context_bytes))
         self.context_kib = _spin(max(1, cfg.context_bytes // 1024), 64)
@@ -1766,6 +1781,9 @@ class SettingsDialog(QDialog):
         values.update(timeout=self.timeout.value(), max_requests=self.requests.value(),
                       max_tool_calls=self.tools.value(), history_turns=self.history_turns.value(),
                       max_history_bytes=max(64, self.history_bytes.value()) * 1024,
+                      max_context_tokens=(self.max_context_tokens.value()
+                                          if self.max_context_enabled.isChecked() else None),
+                      context_reserve_tokens=self.context_reserve_tokens.value(),
                       context_bytes=(max(1, self.context_kib.value()) * 1024
                                      if self.context_enabled.isChecked() else 0),
                       intent_mode=self.intent_box.currentData(),

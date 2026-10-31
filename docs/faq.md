@@ -82,6 +82,15 @@ start a new conversation, or lower `--max-requests` / `--max-tool-calls` for a
 smaller working set. The runtime does not guess a model’s context window; the
 byte budget is an explicit, provider-independent guard.
 
+For request-time protection, set `--max-context-tokens` to the model's context
+window. Before every model request, including requests inside a tool loop,
+mybot conservatively estimates message, instruction and tool-schema tokens,
+reserves 4096 output tokens plus `--context-reserve-tokens` (default 2048), and
+prunes oldest complete turns. If the current turn alone still exceeds the
+available input budget, the request stops with `AgentBudgetExceeded` before it
+reaches the provider. The estimator is provider-independent rather than an
+exact provider tokenizer, so keep a safety reserve appropriate for the model.
+
 ## Where are logs and session history?
 
 Diagnostics go to stderr and the GUI “日志” tab. Agent conversations are also

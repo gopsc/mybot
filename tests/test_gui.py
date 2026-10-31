@@ -101,7 +101,8 @@ def test_config_keeps_tool_preferences_but_drops_grants(tmp_path):
     cfg = GuiConfig(workspace=str(tmp_path), mcp_config="mcp.json",
                     enable_file_tools=True, enable_shell=True,
                     allow_file_writes=True, allow_shell=True, allow_mcp_tools=True,
-                    history_turns=9, max_history_bytes=8 * 1024 * 1024)
+                    history_turns=9, max_history_bytes=8 * 1024 * 1024,
+                    max_context_tokens=32768, context_reserve_tokens=1024)
     cfg.store(path)
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert stored["enable_file_tools"] is True and stored["enable_shell"] is True
@@ -109,6 +110,7 @@ def test_config_keeps_tool_preferences_but_drops_grants(tmp_path):
     assert "allow_mcp_tools" not in stored
     loaded = GuiConfig.load(path)
     assert loaded.history_turns == 9 and loaded.max_history_bytes == 8 * 1024 * 1024
+    assert loaded.max_context_tokens == 32768 and loaded.context_reserve_tokens == 1024
     assert loaded.enable_file_tools and loaded.enable_shell
     assert not loaded.allow_file_writes and not loaded.allow_shell and not loaded.allow_mcp_tools
 
@@ -1203,12 +1205,17 @@ def test_settings_cover_backend_budgets_and_permissions(ui):
         dialog.shell_grant.setChecked(True)
         dialog.history_turns.setValue(9)
         dialog.history_bytes.setValue(4096)
+        dialog.max_context_enabled.setChecked(True)
+        dialog.max_context_tokens.setValue(32768)
+        dialog.context_reserve_tokens.setValue(1024)
         dialog._save()
         assert dialog.values["enable_file_tools"] is True
         assert dialog.values["enable_shell"] is True
         assert dialog.values["allow_shell"] is True
         assert dialog.values["history_turns"] == 9
         assert dialog.values["max_history_bytes"] == 4096 * 1024
+        assert dialog.values["max_context_tokens"] == 32768
+        assert dialog.values["context_reserve_tokens"] == 1024
     finally:
         dialog.close()
 
@@ -1225,6 +1232,8 @@ def test_send_forwards_workspace_shell_file_and_mcp_controls(ui):
     app.shell_grant_toggle.setChecked(True)
     app.mcp_tools_toggle.setChecked(True)
     app.history_box.setValue(9)
+    app.cfg.max_context_tokens = 32768
+    app.cfg.context_reserve_tokens = 1024
     assert app._send("列出硬件")
     method, params = client.requests[-1]
     assert method == "agent.ask"
@@ -1234,6 +1243,8 @@ def test_send_forwards_workspace_shell_file_and_mcp_controls(ui):
     assert params["allowMcpTools"] is True
     assert params["historyTurns"] == 9
     assert params["maxHistoryBytes"] == app.cfg.max_history_bytes
+    assert params["maxContextTokens"] == 32768
+    assert params["contextReserveTokens"] == 1024
 
 
 def test_retry_resends_the_last_task(ui):
