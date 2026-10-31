@@ -1,7 +1,7 @@
 """End-to-end Qsont driver tests against an in-process fake qsont iot-server.
 
 The fake serves the documented API subset on a loopback ephemeral port, so the
-whole stack (HTTP.lua bus → HAL → urllib → Qsont.lua) runs without hardware,
+whole stack (HTTP.py bus → HAL → urllib → Qsont.lua) runs without hardware,
 without --allow-hardware, and without any external network dependency.
 """
 from __future__ import annotations

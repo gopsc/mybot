@@ -807,7 +807,7 @@ end
 
 -- 采纳「在别的 lua_State 里创建的虚拟 fd」：真实 fd 是进程级整数，跨状态机可用；
 -- 而本模块的 open_paths/fd_addr/uart_paths 是逐状态机的表。多状态机拓扑里总线变量
--- （modules/I2C.lua、modules/UART.lua）在自己的状态里 open 拿到 fd，设备变量在自己的
+-- （modules/I2C.py、modules/UART.py）在自己的状态里 open 拿到 fd，设备变量在自己的
 -- 状态里对同一个 fd 读写信道——不先登记的话 v_i2c_set_addr / v_uart_* 会因
 -- open_paths[fd] / uart_paths[fd] 为空而失败。
 -- bus 决定登记到哪张 fd 表：缺省/"i2c" → open_paths + fd_addr；"spi" → spi_paths；

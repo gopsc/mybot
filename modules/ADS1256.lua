@@ -30,7 +30,7 @@ dofile(mpath.resolve("lib/drv_common.lua"))
 local bitc = dofile(mpath.resolve("bitcompat.lua"))
 
 -- 本设备的 SPI 传输封装：统一附带 @SPI 矩阵配置的 delay
--- （delay 由 SPI.lua 的 call() 随 fd 返回，经元数据引用流入 data.delay）
+-- （delay 由 SPI.py 的 call() 随 fd 返回，经元数据引用流入 data.delay）
 local dev_delay = 0
 local function spi_w(fd, v)        return spi_write(fd, v, dev_delay) end
 local function spi_w3(fd, a, b, c) return spi_write3(fd, a, b, c, dev_delay) end

@@ -701,14 +701,12 @@ def lua_runtime(manager, monkeypatch):
     return lua
 
 
-def test_host_runtime_camera_bridge(manager, av_fake):
-    pytest.importorskip("lupa.luajit21")
-    from pymybot.runtime import LuaState
+def test_python_runtime_camera_bridge(manager, av_fake):
+    from pymybot.native import PythonState
     # av_fake is installed: this opt-in exercises dispatch, never real hardware.
-    state = LuaState([MODULES], manager, threading.Event(), allow_hardware=True)
+    state = PythonState([MODULES], manager, threading.Event(), allow_hardware=True)
     try:
-        state.load(MODULES / "Camera.lua")
-        assert state.globals["__hal_call"] is None
+        state.load(MODULES / "Camera.py")
         assert state.call("build", {})["result"] == "OK"
         result = state.call("call", {})
         assert result["result"] == "OK" and result["b64"]
@@ -828,21 +826,21 @@ def test_lua_synthetic_i2c_sensor_and_nack(manager, monkeypatch, synthetic_modul
     ''')
 
 
-def test_windows_style_module_paths_and_cross_state_virtual_sensor(manager, monkeypatch, synthetic_modules):
-    bus_lua = lua_runtime(manager, monkeypatch)
+def test_windows_style_lua_sensor_with_python_cross_state_bus(manager, monkeypatch, synthetic_modules):
+    from pymybot.native import PythonState
+    bus = PythonState([MODULES], manager, threading.Event())
     sensor_lua = lua_runtime(manager, monkeypatch)
-    for lua in (bus_lua, sensor_lua):
-        lua.execute('''
-            local getenv = os.getenv
-            os.getenv = function(name)
-                if name == "BOT4CJ_MODULE_PATH" then return "C:/robots/modules;D:/extra" end
-                return getenv(name)
-            end
-        ''')
-    bus_lua.execute(f'dofile({str(MODULES / "I2C.lua")!r})')
-    data = bus_lua.table_from(dict(path="virt-i2c-0", proto="virt"))
-    assert bus_lua.globals().build(data)["result"] == "OK"
-    fd = bus_lua.globals().call(data)["fd"]
+    sensor_lua.execute('''
+        local getenv = os.getenv
+        os.getenv = function(name)
+            if name == "BOT4CJ_MODULE_PATH" then return "C:/robots/modules;D:/extra" end
+            return getenv(name)
+        end
+    ''')
+    bus.load(MODULES / "I2C.py")
+    data = dict(path="virt-i2c-0", proto="virt")
+    assert bus.call("build", data)["result"] == "OK"
+    fd = bus.call("call", data)["fd"]
     sensor_lua.execute(f'dofile({str(synthetic_modules[0] / "SyntheticI2C.lua")!r})')
     data = sensor_lua.table_from(dict(fd=fd, address=0x31, proto="virt"))
     try:
@@ -858,9 +856,9 @@ def test_windows_style_module_paths_and_cross_state_virtual_sensor(manager, monk
         ''')
     finally:
         assert sensor_lua.globals().destroy(data)["result"] == "OK"
-        assert bus_lua.globals().destroy(bus_lua.table())["result"] == "OK"
-    for lua in (bus_lua, sensor_lua):
-        lua.execute('assert(__BOT4CJ_VIRTBUS.fd_count() == 0)')
+        assert bus.call("destroy", {})["result"] == "OK"
+        bus.close()
+    sensor_lua.execute('assert(__BOT4CJ_VIRTBUS.fd_count() == 0)')
 
 
 def test_lua_hal_speaker_open_is_unsupported(manager, monkeypatch):
@@ -873,20 +871,24 @@ def test_lua_hal_speaker_open_is_unsupported(manager, monkeypatch):
     assert not manager._handles
 
 
-def test_lua_existing_bus_modules_and_camera(manager, ftdi, serial_fake, av_fake, monkeypatch):
+def test_python_bus_modules_and_camera(manager, ftdi, serial_fake, av_fake):
+    from pymybot.native import PythonState
     for module, data in [("I2C", dict(path=I2C_URL)),
                          ("SPI", dict(path=SPI_URL, spi_mode=0, bits=8, speed=1000000, delay=0)),
                          ("UART", dict(path="COM9", baud=9600)),
                          ("Camera", dict(device=0))]:
-        lua = lua_runtime(manager, monkeypatch)
-        lua.execute(f'dofile({str(MODULES / (module + ".lua"))!r})')
-        assert lua.globals().build(lua.table_from(data))["result"] == "OK"
-        result = lua.globals().call(lua.table())
-        assert result["result"] == "OK"
-        if module == "Camera":
-            assert result["b64"] and result["format"] == "jpeg"
-            assert lua.globals().read(lua.table())["result"] == "OK"
-        assert lua.globals().destroy(lua.table())["result"] == "OK"
+        state = PythonState([MODULES], manager, threading.Event(), allow_hardware=True)
+        try:
+            state.load(MODULES / (module + ".py"))
+            assert state.call("build", data)["result"] == "OK"
+            result = state.call("call", {})
+            assert result["result"] == "OK"
+            if module == "Camera":
+                assert result["b64"] and result["format"] == "jpeg"
+                assert state.call("read", {})["result"] == "OK"
+            assert state.call("destroy", {})["result"] == "OK"
+        finally:
+            state.close()
 
 
 class _EchoHandler(BaseHTTPRequestHandler):

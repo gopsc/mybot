@@ -159,7 +159,7 @@ function virt_prepare(data)
 	end
 
 	-- 挂载分派与守护路径共用 virtbus.attach_model（N-26）：
-	--   UART 模型身份是 tty 路径（来自 @UART 引用快照，modules/UART.lua 的
+	--   UART 模型身份是 tty 路径（来自 @UART 引用快照，modules/UART.py 的
 	--   call 下发 fd/baud/path）；I2C 模型身份是 address。
 	--   总线行（I2C/SPI/UART 变量自身）无 address，跳过 attach，仅靠下面的
 	--   inject 让它的 open 变成虚拟 open。
@@ -184,7 +184,7 @@ function virt_prepare(data)
 				model, addr, data.path, "i2c")
 		end
 	end
-	-- fd 由总线变量（modules/I2C.lua、modules/UART.lua）在它自己的状态机里 open
+	-- fd 由总线变量（modules/I2C.py、modules/UART.py）在它自己的状态机里 open
 	-- 出来；本状态机要先把这个进程级整数登记进本地 virtbus，否则 i2c_set_addr /
 	-- uart_read 等认不出该句柄。
 	if data.fd ~= nil then vbus.adopt_fd(data.fd, data.path, addr, bus) end

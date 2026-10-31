@@ -78,7 +78,7 @@ function build(data)
 end
 
 -- 【销毁shell会话】句柄只是登记的默认配置（进程随每次 shell_run 结束已击杀），
--- close 即注销。释放先行（沿 HTTP.lua 的 M3 顺序）：任何早退（含 arg_table
+-- close 即注销。释放先行（沿 HTTP.py 的 M3 顺序）：任何早退（含 arg_table
 -- 拒绝）都不得跳过 shell_close，否则句柄滞留 HAL 表中。
 function destroy(data)
 
