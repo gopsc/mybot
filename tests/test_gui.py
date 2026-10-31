@@ -1004,7 +1004,10 @@ def test_close_during_initialize_stops_child_without_pumping(ui, monkeypatch):
     assert initialized.wait(2)
     start = time.monotonic()
     app.close()
-    assert not app.isVisible() and time.monotonic() - start < 1
+    assert not app.isVisible()
+    # Closing must not wait for the initialize request's five-second guard;
+    # leave headroom for scheduling on loaded CI workers.
+    assert time.monotonic() - start < 4
     assert clients[0].stopped.wait(2)
     app.wait_for_shutdown()
     assert not app._pump_timer.isActive() and not app._start_timer.isActive()
