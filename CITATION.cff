@@ -7,8 +7,8 @@ authors:
 repository-code: "https://github.com/gopsc/mybot"
 url: "https://github.com/gopsc/mybot"
 license: MIT
-version: 0.3.1
-date-released: 2026-10-26
+version: 0.4.0
+date-released: 2026-10-31
 keywords:
   - robotics
   - LuaJIT

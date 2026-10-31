@@ -6,6 +6,8 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] – 2026-10-31
+
 ### Fixed
 
 - The headless Docker image copies `prompts/`, so the packaged defaults are
@@ -130,6 +132,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Removed
 
+- **BREAKING:** Duplicate top-level Lua drivers for I2C, SPI, UART, Camera and
+  HTTP are removed; the corresponding `.py` drivers are now the only built-in
+  implementations. Custom module roots that explicitly load these deleted
+  `.lua` files must use the Python equivalents. Lua chip drivers, Lua HAL
+  adapters, virtual device models and Lua daemons remain supported.
 - **BREAKING:** MT `@Trigger` parsing/execution and the unnamed `@Reflex` table
   syntax with a `name` column are removed and rejected at parse time, without
   compatibility support. Migrate to `@Reflex(name)` and ordinary Action calls;
@@ -291,6 +298,7 @@ Initial public Python edition.
 - Tkinter GUI with agent chat, tool approval dialogs, settings and logs.
 - Linux/Windows CI, wheel/sdist smoke tests and README quick-start checks.
 
+[0.4.0]: https://github.com/gopsc/mybot/releases/tag/v0.4.0
 [0.3.1]: https://github.com/gopsc/mybot/releases/tag/v0.3.1
 [0.3.0]: https://github.com/gopsc/mybot/releases/tag/v0.3.0
 [0.2.0]: https://github.com/gopsc/mybot/releases/tag/v0.2.0
