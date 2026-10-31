@@ -36,7 +36,7 @@ QComboBox QAbstractItemView {
     background: #ffffff; color: #243247;
     selection-background-color: #245cc5; selection-color: #ffffff;
 }
-QPlainTextEdit#chatTranscript { padding: 10px; border: none; }
+QPlainTextEdit#chatTranscript, QTextBrowser#chatTranscript { padding: 10px; border: none; }
 QPlainTextEdit#eventLog { background: #f8fafc; padding: 10px; border: none; }
 QPushButton {
     background: #ffffff; color: #34445a; border: 1px solid #b8c3d2;

@@ -562,6 +562,22 @@ def test_chat_lines_and_deltas_form_one_transcript(ui):
     assert app.chat.toPlainText().strip().splitlines() == ["你：你好", "第一段接续", "→ list_hardware {}", "结论"]
 
 
+def test_assistant_markdown_is_rendered_without_loading_html(ui):
+    gui, app = ui
+    app._chat_delta("**粗体**\n\n- 甲\n- 乙")
+    app._chat_line("[完成]", "system")
+    bold = app.chat.document().find("粗体")
+    assert not bold.isNull()
+    assert bold.charFormat().fontWeight() == gui.QFont.Weight.Bold
+    assert "**粗体**" not in app.chat.toPlainText()
+    assert not app.chat.openLinks() and not app.chat.openExternalLinks()
+
+    text = '<img src="file:///etc/passwd"><b>not HTML</b> & entity'
+    app._chat_delta(text)
+    app._chat_line("[完成]", "system")
+    assert text in app.chat.toPlainText()
+
+
 def test_streaming_and_logs_are_colored_plain_text(ui):
     gui, app = ui
     text = '<img src="file:///etc/passwd"><b>not HTML</b> & entity'

@@ -12,14 +12,14 @@ from pathlib import Path
 from PySide6.QtCore import (QEasingCurve, QEventLoop, QPropertyAnimation, Qt, QTimer,
                             QUrl, Signal)
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics,
-                           QKeySequence, QShortcut, QTextCharFormat, QTextCursor)
+                           QKeySequence, QShortcut, QTextCharFormat, QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog,
     QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QTabWidget, QToolButton, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTextBrowser, QToolButton, QTreeWidget,
+    QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ..paths import source_root
@@ -98,6 +98,13 @@ def _spin(value, maximum, fractional=False):
     return box
 
 
+class ChatTranscript(QTextBrowser):
+    """Read-only transcript that never loads resources referenced by Markdown."""
+
+    def loadResource(self, _resource_type, _url):
+        return None
+
+
 class App(QMainWindow):
     closed = Signal()
 
@@ -119,6 +126,8 @@ class App(QMainWindow):
         self.turn_id = None
         self.turn_text = 0
         self.at_line_start = True
+        self._assistant_start = None
+        self._assistant_markdown = ""
         self.pending_task = ""
         self.last_task = ""
         self.last_failed = False
@@ -384,8 +393,10 @@ class App(QMainWindow):
         layout = QVBoxLayout(right)
         layout.setContentsMargins(0, 0, 0, 0)
         self.notebook = QTabWidget()
-        self.chat = QPlainTextEdit()
+        self.chat = ChatTranscript()
         self.chat.setReadOnly(True)
+        self.chat.setOpenLinks(False)
+        self.chat.setOpenExternalLinks(False)
         self.chat.setObjectName("chatTranscript")
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
@@ -506,14 +517,44 @@ class App(QMainWindow):
         if chunk and not self._stopping:
             self._insert_text(self.log, chunk if chunk.endswith("\n") else chunk + "\n")
 
+    def _flush_markdown(self):
+        """Render the completed assistant segment without re-rendering its deltas."""
+        if self._assistant_start is None:
+            return
+        start, markdown = self._assistant_start, self._assistant_markdown
+        self._assistant_start = None
+        self._assistant_markdown = ""
+        document = QTextDocument()
+        document.setDefaultFont(self.chat.font())
+        # Qt Markdown otherwise silently interprets/removes raw HTML. Escape it
+        # so model output stays literal while Markdown formatting still works.
+        document.setMarkdown(markdown.replace("&", "&amp;").replace("<", "&lt;"))
+        cursor = self.chat.textCursor()
+        cursor.setPosition(start)
+        cursor.movePosition(QTextCursor.MoveOperation.End, QTextCursor.MoveMode.KeepAnchor)
+        cursor.removeSelectedText()
+        cursor.insertHtml(document.toHtml())
+        end = cursor.position()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor(PALETTE["assistant"]))
+        cursor.mergeCharFormat(fmt)
+
     def _chat_line(self, text, tag=None):
         if self._stopping:
             return
+        self._flush_markdown()
         self._insert_text(self.chat, ("" if self.at_line_start else "\n") + text + "\n", tag)
         self.at_line_start = True
 
     def _chat_delta(self, text):
         if text and not self._stopping:
+            if self._assistant_start is None:
+                cursor = self.chat.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+                self._assistant_start = cursor.position()
+            self._assistant_markdown += text
             self._insert_text(self.chat, text, "assistant")
             self.at_line_start = text.endswith("\n")
             self.turn_text += len(text)
@@ -1143,6 +1184,8 @@ class App(QMainWindow):
         self.chat.clear()
         self.at_line_start = True
         self.turn_text = 0
+        self._assistant_start = None
+        self._assistant_markdown = ""
         self._notice("对话已清空")
 
     def copy_chat(self):
