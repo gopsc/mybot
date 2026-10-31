@@ -52,10 +52,11 @@ handle ownership/cleanup and cancellation checks. These checks do **not** constr
 Python imports or direct file, network, subprocess or native I/O. `--allow-hardware`
 is a HAL gate, not a restriction on trusted Python code's host-account privileges.
 
-I2C/SPI/UART/HTTP/Camera/Shell ordinary-table drivers use Python with the existing
-HAL; native bus handles remain usable by Lua device drivers. I2C/SPI/UART explicitly
-route virtual declarations to retained Lua implementations with physical access
-disabled. Existing Daemon chunks remain Lua-only and reject Python-selected drivers.
+I2C/SPI/UART/TCP/HTTP/Camera/Shell ordinary-table drivers use Python with the existing
+HAL; native bus handles remain usable by Lua device drivers. Python I2C/SPI/UART
+open virtual declarations as in-memory HAL handles with physical access disabled;
+Lua device drivers retain their existing `virtbus` models and per-runtime isolation.
+Existing Daemon chunks remain Lua-only and reject Python-selected drivers.
 
 ## System prompt ownership
 

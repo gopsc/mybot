@@ -59,7 +59,7 @@ The GUI exposes the backend surface described in [cli.md](cli.md) and
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
 | 工具 → 环境诊断 | Renders `pymybot doctor`: interpreter, assets and optional dependencies, colour-coded by status, with copy-JSON. |
-| 资源 tab | Structures (`*.sql`), Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
+| 资源 tab | Structures (`*.sql`), Python/Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
 | 重试 | Re-sends the last task after an error, cancellation or timeout, disabled while a turn is running. |
 | 清空 / 复制对话 | Clear the window transcript (after confirmation) or copy it to the clipboard. |
 | 打开会话目录 | Opens `~/.mybot/sessions` in the file manager. |

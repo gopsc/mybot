@@ -93,8 +93,8 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   of replaying a stuck loop. `tests/test_agent_harness_eval.py` is an offline
   matrix covering intent gating, the loop guard, prompt/context injection and
   the web/sandbox surfaces.
-- The resource browser indexes structures (`robots/*.sql`) and Lua drivers
-  (`modules/**/*.lua`) alongside scripts, skills and docs, watches roots with
+- The resource browser indexes structures (`robots/*.sql`) and Python/Lua drivers
+  (`modules/**/*.py`, `modules/**/*.lua`) alongside scripts, skills and docs, watches roots with
   `QFileSystemWatcher` and reloads after a 400 ms debounce.
 - `pymybot sessions --delete ID --yes|--dry-run` deletes named transcripts
   safely (repeatable; never follows links or removes an active session).

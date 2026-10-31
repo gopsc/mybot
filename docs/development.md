@@ -37,7 +37,8 @@ python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
 python -I tools/check_docs_skill_sync.py  # skill links/paths resolve, references declare a Source
 ```
 
-`--no-gui` is required for terminal use; without it, `pymybot` opens the GUI.
+`--no-gui` is required for the terminal agent when no subcommand is given;
+controller subcommands such as `check` and `run` always use the terminal.
 
 ## Code layout
 
@@ -79,9 +80,11 @@ which fails on dead skill links, missing repository paths, a reference without a
 
 1. Add `modules/<Name>.py` implementing `Driver(context)`, or `modules/<Name>.lua`
    using `lib/drv_common.lua` and `lib/bus_contract.lua`.
-2. Add a `robots/<name>_virt.sql` and `scripts/<name>_virt.mt` fixture; register
-   the virtual device model in `modules/lib/virtbus/regmap.lua` when applicable.
-3. Run `tests/test_virtual_drivers.py` and the fixture directly.
+2. Add `tests/fixtures/virt/<name>_virt.sql` and
+   `tests/fixtures/virt/<name>_virt.mt`; register the virtual device model in
+   `modules/lib/virtbus/regmap.lua` when applicable.
+3. Run `python -m pytest tests/test_migrated_drivers.py -q` and the fixture
+   directly. Use `tests/test_virtual_drivers.py` for synthetic bus/protocol models.
 4. Document the device, address range, units and known limitations in
    `docs/` or the driver header.
 5. Never make a virtual result look like a real measurement; use clearly named

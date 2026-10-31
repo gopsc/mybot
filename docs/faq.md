@@ -75,9 +75,10 @@ provided `*_virt.sql` examples for hardware-free work.
 
 ## A long conversation hits the model context limit
 
-pymybot bounds history to six complete turns and a byte budget,
-and returns a structured JSON error instead of crashing when the provider
-rejects a request. Use `--max-history-bytes` (64 KiB–64 MiB, default 4 MiB),
+pymybot retains six complete turns by default and applies a byte budget. Use
+`--history-turns` (1–20) to adjust the retained-turn limit. A structured JSON
+error is returned instead of crashing when the provider rejects a request.
+Use `--max-history-bytes` (64 KiB–64 MiB, default 4 MiB),
 start a new conversation, or lower `--max-requests` / `--max-tool-calls` for a
 smaller working set. The runtime does not guess a model’s context window; the
 byte budget is an explicit, provider-independent guard.
@@ -99,8 +100,9 @@ and images). API keys in environment variables are not read into the
 transcript, but tool output may contain other sensitive data. Disable with
 `--no-session-log`, `MYBOT_SESSION_LOG=0`, or the GUI settings toggle; list and
 prune old transcripts with `pymybot sessions` and
-`pymybot sessions --prune --keep 20 --yes`. Transcripts are not resumable and
-the GUI has no history browser; see
+`pymybot sessions --prune --keep 20 --yes`. Transcripts are not resumable;
+the GUI's **工具 → 会话管理** provides filtering, preview, delete and prune
+controls; see
 [`cli.md`](cli.md#session-transcripts).
 
 ## Should I document a change in `docs/` or in `skills/`?

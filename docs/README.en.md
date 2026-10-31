@@ -170,9 +170,9 @@ TCP also has a direct MT interface: [robots/tcp.sql](../robots/tcp.sql) declares
 does not connect. Start a local TCP echo server before running the example;
 text arguments use MT string expressions such as `$("hello")`.
 
-For a complete runnable example, the Chinese README has a Python UART loopback
-driver, structure SQL and action script that run without a board. The driver
-contract is documented in
+For a complete runnable example, the [Chinese usage guide](Introduce.md#写一个驱动)
+has a Python UART loopback driver, structure SQL and action script that run without
+a board. The driver contract is documented in
 [`skills/pymybot-scripting/references/driver-lua.md`](../skills/pymybot-scripting/references/driver-lua.md).
 
 ## Documentation

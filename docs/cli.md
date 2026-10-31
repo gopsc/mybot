@@ -277,9 +277,9 @@ resources, client configuration and the agent-side MCP client are documented in
   de-duplicated by content; the JSONL only stores hash, MIME type, size and path.
 
 Transcripts are for review and audit only. They are **not** resumable: hardware
-state, unfinished actions and model context are never restored from them, and
-the GUI has no history browser. Resumable model messages are instead stored in
-the selected role's `history.json`; see [roles.md](roles.md#resumable-history).
+state, unfinished actions and model context are never restored from them.
+Resumable model messages are instead stored in the selected role's `history.json`;
+see [roles.md](roles.md#resumable-history).
 
 Disable with `--no-session-log` (`agent`, `serve`) or `MYBOT_SESSION_LOG=0`,
 which the GUI's `serve` child inherits. `MYBOT_HOME` overrides the root
