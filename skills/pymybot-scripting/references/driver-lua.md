@@ -74,10 +74,13 @@ UTF-8 跨次接收的未完整字符会暂存，切换到 `recv_hex` 时先返�
 
 ## 1. 生命周期与运行环境
 
-- **普通 Lua 硬件变量各有独立 Lua 状态**（LuaJIT 2.1）。多器件 Daemon 在一个状态中为各器件
-  创建独立环境；`require_driver` 将入口绑定到调用者环境，实例状态隔离，HAL/helper 共享。
+- **普通 Lua 硬件变量各有独立 Lua 状态**（优先 LuaJIT 2.1；没有 LuaJIT 的 `lupa`
+  wheel 会回退到标准 Lua）。多器件 Daemon 在一个状态中为各器件创建独立环境；
+  `require_driver` 将入口绑定到调用者环境，实例状态隔离，HAL/helper 共享。
 - 环境收紧（**不是安全沙箱**）：移除 `python` / `debug`，`io` 仅保留 stderr；
-  `package.loaders` 受限，拒绝 Lua 字节码；LuaJIT FFI 仍可用，只运行审阅过的驱动。
+  `package.loaders`/`searchers` 受限，拒绝 Lua 字节码；有 LuaJIT 时 FFI 可用，只运行
+  审阅过的驱动。标准 Lua 回退没有 FFI，当前 `HAL.lua` 依赖 FFI，因此使用 HAL 的 Lua
+  驱动需要 LuaJIT；Python 驱动不受影响。
   单文件 ≤8 MiB；指令计数钩子 + JIT 开关实现协作预算（阻塞的原生 I/O 不可中断）。
 - 文件加载：宿主注入 `__mpath`，`__mpath.resolve("lib/xxx.lua")` 把模块相对路径解析为
   实际文件；驱动内 `dofile` / `loadfile` 受同一解析器约束。

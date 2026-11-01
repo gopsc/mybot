@@ -5,7 +5,7 @@
 | Requirement | Version |
 | --- | --- |
 | Python | 3.11–3.14 |
-| LuaJIT | provided by the `lupa` wheel |
+| Lua runtime | provided by the `lupa` wheel; LuaJIT where available, otherwise standard Lua (FFI drivers require LuaJIT) |
 | PySide6 | 6.10–6.x, included in `gui`, `test` and `package` extras |
 | MCP SDK | 1.30–1.x, included in `mcp` and `agent` extras |
 | Node/npm | not required |

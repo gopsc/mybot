@@ -429,7 +429,7 @@ def default_scripts_dir():
 def doctor():
     """Report the interpreter, dependencies and assets without hardware I/O."""
     required = [
-        ("lupa.luajit21", "lupa", "LuaJIT runtime"),
+        ("lupa", "lupa", "Lua runtime"),
         ("sqlparse", "sqlparse", "SQL tokenizer"),
         ("serial", "pyserial", "UART"),
         ("pyftdi", "pyftdi", "I2C/SPI"),
@@ -465,6 +465,20 @@ def doctor():
     checks = [module_check(module, distribution, label) for module, distribution, label in required]
     checks.extend(module_check(module, distribution, label, optional_check=True, hint=hint)
                   for module, distribution, label, hint in optional)
+    if checks[0]["status"] == "ok":
+        try:
+            from .runtime import LUA_BACKEND, LUA_FFI
+        except Exception as exc:
+            checks[0]["status"] = "missing"
+            checks[0]["error"] = type(exc).__name__
+            checks[0]["hint"] = "Install a lupa wheel with LuaJIT or standard Lua support"
+        else:
+            checks[0]["backend"] = LUA_BACKEND
+            if not LUA_FFI:
+                checks.append({"name": "lua.ffi", "label": "LuaJIT FFI", "optional": True,
+                               "status": "warning",
+                               "detail": "LuaJIT is unavailable; standard Lua fallback is active; "
+                                         "FFI-based drivers are unsupported"})
     if sys.platform.startswith("linux"):
         # smbus2 ships in the base Linux install; spidev stays opt-in because it
         # usually builds from source. Report both before a driver open fails.

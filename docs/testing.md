@@ -36,7 +36,7 @@ python -m pytest --durations=10 -q
 | --- | --- | --- |
 | base | Ubuntu 3.11, 3.12, 3.13, 3.14 | No `pydantic_ai` installed; controller regression |
 | windows | Windows / 3.13 | faulthandler, UTF-8 and Qt behaviour |
-| macos | macOS / 3.13 | Base install, `doctor`, and no-hardware `check`/`run` |
+| macos | macOS / 3.13 | Base install, `doctor`, and the Python-only `time` `check`/`run` smoke |
 | agent | Ubuntu 3.11; Windows 3.13 | Offline model/agent integration + MCP server/client |
 | wheel | Ubuntu 3.11; Windows 3.13 | Build from sdist, install into clean venv |
 | quickstart | Ubuntu 3.14 | README commands actually run |

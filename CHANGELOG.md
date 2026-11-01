@@ -21,6 +21,14 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   text/number/bool, while arithmetic, logical operators and Reflex arguments
   continue to reject containers.
 
+### Fixed
+
+- The Lua runtime now falls back to standard Lua when the `lupa` wheel has no
+  `luajit21` module (notably macOS arm64). Python drivers keep working; Lua
+  drivers that depend on LuaJIT FFI/HAL report a clear error, and `doctor`
+  warns instead of marking the base install unhealthy. The macOS CI smoke uses
+  the pure-Python `Time` driver for the same reason.
+
 ## [0.4.1] – 2026-10-31
 
 ### Changed

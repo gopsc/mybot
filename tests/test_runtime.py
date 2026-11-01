@@ -7,7 +7,10 @@ import pytest
 from conftest import usable_symlink
 from pymybot.errors import BudgetExceeded, DriverError, ScriptError
 from pymybot.hardware import Budget, ensure_ok
+from pymybot.robot import Robot
 from pymybot.runtime import LuaState
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class NoHardware:
@@ -32,6 +35,35 @@ def test_luajit_and_python_bridge_hidden(state):
     assert state.lua.eval("require('ffi') ~= nil")
     ok, _ = state.lua.eval("pcall(require, 'python')")
     assert not ok
+
+
+def test_standard_lua_fallback_runs_a_driver(tmp_path, monkeypatch):
+    lua54 = pytest.importorskip("lupa.lua54")
+    import pymybot.runtime as runtime
+    monkeypatch.setattr(runtime, "LuaRuntime", lua54.LuaRuntime)
+    monkeypatch.setattr(runtime, "lua_type", lua54.lua_type)
+    state = runtime.LuaState([tmp_path], NoHardware(), threading.Event())
+    path = tmp_path / "fallback.lua"
+    path.write_text('function build(d) return {result="OK"} end '
+                    'function call(d) return {result="OK", value=7} end '
+                    'function destroy(d) return {result="OK"} end', encoding="utf-8")
+    try:
+        state.load(path)
+        assert state.call("call", {}) == {"result": "OK", "value": 7}
+        assert state.lua.eval("jit == nil")
+    finally:
+        state.close()
+
+
+def test_standard_lua_fallback_runs_a_python_only_example(monkeypatch):
+    lua54 = pytest.importorskip("lupa.lua54")
+    import pymybot.runtime as runtime
+    monkeypatch.setattr(runtime, "LuaRuntime", lua54.LuaRuntime)
+    monkeypatch.setattr(runtime, "lua_type", lua54.lua_type)
+    with Robot.from_file(ROOT / "robots" / "time.sql") as robot:
+        outputs = robot.run((ROOT / "scripts" / "time.mt").read_text(encoding="utf-8"))
+    assert outputs[-1]["result"] == "OK"
+    assert "formatted" in outputs[-1]
 
 
 def test_error_recovery_and_return_contract(state, tmp_path):

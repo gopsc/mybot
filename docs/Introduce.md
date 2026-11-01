@@ -286,6 +286,10 @@ Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 i
 | Windows | pyserial `COMn` | pyftdi MPSSE | PyAV DirectShow | PySide6 |
 | macOS | pyserial | pyftdi MPSSE | PyAV AVFoundation（14+） | PySide6 |
 
+macOS arm64 的 `lupa` wheel 可能不包含 LuaJIT；此时 `pymybot` 会回退到标准 Lua，
+Python 驱动仍可用，但依赖 LuaJIT FFI 的 Lua 驱动不可用。`doctor` 会报告
+`LuaJIT FFI` 警告；需要这些驱动时请安装带 LuaJIT 的 `lupa` 构建。
+
 不提供 GPIO/PWM/Speaker 原生后端；这类外设请通过受支持的总线写协议实现。没有硬件时，用 `*_virt.sql` 或 `loop://`。
 
 ## 目录结构

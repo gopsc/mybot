@@ -123,7 +123,7 @@ Key invariants:
 | `pymybot/matrix.py` | MT action matrix parser and validator |
 | `pymybot/actions.py` | Action runner: aliases, captures, control flow |
 | `pymybot/expr.py` | Expression parser/evaluator and numeric rendering |
-| `pymybot/runtime.py` | Shared HAL bridge, Lupa/LuaJIT bootstrap and Python↔Lua conversion |
+| `pymybot/runtime.py` | Shared HAL bridge, Lupa/LuaJIT (or standard-Lua) bootstrap and Python↔Lua conversion |
 | `pymybot/native.py` | Compile-only validation, per-row Python modules, Driver context and results |
 | `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Camera/Shell host operations |
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |

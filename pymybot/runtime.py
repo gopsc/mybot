@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import ipaddress
 import math
 import os
@@ -8,10 +9,39 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from lupa.luajit21 import LuaRuntime, lua_type
-
 from .errors import BudgetExceeded, DriverError, ScriptError
 from .hardware import Budget
+
+
+def _load_lua_api():
+    """Prefer LuaJIT, then fall back to a bundled standard Lua runtime.
+
+    Lupa wheels include LuaJIT only on platforms where it can be built. macOS
+    arm64 is one of the exceptions; standard Lua can still run the controller
+    and matrix drivers, but LuaJIT FFI-based drivers are unavailable there.
+    """
+    failures = []
+    for name, label, ffi in (("luajit21", "LuaJIT 2.1", True),
+                             ("lua54", "Lua 5.4", False),
+                             ("lua55", "Lua 5.5", False)):
+        try:
+            module = importlib.import_module("lupa." + name)
+        except (ImportError, OSError) as exc:
+            failures.append(f"{name}: {type(exc).__name__}")
+            continue
+        if not hasattr(module, "LuaRuntime") or not hasattr(module, "lua_type"):
+            failures.append(f"{name}: missing LuaRuntime/lua_type")
+            continue
+        return module, label, ffi
+    raise ModuleNotFoundError(
+        "No usable lupa Lua runtime (" + ", ".join(failures) + "); "
+        "install a lupa wheel with LuaJIT or standard Lua support"
+    )
+
+
+_LUA_MODULE, LUA_BACKEND, LUA_FFI = _load_lua_api()
+LuaRuntime = _LUA_MODULE.LuaRuntime
+lua_type = _LUA_MODULE.lua_type
 
 
 def _loopback_base(base):
@@ -29,7 +59,10 @@ def _loopback_base(base):
 _BOOTSTRAP = r'''
 function(loader, resolve, roots, output, getenv, hal, daemon, check)
     local raw_tostring, raw_type = tostring, type
-    local sethook, jit_off, jit_on = debug.sethook, jit.off, jit.on
+    local sethook = debug.sethook
+    -- Standard Lua has no JIT; keep the same bootstrap for both backends.
+    local jit_off = jit and jit.off or function() end
+    local jit_on = jit and jit.on or function() end
     local function hook() check() end
     python = nil
     package.loaded.python = nil
@@ -40,7 +73,10 @@ function(loader, resolve, roots, output, getenv, hal, daemon, check)
     package.loadlib = nil
     package.path, package.cpath = '', ''
     local function blocked() return '\nFile/native module loading is restricted to module roots' end
-    package.loaders = {package.loaders[1], blocked}
+    local loaders = package.searchers or package.loaders
+    local restricted = {loaders[1], blocked}
+    package.loaders = restricted
+    package.searchers = restricted
     os.execute, os.exit, os.remove, os.rename, os.tmpname = nil, nil, nil, nil, nil
     os.getenv = function(name) return getenv(name) end
     print = function(...)
@@ -229,7 +265,11 @@ class LuaState(DriverRuntime):
         except BudgetExceeded:
             raise
         except Exception as exc:
-            raise DriverError(f"Cannot load Lua driver {path}: {exc}") from exc
+            message = f"Cannot load Lua driver {path}: {exc}"
+            if not LUA_FFI and "module 'ffi' not found" in str(exc):
+                message += (" (LuaJIT FFI is unavailable on this platform; use a "
+                            "LuaJIT-enabled lupa wheel or a Python driver)")
+            raise DriverError(message) from exc
         finally:
             self._set_hook(False)
             self.budget = previous

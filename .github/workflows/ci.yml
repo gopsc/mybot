@@ -97,10 +97,12 @@ jobs:
         run: |
           python -m pymybot --version
           python -m pymybot doctor
-      - name: No-hardware smoke
+      - name: No-hardware smoke (Python driver)
         run: |
-          python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
-          python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10
+          # macOS arm64 Lupa wheels may omit LuaJIT. Use the pure-Python Time
+          # driver so this job verifies the base controller without Lua FFI.
+          python -m pymybot check --robot robots/time.sql --input scripts/time.mt
+          python -m pymybot run --robot robots/time.sql --input scripts/time.mt --timeout 10
 
   agent:
     name: agent / ${{ matrix.os }} / Python ${{ matrix.python-version }}

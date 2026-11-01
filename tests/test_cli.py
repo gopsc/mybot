@@ -39,7 +39,7 @@ def test_doctor_reports_dependencies_and_assets(capsys):
     assert code == 0 and payload["ok"] is True and payload["command"] == "doctor"
     assert payload["healthy"] is True
     checks = {item["name"]: item["status"] for item in payload["checks"]}
-    assert checks["lupa.luajit21"] == "ok"
+    assert checks["lupa"] == "ok"
     assert checks["sqlparse"] == "ok"
     assert "PySide6.QtWidgets" in checks and "tkinter" not in checks
     if sys.platform.startswith("linux"):
@@ -48,6 +48,18 @@ def test_doctor_reports_dependencies_and_assets(capsys):
         assert checks["spidev"] in {"ok", "warning"}
     assert payload["assets"]["modules"]["files"] > 0
     assert payload["assets"]["scripts"]["files"] > 0
+
+
+def test_doctor_reports_standard_lua_fallback(monkeypatch, capsys):
+    import pymybot.runtime as runtime
+    monkeypatch.setattr(runtime, "LUA_BACKEND", "Lua 5.4")
+    monkeypatch.setattr(runtime, "LUA_FFI", False)
+    code = cli.main(["doctor"])
+    payload = json.loads(capsys.readouterr().out)
+    checks = {item["name"]: item for item in payload["checks"]}
+    assert code == 0 and payload["healthy"] is True
+    assert checks["lupa"]["backend"] == "Lua 5.4"
+    assert checks["lua.ffi"]["status"] == "warning"
 
 
 @pytest.mark.parametrize("module", ["av", "PySide6.QtWidgets"])
