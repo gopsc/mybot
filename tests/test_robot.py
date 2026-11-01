@@ -1,4 +1,5 @@
 import copy
+import json
 from pathlib import Path
 import threading
 import time
@@ -688,6 +689,137 @@ $(state);
         assert outputs[4]["value"] == 9
         assert outputs[-1]["value"] == 7
         assert robot.registry.get("state") is None
+
+
+def test_struct_whole_value_and_fields_render_as_text(modules):
+    script = '''@Struct(state)
+{"note":"hi","point":{"x":1},"items":[1,2]}
+@
+@Action
+dev.value;
+$(state);
+@
+@Action
+dev.value;
+$(state.note);
+@
+@Action
+dev.value;
+$(state.point);
+@
+@Action
+dev.value;
+$(state.items);
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        outputs = robot.run(script)
+
+    assert json.loads(outputs[0]["value"]) == {"note": "hi", "point": {"x": 1}, "items": [1, 2]}
+    assert outputs[1]["value"] == "hi"
+    assert json.loads(outputs[2]["value"]) == {"x": 1}
+    assert json.loads(outputs[3]["value"]) == [1, 2]
+
+
+def test_struct_capture_to_alias_serializes_and_takes_fields(modules):
+    (modules[0] / "StructProbe.lua").write_text('''
+function build(d) return {result="OK"} end
+function call(d)
+    return {result="OK", value=d.value, payload={points={{x=1},{x=2}},flag=true}, meta={note="hi"}}
+end
+function destroy(d) return {result="OK"} end
+''', encoding="utf-8")
+    sql = "CREATE TABLE StructProbe(name String); INSERT INTO StructProbe(name) VALUES('dev');"
+    script = '''@Alias
+name alias;
+out "";
+@
+@Action
+dev.capture;
+$out=payload;
+@
+@Action
+dev.value;
+$(out);
+@
+@Action
+dev.capture dev.capture2;
+$plain=payload $note=meta.note;
+@
+@Action
+dev.value;
+$(plain);
+@
+@Action
+dev.value;
+$(note);
+@
+'''
+    with Robot(sql, module_paths=modules) as robot:
+        outputs = robot.run(script)
+
+    expected = {"points": [{"x": 1}, {"x": 2}], "flag": True}
+    assert json.loads(outputs[1]["value"]) == expected
+    assert json.loads(outputs[3]["value"]) == expected
+    assert outputs[4]["value"] == "hi"
+    assert robot.registry.get("out") is None
+    assert robot.registry.get("plain") is None
+
+
+def test_struct_null_field_cannot_be_action_parameter(modules):
+    script = '''@Struct(state)
+{"x":null}
+@
+@Action
+dev.value;
+$(state.x);
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        with pytest.raises(ScriptError, match="null"):
+            robot.run(script)
+
+
+def test_struct_container_cannot_enter_arithmetic(modules):
+    script = '''@Struct(state)
+{"x":1}
+@
+@Action
+dev.value;
+$(state+1);
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        with pytest.raises(ScriptError, match="scalar"):
+            robot.run(script)
+
+
+def test_struct_container_cannot_name_action_device(modules):
+    script = '''@Struct(state)
+{"point":{"x":1}}
+@
+@Action
+$(state.point).text;
+1;
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        with pytest.raises(ScriptError, match="device expression"):
+            robot.run(script)
+
+
+def test_struct_container_cannot_name_action_parameter(modules):
+    script = '''@Struct(state)
+{"point":{"x":1}}
+@
+@Action
+dev.$(state.point);
+1;
+@
+'''
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        with pytest.raises(ScriptError, match="parameter name"):
+            robot.run(script)
 
 
 @pytest.mark.parametrize("target", ["state.missing", "state.points[1]", "state.points[-1]",

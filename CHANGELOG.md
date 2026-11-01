@@ -6,6 +6,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Struct, object and array values can be used directly as text parameters and
+  captured into Alias variables as compact JSON; field selection still returns
+  text/number/bool, while arithmetic, logical operators and Reflex arguments
+  continue to reject containers.
+
 ## [0.4.0] – 2026-10-31
 
 ### Fixed

@@ -89,14 +89,27 @@ class ActionRunner:
         with evaluation_guard(self.budget.check):
             return expression.evaluate(self.registry.resolve)
 
+    def _value_json(self, expression: Expression):
+        self.budget.check()
+        with evaluation_guard(self.budget.check):
+            return expression.evaluate_value(self.registry.resolve)
+
     def _parameter_value(self, text: str):
-        value = self._value(Expression(expr_body(text)))
+        value = self._value_json(Expression(expr_body(text)))
+        if value is None:
+            raise ScriptError("@Action $(...) cannot produce null; select a non-null field")
         if isinstance(value, bool):
             raise ScriptError("@Action $(...) cannot produce a boolean result; use an @if condition")
         return value
 
     def _device(self, text: str) -> str:
-        name = render(self._parameter_value(text)) if expr_body(text) is not None else text
+        if expr_body(text) is None:
+            name = text
+        else:
+            value = self._parameter_value(text)
+            if isinstance(value, (dict, list)):
+                raise ScriptError("Action device expression must be text, not a Struct/object/array")
+            name = render(value)
         variable = self.registry.get(name)
         if variable is None or variable.kind not in _SCALARS:
             return name
@@ -115,7 +128,10 @@ class ActionRunner:
 
     def _param(self, text: str) -> str:
         if expr_body(text) is not None:
-            return render(self._parameter_value(text))
+            value = self._parameter_value(text)
+            if isinstance(value, (dict, list)):
+                raise ScriptError("Action parameter name expression must be text, not a Struct/object/array")
+            return render(value)
         variable = self.registry.get(text)
         return render(variable.read()) if variable is not None and variable.kind in _SCALARS else text
 
@@ -161,6 +177,8 @@ class ActionRunner:
             variable = Number(var, float(value))
         elif isinstance(value, str):
             variable = Alias(var, value)
+        elif isinstance(value, (dict, list)):
+            variable = Alias(var, render(value))
         else:
             raise ScriptError(f"Cannot infer capture type for '{var}'; declare @Alias for bool fields")
         self.registry.override(var, variable)
@@ -225,9 +243,16 @@ class ActionRunner:
                 if body is not None:
                     if cache[col] is None or cache[col][0] != body:
                         cache[col] = (body, Expression(body))
-                    value = self._value(cache[col][1])
+                    value = self._value_json(cache[col][1])
+                    if value is None:
+                        raise ScriptError("@Action cell $(...) cannot produce null; select a non-null field")
                     if isinstance(value, bool):
                         raise ScriptError("@Action cell $(...) cannot produce a boolean result")
+                    if isinstance(value, (dict, list)):
+                        if device in reflex_targets:
+                            raise ScriptError(
+                                f"Reflex argument '{param}' must be a scalar, not a Struct/object/array")
+                        value = render(value)
                     # Display precision must not turn numeric Reflex arguments into text.
                     variable = self.registry.get(body.strip())
                     if (device not in reflex_targets and isinstance(value, float)

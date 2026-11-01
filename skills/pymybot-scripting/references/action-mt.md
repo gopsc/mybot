@@ -178,6 +178,8 @@ $t=T;
   捕获读的是**结果表**里的 `T`（回读值），不是发出的参数。
 - 数值捕获自动成为 `@Vars` 型标量，文本捕获成为 `@Alias` 型；
   已存在的 `@Vars` 目标必须捕获到数值字段；不能捕获进驱动/daemon 变量。
+- object/array 捕获到 `@Alias`（或未声明目标）时序列化为紧凑 JSON 文本；
+  捕获到已声明的 Struct 时保留 JSON 类型。未声明目标不会自动成为 Struct。
 - 布尔字段可捕获到已声明的 `@Alias`（可来自 SQL 结构或 MT），保存为文本
   `"true"` / `"false"`；也可捕获到已声明的 Struct 整值或成员，保留 JSON 布尔类型。
   未声明目标无法推断布尔类型，`@Vars` 目标也不接受布尔。
@@ -390,9 +392,27 @@ $(state.points[0].x) $state.points[0].x=slept;
   `.字段` 仅查 JSON 对象键，不访问 Python 属性；字段名使用标识符语法。
 - 数组从 **0** 开始，支持 `[i]`、`[i+1]` 等下标表达式；下标须为非负有限整数值，
   布尔、小数、负数、字符串和越界下标均报错。访问缺失字段或对错误类型取字段/下标也报错。
-- object、array、null 可存储、捕获和用于逐层访问，但不能作为表达式最终结果或参与运算。
-  最终选出的数值/文本可用于动作参数，布尔可用于 `@if` / `@while` 条件。
-  Struct 不是设备，不能直接作为 Action 的调用目标。
+- object、array、null 可存储、捕获和用于逐层访问。object/array 作为表达式最终结果时
+  只在文本上下文可用：动作参数与 Alias 捕获按紧凑 JSON 序列化；仍不能参与算术/逻辑/
+  比较运算。逐层选出的数值/文本可用于动作参数，布尔可用于 `@if` / `@while` 条件；
+  单独的 null 不能作为表达式最终结果。Struct 不是设备，不能直接作为 Action 的调用目标。
+- 序列化不排序键，顺序沿用 Struct JSON 或驱动结果；单个序列化结果仍受 8 MiB 上限约束。
+- Struct/object/array 只能出现在文本值位置；作为设备名、动态参数名或 Reflex 实参会报错，
+  需先选到文本字段。
+
+直接作为文本参数：
+
+```mt
+@Struct(state)
+{"note":"hi","point":{"x":1}}
+@
+@Action
+dev.text dev.text2 dev.note;
+$(state) $(state.point) $(state.note);
+@
+```
+
+三列分别收到完整 JSON、`point` 的 JSON 文本和字段 `note` 的文本 `hi`。
 
 ### 捕获赋值
 
@@ -402,6 +422,9 @@ $(state.points[0].x) $state.points[0].x=slept;
 | `$state.count=count` | 替换已存在的 object 字段 |
 | `$state.points[0]=point` | 替换已存在的 array 元素 |
 | `$state.points[i].x=x` | 替换数组元素中的字段，下标可以是表达式 |
+
+同一捕获路径也可指向 `@Alias`：`$out=payload` 把 object/array 序列化为紧凑 JSON 文本，
+`$out=payload.note` 取字段；未声明目标同样按文本创建 Alias，不会自动创建 Struct。
 
 - 赋值可改变整值、字段或元素的 JSON 类型，但必须保持为合法、有界的 JSON 值。
   不隐式创建字段、不扩展数组；必须先声明 Struct，不能通过捕获自动推断出一个结构变量。

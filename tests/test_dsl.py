@@ -304,9 +304,9 @@ def test_capture_path_auto_types_and_declared_alias_bool():
 
 
 @pytest.mark.parametrize(("value", "target"), [
-    (True, None), (None, None), ({}, None), ([], None),
+    (True, None), (None, None),
     ("text", Number("x", 0)), (True, Number("x", 0)),
-    ({}, Alias("x", "")), (None, Alias("x", "")), (1, Driver("x")),
+    (None, Alias("x", "")), (1, Driver("x")),
     (float("inf"), None),
 ])
 def test_capture_rejects_invalid_type(value, target):
@@ -314,6 +314,28 @@ def test_capture_rejects_invalid_type(value, target):
     variables = [dev] + ([target] if target else [])
     with pytest.raises(ScriptError):
         run(block("Action", "dev.p", "$x=reading"), *variables)
+
+
+@pytest.mark.parametrize(("value", "target", "expected"), [
+    ({"n": 1}, None, '{"n":1}'),
+    ([1, "x"], None, '[1,"x"]'),
+    ({}, Alias("x", ""), "{}"),
+])
+def test_capture_serializes_object_and_array_to_alias(value, target, expected):
+    dev = Driver(callback=lambda params: {"reading": value})
+    variables = [dev] + ([target] if target else [])
+    registry, _ = run(block("Action", "dev.p", "$x=reading"), *variables)
+    assert registry.get("x").kind == "alias"
+    assert registry.resolve("x") == expected
+
+
+def test_capture_takes_nested_fields_from_object():
+    dev = Driver(callback=lambda params: {"reading": {"meta": {"note": "hi"}, "items": [1]}})
+    registry, _ = run(block("Action", "dev.p dev.q", "$note=reading.meta.note $obj=reading.meta"), dev)
+    assert registry.get("note").kind == "alias"
+    assert registry.resolve("note") == "hi"
+    assert registry.get("obj").kind == "alias"
+    assert registry.resolve("obj") == '{"note":"hi"}'
 
 
 @pytest.mark.parametrize("cell", ["$x", "$=field", "$x=", "$x=a..b", "$x=.a", "$x=a.", "$bad-name=f", "$x=missing"])
@@ -1374,6 +1396,14 @@ def test_expression_json_final_value_must_be_scalar(value, text):
     resolve = {"state": value, "root": {"child": value, "array": [value]}}.__getitem__
     with pytest.raises(ScriptError, match="scalar"):
         Expression(text).evaluate(resolve)
+
+
+def test_expression_json_value_evaluation_keeps_containers_for_text_rendering():
+    state = {"x": 1, "items": [1, 2]}
+    expression = Expression("state")
+    assert expression.evaluate_value(lambda name: state) == state
+    with pytest.raises(ScriptError, match="scalar"):
+        expression.evaluate(lambda name: state)
 
 
 @pytest.mark.parametrize("text", [

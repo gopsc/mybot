@@ -8,6 +8,7 @@ import threading
 from collections.abc import Callable
 
 from .errors import ScriptError
+from .security import MAX_BODY, dumps
 
 Value = float | str | bool
 ResolvedValue = Value | int | dict[str, "ResolvedValue"] | list["ResolvedValue"] | None
@@ -46,13 +47,21 @@ def expr_body(text: str) -> str | None:
     return text[2:-1] if text.startswith("$(") and text.endswith(")") else None
 
 
-def render(value: Value) -> str:
+def render(value: ResolvedValue) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, (dict, list)):
+        try:
+            text = dumps(value)
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise ScriptError(f"Struct value cannot be serialized as JSON: {exc}") from None
+        if len(text.encode("utf-8")) > MAX_BODY:
+            raise ScriptError("Serialized Struct exceeds the 8 MiB limit")
+        return text
     if not isinstance(value, (float, int)):
-        raise ScriptError("Only string/number/bool values can be rendered")
+        raise ScriptError("Only string/number/bool/object/array values can be rendered")
     try:
         number = float(value)
     except OverflowError:
@@ -378,8 +387,12 @@ class Expression:
             parser.fail("unexpected trailing input")
         self.identifiers = parser.identifiers
 
+    def evaluate_value(self, resolve: Callable[[str], ResolvedValue]) -> ResolvedValue:
+        """Return the raw JSON value; text callers render containers as JSON."""
+        return _evaluate(self._root, resolve)
+
     def evaluate(self, resolve: Callable[[str], ResolvedValue]) -> Value:
-        return _scalar(_evaluate(self._root, resolve))
+        return _scalar(self.evaluate_value(resolve))
 
 
 class Reference:
