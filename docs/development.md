@@ -35,6 +35,7 @@ python -I tools/ci_smoke.py base        # fail if pydantic_ai leaked into base e
 python -I tools/ci_smoke.py agent       # fail if agent imports are missing
 python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
 python -I tools/check_docs_skill_sync.py  # skill links/paths resolve, references declare a Source
+python -I tools/check_release_metadata.py # pyproject/__init__/CITATION/CHANGELOG agree
 ```
 
 `--no-gui` is required for the terminal agent when no subcommand is given;
@@ -96,6 +97,11 @@ which fails on dead skill links, missing repository paths, a reference without a
 python -m pip install -e ".[agent,camera,package]"
 python -m PyInstaller --noconfirm --clean tools/mybot.spec
 ```
+
+Both `tools/mybot.spec` and the experimental onefile spec import
+`tools/bundle_assets.py`, the single source of truth for bundled modules, robots,
+scripts, skills, prompts, GUI assets and optional package metadata. Add a new
+asset root there rather than duplicating it in a spec.
 
 The spec produces `dist/mybot/` with:
 

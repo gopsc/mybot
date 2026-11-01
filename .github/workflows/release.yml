@@ -45,6 +45,8 @@ jobs:
           test "$tag" = "$pkg" || { echo "tag $tag != pyproject $pkg"; exit 1; }
           test "$tag" = "$mod" || { echo "tag $tag != pymybot $mod"; exit 1; }
           test "$tag" = "$cit" || { echo "tag $tag != CITATION $cit"; exit 1; }
+      - name: Verify release metadata
+        run: python -I tools/check_release_metadata.py
       - name: Install build frontend
         run: python -m pip install build
       - name: Build
@@ -86,6 +88,8 @@ jobs:
           dist\mybot\pymybot.exe --version
           dist\mybot\pymybot.exe doctor
           dist\mybot\pymybot.exe check --robot dist\mybot\robots\relay-test.sql --input dist\mybot\scripts\relay-test.mt
+          dist\mybot\pymybot.exe run --robot dist\mybot\robots\relay-test.sql --input dist\mybot\scripts\relay-test.mt --timeout 10
+          dist\mybot\pymybot.exe prompts list
       - name: Verify camera support in the bundle
         shell: pwsh
         run: |

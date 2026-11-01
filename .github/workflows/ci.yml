@@ -35,6 +35,8 @@ jobs:
         run: ruff check pymybot tests tools build_support.py
       - name: Docs/skill sync
         run: python -I tools/check_docs_skill_sync.py
+      - name: Release metadata
+        run: python -I tools/check_release_metadata.py
 
   test:
     name: pytest / Python ${{ matrix.python-version }}
@@ -77,6 +79,28 @@ jobs:
         run: python -I tools/ci_smoke.py base
       - name: Tests
         run: python -m pytest -q
+
+  macos:
+    name: macOS base smoke
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install base package
+        run: python -m pip install -e .
+      - name: Version and diagnostics
+        run: |
+          python -m pymybot --version
+          python -m pymybot doctor
+      - name: No-hardware smoke
+        run: |
+          python -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
+          python -m pymybot run --robot robots/relay-test.sql --input scripts/relay-test.mt --timeout 10
 
   agent:
     name: agent / ${{ matrix.os }} / Python ${{ matrix.python-version }}

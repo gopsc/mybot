@@ -8,12 +8,12 @@ are `pymybot/__init__.py`, `pyproject.toml` and `CITATION.cff` (currently
 
 ## Compatibility promises
 
-Within a minor line (`0.3.x`):
+Within a minor line (`0.4.x`):
 
 - CLI command names and JSON keys remain stable.
-- `robots/*.sql` and `scripts/*.mt` accepted by earlier 0.2.x/0.3.x releases
-  remain accepted, except
-  where a security fix requires a documented rejection.
+- `robots/*.sql` and `scripts/*.mt` accepted by earlier 0.2.x/0.3.x/0.4.x
+  releases remain accepted, except where a security fix requires a documented
+  rejection.
 - Public Python module paths used by integrations (`pymybot.cli`,
   `pymybot.robot`, `pymybot.serve`) keep their entry points.
 - The `serve` JSON-RPC protocol version is reported by `initialize`; new

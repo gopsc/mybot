@@ -8,50 +8,15 @@ Build:
 The console EXE hides its console when it starts the GUI. The GUI launches
 ``pymybot.exe serve`` with CREATE_NO_WINDOW (see pymybot/gui/protocol.py).
 """
+import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules, copy_metadata
-
 ROOT = Path(SPECPATH).resolve().parent
-ASSET_SUFFIXES = {"modules": (".lua", ".py"), "robots": (".sql",), "scripts": (".mt",),
-                  "skills": (".md",), "prompts": (".md", ".json")}
+sys.path.insert(0, str(ROOT / "tools"))
+from bundle_assets import asset_datas, hidden_imports, metadata_datas
 
-datas = []
-for name, suffixes in ASSET_SUFFIXES.items():
-    for source in sorted((ROOT / name).rglob("*")):
-        if source.is_file() and source.suffix in suffixes:
-            relative = source.relative_to(ROOT)
-            datas.append((str(source), str(Path("pymybot/assets") / relative.parent)))
-
-for source in sorted((ROOT / "pymybot" / "gui" / "assets").glob("*.svg")):
-    datas.append((str(source), "pymybot/gui/assets"))
-
-for extra in ("README.md", "LICENSE", "CHANGELOG.md"):
-    candidate = ROOT / extra
-    if candidate.is_file():
-        datas.append((str(candidate), "."))
-
-for distribution in (
-    "pydantic-ai-slim", "pydantic-graph", "pydantic", "openai", "anthropic",
-    "genai-prices", "httpx2", "httpcore2", "griffelib", "truststore", "jiter",
-    "tiktoken", "lupa", "sqlparse", "pyserial", "pyftdi", "pillow", "av", "PySide6",
-    "mcp", "httpx", "beautifulsoup4",
-):
-    try:
-        datas += copy_metadata(distribution)
-    except Exception:
-        pass
-
-hiddenimports = ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtSvg"]
-for package in (
-    "pydantic_ai", "pydantic_graph", "openai", "anthropic", "genai_prices",
-    "httpx2", "httpcore2", "griffelib", "truststore", "jiter", "tiktoken",
-    "lupa", "PIL", "serial", "pyftdi", "av", "mcp", "httpx", "bs4",
-):
-    try:
-        hiddenimports += collect_submodules(package)
-    except Exception:
-        pass
+datas = list(asset_datas(ROOT)) + metadata_datas()
+hiddenimports = hidden_imports()
 
 a = Analysis(
     [str(ROOT / "tools" / "entry_cli.py")],

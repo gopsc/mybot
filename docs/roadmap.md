@@ -28,6 +28,10 @@ release; security and reproducibility work takes precedence.
 
 - [x] Standard MCP over stdio: `pymybot mcp` exposes the read-only controller,
   and the agent can call operator-configured external MCP servers.
+- [x] Best-effort abort (`abort` / `session.abort` / GUI **急停**) with optional
+  Python/Lua `safe()` hooks and a bounded, reverse-order stop path.
+- [x] Shared frozen-asset plan for the onedir and onefile PyInstaller specs.
+- [x] Runnable `pymybot new` scaffold and a README quick start.
 - [ ] Remote MCP transports (HTTP/SSE), after a network threat-model review.
 - [ ] Pluggable model providers beyond the current four, without duplicating
   HTTP code.

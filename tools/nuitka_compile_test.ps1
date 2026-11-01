@@ -1,6 +1,7 @@
 # Experimental Windows Nuitka standalone build. Not used by release CI.
 # Prerequisites: .venv with ".[agent,camera,gui]" plus `pip install nuitka`.
 # -SkipBuild only verifies/repairs the Qt plugins of an existing build-nuitka\mybot.dist.
+# powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\nuitka_compile_test.ps1
 param([switch]$SkipBuild)
 
 $ErrorActionPreference = "Stop"
