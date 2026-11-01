@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 
 import pytest
 
@@ -659,6 +660,42 @@ function destroy(d) print("probe destroyed"); return {{result="OK"}} end
                                        "--module-path", workspace, "--timeout", "0.02")
     assert code == 1 and error in result["error"]["message"]
     assert "probe destroyed" in diagnostics
+
+
+def test_signal_stop_uses_abort_instead_of_plain_deactivate(workspace, monkeypatch):
+    calls = []
+
+    class FakeRobot:
+        def __init__(self, *args, **kwargs):
+            self.state = "Active"
+            self.tables = {}
+
+        def _validate(self, tables):
+            return {}
+
+        def active(self):
+            return self
+
+        def run(self, *args, **kwargs):
+            return []
+
+        def abort(self, reason):
+            calls.append(reason)
+            return {"state": "Aborted"}
+
+        def deactivate(self):
+            calls.append("deactivate")
+
+    monkeypatch.setattr(cli, "Robot", FakeRobot)
+    args = cli.parse_args(["run", "--robot", str(workspace / "robot.sql"),
+                           "--input", str(workspace / "action.mt")])
+    stop = threading.Event()
+    stop.set()
+
+    result = cli.execute(args, stop)
+
+    assert result == {"outputs": []}
+    assert calls == ["cli-signal"]
 
 
 @pytest.mark.parametrize("command, extra, method", [

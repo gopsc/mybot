@@ -133,6 +133,7 @@ def parser():
         "sessions": "List or prune conversation transcripts under ~/.mybot/sessions",
         "prompts": "List or restore runtime prompt layers without a robot or model",
         "roles": "Create, inspect and clear self-contained Agent roles under ~/.mybot/roles",
+        "new": "Create a runnable robot SQL/MT/driver skeleton in the current directory",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
@@ -167,6 +168,12 @@ def parser():
                               help="back up runtime prompts and restore all bundled defaults")
             restore.add_argument("--yes", action="store_true",
                                  help="approve --all without an interactive confirmation")
+            continue
+        if name == "new":
+            command.add_argument("name", help="robot name, for example mybot-arm")
+            command.add_argument("--dir", default=".", metavar="DIR",
+                                 help="workspace root (default: current directory)")
+            command.add_argument("--force", action="store_true", help="overwrite existing generated files")
             continue
         if name in {"agent", "gui"}:
             command.add_argument("--role", metavar="NAME",
@@ -352,7 +359,7 @@ def parse_args(argv=None):
         print(f"pymybot {__version__}")
         raise SystemExit(0)
     commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql",
-                 "agent", "gui", "serve", "mcp", "doctor", "sessions", "prompts", "roles"}
+                 "agent", "gui", "serve", "mcp", "doctor", "sessions", "prompts", "roles", "new"}
     # --no-gui is a top-level switch: the GUI is the default entry, so drop it
     # before choosing a command, and let a subcommand keep its own semantics.
     no_gui = "--no-gui" in arguments
@@ -587,6 +594,9 @@ def role_command(args):
 
 
 def execute(args, stop):
+    if args.command == "new":
+        from .scaffold import create_robot
+        return create_robot(args.dir, args.name, force=args.force)
     if args.command == "doctor":
         return doctor()
     if args.command == "prompts":
@@ -688,8 +698,17 @@ def execute(args, stop):
             return sample(robot, args, stop)
         return {"output": robot.apply_sql(args.sql)}
     finally:
-        # Also required when active() fails after opening only some devices.
-        robot.deactivate()
+        # A signal is an operator stop: try the drivers' safe() hooks before
+        # releasing. Ordinary failures keep the historical destroy-only cleanup.
+        if stop.is_set():
+            try:
+                robot.abort("cli-signal")
+            except Exception as exc:
+                print(f"Abort failed: {exc}", file=sys.stderr)
+                robot.deactivate()
+        else:
+            # Also required when active() fails after opening only some devices.
+            robot.deactivate()
 
 
 def hide_console_window():

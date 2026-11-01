@@ -167,6 +167,20 @@ def test_session_persists_hot_sql_until_deactivate(workspace, client_factory):
     assert client.close() == 0
 
 
+@pytest.mark.parametrize("method", ["abort", "session.abort"])
+def test_abort_ends_the_session(workspace, client_factory, method):
+    client = client_factory(workspace)
+    client.call("session.activate", {"robot": str(workspace / "robot.sql")})
+
+    receipt = client.call(method)
+    assert receipt["state"] == "Aborted"
+    assert receipt["aborted"] is True
+    assert client.call("session.status")["state"] == "Inactive"
+    assert client.error("run", {"input": str(workspace / "action.mt")})["code"] == serve.WRONG_STATE
+    assert client.call(method)["aborted"] is False
+    assert client.close() == 0
+
+
 def test_session_activate_applies_var_bindings(workspace, client_factory):
     modules = workspace / "probe-modules"
     modules.mkdir()
@@ -501,6 +515,12 @@ class LifecycleHarness:
             def cancel(self):
                 self.stopped = True
 
+            async def abort(self):
+                self.stopped = True
+                return {"ok": True, "executed": False, "state": "completed",
+                        "data": {"state": "Aborted", "aborted": True, "reason": "operator",
+                                 "safe_failures": [], "destroy_failures": []}}
+
             async def ask(self, task):
                 await harness.phase("ask")
                 if self.stopped:
@@ -631,6 +651,17 @@ def test_owner_agent_transitions_block_session(workspace, monkeypatch, phase):
         gate.release.set()
         assert "result" in await h.reply(pending)
         await h.call("agent.reset")
+        await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+def test_abort_agent_closes_an_idle_conversation(workspace, monkeypatch):
+    async def scenario(h):
+        await h.call("agent.ask")
+        receipt = await h.call("abort")
+        assert receipt["agent"] is True and receipt["conversationClosed"] is True
+        assert receipt["state"] == "Aborted"
+        assert h.agents[0]["session"].closed and h.agents[0]["client"].closed
         await h.check_free()
     lifecycle_scenario(workspace, monkeypatch, scenario)
 

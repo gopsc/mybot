@@ -776,6 +776,21 @@ def test_operator_bindings_are_validated(setup):
         setup.factory(vars={"bad.name": "x"})
 
 
+def test_explicit_abort_latches_executor_and_robot(setup):
+    async def scenario():
+        ex = setup.factory()
+        try:
+            await ex.start()
+            result = await ex.abort()
+            assert result["ok"] and result["data"]["state"] == "Aborted"
+            assert setup.made[0].state == "Aborted"
+            assert ex.faulted
+            rejected(await ex.call("list_hardware", {}))
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
 def test_cancelled_call_waits_for_native_io_and_cleanup(setup):
     entered, release = threading.Event(), threading.Event()
     def block(_):
@@ -795,7 +810,7 @@ def test_cancelled_call_waits_for_native_io_and_cleanup(setup):
             await asyncio.sleep(0)
             release.set()
             unknown(await task, "BudgetExceeded")
-            assert ex.faulted and ex.interrupted and setup.made[0].state == "Inactive"
+            assert ex.faulted and ex.interrupted and setup.made[0].state == "Aborted"
         finally:
             release.set()
             await ex.close()

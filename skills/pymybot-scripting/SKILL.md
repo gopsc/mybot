@@ -11,7 +11,7 @@ description: Reference for the pymybot three-layer robot scripting stack — SQL
 
 - 仓库根 ＝ Python 主线，包名 pymybot。**一切开发以它为准。**
 - 三层模型：`robots/*.sql` 结构（舞台：声明零件与接线）→ `modules/*.py` 或 `*.lua` 驱动
-  （演员：build/call/destroy）→ `scripts/*.mt` 动作（剧本：一行一拍）。
+  （演员：build/call/destroy，可加 safe）→ `scripts/*.mt` 动作（剧本：一行一拍）。
 - 操作者文档 `docs/` 是架构、CLI、安全、测试的权威来源，本技能只写脚本层的硬规则；
   agent 读不到 docs，因此每个 reference 开头的 `Source:` 行标明了它对应的权威位置。
 
@@ -40,7 +40,8 @@ references 内的相对路径均以仓库根 `mybot/` 为基准。
 6. 普通表对应 `modules/<表名>.py` 或 `.lua`：逐根查找，同根 Python 优先；原生入口是 `Driver(context)`，详见驱动参考。表名不带连字符。
 7. `proto='virt'` 找不到内嵌 `*_VIRT` 模型会响亮报错，**绝不静默回落真机**；
    虚拟与真机用分别命名的 SQL。
-8. `destroy` 是尽力释放：资源不可用就跳过动作、仍返回 OK。
+8. `destroy` 是尽力释放：资源不可用就跳过动作、仍返回 OK。可选 `safe(data)` 在 abort 时、`destroy`
+   之前按激活逆序调用；它拿到 `mode="safe"`，但仍是协作式软件停止，不是硬件急停。
 9. `@if`/`@while` 条件写在块名内且中间无空格：`@if(x>0)`；Action、控制块和 Reflex body
    均可混排矩阵与嵌套 Action/if/while。Include 只在最外层，body 内 Merge 只合并其后的纯矩阵，不能横向合并嵌套块。
 10. 默认拒绝物理设备、非回环网络与宿主命令执行（`--allow-hardware` 才放开）；virt 总线、`loop://` 与回环 HTTP（127.0.0.1/localhost/[::1]）不需要该开关。

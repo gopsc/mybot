@@ -366,6 +366,63 @@ class Server:
         await self.deactivate()
         return self.status()
 
+    async def m_abort(self, ident, params, cancel):
+        """Best-effort stop for whichever side currently owns the hardware."""
+        if self.agent is not None:
+            return await self._abort_agent()
+        if self.robot is not None:
+            return await self._abort_session()
+        return {"state": "Inactive", "aborted": False, "agent": False,
+                "safe_failures": [], "destroy_failures": []}
+
+    async def m_session_abort(self, ident, params, cancel):
+        return await self._abort_session()
+
+    async def _abort_session(self):
+        """Best-effort stop for a direct robot session; always ends the session."""
+        robot = self.robot
+        if robot is None:
+            return {"state": "Inactive", "aborted": False,
+                    "safe_failures": [], "destroy_failures": []}
+        self.require_owner("session")
+        # Wake a running cooperative action before waiting for the owner thread;
+        # the abort task itself is queued behind that action.
+        robot.stop_event.set()
+        if self.robot_op is not None:
+            self.cancel({"id": self.robot_op[0]})
+        try:
+            receipt = await self.on_worker(robot.abort, "operator")
+        finally:
+            self.robot = None
+            self.session = None
+            self.owner = None
+            self.notify("session", self.status())
+        return receipt
+
+    async def m_agent_abort(self, ident, params, cancel):
+        return await self._abort_agent()
+
+    async def _abort_agent(self):
+        """Stop the active Agent executor and close an idle conversation."""
+        agent = self.agent
+        if agent is None:
+            return {"state": "Inactive", "aborted": False, "agent": False,
+                    "safe_failures": [], "destroy_failures": []}
+        session = agent["session"]
+        session.executor.cancel()
+        result = await session.executor.abort()
+        data = result.get("data") if isinstance(result, dict) else None
+        receipt = data if isinstance(data, dict) else result
+        closed = not self.agent_lock.locked()
+        if closed:
+            async with self.agent_lock:
+                await self.close_agent()
+                if self.owner == "agent":
+                    self.owner = None
+        if isinstance(result, dict) and result.get("ok") is False:
+            receipt = {**result, "aborted": False}
+        return {**receipt, "agent": True, "conversationClosed": closed}
+
     async def deactivate(self):
         cancelled = False
         while self.owner == "session":

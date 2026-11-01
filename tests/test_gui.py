@@ -844,6 +844,19 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     assert (params["timeout"], params["maxRequests"], params["maxToolCalls"]) == (2.5, 2, 4)
 
 
+def test_abort_button_targets_the_server_not_the_agent_turn(ui, qapp):
+    _, app = ui
+    client = attach_client(app)
+    app.task_box.setPlainText("hello")
+    app.send_button.click()
+    app.abort_button.click()
+
+    assert client.requests[-1] == ("abort", {})
+    assert client.cancelled == [1]
+    client.futures[-1].set_result({"state": "Aborted", "safe_failures": []})
+    assert qt_wait(qapp, lambda: "急停完成" in app.status_notice.text())
+
+
 def test_composer_sends_without_a_server_and_remembers_the_task(ui, monkeypatch):
     _, app = ui
     started = []

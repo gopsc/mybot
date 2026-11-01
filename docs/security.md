@@ -122,6 +122,12 @@ of safety policy remains unsupported; editable memory layers do not supersede it
   these regularly in long loops. Timeouts/cancellation cannot forcibly interrupt
   a blocking native call **or an uncooperative Python loop**. They are not a hard
   execution limit or a safety stop.
+- `abort`, `session.abort`, `agent.abort` and the GUI **急停** button are
+  best-effort operator stops: they set the stop flag, call optional driver
+  `safe()`, then release handles. They are not a hardware emergency stop and must
+  not be used as a safety-rated interlock. A blocked native call can delay them
+  indefinitely; keep a physical E-stop and independent safety circuit for any
+  machine that needs one.
 - A dispatched action is never claimed to be rolled back. If an exception
   occurs after dispatch, the result is “unknown”; the operator must inspect the
   robot.

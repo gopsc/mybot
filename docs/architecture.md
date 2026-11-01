@@ -32,11 +32,18 @@ inherits the previous row's value.
 
 Activation executes the selected source in a fresh module namespace and creates
 one `Driver(context)` instance **per SQL row**. `build(data)` and `call(data)` are
-required; `read(data)` is optional and falls back to `call(data)`, and optional
-`destroy(data)` performs cleanup. Methods receive a dictionary of resolved
-metadata, action parameters and trigger results as applicable, with `mode` set
-to the entry point. Return a nonempty dictionary of JSON-compatible values;
-`result` may be omitted, or be `"OK"` for success / `"ERR"` with `message` for failure.
+required; `read(data)` is optional and falls back to `call(data)`, optional
+`destroy(data)` performs cleanup, and optional `safe(data)` is the best-effort
+abort hook. Methods receive a dictionary of resolved metadata, action parameters
+and trigger results as applicable, with `mode` set to the entry point. Return a
+nonempty dictionary of JSON-compatible values; `result` may be omitted, or be
+`"OK"` for success / `"ERR"` with `message` for failure.
+
+`Robot.abort()` sets the runtime stop flag, calls `safe()` in reverse activation
+order with a fresh bounded budget, then destroys every driver. It is not a
+hardware emergency stop: a blocking native call or uncooperative Python loop can
+still delay it. An aborted `Robot` is latched and must be replaced, not
+reactivated.
 
 `context.call(operation, *args)` uses existing HAL operations (for example,
 `uart_read`, `i2c_transfer`, `close_handle`) with the same permissions, handle
@@ -135,6 +142,7 @@ Key invariants:
 | `pymybot/mcp_server.py` | Standard MCP stdio server over the same executor (read-only by default) |
 | `pymybot/mcp_client.py` | Operator `mcpServers` configuration for external agent tools |
 | `pymybot/gui/` | PySide6 front-end: protocol client, settings, approvals |
+| `pymybot/scaffold.py` | `pymybot new` SQL/MT/Python skeleton generator |
 | `pymybot/security.py` | Bounded reads and strict JSON output |
 | `pymybot/paths.py` | Source/frozen asset resolution |
 

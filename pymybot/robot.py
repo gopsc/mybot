@@ -73,6 +73,14 @@ class Robot:
         self.state = "Loaded"
         self.structure_path = ""
         self.deactivate_grace_ms = 30000
+        # Abort is deliberately faster than ordinary deactivation: stop workers
+        # promptly, give each driver a bounded safe() window, then release.
+        self.abort_grace_ms = 2000
+        self.safe_timeout_ms = 2000
+        self.safe_budget_ms = 5000
+        self.aborted = False
+        self.abort_reason = ""
+        self._abort_receipt = None
         self._lock = threading.RLock()
         self._metas = {}
 
@@ -285,7 +293,9 @@ class Robot:
 
     def active(self):
         with self._lock:
-            if self.state in {"Active", "Deactivating"}:
+            if self.aborted or self.state == "Aborted":
+                raise ScriptError("Robot was aborted; create a new Robot to resume control")
+            if self.state in {"Active", "Deactivating", "Aborting"}:
                 raise ScriptError(f"Cannot activate robot in state {self.state}")
             rows = self._validate(self.tables)
             if self.state == "Inactive":
@@ -306,26 +316,96 @@ class Robot:
                 raise
         return self
 
+    def _shutdown(self, *, safe_reason=None, grace_ms=None):
+        """Stop workers, optionally call safe(), then destroy every variable.
+
+        The caller owns ``self._lock`` and sets the final state. ``safe`` runs
+        before destroy so a driver can still use its open handles.
+        """
+        variables = list(self.registry.values())
+        daemons = [var for var in reversed(variables) if var.kind == "daemon"]
+        grace = self.deactivate_grace_ms if grace_ms is None else grace_ms
+        deadline = time.monotonic() + grace / 1000
+        for var in daemons:
+            var.request_stop(deadline)
+        safe_failures = []
+        if safe_reason is not None:
+            safe_failures = self._safe_all(variables, safe_reason)
+        failures = []
+        for var in daemons + [var for var in reversed(variables) if var.kind != "daemon"]:
+            try:
+                var.destroy()
+            except Exception as exc:
+                failures.append(str(exc))
+        self.hal.close()
+        return safe_failures, failures
+
+    def _safe_all(self, variables, reason):
+        failures = []
+        deadline = time.monotonic() + self.safe_budget_ms / 1000
+        for var in reversed(variables):
+            if var.kind not in {"python", "lua"}:
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                failures.append("safe() budget exhausted before all drivers ran")
+                break
+            try:
+                if not var.has_safe():
+                    continue
+                var.safe(reason, timeout=min(self.safe_timeout_ms / 1000, remaining))
+            except Exception as exc:
+                message = str(exc).replace("\n", " ")[:512]
+                failures.append(f"{var.name}: {message or type(exc).__name__}")
+        return failures
+
     def deactivate(self):
         with self._lock:
-            if self.state in {"Loaded", "Inactive"}:
+            if self.state in {"Loaded", "Inactive", "Aborted"}:
                 return
             self.state = "Deactivating"
-            variables = list(self.registry.values())
-            daemons = [var for var in reversed(variables) if var.kind == "daemon"]
-            deadline = time.monotonic() + self.deactivate_grace_ms / 1000
-            for var in daemons:
-                var.request_stop(deadline)
-            failures = []
-            for var in daemons + [var for var in reversed(variables) if var.kind != "daemon"]:
-                try:
-                    var.destroy()
-                except Exception as exc:
-                    failures.append(str(exc))
-            self.hal.close()
+            _, failures = self._shutdown()
             self.state = "Inactive"
             if failures:
                 print("Deactivate warnings: " + "; ".join(failures), file=sys.stderr)
+
+    def abort(self, reason="operator"):
+        """Best-effort stop: latch, call optional driver safe() hooks, then release.
+
+        This is not a hardware emergency stop. It sets ``stop_event`` before
+        taking the robot lock so a running cooperative action can unwind, then
+        calls ``safe(data)`` on each active Python/Lua driver using a fresh,
+        bounded budget. A blocking native call or uncooperative Python loop can
+        still delay this method indefinitely.
+        """
+        # Set the flag before waiting for a running action to release the lock.
+        self.stop_event.set()
+        with self._lock:
+            if self.state == "Aborted":
+                return dict(self._abort_receipt or {"state": "Aborted", "aborted": True})
+            if self.state == "Aborting":
+                return dict(self._abort_receipt or {"state": "Aborting", "aborted": True})
+            self.aborted = True
+            self.abort_reason = str(reason)[:256]
+            if self.state in {"Loaded", "Inactive"}:
+                self.state = "Aborted"
+                receipt = {"state": "Aborted", "aborted": True, "reason": self.abort_reason,
+                           "safe_failures": [], "destroy_failures": []}
+                self._abort_receipt = receipt
+                return dict(receipt)
+            self.state = "Aborting"
+            safe_failures, destroy_failures = [], []
+            try:
+                safe_failures, destroy_failures = self._shutdown(
+                    safe_reason=self.abort_reason, grace_ms=self.abort_grace_ms)
+            except Exception as exc:
+                destroy_failures.append(f"{type(exc).__name__}: {str(exc)[:512]}")
+            finally:
+                self.state = "Aborted"
+            receipt = {"state": "Aborted", "aborted": True, "reason": self.abort_reason,
+                       "safe_failures": safe_failures, "destroy_failures": destroy_failures}
+            self._abort_receipt = receipt
+            return dict(receipt)
 
     def __enter__(self):
         return self.active()

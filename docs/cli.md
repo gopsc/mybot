@@ -27,6 +27,7 @@ python -m pymybot doctor
 | `pymybot agent ...` | PydanticAI task/REPL | Via approved tools |
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
+| `pymybot new NAME [--dir DIR] [--force]` | Generate a runnable `robots/`, `scripts/` and `modules/` skeleton | No |
 | `pymybot doctor` | Environment/dependency/asset diagnostics, including prompt manifest and safety hashes | No |
 | `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
 | `pymybot prompts list` | List runtime prompt layers, hashes and modification status | No |
@@ -145,6 +146,9 @@ they stay in memory for this launch and are never written to `settings.json`.
 ## Examples
 
 ```sh
+# Create a runnable pure-software skeleton
+python -m pymybot new mybot-arm
+
 # Static validation, no hardware
 python -m pymybot check \
   --robot robots/relay-test.sql \
@@ -184,6 +188,9 @@ Failure:
 ```
 
 Exit codes: `0` success, `1` runtime error, `2` usage error, `130` interrupted.
+A Ctrl+C/SIGTERM during an activating command stops the action and attempts the
+same `safe()` hooks as `abort` before releasing hardware; ordinary action errors
+keep the historical destroy-only cleanup.
 The agent may add `tool_events` and `cleanup_errors`; it never includes tool
 arguments, secrets or images in the final JSON. Full transcripts are written
 separately; see [Session transcripts](#session-transcripts).
@@ -200,6 +207,9 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `session.status` | — | `state`, `robot`, `busy`, ... |
 | `session.activate` | `robot`, optional `modulePaths`, `cameraSrcDir`, `allowHardware`, `vars` | session state |
 | `session.deactivate` | — | cancels work and cleans drivers |
+| `abort` | — | best-effort stop for the active session or Agent executor; returns `state`, `aborted`, `safe_failures`, `destroy_failures` |
+| `session.abort` | — | abort a direct robot session; always ends the session |
+| `agent.abort` | — | stop the Agent executor; closes an idle conversation |
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
@@ -213,7 +223,15 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 
 Only one hardware operation runs at a time (`-32001` when busy). An active
 session and an agent conversation are mutually exclusive (`-32002` when the
-state is wrong). The server may send a `confirm` request to the client; only
+state is wrong).
+
+`abort` is the client-facing stop: it chooses the current owner, sets the stop
+flag immediately, waits for the active action to unwind, calls optional driver
+`safe()` hooks in reverse activation order, and releases the hardware. A direct
+session is ended; an idle Agent conversation is closed. It is **best effort, not
+a hardware emergency stop**: a blocking native call or uncooperative Python loop
+can still delay it. `session.deactivate` is ordinary cleanup and does not call
+`safe()`. The server may send a `confirm` request to the client; only
 `{"approved": true}` executes a gated tool. Changing `autoStats` changes the
 conversation configuration and reopens the agent, just like other configuration
 changes. Non-boolean values are rejected with `-32602`. Prompt updates always

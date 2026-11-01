@@ -8,10 +8,25 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- First-class best-effort abort: `Robot.abort()`, optional driver `safe(data)`
+  hooks (Python and Lua), and `abort` / `session.abort` / `agent.abort` serve
+  methods. The GUI adds a red **急停** button without a confirmation dialog.
+  Abort sets the stop flag before waiting, calls `safe()` in reverse activation
+  order with a fresh bounded budget, then destroys drivers and latches the
+  robot. It is not a hardware emergency stop.
+- `pymybot new NAME` generates a runnable structure SQL, MT action and Python
+  driver skeleton without touching hardware.
 - Struct, object and array values can be used directly as text parameters and
   captured into Alias variables as compact JSON; field selection still returns
   text/number/bool, while arithmetic, logical operators and Reflex arguments
   continue to reject containers.
+
+## [0.4.1] – 2026-10-31
+
+### Changed
+
+- Modernized the desktop GUI theme and splash screen; refreshed the robot
+  branding assets and startup animation.
 
 ## [0.4.0] – 2026-10-31
 

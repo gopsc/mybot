@@ -333,6 +333,24 @@ class DriverVariable(Variable):
             raise DriverError(f"'{self.name}' not built or already destroyed")
         return self.runtime.call("read" if self.runtime.has_function("read") else "call", self.metadata.collect(), budget=self.budget)
 
+    def has_safe(self):
+        return self.runtime is not None and self.runtime.has_function("safe")
+
+    def safe(self, reason="operator", *, timeout=2.0):
+        """Best-effort safe-state hook; absent safe() is a no-op.
+
+        A fresh budget deliberately ignores the latched stop_event: the hook is
+        how a driver reaches a safe state after a stop was requested. It still
+        expires cooperatively, and cannot interrupt a blocking native call.
+        """
+        if self.runtime is None or not self.runtime.has_function("safe"):
+            return
+        data = self.metadata.collect(for_destroy=True)
+        data["mode"] = "safe"
+        data.setdefault("reason", str(reason)[:256])
+        result = self.runtime.call("safe", data, budget=Budget(timeout=max(0.1, float(timeout))))
+        ensure_ok(result, f"safe {self.name}")
+
     def destroy(self):
         if self.runtime is None:
             return

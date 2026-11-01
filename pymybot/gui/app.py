@@ -208,9 +208,12 @@ class App(QMainWindow):
         toolbar.addWidget(self.manage_button)
         toolbar.addWidget(_button("命令", self.open_console))
         self.new_button = _button("新对话", self.new_conversation)
-        self.stop_button = _button("停止", self.stop_turn, role="danger")
+        self.stop_button = _button("停止对话", self.stop_turn, role="danger")
+        self.abort_button = _button("急停", self.abort_all, role="danger")
+        self.abort_button.setToolTip("停止当前动作并调用驱动的 safe()；不是硬件急停")
         toolbar.addWidget(self.new_button)
         toolbar.addWidget(self.stop_button)
+        toolbar.addWidget(self.abort_button)
         toolbar.addWidget(_button("设置", self.open_settings))
 
         body = QSplitter(Qt.Orientation.Horizontal)
@@ -1151,6 +1154,42 @@ class App(QMainWindow):
             self._notice("已请求停止…")
         self._refresh_status()
 
+    def abort_all(self):
+        """Best-effort stop; no confirmation so it remains usable in a hurry."""
+        client = self.serve
+        if client is None:
+            self._notice("服务未启动，无法发送急停")
+            return
+        if self.turn_id is not None:
+            client.cancel(self.turn_id)
+        self._dismiss_approvals()
+        self.pending_task = ""
+        self._notice("已发送急停请求…")
+        generation = self.generation
+        try:
+            _, future = client.start_request("abort", {})
+        except RpcError as exc:
+            self._notice(f"急停失败：{exc}")
+            return
+        self._background(lambda: future.result(), lambda value, error: self._abort_done(generation, value, error))
+
+    def _abort_done(self, generation, result, error):
+        if generation != self.generation or self._stopping:
+            return
+        if error is not None:
+            self._notice(f"急停失败：{error}", seconds=12)
+            return
+        result = result or {}
+        if result.get("ok") is False:
+            self._notice("急停请求失败：" + str((result.get("error") or {}).get("message", "未知错误")), seconds=12)
+        elif result.get("aborted") is False:
+            self._notice("没有活动硬件会话；当前对话已停止", seconds=8)
+        else:
+            failures = len(result.get("safe_failures") or [])
+            suffix = f"（{failures} 个 safe() 失败）" if failures else ""
+            self._notice("急停完成，硬件会话已释放" + suffix, seconds=12)
+        self.refresh_context()
+
     def new_conversation(self):
         if self._stopping:
             return
@@ -1471,6 +1510,7 @@ class App(QMainWindow):
         busy = "执行中…" if self.busy else "空闲"
         self.status_busy.setText(busy + ("（" + "、".join(flags) + "）" if flags else ""))
         self.stop_button.setEnabled(self.busy or bool(self.pending_task))
+        self.abort_button.setEnabled(self.serve is not None)
         self._update_retry_buttons()
 
     def _set_busy(self, busy):

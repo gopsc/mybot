@@ -469,7 +469,7 @@ class RobotExecutor:
                           "message": _UNKNOWN if executed else _NOT_EXECUTED}}
 
     def _record(self, name, result, *, control=False):
-        known = isinstance(name, str) and (name in _TOOLS or (control and name == "deactivate"))
+        known = isinstance(name, str) and (name in _TOOLS or (control and name in {"abort", "deactivate"}))
         with self._records_lock:
             self.records.append({"tool": name if known else "unknown",
                                  **{k: result[k] for k in ("state", "ok", "executed")}})
@@ -586,6 +586,37 @@ class RobotExecutor:
             return self._record("deactivate", self._failure(exc), control=True)
         data = await self._wait(asyncio.wrap_future(future))
         return self._record("deactivate", {"ok": True, "executed": False, "state": "completed", "data": data},
+                            control=True)
+
+    def _abort(self):
+        self._owner()
+        self._stop.set()
+        if self._robot is None:
+            self._faulted = True
+            return {"state": "Aborted", "aborted": True, "reason": "operator",
+                    "safe_failures": [], "destroy_failures": []}
+        receipt = self._robot.abort("operator")
+        self._needs_cleanup = False
+        self._active = False
+        self._faulted = True
+        return receipt
+
+    async def abort(self) -> dict:
+        """Best-effort operator stop, serialized behind any active action.
+
+        The stop event is set before queuing so a cooperative action unwinds and
+        releases the owner thread. A blocking native call can still delay the
+        safe() hooks; this is not a hardware emergency stop.
+        """
+        if self._closing:
+            return self._record("abort", self._failure(SecurityError()), control=True)
+        self.cancel()
+        try:
+            future = self._pool.submit(self._abort)
+        except Exception as exc:
+            return self._record("abort", self._failure(exc), control=True)
+        data = await self._wait(asyncio.wrap_future(future))
+        return self._record("abort", {"ok": True, "executed": False, "state": "completed", "data": data},
                             control=True)
 
     @staticmethod
@@ -768,8 +799,17 @@ class RobotExecutor:
                 self._interrupted = self._stop.is_set()
                 self._faulted = True
                 self.cancel()
+                timed_out = deadline is not None and time.monotonic() >= deadline
                 try:
-                    self._cleanup()
+                    if self._robot is not None and (self._interrupted or timed_out):
+                        # Cancellation/timeout must attempt the driver's safe
+                        # hook before releasing handles. Ordinary driver faults
+                        # keep the historical destroy-only cleanup.
+                        self._robot.abort(f"{name}:{type(exc).__name__}")
+                        self._needs_cleanup = False
+                        self._active = False
+                    else:
+                        self._cleanup()
                 except BaseException:
                     pass  # close will retry cleanup, never the action.
             result = self._failure(exc, executed)

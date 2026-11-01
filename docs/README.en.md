@@ -96,9 +96,16 @@ export MYBOT_MODEL="deepseek:deepseek-chat"
 export DEEPSEEK_API_KEY="sk-..."
 .venv/bin/python -m pymybot --no-gui \
   --robot robots/relay-test.sql --task "List the hardware"
+
+# Generate a runnable SQL/MT/driver skeleton:
+.venv/bin/python -m pymybot new mybot-arm
 ```
 
 On Windows, use `.venv\Scripts\pip` and `.venv\Scripts\python`.
+
+`abort` and the GUI **急停** button are best-effort software stops: they call an
+optional driver `safe()` hook before releasing hardware. They are not a hardware
+emergency stop.
 
 Agent conversations are transcribed to `~/.mybot/sessions` by default (tool
 arguments, bounded results and images; API keys in environment variables are

@@ -10,9 +10,13 @@ Source: 驱动契约与信任边界的权威是 [docs/architecture.md](../../../
   按模块根顺序逐根查找（`--module-path` 可重复），**每根内 `.py` 优先于 `.lua`**；
   较早根的 Lua 优先于较晚根的 Python。无需新增 SQL 语言列。
 - 必须实现 `build(self, data)`、`call(self, data)`；可选 `read(self, data)`（缺省回退到
-  `call`）和 `destroy(self, data)`（尽力清理）。`data` 是已解析元数据、动作参数、触发结果
-  合成的字典，`mode` 是本次入口名。返回非空、可转 JSON 的字典；`result` 可省略，或以
+  `call`）、`destroy(self, data)`（尽力清理）和 `safe(self, data)`（abort 时的尽力安全动作）。
+  `data` 是已解析元数据、动作参数、触发结果合成的字典，`mode` 是本次入口名；`safe` 额外带
+  `mode="safe"` 和不冲突的 `reason`。返回非空、可转 JSON 的字典；`result` 可省略，或以
   `"OK"` 表示成功、`"ERR"` + `message` 表示失败；不要返回裸标量、空字典或 `None`。
+- `safe` 按激活逆序调用，使用独立的有界预算，因此 `stop_event` 已置位时仍可执行；
+  它仍不能硬中断阻塞的原生调用。`safe` 失败会记录在 abort 回执中，后续 `destroy` 继续。
+  普通 `deactivate` 不调用 `safe`；abort 后机器人锁存，必须新建会话。
 - `context.call(operation, *args)` 使用宿主 HAL 操作名，例如 `uart_write` / `uart_read`、
   `i2c_transfer` / `spi_transfer`、`close_handle` / `sleep_ms`；不是下文的 Lua 便利函数名。
   字节数组使用 Python list（索引从 0 起）。长循环要主动调用 `context.check()`——
@@ -79,7 +83,8 @@ UTF-8 跨次接收的未完整字符会暂存，切换到 `recv_hex` 时先返�
   实际文件；驱动内 `dofile` / `loadfile` 受同一解析器约束。
 - 入口是全局函数而非方法：`build(data)` 激活初始化（打开/配置器件）、`call(data)` 每次动作派发、
   `read(data)` 可选快照（`sample` 与守护采样用，缺省回退 `call`）、`destroy(data)` 去激活收尾
-  （**尽力释放**：资源不可用就跳过动作、仍返回 OK）。
+  （**尽力释放**：资源不可用就跳过动作、仍返回 OK）。可选 `safe(data)` 在 abort 时、`destroy`
+  之前按激活逆序调用；它拿到 `mode="safe"`，可用独立预算执行急停/断电/归位等动作。
 - `data` 表 = **结构元数据 ∪ 本次动作参数 ∪ trigger 结果**（trigger 结果以触发器变量名为键注入）。
 - **返回值契约**同上面的 Python 节：非空 Lua 表，含 `result` 键时必须恰为 `"OK"`；
   失败用 `err("原因")` 生成 `{result="ERR", message=...}`。
