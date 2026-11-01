@@ -72,7 +72,7 @@ CREATE TABLE LCD1206 (
 INSERT INTO LCD1206 (name, I2C, address, cols, rows) VALUES ('lcd0', '$i2c-1', '0x27', "16", "2");
 
 
-
+/* 用于连接qsont服务的变量 */
 CREATE TABLE Alias (name String, alias String);
 INSERT INTO Alias (name, alias) VALUES ('user', 'COVER_ME');
 INSERT INTO Alias (name, alias) VALUES ('pass', 'COVER_ME');
@@ -82,8 +82,25 @@ INSERT INTO Alias (name, alias) VALUES ('url',  'COVER_ME');
 CREATE TABLE Vars (name String, value String);
 INSERT INTO Vars (name, value) VALUES ('device', -1);
 
+CREATE TABLE Time (name String);
+INSERT INTO Time (name) VALUES ('clock');
+
 /* MyFlowers物联网服务器 */
 CREATE TABLE HTTP (name String, base String, timeout Number);
 INSERT INTO HTTP (name, base, timeout) VALUES ('cloud', '$url', 5000);
 CREATE TABLE Qsont (name String, HTTP String, user String, pass String, device Number);
 INSERT INTO Qsont (name, HTTP, user, pass, device) VALUES ('qs', '$cloud', '$user', '$pass', '$(device)');
+
+
+/* 科星交流继电器 */
+CREATE TABLE TCP (
+	name  String,
+	host  String,
+	port  Number
+);
+
+/* 连接TCP用的变量 */
+INSERT INTO Alias (name, alias) VALUES ('tcp0_host', 'COVER_ME');
+INSERT INTO Vars (name, value) VALUES ('tcp0_port', -1);
+
+INSERT INTO TCP (name, host, port) VALUES ('tcp0', '$tcp0_host', '$(tcp0_port)');
