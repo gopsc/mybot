@@ -1,3 +1,66 @@
+# TCP 客户端总线驱动（标准库 socket，经宿主 HAL 管理连接）
+#
+# 结构 SQL 只配置三个字段；激活仅校验，不建立连接：
+#   CREATE TABLE TCP (name String, host String, port Number);
+#   INSERT INTO TCP (name, host, port) VALUES ('net', '127.0.0.1', 9000);
+#
+# 动作脚本（MT）显式控制连接与收发，一次派发最多一个有效操作：
+#   @Action
+#   net.timeout net.num_recv;
+#          1000          512;
+#   @
+#   @Action
+#   net.connect;
+#             1;
+#   @
+#   @Action
+#   net.send_hex;
+#   $("00FF80");
+#   @
+#   @Action
+#   net.recv_hex;
+#              1;
+#   @
+#   @Action
+#   net.send_str;
+#    $("你好");
+#   @
+#   @Action
+#   net.close;
+#            1;
+#   @
+#
+# MT 字段：
+#   connect / close / recv_hex / recv_str
+#       1 = 执行，0 = 不执行；close 重复调用也成功，已连接时 connect 不重连。
+#   timeout
+#       1..60000 毫秒，默认 1000；修改后用于后续连接、发送与接收。
+#   num_recv
+#       单次接收上限 1..512 字节，默认 512；修改后持续生效。
+#   send_hex
+#       十六进制文本，如 $("00FF80")；允许 ASCII 空白，不接受奇数位或非十六进制字符。
+#   send_str
+#       UTF-8 文本，如 $("你好")；编码后单次最多 512 字节。
+#
+# MT 普通单元格只接受数字；文本须用 $("...") 或字符串表达式，表达式内不能含实际空白，
+# 含空白的文本可放进 @Struct JSON 字段再通过表达式引用。接收字段可按普通捕获读取：
+#   net.recv_hex net.reply; 1 $reply=recv_hex;
+#
+# 回执：每次调用都带 result / fd / connected / host / port / timeout / num_recv；
+# 发送带 sent；接收带 status（data | timeout | eof）、received，以及
+# recv_hex（大写、空格分隔）或 recv_str。
+#
+# 行为与限制：
+#   - host 必须是 IPv4/IPv6 字面量（不支持域名或 scope），port 为 1..65535。
+#   - 每个 SQL 行有独立连接；激活不自动连接；重复 build 会关闭旧连接并复位默认参数。
+#   - TCP 是字节流：一次接收最多读取 num_recv 字节，不保证填满或返回一个完整报文。
+#   - status=timeout 不是断连；status=eof 会关闭连接。UTF-8 跨次接收的未完整字符会
+#     暂存，切换到 recv_hex 时先返回这些原始字节；非法 UTF-8 或 EOF 时仍有不完整
+#     字符会报错，不替换乱码。
+#   - sent 只表示 socket 接受的字节数，不代表对端已执行；发送失败或取消后关闭连接，
+#     不自动重连或重放；去激活会兜底关闭未显式关闭的连接。
+#   - read / sample 只返回连接与配置元数据，不接收数据。
+#   - 回环地址无需 --allow-hardware；非回环连接需要该开关。
 import codecs
 import ipaddress
 from decimal import Decimal, InvalidOperation
