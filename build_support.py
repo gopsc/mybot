@@ -19,7 +19,7 @@ class BuildPy(build_py):
         for name, suffix in (
             ("modules", ".py"), ("modules", ".lua"),
             ("robots", ".sql"), ("scripts", ".mt"), ("skills", ".md"),
-            ("prompts", ".md"), ("prompts", ".json"),
+            ("skills", ".json"), ("prompts", ".md"), ("prompts", ".json"),
         ):
             source_root = asset_root if name in {"modules", "robots", "scripts"} else root
             for source in sorted((source_root / name).rglob("*" + suffix)):

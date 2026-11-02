@@ -6,6 +6,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Agent `run_skill` executes only actions declared by a trusted `skill.json`,
+  with typed parameters, scoped paths, per-call approval, host-injected hardware
+  grants, bounded subprocess output and timeout/unknown-outcome semantics.
+  `hardware-controller` registers `doctor`, `hardware`, `check` and `run`.
+
 ### Changed
 
 - Moved the self-contained controller and MCP Runtime to

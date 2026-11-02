@@ -1,0 +1,168 @@
+import asyncio
+import json
+from pathlib import Path
+
+import pytest
+
+from pymybot.agent_skill_runner import SkillRunner
+from pymybot.agent_skills import SkillsLibrary
+from pymybot.agent_executor import RobotExecutor
+from pymybot.errors import BudgetExceeded
+from pymybot.security import SecurityError
+
+ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+
+SKILL_MD = "---\nname: demo-skill\ndescription: Demo runnable skill.\n---\n\n# Demo\n"
+
+
+def make_skill(tmp_path, *, argv=None, params=None, hardware_flag=None, entry=None, effect="read"):
+    root = tmp_path / "skills"
+    skill = root / "demo-skill"
+    scripts = skill / "scripts"
+    scripts.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
+    data = skill / "references" / "assets" / "data.txt"
+    data.parent.mkdir(parents=True)
+    data.write_text("ok", encoding="utf-8")
+    (scripts / "task.py").write_text(entry or (
+        "import json, os, sys\n"
+        "print(json.dumps({'argv': sys.argv[1:], 'secret': os.environ.get('OPENAI_API_KEY')}))\n"
+    ), encoding="utf-8")
+    action = {"effect": effect, "output": "json", "argv": argv or [],
+              "params": params or {}}
+    if hardware_flag:
+        action["hardwareFlag"] = hardware_flag
+    (skill / "skill.json").write_text(json.dumps({
+        "version": 1,
+        "run": {"entrypoint": "scripts/task.py", "actions": {"echo": action}},
+    }), encoding="utf-8")
+    return SkillsLibrary(root)
+
+
+def test_runner_executes_fixed_action_with_minimal_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-leak")
+    library = make_skill(tmp_path, argv=["{value}"], params={
+        "value": {"type": "number", "min": 0, "max": 10}})
+
+    result = SkillRunner(library).run("demo-skill", "echo", {"value": 3})
+
+    assert result["exit_code"] == 0 and result["output_error"] is None
+    assert result["output"] == {"argv": ["3"], "secret": None}
+    assert result["stderr"] == ""
+
+
+def test_runner_resolves_declared_path_scope(tmp_path):
+    library = make_skill(tmp_path, argv=["{file}"], params={
+        "file": {"type": "path", "scope": ["skill_assets"], "suffix": ".txt", "required": True}})
+
+    result = SkillRunner(library).run(
+        "demo-skill", "echo", {"file": {"scope": "skill_assets", "path": "data.txt"}})
+
+    assert Path(result["output"]["argv"][0]).name == "data.txt"
+
+
+@pytest.mark.parametrize("arguments", [
+    {"file": {"scope": "skill_assets", "path": "../outside.txt"}},
+    {"file": {"scope": "skill_assets", "path": str(Path("C:/outside.txt"))}},
+    {"file": {"scope": "other", "path": "data.txt"}},
+    {"file": {"scope": "skill_assets", "path": "data.txt", "extra": "no"}},
+])
+def test_runner_rejects_path_escape_and_unknown_scopes(tmp_path, arguments):
+    library = make_skill(tmp_path, argv=["{file}"], params={
+        "file": {"type": "path", "scope": ["skill_assets"], "suffix": ".txt", "required": True}})
+    with pytest.raises(SecurityError):
+        SkillRunner(library).run("demo-skill", "echo", arguments)
+
+
+def test_runner_rejects_manifest_hardware_flag(tmp_path):
+    library = make_skill(tmp_path, argv=["--allow-hardware"], hardware_flag=None)
+    with pytest.raises(SecurityError):
+        SkillRunner(library).run("demo-skill", "echo", {})
+
+
+def test_runner_adds_hardware_flag_only_from_host_grant(tmp_path):
+    library = make_skill(tmp_path, argv=["run"], hardware_flag="--allow-hardware", effect="execute")
+
+    without = SkillRunner(library).run("demo-skill", "echo", {}, allow_hardware=False)
+    with_hardware = SkillRunner(library).run("demo-skill", "echo", {}, allow_hardware=True)
+
+    assert without["output"]["argv"] == ["run"]
+    assert with_hardware["output"]["argv"] == ["run", "--allow-hardware"]
+
+
+def test_runner_uses_cli_fallback_for_packaged_skill(tmp_path):
+    root = tmp_path / "skills"
+    skill = root / "packaged-skill"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: packaged-skill\ndescription: Packaged fallback.\n---\n\n# Packaged\n",
+        encoding="utf-8")
+    (skill / "skill.json").write_text(json.dumps({
+        "version": 1,
+        "run": {"entrypoint": "scripts/missing.py", "packaged": "cli",
+                "actions": {"doctor": {"effect": "read", "output": "json",
+                                        "argv": ["doctor"], "params": {}}}},
+    }), encoding="utf-8")
+
+    result = SkillRunner(SkillsLibrary(root)).run("packaged-skill", "doctor")
+
+    assert result["exit_code"] == 0
+    assert result["output"]["command"] == "doctor"
+
+
+def test_runner_does_not_accept_unknown_action(tmp_path):
+    library = make_skill(tmp_path)
+    with pytest.raises(SecurityError):
+        SkillRunner(library).run("demo-skill", "missing", {})
+
+
+def test_executor_runs_hardware_controller_virtual_action():
+    async def scenario():
+        executor = RobotExecutor(
+            ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts",
+            skills=SkillsLibrary(ROOT / "skills"), allow_hardware=False)
+        try:
+            result = await executor.call("run_skill", {
+                "skill": "hardware-controller", "action": "run",
+                "arguments": {
+                    "robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"},
+                    "script": {"scope": "skill_assets", "path": "scripts/relay-test.mt"},
+                },
+            }, timeout=30)
+        finally:
+            await executor.close()
+        return result
+
+    result = asyncio.run(scenario())
+    assert result["ok"] and result["executed"] and result["state"] == "completed"
+    assert result["data"]["output"]["outputs"][-1]["slept"] == 1
+    assert "argv" not in result["data"]
+
+
+def test_executor_timeout_after_skill_start_is_unknown(tmp_path):
+    root = tmp_path / "skills"
+    skill = root / "slow-skill"
+    scripts = skill / "scripts"
+    scripts.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: slow-skill\ndescription: Slow test skill.\n---\n\n# Slow\n", encoding="utf-8")
+    (scripts / "slow.py").write_text("import time\ntime.sleep(30)\n")
+    (skill / "skill.json").write_text(json.dumps({
+        "version": 1,
+        "run": {"entrypoint": "scripts/slow.py",
+                "actions": {"wait": {"effect": "execute", "output": "json", "argv": ["wait"], "params": {}}}},
+    }), encoding="utf-8")
+
+    async def scenario():
+        executor = RobotExecutor(
+            ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts",
+            skills=SkillsLibrary(root), allow_hardware=False)
+        try:
+            return await executor.call("run_skill", {
+                "skill": "slow-skill", "action": "wait", "arguments": {}}, timeout=0.5)
+        finally:
+            await executor.close()
+
+    result = asyncio.run(scenario())
+    assert not result["ok"] and result["executed"] and result["state"] == "unknown"

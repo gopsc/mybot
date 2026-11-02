@@ -224,6 +224,65 @@ def test_io_approval_is_host_owned(allow, confirm_result, expected):
         assert confirmations == []
 
 
+@pytest.mark.parametrize("approved,expected", [(False, False), (True, True)])
+def test_run_skill_always_requires_independent_approval(approved, expected):
+    from pymybot.agent_skills import SkillsLibrary
+
+    executor = FakeExecutor()
+    model = scripted_model(
+        [ToolCallPart("run_skill", {"skill": "hardware-controller", "action": "doctor"})],
+        [TextPart("done")])
+    confirmations = []
+
+    async def confirm(name, arguments):
+        confirmations.append((name, arguments))
+        return approved
+
+    async def scenario():
+        session = AgentSession(
+            executor, model, AgentConfig(allow_actions=True, intent_mode="diagnose"),
+            confirm=confirm, skills=SkillsLibrary(asset_path("skills")))
+        try:
+            await session.ask("诊断控制器")
+            return session.events[0]
+        finally:
+            await session.close()
+
+    event = asyncio.run(scenario())
+    assert confirmations == [("run_skill", {"skill": "hardware-controller", "action": "doctor",
+                                             "arguments": {}})]
+    assert event["executed"] is expected
+    assert len(executor.calls) == int(expected)
+
+
+def test_agent_run_skill_end_to_end():
+    from pymybot.agent_executor import RobotExecutor
+    from pymybot.agent_skills import SkillsLibrary
+
+    executor = RobotExecutor(
+        asset_path("robots") / "relay-test.sql", scripts_dir=asset_path("scripts"),
+        skills=SkillsLibrary(asset_path("skills")), allow_hardware=False)
+    model = scripted_model(
+        [ToolCallPart("run_skill", {"skill": "hardware-controller", "action": "doctor"})],
+        [TextPart("done")])
+
+    async def confirm(name, arguments):
+        return name == "run_skill"
+
+    async def scenario():
+        session = AgentSession(executor, model, AgentConfig(intent_mode="diagnose"), confirm=confirm,
+                               skills=SkillsLibrary(asset_path("skills")))
+        try:
+            return await session.ask("诊断控制器")
+        finally:
+            await session.close()
+
+    result = asyncio.run(scenario())
+    assert result["output"] == "done"
+    assert executor.records[-1]["tool"] == "run_skill"
+    assert executor.records[-1]["state"] == "completed"
+
+
 @pytest.mark.parametrize("tool,arguments,permission", [
     ("shell", {"command": "exit 0"}, "allow_shell"),
     ("write_file", {"path": "a.txt", "content": "new"}, "allow_file_writes"),

@@ -56,6 +56,7 @@ MAX_HISTORY = 4 * 1024 * 1024
 MAX_OUTPUT_TOKENS = 4096
 MAX_CONTEXT_TOKENS = 2 * 1024 * 1024
 IO_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
+SKILL_TOOLS = frozenset({"run_skill"})
 FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
 WEB_TOOLS = frozenset({"web_fetch", "web_search"})
 MAX_IDENTICAL_CALLS = 3
@@ -289,6 +290,12 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         return await ctx.deps.dispatch("create_skill", {
             "name": name, "description": description, "content": content})
 
+    async def run_skill(ctx: RunContext[AgentSession], skill: str, action: str,
+                        arguments: dict[str, object] | None = None) -> dict:
+        """Run one action declared by a trusted skill.json manifest after host approval. Paths use declared scopes; never guess entrypoints or command-line flags."""
+        return await ctx.deps.dispatch("run_skill", {
+            "skill": skill, "action": action, "arguments": arguments or {}})
+
     async def list_files(ctx: RunContext[AgentSession], path: str = ".") -> dict:
         """List one workspace directory, without recursion."""
         return await ctx.deps.dispatch("list_files", {"path": path})
@@ -343,16 +350,23 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
     guide = []
     if skills is not None and skills.root is not None:
         functions.extend((list_skills, read_skill, create_skill))
+        if any(skill.get("runnable") for skill in skills.index()["skills"]):
+            functions.append(run_skill)
         if skills.enabled:
             index = skills.index()["skills"]
             guide.append("Operator-provided reference skills (trusted, curated documentation):")
-            guide.extend(f"- {skill['name']}: {skill['description']}" for skill in index)
+            guide.extend(f"- {skill['name']}: {skill['description']}"
+                         + (" (runnable via run_skill)" if skill.get("runnable") else "")
+                         for skill in index)
             guide.append("Consult them with read_skill(name, file) before writing or diagnosing")
             guide.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
         guide.append("Skills are protected operator content: create them with create_skill and read them "
                      "with read_skill; never write skill files with write_file, edit_file or shell.")
         guide.append("Create reusable skills with create_skill(name, description, content) after approval; "
                      "content is the Markdown body without frontmatter. New skills are immediately readable.")
+        guide.append("Invoke only skills marked runnable with run_skill(skill, action, arguments). "
+                     "Use the actions and scoped paths documented by that skill; never invent entrypoints, "
+                     "commands, flags or absolute paths.")
     guide.append(f"Runtime gates: workspace={'enabled' if workspace else 'disabled'}, "
                  f"shell={'enabled' if enable_shell else 'disabled'}.")
     if enable_shell:
@@ -712,7 +726,7 @@ class AgentSession:
         if not self.config.auto_stats:
             return
         events = self.events[first_event:]
-        actions = [event for event in events if event["tool"] in IO_TOOLS]
+        actions = [event for event in events if event["tool"] in IO_TOOLS | SKILL_TOOLS]
         robot = getattr(self.executor, "robot_path", "")
         if not robot and isinstance(self.context, dict):
             robot = self.context.get("robot", "")
@@ -756,7 +770,8 @@ class AgentSession:
             return result
         if name in PROMPT_TOOLS:
             return await self._prompt_call(name, arguments)
-        needs_approval = ((name in IO_TOOLS and not self.config.allow_actions)
+        needs_approval = (name in SKILL_TOOLS
+                          or (name in IO_TOOLS and not self.config.allow_actions)
                           or (name in FILE_WRITE_TOOLS and not self.config.allow_file_writes)
                           or (name in WEB_TOOLS and not self.config.allow_web)
                           or (name == "shell" and not self.config.allow_shell)

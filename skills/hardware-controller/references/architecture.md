@@ -130,6 +130,7 @@ Key invariants:
 | `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Camera/Shell host operations |
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
 | `pymybot/agent.py` | PydanticAI agent, model configuration, tool loop |
+| `pymybot/agent_skill_runner.py` | Trusted `skill.json` parsing, scoped arguments and bounded Skill subprocess |
 | `pymybot/prompts.py` | Manifest-ordered runtime prompt layers, trusted safety hashes, bounded composition, CAS/backups and private storage |
 | `pymybot/roles.py` | Role creation/loading, role-owned prompt/skills/MCP paths and bounded atomic model-history persistence |
 | `pymybot/agent_prompt.py` | Operator profile validation and legacy prompt composition compatibility |
@@ -179,6 +180,10 @@ flowchart TB
   External MCP tools stay outside that owner thread and are surfaced by
   PydanticAI toolsets, but approval, result bounding and transcripts use the
   same session rules.
+  `run_skill` executes only actions declared by a trusted Skill `skill.json`:
+  the model supplies a skill/action plus scoped parameters, never an entrypoint,
+  argv or hardware flag. The child process runs on the owner thread, so Skill and
+  native controller calls cannot activate hardware concurrently.
 - **MCP server mode** is a protocol adapter over `RobotExecutor`: the model is
   absent, the operator passes static and execution switches at launch, and
   stdout carries only MCP JSON-RPC.

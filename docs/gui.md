@@ -176,6 +176,7 @@ creating a runtime home.
 | 联网工具 | Exposes `web_fetch` and, with a SearXNG endpoint, `web_search`; off by default. |
 | 自动批准联网 | Pre-approves web requests; confirmed once per launch. |
 | 自动批准 MCP 工具 | Pre-approves external MCP calls; requires an MCP file and is confirmed once per launch. |
+| Skill 执行 | `run_skill` always asks per call and is not covered by action/file auto-approval. Only actions declared by a trusted `skill.json` can run. |
 
 Tool availability preferences (文件工具 / Shell 工具 / 联网工具) and budgets are persisted;
 approval grants (硬件 / 动作 / 写入 / Shell / 联网 / MCP) and the one-shot task are

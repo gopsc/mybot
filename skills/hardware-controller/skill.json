@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "run": {
+    "entrypoint": "scripts/hardware_controller.py",
+    "packaged": "cli",
+    "actions": {
+      "doctor": {
+        "effect": "read",
+        "output": "json",
+        "argv": ["doctor"],
+        "params": {}
+      },
+      "hardware": {
+        "effect": "read",
+        "output": "json",
+        "argv": ["hardware", "--robot", "{robot}"],
+        "params": {
+          "robot": {
+            "type": "path",
+            "scope": ["robots", "skill_assets"],
+            "suffix": ".sql",
+            "required": true
+          }
+        }
+      },
+      "check": {
+        "effect": "read",
+        "output": "json",
+        "argv": ["check", "--robot", "{robot}", "--input", "{script}"],
+        "params": {
+          "robot": {
+            "type": "path",
+            "scope": ["robots", "skill_assets"],
+            "suffix": ".sql",
+            "required": true
+          },
+          "script": {
+            "type": "path",
+            "scope": ["scripts", "skill_assets"],
+            "suffix": ".mt",
+            "required": true
+          }
+        }
+      },
+      "run": {
+        "effect": "execute",
+        "output": "json",
+        "argv": ["run", "--robot", "{robot}", "--input", "{script}", "--timeout", "{timeout}"],
+        "hardwareFlag": "--allow-hardware",
+        "params": {
+          "robot": {
+            "type": "path",
+            "scope": ["robots", "skill_assets"],
+            "suffix": ".sql",
+            "required": true
+          },
+          "script": {
+            "type": "path",
+            "scope": ["scripts", "skill_assets"],
+            "suffix": ".mt",
+            "required": true
+          },
+          "timeout": {
+            "type": "number",
+            "min": 1,
+            "max": 3600,
+            "default": 180
+          }
+        }
+      }
+    }
+  }
+}

@@ -101,8 +101,12 @@ class SkillsLibrary:
                         raise SecurityError("Skill exceeds the file count limit")
             if not files:
                 raise SecurityError(f"Skill '{entry.name}' has no SKILL.md")
+            manifest = entry / "skill.json"
+            runnable = (manifest.is_file() and not manifest.is_symlink()
+                        and stat.S_ISREG(manifest.stat().st_mode))
             self.skills[entry.name] = {"description": description,
-                                       "directory": entry, "files": sorted(files)}
+                                       "directory": entry, "files": sorted(files),
+                                       "runnable": runnable}
             if len(self.skills) > MAX_LIST:
                 raise SecurityError("Skills root exceeds the skill count limit")
 
@@ -137,7 +141,8 @@ class SkillsLibrary:
         return description
 
     def index(self):
-        skills = [{"name": name, "description": item["description"], "files": item["files"]}
+        skills = [{"name": name, "description": item["description"], "files": item["files"],
+                   "runnable": item["runnable"]}
                   for name, item in sorted(self.skills.items())]
         return {"skills": skills, "truncated": len(skills) == MAX_LIST}
 

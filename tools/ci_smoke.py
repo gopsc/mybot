@@ -15,7 +15,7 @@ import tempfile
 
 
 ASSET_SUFFIXES = {"modules": (".lua", ".py"), "robots": (".sql",), "scripts": (".mt",),
-                  "skills": (".md",), "prompts": (".md", ".json")}
+                  "skills": (".md", ".json"), "prompts": (".md", ".json")}
 
 
 def require(condition, message):

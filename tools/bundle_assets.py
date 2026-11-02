@@ -9,7 +9,7 @@ ASSET_SUFFIXES = {
     "modules": (".lua", ".py"),
     "robots": (".sql",),
     "scripts": (".mt",),
-    "skills": (".md",),
+    "skills": (".md", ".json"),
     "prompts": (".md", ".json"),
 }
 
@@ -26,7 +26,8 @@ HIDDEN_PACKAGES = (
     "lupa", "PIL", "serial", "pyftdi", "av", "mcp", "httpx", "bs4",
 )
 CONTROLLER_MODULES = (
-    "pymybot.actions", "pymybot.agent_executor", "pymybot.agent_skills",
+    "pymybot.actions", "pymybot.agent_executor", "pymybot.agent_skill_runner",
+    "pymybot.agent_skills",
     "pymybot.agent_workspace", "pymybot.cli", "pymybot.daemon", "pymybot.errors",
     "pymybot.expr", "pymybot.hal", "pymybot.hardware", "pymybot.include",
     "pymybot.matrix", "pymybot.mcp_server", "pymybot.native", "pymybot.paths",

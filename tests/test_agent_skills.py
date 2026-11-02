@@ -277,8 +277,10 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "before calling create_skill" in instructions
     assert "before calling create_skill" in without
     assert "never write skill files with write_file" in instructions
+    assert "runnable via run_skill" in instructions
     base_tools = ["list_hardware", "list_action_scripts", "query_sql", "run_action_script", "read_prompt", "update_prompt"]
-    assert sorted(agent._function_toolset.tools) == sorted(base_tools + ["list_skills", "read_skill", "create_skill"])
+    assert sorted(agent._function_toolset.tools) == sorted(
+        base_tools + ["list_skills", "read_skill", "create_skill", "run_skill"])
     assert sorted(plain._function_toolset.tools) == sorted(base_tools)
 
 

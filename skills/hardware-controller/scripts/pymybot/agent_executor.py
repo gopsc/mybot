@@ -20,6 +20,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
 from .agent_skills import SkillsLibrary
+from .agent_skill_runner import SkillRunner
 from .agent_workspace import WORKSPACE_TOOLS, Workspace
 from .sandbox import SANDBOX_MODES, describe_backend
 from .errors import BudgetExceeded
@@ -48,6 +49,7 @@ _TOOLS = {
     "list_skills": (set(), set()),
     "read_skill": ({"name"}, {"name", "file"}),
     "create_skill": ({"name", "description", "content"}, {"name", "description", "content"}),
+    "run_skill": ({"skill", "action"}, {"skill", "action", "arguments"}),
     **WORKSPACE_TOOLS,
 }
 EXECUTION_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
@@ -662,6 +664,11 @@ class RobotExecutor:
         elif name == "create_skill":
             for field in ("name", "description", "content"):
                 checked_text(arguments[field])
+        elif name == "run_skill":
+            checked_text(arguments["skill"], 64)
+            checked_text(arguments["action"], 64)
+            if "arguments" in arguments and type(arguments["arguments"]) is not dict:
+                raise SecurityError("Skill arguments must be an object")
 
     def _preflight_io(self, name, arguments):
         # Host approval belongs to AgentSession. This flag is passed to Robot,
@@ -751,6 +758,16 @@ class RobotExecutor:
                     raise SecurityError("Skills are not configured")
                 data = self._skills.create(arguments["name"], arguments["description"],
                                            arguments["content"], started=started)
+            elif name == "run_skill":
+                if self._skills is None or self._skills.root is None:
+                    raise SecurityError("Skills are not configured")
+                roots = {"robots": self._robot_path.parent, "scripts": self._scripts_dir}
+                if self._workspace_dir is not None:
+                    roots["workspace"] = self._workspace_dir
+                data = SkillRunner(self._skills, roots=roots).run(
+                    arguments["skill"], arguments["action"], arguments.get("arguments"),
+                    allow_hardware=self._allow_hardware, deadline=deadline,
+                    check=lambda: self._check(deadline), started=started)
             elif name in WORKSPACE_TOOLS:
                 if self._workspace is None:
                     raise SecurityError("Workspace tools are not configured")
@@ -784,7 +801,8 @@ class RobotExecutor:
                     value = self._read([arguments["name"]], deadline)[arguments["name"]]
                     data, image = _image(value)
             self._check(deadline)
-            ok = data["exit_code"] == 0 if name == "shell" else True
+            ok = (data["exit_code"] == 0 and not data.get("output_error")
+                  if name in {"shell", "run_skill"} else True)
             result = _bounded({"ok": ok, "executed": executed, "state": "completed", "data": data})
             self._check(deadline)
             if image is not None:
@@ -815,7 +833,8 @@ class RobotExecutor:
                 except BaseException:
                     pass  # close will retry cleanup, never the action.
             result = self._failure(exc, executed)
-            if isinstance(name, str) and name in WORKSPACE_TOOLS and not executed and isinstance(exc, SecurityError):
+            if (isinstance(name, str) and (name in WORKSPACE_TOOLS or name == "run_skill")
+                    and not executed and isinstance(exc, SecurityError)):
                 result["error"]["message"] = str(exc)
         return self._record(name, result)
 

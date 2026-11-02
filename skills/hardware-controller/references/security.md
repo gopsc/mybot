@@ -137,6 +137,22 @@ of safety policy remains unsupported; editable memory layers do not supersede it
   new session are not guaranteed to be killed.
 - `--allow-hardware` is a capability switch, not a safety certification.
 
+## Skill execution
+
+`run_skill` is an Agent-only execution surface for skills carrying a trusted
+`skill.json`. It accepts only declared actions and typed parameters; the model
+cannot provide an entrypoint, argv, absolute path, `..`, symlink target or
+`--allow-hardware`. Paths are resolved inside the workspace robots/scripts roots
+or the skill's `references/assets/`. SKILL.md content is never executed by
+`read_skill`.
+
+Every `run_skill` call requires a dedicated host approval, independent of
+`--allow-actions`. Physical hardware flags are appended by the host only when
+hardware access was granted. The child process runs without a shell, with a
+minimal environment that excludes API keys, bounded stdout/stderr, the Agent
+deadline and best-effort process-tree termination. Skill code remains trusted
+code, not a sandbox; cancellation after launch is reported as an unknown outcome.
+
 ## Reporting
 
 Use the private advisory link in [`../.github/SECURITY.md`](../../../.github/SECURITY.md). Include the

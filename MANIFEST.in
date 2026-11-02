@@ -1,7 +1,7 @@
 include build_support.py
 include LICENSE
 include CHANGELOG.md
-recursive-include skills *.md *.py *.lua *.sql *.mt
+recursive-include skills *.md *.json *.py *.lua *.sql *.mt
 recursive-include prompts *.md *.json
 recursive-include docs *.md *.png
 recursive-include tools *.py *.spec *.ps1 *.ico

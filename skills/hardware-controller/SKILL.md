@@ -43,6 +43,25 @@ python skills/hardware-controller/scripts/hardware_controller.py mcp --robot ski
 
 MCP 默认只读。执行动作、读取变量和抓图需要 `--allow-execution`；物理硬件另需 `--allow-hardware`。Camera 和变量读取继续使用白名单。
 
+## Agent 原生 run_skill
+
+当根 Agent 发现本 Skill 标记为 `runnable` 时，可调用：
+
+```text
+run_skill(skill="hardware-controller", action="doctor")
+run_skill(skill="hardware-controller", action="hardware", arguments={
+  "robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"}
+})
+run_skill(skill="hardware-controller", action="check", arguments={
+  "robot": {"scope": "robot", "path": "relay-test.sql"},
+  "script": {"scope": "scripts", "path": "relay-test.mt"}
+})
+```
+
+允许的 action 仅为 `doctor`、`hardware`、`check`、`run`，定义在 `skill.json`。路径必须使用 `robots`、`scripts` 或 `skill_assets` scope，不能传绝对路径、`..`、命令、argv 或 `--allow-hardware`。
+
+`run_skill` 每次执行都要求独立审批，现有动作自动批准不能绕过。只有宿主已授予硬件权限时，`run` 才会追加 `--allow-hardware`；否则仅执行虚拟/软件动作。
+
 ## 安全与兼容性
 
 - 优先复用 HAL、`context.call()` 和 `context.check()`，不要用临时 I/O 绕过权限、预算、句柄所有权或清理。

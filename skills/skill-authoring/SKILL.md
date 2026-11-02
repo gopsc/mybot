@@ -13,6 +13,7 @@ description: 技能编写规范：创建或更新 mybot 技能时先读本技能
 ```text
 <skills-root>/<name>/
 ├── SKILL.md              # 必需
+├── skill.json            # 可选，Agent run_skill 的可执行 action 清单
 └── references/           # 可选，通常只放 .md；hardware-controller 另可含 assets/
     └── example.md
 ```
@@ -105,6 +106,7 @@ description: 为 mybot 创建 Markdown 技能（SKILL.md），包含 frontmatter
 - [ ] description 单行、≤1024 字符、包含触发词
 - [ ] SKILL.md 以 `---` 开头并有闭合 frontmatter
 - [ ] 正文简洁，references 为 `.md`（hardware-controller 的可信 `references/assets/` 除外）
+- [ ] 需要 `run_skill` 时，`skill.json` 只声明固定 action、typed params 和受信入口；绝不接受模型提供的 argv
 - [ ] `list_skills` 能看到新技能
 - [ ] `read_skill(name)` 能读到正文和引用
 - [ ] 没有让 Agent 用文件工具写技能

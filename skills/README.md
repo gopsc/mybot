@@ -7,7 +7,7 @@ the controller Runtime explicitly loads trusted code and assets from
 
 | Skill | Purpose |
 | --- | --- |
-| [`hardware-controller/`](hardware-controller/SKILL.md) | Self-contained Python controller, MCP server, authoritative controller docs and default robots/scripts/modules assets |
+| [`hardware-controller/`](hardware-controller/SKILL.md) | Self-contained Python controller, MCP server, Agent `run_skill`, authoritative controller docs and default robots/scripts/modules assets |
 | [`pymybot-scripting/`](pymybot-scripting/SKILL.md) | Structure SQL, MT actions, Python/Lua drivers, daemon, virtbus and error workflow references |
 | [`skill-authoring/`](skill-authoring/SKILL.md) | 技能编写规范: SKILL.md layout, frontmatter, trigger descriptions, references and the approved `create_skill` workflow |
 
@@ -30,6 +30,7 @@ already own. Each topic has exactly one authority:
 | Controller MCP | `hardware-controller/scripts/pymybot/mcp_server.py` | [`references/mcp.md`](hardware-controller/references/mcp.md) |
 | Controller security | `hardware-controller/scripts/pymybot/` | [`references/security.md`](hardware-controller/references/security.md) |
 | Controller testing | `tests/` | [`references/testing.md`](hardware-controller/references/testing.md) |
+| Executable Skill actions | `hardware-controller/skill.json`, `pymybot/agent_skill_runner.py` | [`hardware-controller/SKILL.md`](hardware-controller/SKILL.md#agent-原生-run_skill) |
 
 The scripting grammars have no prose authority outside the implementation, so
 the reference *is* the written source of truth for them; docs link here instead
