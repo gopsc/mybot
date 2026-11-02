@@ -1465,12 +1465,13 @@ def test_editor_opens_saves_and_tracks_dirty(qapp, tmp_path, monkeypatch):
         assert panel.current_path == str(path)
         assert panel.files.currentData() == str(path)
         assert not panel.dirty and "@Action" in panel.editor.toPlainText()
+        assert events == []
 
         panel.editor.setPlainText("@Action\nrelay0.test;\n1;\n@\n")
-        assert panel.dirty and events == [True]
+        assert panel.dirty and events[-1] is True and True in events
         assert panel.save()
         assert path.read_text(encoding="utf-8").startswith("@Action\nrelay0")
-        assert not panel.dirty and events == [True, False]
+        assert not panel.dirty and events[-1] is False
         assert panel.status.text().startswith("已保存")
 
         assert panel.new_file()

@@ -164,6 +164,7 @@ class ScriptEditorPanel(QWidget):
         self.current_path: str | None = None
         self.saved_text = ""
         self._dirty = False
+        self._loading = False
         self._running = False
         self._call: CliCall | None = None
         self.runner = runner or self._run_cli
@@ -384,9 +385,7 @@ class ScriptEditorPanel(QWidget):
             return False
         self.current_path = path
         self.saved_text = text
-        self.editor.blockSignals(True)
-        self.editor.setPlainText(text)
-        self.editor.blockSignals(False)
+        self._replace_text(text)
         self._set_language(path)
         self._set_dirty(False)
         self._sync_robot_label()
@@ -406,9 +405,7 @@ class ScriptEditorPanel(QWidget):
             return False
         self.current_path = None
         self.saved_text = ""
-        self.editor.blockSignals(True)
-        self.editor.clear()
-        self.editor.blockSignals(False)
+        self._replace_text("")
         self._set_language("untitled.mt")
         self._set_dirty(False)
         self._sync_robot_label()
@@ -511,7 +508,20 @@ class ScriptEditorPanel(QWidget):
     def running(self):
         return self._running
 
+    def _replace_text(self, text):
+        # Qt may deliver intermediate textChanged signals while replacing the
+        # document; blockSignals alone is not enough on every platform.
+        self._loading = True
+        self.editor.blockSignals(True)
+        try:
+            self.editor.setPlainText(text)
+        finally:
+            self.editor.blockSignals(False)
+            self._loading = False
+
     def _on_text_changed(self):
+        if self._loading:
+            return
         self._set_dirty(self.editor.toPlainText() != self.saved_text)
 
     def _set_dirty(self, value):
