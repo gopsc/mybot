@@ -182,8 +182,9 @@ GUI 是一个前端，不重复实现机器人逻辑：窗口只启动一个 `se
 
 - 启动先显示复古风入口界面：SVG 机器人 logo、扫描线、真实的 serve 状态、`进入控制台` 按钮和淡入过渡；`--no-splash` 可以跳过。
 - 左侧是 workspace、脚本/技能/模块/MCP 配置、硬件树、权限与预算，以及模型摘要。
-- 右侧是对话、日志、资源三个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
-- 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
+- 右侧是对话、日志、编辑器、资源四个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
+- 编辑器页可打开、编辑和保存 `.mt` 动作脚本与 `robots/*.sql` 结构文件，带行号、MT/SQL 高亮和未保存标记；**检查**只做静态校验（结构用 `check --robot`，动作用 `check --robot --input`），不激活硬件。**运行**通过一次性 CLI 子进程执行，默认虚拟硬件，勾选 `允许硬件` 并确认后才会碰真实设备；编辑结构时可在“运行脚本”里选择一个 `.mt`，对当前结构运行。快捷键：`Ctrl+S` 保存、`Ctrl+Shift+S` 另存、`Ctrl+Enter` 运行、`F6` 检查。
+- 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、脚本编辑器（`Ctrl+E`）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
 - 对话支持流式输出、忙碌指示、重试、清空和复制；危险工具会逐次弹窗确认。
 - **停止对话**只取消当前 Agent 回合；**急停**不带确认弹窗，会发送 `abort`、调用驱动 `safe()` 并释放硬件，是尽力而为的软件停止，不是硬件急停。
 - `允许硬件`、`自动批准动作`、文件写入、Shell 和 MCP 自动批准都在每次启动时重新确认，不落盘；文件/Shell 工具默认关闭。

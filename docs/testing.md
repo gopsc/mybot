@@ -11,7 +11,7 @@
 | Agent | `tests/test_agent*.py` | Offline model loop, approval, budgets, cleanup |
 | MCP | `tests/test_mcp_server.py`, `tests/test_mcp_client.py` | Real stdio MCP clients, permissions, resources, external tool gating |
 | Transcripts | `tests/test_session_log.py` | JSONL bounds, permissions, list/prune safety |
-| Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs |
+| Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs, editor check/run |
 | Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
 | Docs/skill sync | `tests/test_docs_skill_sync.py`, `tools/check_docs_skill_sync.py` | Skill links/paths resolve, references declare and register their authority |
 

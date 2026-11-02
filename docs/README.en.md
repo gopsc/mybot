@@ -89,6 +89,8 @@ python -m venv .venv
 # GUI (PySide6 / Qt 6; optional for headless CLI use):
 .venv/bin/pip install -e ".[gui]"
 .venv/bin/python -m pymybot
+# The window includes a script/structure editor: open .mt actions or robots/*.sql,
+# run the static check, or run a selected action against the edited structure.
 
 # Agent:
 .venv/bin/pip install -e ".[agent,test]"
