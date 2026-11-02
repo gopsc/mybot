@@ -49,6 +49,13 @@ def test_chinese_intent_classification(text, expected):
         assert decision.restricted and decision.confidence >= 0.55
 
 
+def test_skill_authoring_request_allows_skill_tools():
+    decision = classify_intent("创建一个技能")
+    assert decision.name == "author"
+    assert decision.restricted
+    assert decision.allows("read_skill") and decision.allows("create_skill")
+
+
 def test_english_intent_classification():
     assert classify_intent("list the declared hardware").name == "inspect"
     assert classify_intent("run the relay self test").name == "control"

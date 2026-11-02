@@ -15,7 +15,7 @@ import pymybot.prompts as prompts
 from pymybot.paths import asset_path
 from pymybot.security import SecurityError
 
-CORE_SHA = "f83f1fbcf091c5aed6f38f0837bef32c2d408f96bc510838bc328430488939b8"
+CORE_SHA = "ca0bc5b3244c0669b6b1cc6dcf9b4dacb2c79fdf792528db4fc862176d043e64"
 IDS = ["0", "10", "97", "98", "99", "100"]
 
 
@@ -58,6 +58,14 @@ def test_constructor_defaults_listing_and_golden_core(tmp_path, monkeypatch):
     monkeypatch.delenv("MYBOT_HOME")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     assert prompts.PromptLibrary().home == tmp_path / ".mybot" / "prompts"
+
+
+def test_core_routes_skill_creation_through_read_skill(library):
+    text = library.read("10")["content"]
+    assert "list_skills" in text
+    assert "read_skill" in text
+    assert "before calling create_skill" in text
+    assert "create or modify them with write_file" in text
 
 
 def test_bootstrap_preserves_existing_and_returns_only_created(tmp_path):

@@ -27,8 +27,8 @@ flowchart LR
 | Boundary | Rule |
 | --- | --- |
 | Model → tools | Every action/read/capture is approval-gated unless the operator pre-authorised the session. File writes and shell have separate switches. |
-| Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded. Agent prompt roots (runtime and bundled) reject generic reads/writes; use the dedicated prompt tools. |
-| Model → shell | Agent shell is opt-in and requires usable bubblewrap with runtime/bundled prompt roots mounted read-only, including inside a writable workspace. If protection cannot be established, shell is refused; no unisolated fallback. Read-only mounts protect integrity, not confidentiality. |
+| Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded. Agent prompt roots (runtime and bundled) and operator skill roots reject generic reads/writes; use the dedicated prompt or skill tools. |
+| Model → shell | Agent shell is opt-in and requires usable bubblewrap with runtime/bundled prompt and operator skill roots mounted read-only, including inside a writable workspace. If protection cannot be established, shell is refused; no unisolated fallback. Read-only mounts protect integrity, not confidentiality. |
 | Model → network | Non-loopback HTTP/TCP requires `--allow-hardware`; TCP accepts only IPv4/IPv6 literals and has no implicit reconnect or replay. HTTP redirects are refused; URL credentials/query/fragment are rejected. Agent web tools are separate and opt-in: HTTPS only, private/loopback/link-local targets refused, every redirect re-validated, text-only bodies bounded to 512 KiB, and SearXNG is the only search provider. |
 | MCP client → host | A stdio MCP server is operator-configured host code, not a sandbox. Every external tool call is approval-gated unless `--allow-mcp-tools`; results are bounded and failures are reported as unknown. |
 | MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware`, `--read-var` and `--camera-var` stay separate gates. Resources never grant execution. |

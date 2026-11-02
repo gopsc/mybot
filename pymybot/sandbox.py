@@ -94,7 +94,7 @@ def wrap_shell(argv, *, mode, workspace, cwd, protected_paths=()):
     protected_paths = tuple(protected_paths)
     backend = resolve_backend(mode)
     if protected_paths and backend != "bwrap":
-        raise SecurityError("Prompt protection requires usable bubblewrap; enable sandbox=auto or bwrap. "
+        raise SecurityError("Protected paths require usable bubblewrap; enable sandbox=auto or bwrap. "
                             "Shell was not executed; unisolated fallback is disabled")
     if backend != "bwrap":
         # Preserve the platform's argv shape: Windows uses one cmd.exe string.
@@ -108,9 +108,9 @@ def wrap_shell(argv, *, mode, workspace, cwd, protected_paths=()):
         roots = {Path(path).resolve(strict=True) for path in protected_paths}
         for path in roots:
             if not path.is_dir():
-                raise SecurityError("Protected prompt roots must be existing directories")
+                raise SecurityError("Protected roots must be existing directories")
             if workspace_path.is_relative_to(path):
-                raise SecurityError("Workspace cannot be inside a protected prompt directory")
+                raise SecurityError("Workspace cannot be inside a protected directory")
         # A read-only child mount alone does not stop renaming its writable
         # ancestors. Pin each such ancestor as a mountpoint, without making its
         # ordinary sibling files read-only. Install all read-only roots last.

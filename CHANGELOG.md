@@ -10,6 +10,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The core prompt now tells the agent to `list_skills`, read the relevant
+  skill-authoring reference with `read_skill`, and follow it before calling
+  `create_skill`. Operator skill roots are protected from generic workspace
+  file tools and shell writes, so skills must go through the approved skill
+  tools.
 - GUI script/structure editor tab: opens and saves `.mt` actions and
   `robots/*.sql` structures with line numbers, MT/SQL highlighting and
   unsaved-change tracking. **检查** runs the static check without activation

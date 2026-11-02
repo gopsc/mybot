@@ -74,6 +74,26 @@ def test_listing_prompt_directories_is_private(assets, root_name, suffix):
         invoke(workspace, "list_files", {"path": path})
 
 
+def test_skills_root_rejects_generic_file_tools(assets):
+    skills = assets.workspace / "skills"
+    (skills / "demo").mkdir(parents=True)
+    (skills / "demo" / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: demo.\n---\n", encoding="utf-8")
+    workspace = Workspace(assets.workspace, skills_root=skills)
+    assert skills.resolve() in workspace.shell_protected_paths
+    for tool, arguments in (
+        ("read_file", {"path": "skills/demo/SKILL.md"}),
+        ("list_files", {"path": "skills"}),
+        ("write_file", {"path": "skills/demo/SKILL.md", "content": "changed", "overwrite": True}),
+        ("edit_file", {"path": "skills/demo/SKILL.md", "old_string": "demo", "new_string": "changed"}),
+        ("write_file", {"path": "skills", "content": "changed"}),
+    ):
+        with pytest.raises(SecurityError, match="create_skill"):
+            invoke(workspace, tool, arguments)
+    invoke(workspace, "write_file", {"path": "notes.txt", "content": "ok"})
+    assert (assets.workspace / "notes.txt").read_text(encoding="utf-8") == "ok"
+
+
 def test_protected_roots_can_be_named_but_not_opened_and_siblings_work(assets):
     workspace = Workspace(assets.workspace, protected_paths=assets.roots)
     assert {entry["name"] for entry in invoke(workspace, "list_files")["entries"]} == {"runtime", "source"}

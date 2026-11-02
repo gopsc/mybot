@@ -137,6 +137,13 @@ arguments all include them. Do not package a developer's `MYBOT_HOME` or backups
 `doctor` validates the bundled manifest and trusted safety hashes without creating
 runtime files; first-use copies belong only in the selected `MYBOT_HOME/prompts`.
 
+Editing a bundled layer such as `010_core.md` changes its manifest hash: update
+`prompts/manifest.json` and `tests/test_prompts.py::CORE_SHA`, then run
+`pymybot doctor` plus `pytest tests/test_prompts.py`. Existing runtime copies are
+not overwritten. Back up and replace them with
+`pymybot prompts restore --all --yes`, or delete the runtime layer and run
+`pymybot prompts restore --missing-only` to refill it while preserving other edits.
+
 ```sh
 python -I tools/ci_smoke.py wheel
 python -I tools/ci_smoke.py frozen --executable /absolute/path/to/pymybot

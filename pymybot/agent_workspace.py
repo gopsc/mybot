@@ -110,7 +110,8 @@ def _unlink_at(parent, fd, name):
 
 
 class Workspace:
-    def __init__(self, directory, *, enable_shell=False, sandbox="off", protected_paths=()):
+    def __init__(self, directory, *, enable_shell=False, sandbox="off", protected_paths=(),
+                 skills_root=None):
         if type(enable_shell) is not bool:
             raise SecurityError("enable_shell must be a boolean")
         if sandbox not in SANDBOX_MODES:
@@ -137,21 +138,43 @@ class Workspace:
                 raise SecurityError("Workspace cannot be inside a protected prompt directory")
             protected[root] = _identity(info)
         self._protected = tuple(protected.items())
+        self._skills_root = None
+        if skills_root is not None:
+            candidate = Path(skills_root).absolute()
+            _no_links(candidate)
+            root = candidate.resolve(strict=True)
+            info = root.lstat()
+            if not stat.S_ISDIR(info.st_mode):
+                raise SecurityError("Skills root must be an existing directory")
+            if self.path.is_relative_to(root):
+                raise SecurityError("Workspace cannot be inside a protected skills directory")
+            self._skills_root = (root, _identity(info))
 
     @property
     def protected_paths(self):
         return tuple(root for root, _ in self._protected)
 
+    @property
+    def shell_protected_paths(self):
+        roots = [root for root, _ in self._protected]
+        if self._skills_root is not None:
+            roots.append(self._skills_root[0])
+        return tuple(roots)
+
     def _check_protected_path(self, path, *, writing=False):
         for root, _ in self._protected:
             if path.is_relative_to(root) or (writing and root.is_relative_to(path)):
                 raise SecurityError("Prompt assets are protected; use read_prompt or approved prompt tools")
+        if self._skills_root is not None:
+            root, _ = self._skills_root
+            if path.is_relative_to(root) or (writing and root.is_relative_to(path)):
+                raise SecurityError("Skills are protected; use list_skills, read_skill or create_skill")
 
     def _check_hardlinks(self, info):
         # A second name need not live below a protected root. Conservatively
         # reject multiply linked files only for opt-in protected workspaces.
-        if self._protected and info is not None and info.st_nlink > 1:
-            raise SecurityError("Hardlinked files are unavailable with prompt protection; use read_prompt")
+        if (self._protected or self._skills_root is not None) and info is not None and info.st_nlink > 1:
+            raise SecurityError("Hardlinked files are unavailable with protected paths; use dedicated tools")
 
     def _check_protected_shell(self, check):
         # Read-only mounts cannot protect an existing writable hardlink outside
@@ -159,14 +182,17 @@ class Workspace:
         def failed(error):
             raise error
 
-        for root, _ in self._protected:
+        roots = [root for root, _ in self._protected]
+        if self._skills_root is not None:
+            roots.append(self._skills_root[0])
+        for root in roots:
             for base, dirs, files in os.walk(root, followlinks=False, onerror=failed):
                 check()
                 for name in (*dirs, *files):
                     check()
                     info = (Path(base) / name).lstat()
                     if _linked(info):
-                        raise SecurityError("Linked prompt assets cannot be protected by the shell sandbox")
+                        raise SecurityError("Linked protected assets cannot be protected by the shell sandbox")
                     if stat.S_ISREG(info.st_mode):
                         self._check_hardlinks(info)
 
@@ -276,7 +302,7 @@ class Workspace:
                 self._check_protected_shell(check)
                 result = self._shell(arguments["command"], parent, fd, guard, check, started,
                                      sandbox=self.sandbox, workspace=self.path,
-                                     protected_paths=self.protected_paths)
+                                     protected_paths=self.shell_protected_paths)
             elif name == "list_files":
                 result = self._listing(relative, parent, fd, check)
             elif name == "read_file":

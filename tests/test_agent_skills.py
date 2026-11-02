@@ -270,9 +270,92 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "- pymybot-scripting:" in instructions
     assert "Operator-provided reference skills" in instructions
     assert "Operator-provided reference skills" not in without
+    assert "before calling create_skill" in instructions
+    assert "before calling create_skill" in without
+    assert "never write skill files with write_file" in instructions
     base_tools = ["list_hardware", "list_action_scripts", "query_sql", "run_action_script", "read_prompt", "update_prompt"]
     assert sorted(agent._function_toolset.tools) == sorted(base_tools + ["list_skills", "read_skill", "create_skill"])
     assert sorted(plain._function_toolset.tools) == sorted(base_tools)
+
+
+def test_skill_authoring_reads_reference_before_create(tmp_path):
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from pymybot.agent import AgentConfig, AgentSession
+
+    root = tmp_path / "skills"
+    meta = root / "skill-authoring"
+    meta.mkdir(parents=True)
+    (meta / "SKILL.md").write_text(
+        "---\nname: skill-authoring\ndescription: Create reusable skills.\n---\n\n"
+        "Read the references before creating a skill.\n", encoding="utf-8")
+    library = SkillsLibrary(root)
+    seen, approvals = [], []
+
+    async def confirm(name, arguments):
+        approvals.append((name, arguments["name"]))
+        return name == "create_skill"
+
+    async def respond(messages, info):
+        seen.append(str(info.instructions))
+        returns = [part for message in messages for part in message.parts
+                   if isinstance(part, ToolReturnPart)]
+        if not returns:
+            return ModelResponse(parts=[ToolCallPart("list_skills", {})])
+        if len(returns) == 1:
+            return ModelResponse(parts=[ToolCallPart("read_skill", {"name": "skill-authoring"})])
+        if len(returns) == 2:
+            return ModelResponse(parts=[ToolCallPart("create_skill", {
+                "name": "created-by-agent", "description": "Created.", "content": "Body."})])
+        return ModelResponse(parts=[TextPart("done")])
+
+    async def scenario():
+        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=ROOT / "scripts",
+                                 skills=library)
+        session = AgentSession(executor, FunctionModel(respond),
+                               AgentConfig(intent_mode="author"), skills=library, confirm=confirm)
+        try:
+            return await session.ask("创建一个技能")
+        finally:
+            await session.close()
+
+    result = asyncio.run(scenario())
+    assert result["output"] == "done"
+    assert "before calling create_skill" in seen[0]
+    assert "- skill-authoring:" in seen[0]
+    assert approvals == [("create_skill", "created-by-agent")]
+    assert (root / "created-by-agent" / "SKILL.md").is_file()
+
+
+def test_workspace_cannot_write_skill_files(tmp_path):
+    pytest.importorskip("pydantic_ai")
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    skills = workspace / "skills"
+    skills.mkdir()
+
+    async def scenario():
+        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=ROOT / "scripts",
+                                 skills=SkillsLibrary(skills), workspace_dir=workspace)
+        try:
+            blocked = await executor.call("write_file", {
+                "path": "skills/manual/SKILL.md", "content": "---\nname: manual\n---\n"}, timeout=5)
+            allowed = await executor.call("write_file", {
+                "path": "note.txt", "content": "ok"}, timeout=5)
+            created = await executor.call("create_skill", {
+                "name": "approved", "description": "Approved.", "content": "Body."}, timeout=5)
+        finally:
+            await executor.close()
+        return blocked, allowed, created
+
+    blocked, allowed, created = asyncio.run(scenario())
+    assert blocked["ok"] is False and "create_skill" in str(blocked["error"])
+    assert allowed["ok"] is True and (workspace / "note.txt").read_text(encoding="utf-8") == "ok"
+    assert created["ok"] is True and (skills / "approved" / "SKILL.md").is_file()
+    assert not (skills / "manual").exists()
 
 
 def test_create_skill_requires_host_approval(tmp_path):

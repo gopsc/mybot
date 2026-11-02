@@ -349,6 +349,8 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
             guide.extend(f"- {skill['name']}: {skill['description']}" for skill in index)
             guide.append("Consult them with read_skill(name, file) before writing or diagnosing")
             guide.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
+        guide.append("Skills are protected operator content: create them with create_skill and read them "
+                     "with read_skill; never write skill files with write_file, edit_file or shell.")
         guide.append("Create reusable skills with create_skill(name, description, content) after approval; "
                      "content is the Markdown body without frontmatter. New skills are immediately readable.")
     guide.append(f"Runtime gates: workspace={'enabled' if workspace else 'disabled'}, "
