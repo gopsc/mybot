@@ -42,11 +42,15 @@ def preflight(mode):
     print(f"{mode} dependency preflight passed", flush=True)
 
 
-def asset_manifest(root):
+CONTROLLER_ASSETS = Path("skills/hardware-controller/references/assets")
+CONTROLLER_DIRECTORIES = frozenset({"modules", "robots", "scripts"})
+
+
+def asset_manifest(root, *, source_tree=False):
     result = {}
+    root = Path(root)
     for directory, suffixes in ASSET_SUFFIXES.items():
-        source_root = (root / "skills" / "hardware-controller" / "references" / "assets"
-                       if directory in {"modules", "robots", "scripts"} else root)
+        source_root = root / CONTROLLER_ASSETS if source_tree and directory in CONTROLLER_DIRECTORIES else root
         files = sorted(path for path in (source_root / directory).rglob("*")
                        if path.is_file() and path.suffix in suffixes)
         require(files, f"Missing or empty asset directory: {source_root / directory}")
@@ -112,7 +116,7 @@ def prompt_smoke(cli, *, cwd, bundle=None):
 
 def wheel_smoke():
     source = Path(__file__).resolve().parents[1]
-    expected = asset_manifest(source)
+    expected = asset_manifest(source, source_tree=True)
     env = smoke_env()
     with tempfile.TemporaryDirectory(prefix="pymybot-wheel-") as temporary:
         root = Path(temporary).resolve()
