@@ -42,8 +42,10 @@ About dialog mark.
 - **Advanced tool permissions** — workspace file tools, file writes, shell and
   MCP auto-approval, each separately gated.
 - **Model summary** — current provider/model/endpoint/key-variable state.
-- **Chat, logs and resources** — streaming transcript, tool receipts,
-  diagnostics, and a lazy resource browser for scripts, skills and docs.
+- **Chat, logs, editor and resources** — streaming transcript, tool receipts,
+  diagnostics, an action-script editor (line numbers, MT highlighting,
+  save/dirty state, check and run), and a lazy resource browser for scripts,
+  skills and docs.
 - **Status bar** — serve/MCP availability, busy state with an indeterminate
   progress indicator, active grants and notices.
 
@@ -56,6 +58,7 @@ The GUI exposes the backend surface described in [cli.md](cli.md) and
 | --- | --- |
 | 设置 | Tabs for 通用 / 模型与预算 / 权限 / 高级 / MCP / 提示词: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, tool permissions (files, Shell, web, MCP), MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
+| 编辑器 tab | Opens and saves `.mt` actions with line numbers, MT highlighting and unsaved-change tracking. **检查** runs the CLI static check without activation; **运行** executes through the same one-shot CLI child, stays virtual-only unless 允许硬件 is confirmed, shows the JSON receipt and can be stopped. It does not touch the agent's long-lived `serve` session. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
 | 工具 → 环境诊断 | Renders `pymybot doctor`: interpreter, assets and optional dependencies, colour-coded by status, with copy-JSON. |

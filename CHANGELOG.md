@@ -6,8 +6,16 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] – 2026-11-02
+
 ### Added
 
+- GUI script editor tab: opens and saves `.mt` actions with line numbers, MT
+  highlighting and unsaved-change tracking. **检查** runs the static check
+  without activation; **运行** executes through the same one-shot CLI child,
+  stays virtual-only unless **允许硬件** is confirmed, renders the JSON receipt
+  and can be stopped. It does not touch the agent's long-lived `serve` session,
+  and it follows toolbar structure and workspace context changes.
 - First-class best-effort abort: `Robot.abort()`, optional driver `safe(data)`
   hooks (Python and Lua), and `abort` / `session.abort` / `agent.abort` serve
   methods. The GUI adds a red **急停** button without a confirmation dialog.

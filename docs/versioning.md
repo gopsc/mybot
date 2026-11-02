@@ -4,11 +4,11 @@
 
 The repository tag `vX.Y.Z` describes the Python package. The version sources
 are `pymybot/__init__.py`, `pyproject.toml` and `CITATION.cff` (currently
-0.4.1).
+0.5.0).
 
 ## Compatibility promises
 
-Within a minor line (`0.4.x`):
+Within a minor line (`0.5.x`):
 
 - CLI command names and JSON keys remain stable.
 - `robots/*.sql` and `scripts/*.mt` accepted by earlier 0.2.x/0.3.x/0.4.x

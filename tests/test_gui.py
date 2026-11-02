@@ -1445,6 +1445,212 @@ def test_command_dialog_builds_argv_and_renders_contract(qapp, tmp_path):
         dialog.deleteLater()
 
 
+# -- script editor ----------------------------------------------------------
+def test_editor_opens_saves_and_tracks_dirty(qapp, tmp_path, monkeypatch):
+    from pymybot.gui.editor import ScriptEditorPanel
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    path = scripts / "demo.mt"
+    path.write_text("@Action\n@\n", encoding="utf-8")
+    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
+                              robot=str(tmp_path / "robot.sql"), scripts_root=str(scripts))
+    try:
+        panel.refresh_files()
+        assert panel.files.count() == 2
+        events = []
+        panel.dirty_changed.connect(events.append)
+
+        assert panel.open_path(str(path))
+        assert panel.current_path == str(path)
+        assert panel.files.currentData() == str(path)
+        assert not panel.dirty and "@Action" in panel.editor.toPlainText()
+
+        panel.editor.setPlainText("@Action\nrelay0.test;\n1;\n@\n")
+        assert panel.dirty and events == [True]
+        assert panel.save()
+        assert path.read_text(encoding="utf-8").startswith("@Action\nrelay0")
+        assert not panel.dirty and events == [True, False]
+        assert panel.status.text().startswith("已保存")
+
+        assert panel.new_file()
+        assert panel.current_path is None and not panel.dirty
+        panel.editor.setPlainText("@Action\n@\n")
+        target = scripts / "saved-as.mt"
+        monkeypatch.setattr("pymybot.gui.editor.QFileDialog.getSaveFileName",
+                            lambda *args, **kwargs: (str(target), ""))
+        assert panel.save()
+        assert target.read_text(encoding="utf-8") == "@Action\n@\n"
+        assert panel.current_path == str(target) and not panel.dirty
+    finally:
+        panel.deleteLater()
+
+
+def test_editor_run_check_and_argv_gates(qapp, tmp_path):
+    from pymybot.gui.editor import ScriptEditorPanel
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    path = scripts / "demo.mt"
+    path.write_text("@Action\n@\n", encoding="utf-8")
+    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
+                              robot=str(tmp_path / "robot.sql"), scripts_root=str(scripts))
+    try:
+        assert panel.open_path(str(path))
+        panel.hardware.setChecked(True)
+        check = panel.build_argv("check")
+        assert check[2] == "check" and "--allow-hardware" not in check
+        assert f"--input={path}" in check
+
+        run = panel.build_argv("run")
+        assert run[2] == "run" and "--allow-hardware" in run and "--timeout=180.0" in run
+
+        calls = []
+        panel.runner = lambda argv, cwd: (
+            calls.append(argv) or
+            {"code": 0, "json": {"ok": True, "command": "run", "outputs": [{"result": "OK"}]},
+             "duration_ms": 3})
+        panel.confirm = lambda title, text: False
+        panel.run()
+        assert calls == [] and panel.run_button.isEnabled() and not panel.stop_button.isEnabled()
+
+        panel.confirm = lambda title, text: True
+        panel.hardware.setChecked(False)
+        panel.run()
+        assert qt_wait(qapp, lambda: bool(calls) and not panel.running)
+        assert calls and calls[0][2] == "run" and "--allow-hardware" not in calls[0]
+        assert '"result": "OK"' in panel.output.toPlainText()
+        assert "退出码 0" in panel.status.text()
+
+        panel.runner = lambda argv, cwd: (
+            calls.append(argv) or {"code": 0, "json": {"ok": True}, "duration_ms": 1})
+        panel.editor.setPlainText("@Action\nrelay0.test;\n2;\n@\n")
+        panel.check()
+        assert qt_wait(qapp, lambda: len(calls) == 2 and not panel.running)
+        assert calls[1][2] == "check"
+        assert "relay0.test;\n2;" in path.read_text(encoding="utf-8")
+    finally:
+        panel.deleteLater()
+
+
+def test_editor_reports_bad_files_and_missing_inputs(qapp, tmp_path):
+    from pymybot.gui.editor import ScriptEditorPanel
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    bad = scripts / "bad.mt"
+    bad.write_bytes(b"\xff\xfe\x00")
+    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
+                              robot=str(tmp_path / "robot.sql"), scripts_root=str(scripts))
+    try:
+        assert not panel.open_path(str(bad))
+        assert panel.status.text().startswith("无法打开")
+
+        assert panel.new_file()
+        with pytest.raises(ValueError):
+            panel.build_argv("run")
+        panel.editor.setPlainText("@Action\n@\n")
+        panel.current_path = str(tmp_path / "out.mt")
+        panel.writer = lambda path, text: (_ for _ in ()).throw(OSError("disk full"))
+        panel.set_context(robot=str(tmp_path / "robot.sql"))
+        assert not panel.save()
+        assert panel.status.text().startswith("保存失败")
+    finally:
+        panel.deleteLater()
+
+
+def test_editor_tab_tracks_context_and_dirty_marker(ui, tmp_path):
+    gui, app = ui
+    index = app.notebook.indexOf(app.editor)
+    assert index >= 0
+    assert [app.notebook.tabText(i) for i in range(2)] == ["对话", "日志"]
+    assert app.notebook.tabText(index) == "编辑器"
+    assert app.editor.robot == app._robot_path()
+
+    app.show_editor()
+    assert app.notebook.currentWidget() is app.editor
+
+    path = tmp_path / "edit.mt"
+    path.write_text("@Action\n@\n", encoding="utf-8")
+    assert app.editor.open_path(str(path))
+    app.editor.editor.setPlainText("@Action\nrelay0.test;\n1;\n@\n")
+    assert app.notebook.tabText(index) == "编辑器 •"
+    assert app.editor.save()
+    assert app.notebook.tabText(index) == "编辑器"
+
+    other = str(ROOT / "robots" / "relay-test.sql")
+    app.cfg.robot = other
+    app.sync_editor()
+    assert app.editor.robot == other
+
+
+def test_editor_follows_robot_and_context_changes(ui, tmp_path):
+    _gui, app = ui
+    target = str(ROOT / "robots" / "time.sql")
+    index = app.robot_box.findData(target)
+    assert index >= 0
+    app.robot_box.setCurrentIndex(index)
+    app.on_robot_changed()
+    assert app.editor.robot == target
+    assert "time.sql" in app.editor.robot_label.text()
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    action = scripts / "only.mt"
+    action.write_text("@Action\n@\n", encoding="utf-8")
+    app.context_entries["scripts_dir"].setText(str(scripts))
+    app._sync_config()
+    assert app.editor.scripts_root == scripts.absolute()
+    assert app.editor.files.count() == 2
+    assert app.editor.files.itemData(1) == str(action)
+
+
+def test_editor_starts_with_the_loaded_structure(app_factory):
+    config = GuiConfig(workspace=str(ROOT), robot="")
+    _gui, app = app_factory(config=config)
+    assert app.cfg.robot and app.editor.robot == app.cfg.robot
+
+
+def test_editor_close_is_blocked_by_unsaved_changes(ui):
+    _gui, app = ui
+    app.editor.editor.setPlainText("@Action\n@\n")
+    assert app.editor.dirty
+    app.editor.maybe_save = lambda: False
+
+    class Event:
+        ignored = False
+        accepted = False
+
+        def ignore(self):
+            self.ignored = True
+
+        def accept(self):
+            self.accepted = True
+
+    event = Event()
+    app.closeEvent(event)
+    assert event.ignored and not event.accepted
+
+
+def test_editor_runs_virtual_script_end_to_end(qapp):
+    from pymybot.gui.editor import ScriptEditorPanel
+
+    panel = ScriptEditorPanel(
+        python=sys.executable, cwd=str(ROOT), robot=str(ROOT / "robots" / "relay-test.sql"),
+        scripts_root=str(ROOT / "scripts"), timeout=20)
+    try:
+        assert panel.open_path(str(ROOT / "scripts" / "relay-test.mt"))
+        panel.hardware.setChecked(False)
+        panel.run()
+        assert qt_wait(qapp, lambda: not panel.running and "退出码" in panel.status.text(),
+                       timeout=30000)
+        assert "退出码 0" in panel.status.text()
+        assert '"result": "OK"' in panel.output.toPlainText()
+    finally:
+        panel.shutdown()
+        panel.deleteLater()
+
+
 # -- entry screen and branding ---------------------------------------------
 def test_logo_renders_from_svg(qapp):
     from pymybot.gui.branding import logo_icon, logo_pixmap

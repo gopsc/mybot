@@ -31,6 +31,7 @@ from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog, PreviewDialog,
                       PromptPanel, ResourcePanel, SessionsDialog)
+from .editor import ScriptEditorPanel
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
@@ -161,6 +162,7 @@ class App(QMainWindow):
         self._load_role_list()
         self._load_robot_list()
         self._refresh_hardware()
+        self.sync_editor()
         self._start_timer.start(120)
         self.task_box.setPlainText(self.cfg.task.strip())
         self._refresh_status()
@@ -272,6 +274,7 @@ class App(QMainWindow):
 
         tools = bar.addMenu("工具")
         action(tools, "命令面板…", self.open_console, "Ctrl+Shift+P")
+        action(tools, "脚本编辑器", self.show_editor, "Ctrl+E")
         action(tools, "MCP 配置…", self.open_mcp)
         action(tools, "会话管理…", self.open_sessions)
         action(tools, "环境诊断…", self.open_doctor)
@@ -287,7 +290,8 @@ class App(QMainWindow):
 
     def _manage_menu(self):
         menu = QMenu(self)
-        for text, slot in (("命令面板…", self.open_console), ("MCP 配置…", self.open_mcp),
+        for text, slot in (("命令面板…", self.open_console), ("脚本编辑器", self.show_editor),
+                           ("MCP 配置…", self.open_mcp),
                            ("会话管理…", self.open_sessions), ("环境诊断…", self.open_doctor),
                            ("资源预览", self.show_resources), ("清空对话", self.clear_chat)):
             action = QAction(text, menu)
@@ -414,8 +418,18 @@ class App(QMainWindow):
         self.log.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log.setObjectName("eventLog")
         self.resources = ResourcePanel()
+        workspace = self.cfg.workspace or default_workspace()
+        self.editor = ScriptEditorPanel(
+            python=resolve_python(workspace, self.cfg.python), cwd=workspace,
+            robot=self._robot_path(), scripts_root=self._scripts_root(),
+            module_paths=self._module_paths(),
+            camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace),
+            timeout=self.cfg.timeout,
+            confirm=lambda title, text: self._message(title, text, confirm=True))
+        self.editor.dirty_changed.connect(self._editor_dirty)
         self.notebook.addTab(self.chat, "对话")
         self.notebook.addTab(self.log, "日志")
+        self.notebook.addTab(self.editor, "编辑器")
         self.notebook.addTab(self.resources, "资源")
         self.notebook.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.notebook, 1)
@@ -446,6 +460,8 @@ class App(QMainWindow):
     def _on_tab_changed(self, index):
         if self.notebook.widget(index) is self.resources:
             self.show_resources()
+        elif self.notebook.widget(index) is self.editor:
+            self.sync_editor()
 
     def _robots_root(self):
         workspace = Path(self.cfg.workspace or default_workspace()).absolute()
@@ -464,6 +480,24 @@ class App(QMainWindow):
             self.resources.set_roots(*roots)
         self.notebook.setCurrentWidget(self.resources)
         self.resources.ensure_loaded()
+
+    def sync_editor(self):
+        workspace = self.cfg.workspace or default_workspace()
+        self.editor.set_context(python=resolve_python(workspace, self.cfg.python), cwd=workspace,
+                                robot=self._robot_path(), scripts_root=self._scripts_root(),
+                                module_paths=self._module_paths(),
+                                camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace))
+
+    def show_editor(self):
+        if self._stopping:
+            return
+        self.sync_editor()
+        self.notebook.setCurrentWidget(self.editor)
+
+    def _editor_dirty(self, dirty):
+        index = self.notebook.indexOf(self.editor)
+        if index >= 0:
+            self.notebook.setTabText(index, "编辑器 •" if dirty else "编辑器")
 
     def post(self, callback):
         """Only the Qt timer consumes callbacks; cleanup never depends on it."""
@@ -614,6 +648,7 @@ class App(QMainWindow):
         self.cfg.enable_web = self.web_tools_toggle.isChecked()
         self.cfg.allow_web = self.web_grant_toggle.isChecked()
         self.cfg.allow_mcp_tools = self.mcp_tools_toggle.isChecked()
+        self.sync_editor()
 
     def _sync_controls(self):
         for name, entry in self.context_entries.items():
@@ -754,6 +789,7 @@ class App(QMainWindow):
 
     def on_robot_changed(self):
         self.cfg.robot = self.robot_box.currentData() or ""
+        self.sync_editor()
         self._hardware_timer.start(140)
 
     def _robot_path(self):
@@ -1395,6 +1431,7 @@ class App(QMainWindow):
         self._load_role_list()
         self._load_robot_list()
         self._refresh_hardware()
+        self.sync_editor()
 
     def _refresh_hardware(self):
         if self._stopping:
@@ -1473,6 +1510,7 @@ class App(QMainWindow):
         self._refresh_model_label()
         self._load_robot_list()
         self._refresh_hardware()
+        self.sync_editor()
         if before != (self.cfg.workspace, self.cfg.python, self.cfg.session_log):
             self._restart_server()
         self._notice("设置已保存" if saved else "设置已应用，但配置文件写入失败（见日志）")
@@ -1527,6 +1565,7 @@ class App(QMainWindow):
             if self._stopping:
                 return
             self._stopping = True
+            self.editor.stop()
             clients = [client for client, event in self._clients.items() if event is None]
             if self.serve is not None and self.serve not in self._clients:
                 clients.append(self.serve)
@@ -1559,6 +1598,9 @@ class App(QMainWindow):
             worker.join(max(0, deadline - time.monotonic()))
 
     def closeEvent(self, event):
+        if not self._stopping and not self.editor.maybe_save():
+            event.ignore()
+            return
         if not self._stopping and self.busy and not self._message(
                 "退出", "本轮仍在执行：退出会取消它，且已派发的动作不会回滚。继续？", confirm=True):
             event.ignore()
