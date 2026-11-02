@@ -383,6 +383,9 @@ class ScriptEditorPanel(QWidget):
             self.status.setText(f"无法打开：{exc}")
             self._select_path(self.current_path)
             return False
+        # Qt's toPlainText() always uses LF; keep saved_text comparable so a
+        # Windows CRLF checkout does not look dirty immediately after opening.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         self.current_path = path
         self.saved_text = text
         self._replace_text(text)

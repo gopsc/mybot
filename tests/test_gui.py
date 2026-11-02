@@ -1487,6 +1487,28 @@ def test_editor_opens_saves_and_tracks_dirty(qapp, tmp_path, monkeypatch):
         panel.deleteLater()
 
 
+def test_editor_normalizes_crlf_without_dirty_events(qapp, tmp_path):
+    from pymybot.gui.editor import ScriptEditorPanel
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    path = scripts / "crlf.mt"
+    path.write_bytes(b"@Action\r\n@\r\n")
+    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
+                              robot=str(tmp_path / "robot.sql"), scripts_root=str(scripts))
+    try:
+        events = []
+        panel.dirty_changed.connect(events.append)
+        assert panel.open_path(str(path))
+        assert panel.editor.toPlainText() == "@Action\n@\n"
+        panel._on_text_changed()  # simulate Qt delivering a deferred notification
+        assert not panel.dirty and events == []
+        assert panel.save()
+        assert path.read_bytes() == b"@Action\n@\n"
+    finally:
+        panel.deleteLater()
+
+
 def test_editor_run_check_and_argv_gates(qapp, tmp_path):
     from pymybot.gui.editor import ScriptEditorPanel
 
