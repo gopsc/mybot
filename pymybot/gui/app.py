@@ -422,7 +422,7 @@ class App(QMainWindow):
         self.editor = ScriptEditorPanel(
             python=resolve_python(workspace, self.cfg.python), cwd=workspace,
             robot=self._robot_path(), scripts_root=self._scripts_root(),
-            module_paths=self._module_paths(),
+            robots_root=self._robots_root(), module_paths=self._module_paths(),
             camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace),
             timeout=self.cfg.timeout,
             confirm=lambda title, text: self._message(title, text, confirm=True))
@@ -485,7 +485,7 @@ class App(QMainWindow):
         workspace = self.cfg.workspace or default_workspace()
         self.editor.set_context(python=resolve_python(workspace, self.cfg.python), cwd=workspace,
                                 robot=self._robot_path(), scripts_root=self._scripts_root(),
-                                module_paths=self._module_paths(),
+                                robots_root=self._robots_root(), module_paths=self._module_paths(),
                                 camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace))
 
     def show_editor(self):

@@ -1601,8 +1601,58 @@ def test_editor_follows_robot_and_context_changes(ui, tmp_path):
     app.context_entries["scripts_dir"].setText(str(scripts))
     app._sync_config()
     assert app.editor.scripts_root == scripts.absolute()
-    assert app.editor.files.count() == 2
-    assert app.editor.files.itemData(1) == str(action)
+    assert app.editor.robots_root == Path(app._robots_root()).absolute()
+    data = [app.editor.files.itemData(i) for i in range(app.editor.files.count())]
+    assert str(action) in data
+    assert any(item and Path(item).suffix == ".sql" for item in data)
+
+
+def test_editor_edits_structure_sql_and_runs_action(qapp, tmp_path):
+    from pymybot.gui.editor import ScriptEditorPanel
+
+    robots = tmp_path / "robots"
+    robots.mkdir()
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    sql = robots / "board.sql"
+    sql.write_text("CREATE TABLE Time (name String);\n"
+                   "INSERT INTO Time (name) VALUES ('clock');\n", encoding="utf-8")
+    action = scripts / "clock.mt"
+    action.write_text("@Action\nclock.now;\n1;\n@\n", encoding="utf-8")
+
+    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
+                              robot=str(tmp_path / "other.sql"), scripts_root=str(scripts),
+                              robots_root=str(robots))
+    try:
+        panel.refresh_files()
+        labels = {panel.files.itemText(i): panel.files.itemData(i)
+                  for i in range(panel.files.count())}
+        assert labels["结构/board.sql"] == str(sql)
+        assert labels["脚本/clock.mt"] == str(action)
+
+        assert panel.open_path(str(sql))
+        assert "board.sql" in panel.robot_label.text()
+        assert panel.run_script.isEnabled()
+        assert panel.build_argv("check") == ["-m", "pymybot", "check", f"--robot={sql}"]
+
+        panel.editor.setPlainText(sql.read_text(encoding="utf-8") + "\n")
+        assert panel.save() and sql.read_text(encoding="utf-8").endswith("\n\n")
+
+        calls = []
+        panel.runner = lambda argv, cwd: (
+            calls.append(argv) or {"code": 0, "json": {"ok": True}, "duration_ms": 1})
+        panel.run()
+        assert calls == [] and "请选择运行脚本" in panel.status.text()
+
+        index = panel.run_script.findData(str(action))
+        assert index > 0
+        panel.run_script.setCurrentIndex(index)
+        panel.run()
+        assert qt_wait(qapp, lambda: bool(calls) and not panel.running)
+        assert calls[0][:3] == ["-m", "pymybot", "run"]
+        assert f"--robot={sql}" in calls[0] and f"--input={action}" in calls[0]
+    finally:
+        panel.deleteLater()
 
 
 def test_editor_starts_with_the_loaded_structure(app_factory):
@@ -1637,10 +1687,20 @@ def test_editor_runs_virtual_script_end_to_end(qapp):
 
     panel = ScriptEditorPanel(
         python=sys.executable, cwd=str(ROOT), robot=str(ROOT / "robots" / "relay-test.sql"),
-        scripts_root=str(ROOT / "scripts"), timeout=20)
+        scripts_root=str(ROOT / "scripts"), robots_root=str(ROOT / "robots"), timeout=20)
     try:
         assert panel.open_path(str(ROOT / "scripts" / "relay-test.mt"))
         panel.hardware.setChecked(False)
+        panel.run()
+        assert qt_wait(qapp, lambda: not panel.running and "退出码" in panel.status.text(),
+                       timeout=30000)
+        assert "退出码 0" in panel.status.text()
+        assert '"result": "OK"' in panel.output.toPlainText()
+
+        assert panel.open_path(str(ROOT / "robots" / "relay-test.sql"))
+        index = panel.run_script.findData(str(ROOT / "scripts" / "relay-test.mt"))
+        assert index > 0
+        panel.run_script.setCurrentIndex(index)
         panel.run()
         assert qt_wait(qapp, lambda: not panel.running and "退出码" in panel.status.text(),
                        timeout=30000)

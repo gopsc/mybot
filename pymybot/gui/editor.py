@@ -139,7 +139,7 @@ class _EditorTask(QRunnable):
 
 
 class ScriptEditorPanel(QWidget):
-    """Edit action scripts and run them through the same CLI child the GUI uses.
+    """Edit action scripts, structure SQL and run them through the same CLI child.
 
     The panel never re-implements robot logic: argv comes from ``cli_args`` and
     execution is a short-lived ``python -m pymybot`` process. The GUI's long-lived
@@ -151,13 +151,14 @@ class ScriptEditorPanel(QWidget):
     dirty_changed = Signal(bool)
 
     def __init__(self, parent=None, *, python=None, cwd=".", robot="", scripts_root="",
-                 module_paths=(), camera_src_dir="", timeout=180.0, runner=None,
-                 confirm=None, reader=None, writer=None):
+                 robots_root="", module_paths=(), camera_src_dir="", timeout=180.0,
+                 runner=None, confirm=None, reader=None, writer=None):
         super().__init__(parent)
         self.python = python or sys.executable
         self.cwd = str(cwd or ".")
         self.robot = str(robot or "")
         self.scripts_root = Path(scripts_root).absolute() if str(scripts_root or "").strip() else None
+        self.robots_root = Path(robots_root).absolute() if str(robots_root or "").strip() else None
         self.module_paths = tuple(str(path) for path in module_paths if str(path).strip())
         self.camera_src_dir = str(camera_src_dir or "")
         self.current_path: str | None = None
@@ -180,7 +181,7 @@ class ScriptEditorPanel(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
         files = QHBoxLayout()
-        files.addWidget(_label("脚本"))
+        files.addWidget(_label("文件"))
         self.files = QComboBox()
         self.files.setMinimumWidth(220)
         self.files.activated.connect(self._file_selected)
@@ -190,11 +191,19 @@ class ScriptEditorPanel(QWidget):
         files.addWidget(_button("新建", self.new_file))
         layout.addLayout(files)
 
-        controls = QHBoxLayout()
+        target = QHBoxLayout()
         self.robot_label = _label("", secondary=True)
         self.robot_label.setWordWrap(False)
         self.robot_label.setMinimumWidth(160)
-        controls.addWidget(self.robot_label, 1)
+        target.addWidget(self.robot_label, 1)
+        target.addWidget(_label("运行脚本"))
+        self.run_script = QComboBox()
+        self.run_script.setMinimumWidth(200)
+        self.run_script.setToolTip("编辑结构 SQL 时选择一个动作脚本对它运行；编辑 .mt 时固定为当前文件")
+        target.addWidget(self.run_script, 1)
+        layout.addLayout(target)
+
+        controls = QHBoxLayout()
         self.hardware = QCheckBox("允许硬件")
         self.hardware.setToolTip("运行会激活机器人并可能写硬件；只对可信结构执行")
         controls.addWidget(self.hardware)
@@ -204,6 +213,7 @@ class ScriptEditorPanel(QWidget):
         self.timeout.setSuffix(" s")
         controls.addWidget(_label("超时"))
         controls.addWidget(self.timeout)
+        controls.addStretch(1)
         self.save_button = _button("保存", self.save)
         self.check_button = _button("检查", self.check)
         self.run_button = _button("运行", self.run, role="primary")
@@ -215,7 +225,7 @@ class ScriptEditorPanel(QWidget):
 
         split = QSplitter(Qt.Orientation.Vertical)
         self.editor = CodeEditor()
-        self.editor.setPlaceholderText("打开或新建 .mt 动作脚本…")
+        self.editor.setPlaceholderText("打开或新建 .mt 动作脚本或 .sql 结构…")
         self.highlighter = CodeHighlighter(self.editor.document(), "mt")
         self.editor.textChanged.connect(self._on_text_changed)
         split.addWidget(self.editor)
@@ -245,18 +255,26 @@ class ScriptEditorPanel(QWidget):
 
     # -- context -----------------------------------------------------------
     def set_context(self, *, python=None, cwd=None, robot=None, scripts_root=None,
-                    module_paths=None, camera_src_dir=None, timeout=None):
+                    robots_root=None, module_paths=None, camera_src_dir=None, timeout=None):
         if python:
             self.python = python
         if cwd is not None:
             self.cwd = str(cwd or ".")
         if robot is not None:
             self.robot = str(robot or "")
+        changed = False
         if scripts_root is not None:
             root = Path(scripts_root).absolute() if str(scripts_root or "").strip() else None
             if root != self.scripts_root:
                 self.scripts_root = root
-                self.refresh_files()
+                changed = True
+        if robots_root is not None:
+            root = Path(robots_root).absolute() if str(robots_root or "").strip() else None
+            if root != self.robots_root:
+                self.robots_root = root
+                changed = True
+        if changed:
+            self.refresh_files()
         if module_paths is not None:
             self.module_paths = tuple(str(path) for path in module_paths if str(path).strip())
         if camera_src_dir is not None:
@@ -265,17 +283,28 @@ class ScriptEditorPanel(QWidget):
             self.timeout.setValue(float(timeout))
         self._sync_robot_label()
 
+    def _is_structure(self, path=None):
+        return Path(path or self.current_path or "").suffix.lower() == ".sql"
+
     def _sync_robot_label(self):
+        if self.current_path and self._is_structure():
+            self.robot_label.setText(f"结构：{Path(self.current_path).name}（编辑中）")
+            self.robot_label.setToolTip(self.current_path)
+            return
         name = Path(self.robot).name if self.robot else "未选择结构"
         self.robot_label.setText(f"结构：{name}")
         self.robot_label.setToolTip(self.robot or "在工具栏选择结构 SQL")
 
     def refresh_files(self):
         current = self.current_path
-        self.files.blockSignals(True)
-        self.files.clear()
-        self.files.addItem("（未打开文件）", "")
-        found = []
+        structures = []
+        scripts = []
+        if self.robots_root is not None and self.robots_root.is_dir():
+            try:
+                structures = [path for path in sorted(self.robots_root.glob("*.sql"))
+                              if not path.is_symlink() and path.is_file()]
+            except OSError as exc:
+                self.status.setText(f"读取结构目录失败：{exc}")
         root = self.scripts_root
         if root is not None and root.is_dir():
             try:
@@ -284,14 +313,20 @@ class ScriptEditorPanel(QWidget):
                     for name in sorted(names):
                         path = Path(base) / name
                         if path.suffix == ".mt" and not path.is_symlink() and path.is_file():
-                            found.append(path)
-                    if len(found) >= MAX_SCRIPT_FILES:
+                            scripts.append(path)
+                    if len(scripts) >= MAX_SCRIPT_FILES:
                         break
             except OSError as exc:
                 self.status.setText(f"读取脚本目录失败：{exc}")
-        for path in sorted(found[:MAX_SCRIPT_FILES],
+
+        self.files.blockSignals(True)
+        self.files.clear()
+        self.files.addItem("（未打开文件）", "")
+        for path in structures[:MAX_SCRIPT_FILES]:
+            self.files.addItem(f"结构/{path.name}", str(path))
+        for path in sorted(scripts[:MAX_SCRIPT_FILES],
                            key=lambda item: item.relative_to(root).as_posix()):
-            self.files.addItem(path.relative_to(root).as_posix(), str(path))
+            self.files.addItem(f"脚本/{path.relative_to(root).as_posix()}", str(path))
         if current:
             index = self.files.findData(str(current))
             if index < 0 and Path(current).is_file():
@@ -301,12 +336,37 @@ class ScriptEditorPanel(QWidget):
                 self.files.setCurrentIndex(index)
         self.files.blockSignals(False)
 
+        previous = self.run_script.currentData()
+        self.run_script.blockSignals(True)
+        self.run_script.clear()
+        self.run_script.addItem("（选择动作脚本）", "")
+        for path in sorted(scripts[:MAX_SCRIPT_FILES],
+                           key=lambda item: item.relative_to(root).as_posix()):
+            self.run_script.addItem(path.relative_to(root).as_posix(), str(path))
+        if previous:
+            index = self.run_script.findData(previous)
+            if index >= 0:
+                self.run_script.setCurrentIndex(index)
+        self.run_script.blockSignals(False)
+        self._sync_run_script()
+
+    def _sync_run_script(self):
+        if self.current_path and not self._is_structure():
+            index = self.run_script.findData(self.current_path)
+            if index < 0:
+                self.run_script.addItem(Path(self.current_path).name, self.current_path)
+                index = self.run_script.count() - 1
+            self.run_script.setCurrentIndex(index)
+            self.run_script.setEnabled(False)
+            return
+        self.run_script.setEnabled(bool(self.current_path and self._is_structure()))
+
     # -- file operations ---------------------------------------------------
     def open_dialog(self):
         start = str(Path(self.current_path).parent) if self.current_path else str(self.scripts_root or self.cwd)
         path, _filter = QFileDialog.getOpenFileName(
-            self, "打开动作脚本", start,
-            "动作脚本 (*.mt);;结构 SQL (*.sql);;Python (*.py);;Lua (*.lua);;所有文件 (*)")
+            self, "打开脚本或结构", start,
+            "动作脚本或结构 (*.mt *.sql);;动作脚本 (*.mt);;结构 SQL (*.sql);;所有文件 (*)")
         if path:
             self.open_path(path)
 
@@ -329,6 +389,8 @@ class ScriptEditorPanel(QWidget):
         self.editor.blockSignals(False)
         self._set_language(path)
         self._set_dirty(False)
+        self._sync_robot_label()
+        self._sync_run_script()
         self.output.clear()
         self.status.setText(f"已打开 {path}")
         index = self.files.findData(path)
@@ -349,6 +411,8 @@ class ScriptEditorPanel(QWidget):
         self.editor.blockSignals(False)
         self._set_language("untitled.mt")
         self._set_dirty(False)
+        self._sync_robot_label()
+        self._sync_run_script()
         self.output.clear()
         self.files.setCurrentIndex(0)
         self.status.setText("新脚本：保存后即可检查或运行")
@@ -363,8 +427,8 @@ class ScriptEditorPanel(QWidget):
         default = (Path(self.current_path) if self.current_path
                    else (self.scripts_root or Path(self.cwd)) / "untitled.mt")
         path, _filter = QFileDialog.getSaveFileName(
-            self, "保存动作脚本", str(default),
-            "动作脚本 (*.mt);;结构 SQL (*.sql);;Python (*.py);;Lua (*.lua);;所有文件 (*)")
+            self, "保存脚本或结构", str(default),
+            "动作脚本 (*.mt);;结构 SQL (*.sql);;所有文件 (*)")
         if not path:
             return False
         if not Path(path).suffix:
@@ -383,6 +447,7 @@ class ScriptEditorPanel(QWidget):
         self._set_language(self.current_path)
         self._set_dirty(False)
         self.refresh_files()
+        self._sync_robot_label()
         self.status.setText(f"已保存 {self.current_path}")
         return True
 
@@ -456,15 +521,32 @@ class ScriptEditorPanel(QWidget):
             self.dirty_changed.emit(value)
 
     # -- controller commands ----------------------------------------------
+    def _run_script(self):
+        if self.current_path and not self._is_structure():
+            return self.current_path
+        return self.run_script.currentData() or ""
+
+    def _run_structure(self):
+        if self.current_path and self._is_structure():
+            return self.current_path
+        return self.robot
+
     def build_argv(self, command):
         if command not in {"check", "run"}:
             raise ValueError(f"unsupported editor command: {command}")
         if not self.current_path:
             raise ValueError("请先保存脚本")
-        if not self.robot.strip():
+        if command == "check" and self._is_structure():
+            return cli_args("check", robot=self.current_path, module_paths=self.module_paths,
+                            camera_src_dir=self.camera_src_dir)
+        script = self._run_script()
+        robot = self._run_structure()
+        if not str(script).strip():
+            raise ValueError("请选择运行脚本")
+        if not str(robot).strip():
             raise ValueError("请选择结构 SQL")
         timeout = self.timeout.value() if command == "run" else None
-        return cli_args(command, robot=self.robot, script=self.current_path, timeout=timeout,
+        return cli_args(command, robot=robot, script=script, timeout=timeout,
                         allow_hardware=command == "run" and self.hardware.isChecked(),
                         module_paths=self.module_paths, camera_src_dir=self.camera_src_dir)
 
