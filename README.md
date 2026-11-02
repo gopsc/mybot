@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%E2%80%933.14-3776AB)](pyproject.toml)
 
-[中文使用指南](docs/Introduce.md) · [English](docs/README.en.md) · [文档索引](docs/README.md) · [路线图](docs/roadmap.md) · [安全模型](docs/security.md)
+[Controller Skill](skills/hardware-controller/SKILL.md) · [中文使用指南](docs/Introduce.md) · [English](docs/README.en.md) · [文档索引](docs/README.md) · [路线图](docs/roadmap.md) · [安全模型](skills/hardware-controller/references/security.md)
 
 ![pymybot GUI](docs/screenshots/gui.png)
 

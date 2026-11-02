@@ -11,6 +11,7 @@ from pymybot.robot import Robot
 from pymybot.runtime import LuaState
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 
 
 class NoHardware:
@@ -60,8 +61,8 @@ def test_standard_lua_fallback_runs_a_python_only_example(monkeypatch):
     import pymybot.runtime as runtime
     monkeypatch.setattr(runtime, "LuaRuntime", lua54.LuaRuntime)
     monkeypatch.setattr(runtime, "lua_type", lua54.lua_type)
-    with Robot.from_file(ROOT / "robots" / "time.sql") as robot:
-        outputs = robot.run((ROOT / "scripts" / "time.mt").read_text(encoding="utf-8"))
+    with Robot.from_file(ASSETS / "robots" / "time.sql") as robot:
+        outputs = robot.run((ASSETS / "scripts" / "time.mt").read_text(encoding="utf-8"))
     assert outputs[-1]["result"] == "OK"
     assert "formatted" in outputs[-1]
 

@@ -21,6 +21,7 @@ from pymybot.cli import main
 from pymybot.mcp_client import McpConfigError, load_servers
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 
 SERVER_SCRIPT = '''
 try:
@@ -228,21 +229,21 @@ def test_mcp_server_failures_are_reported_as_unknown(tmp_path):
 
 
 def test_cli_rejects_mcp_flags_without_a_configuration(capsys):
-    code = main(["--no-gui", "agent", "--robot", str(ROOT / "robots/relay-test.sql"),
+    code = main(["--no-gui", "agent", "--robot", str(ASSETS / "robots/relay-test.sql"),
                  "--task", "list hardware", "--allow-mcp-tools"])
     assert code == 2
     assert "--allow-mcp-tools requires --mcp-config" in capsys.readouterr().err
 
 
 def test_cli_rejects_invalid_history_and_mcp_configuration(tmp_path, capsys):
-    code = main(["--no-gui", "agent", "--robot", str(ROOT / "robots/relay-test.sql"),
+    code = main(["--no-gui", "agent", "--robot", str(ASSETS / "robots/relay-test.sql"),
                  "--task", "list hardware", "--history-turns", "0"])
     assert code == 2
     assert "history-turns" in capsys.readouterr().err
 
     bad = tmp_path / "mcp.json"
     bad.write_text('{"mcpServers": {"demo": {"url": "https://example.invalid"}}}', encoding="utf-8")
-    code = main(["--no-gui", "agent", "--robot", str(ROOT / "robots/relay-test.sql"),
+    code = main(["--no-gui", "agent", "--robot", str(ASSETS / "robots/relay-test.sql"),
                  "--task", "list hardware", "--mcp-config", str(bad)])
     captured = capsys.readouterr()
     assert code == 1

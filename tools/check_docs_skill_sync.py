@@ -86,7 +86,19 @@ def audit(root):
             if not (path.parent / target).resolve().exists():
                 problems.append(f"{relative}: link target does not exist: {target}")
         for candidate in _candidate_paths(text):
-            if not (root / candidate).exists():
+            candidates = [root / candidate]
+            if candidate == "pymybot/assets":
+                continue  # Normalised package layout, not a source-tree directory.
+            if candidate.startswith("pymybot/assets/"):
+                suffix = candidate.removeprefix("pymybot/assets/")
+                candidates.append(root / suffix)
+                if suffix.split("/", 1)[0] in {"modules", "robots", "scripts"}:
+                    candidates.append(root / "skills" / "hardware-controller" / "references" / "assets" / suffix)
+            elif candidate.startswith("pymybot/"):
+                candidates.append(root / "skills" / "hardware-controller" / "scripts" / candidate)
+            elif candidate.split("/", 1)[0] in {"modules", "robots", "scripts"}:
+                candidates.append(root / "skills" / "hardware-controller" / "references" / "assets" / candidate)
+            if not any(path.exists() for path in candidates):
                 problems.append(f"{relative}: referenced path does not exist: {candidate}")
         if path.name == "SKILL.md":
             lines = text.count("\n") + 1

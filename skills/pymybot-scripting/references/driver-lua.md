@@ -67,8 +67,8 @@ TCP 是字节流：接收最多读取 `num_recv` 字节，不保证填满或返�
 UTF-8 跨次接收的未完整字符会暂存，切换到 `recv_hex` 时先返回这些原始字节；
 非法 UTF-8 或 EOF 时仍有不完整字符会报错，不替换乱码。
 发送回执的 `sent` 只表示 socket 接受的字节数，不代表设备已执行；发送失败或取消后关闭连接，
-不自动重连或重放，去激活会兜底关闭未显式关闭的连接。样例 [robots/tcp.sql](../../../robots/tcp.sql)
-和 [scripts/tcp.mt](../../../scripts/tcp.mt) 需要先在本机对应端口启动 TCP 回显服务。
+不自动重连或重放，去激活会兜底关闭未显式关闭的连接。样例 [robots/tcp.sql](../../hardware-controller/references/assets/robots/tcp.sql)
+和 [scripts/tcp.mt](../../hardware-controller/references/assets/scripts/tcp.mt) 需要先在本机对应端口启动 TCP 回显服务。
 
 以下章节专述保留的 **Lua** 驱动协议与工具。
 

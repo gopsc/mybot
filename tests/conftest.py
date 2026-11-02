@@ -4,6 +4,7 @@ import sys
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 
 
 @pytest.hookimpl(trylast=True)
@@ -192,7 +193,7 @@ def synthetic_modules(tmp_path):
     for name, source in (("SyntheticI2C", I2C_DRIVER), ("SyntheticSPI", SPI_DRIVER),
                          ("SyntheticUART", UART_DRIVER)):
         (tmp_path / (name + ".lua")).write_text(PRELUDE + source, encoding="utf-8")
-    return [tmp_path, ROOT / "modules"]
+    return [tmp_path, ASSETS / "modules"]
 
 
 @pytest.fixture

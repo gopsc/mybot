@@ -31,12 +31,12 @@ try {
            --include-distribution-metadata=lupa --include-distribution-metadata=sqlparse `
            --include-distribution-metadata=pyserial --include-distribution-metadata=pyftdi `
            --include-distribution-metadata=pillow --include-distribution-metadata=av `
-           --include-data-dir=modules=pymybot/assets/modules `
-           --include-data-dir=robots=pymybot/assets/robots `
-           --include-data-dir=scripts=pymybot/assets/scripts `
+           --include-data-dir=skills/hardware-controller/references/assets/modules=pymybot/assets/modules `
+           --include-data-dir=skills/hardware-controller/references/assets/robots=pymybot/assets/robots `
+           --include-data-dir=skills/hardware-controller/references/assets/scripts=pymybot/assets/scripts `
            --include-data-dir=skills=pymybot/assets/skills `
            --include-data-dir=prompts=pymybot/assets/prompts `
-           --include-data-dir=robots=robots --include-data-dir=scripts=scripts `
+           --include-data-dir=skills/hardware-controller/references/assets/robots=robots --include-data-dir=skills/hardware-controller/references/assets/scripts=scripts `
            --include-data-files=README.md=README.md --include-data-files=LICENSE=LICENSE `
            --noinclude-custom-mode=genai_prices.data:bytecode `
            --noinclude-custom-mode=openai.types:bytecode `
@@ -46,7 +46,7 @@ try {
         # Nuitka excludes Python source from data directories; native drivers load it at runtime.
         $AssetModules = Join-Path $Dist "pymybot\assets\modules"
         if (-not (Test-Path $AssetModules)) { throw "Missing packaged module assets: $AssetModules" }
-        Copy-Item (Join-Path $Root "modules\*.py") $AssetModules -Force
+        Copy-Item (Join-Path $Root "skills\hardware-controller\references\assets\modules\*.py") $AssetModules -Force
     }
 
     if (-not (Test-Path (Join-Path $Dist "pymybot.exe"))) { throw "No build at $Dist" }

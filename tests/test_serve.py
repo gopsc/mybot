@@ -19,6 +19,7 @@ from pymybot import serve
 from pymybot.errors import BudgetExceeded
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 VIRTUAL_SQL = """
 CREATE TABLE Timer(name String);
 INSERT INTO Timer(name) VALUES('t0');
@@ -201,7 +202,7 @@ end
                          "INSERT INTO Alias(name, alias) VALUES('word','default');"
                          "CREATE TABLE Probe(name String, word String);"
                          "INSERT INTO Probe(name, word) VALUES('p','$word');", encoding="utf-8")
-    paths = [str(modules), str(ROOT / "modules")]
+    paths = [str(modules), str(ASSETS / "modules")]
     client = client_factory(workspace)
     active = client.call("session.activate",
                          {"robot": str(structure), "modulePaths": paths, "vars": {"word": "bound"}})

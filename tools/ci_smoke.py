@@ -45,11 +45,13 @@ def preflight(mode):
 def asset_manifest(root):
     result = {}
     for directory, suffixes in ASSET_SUFFIXES.items():
-        files = sorted(path for path in (root / directory).rglob("*")
+        source_root = (root / "skills" / "hardware-controller" / "references" / "assets"
+                       if directory in {"modules", "robots", "scripts"} else root)
+        files = sorted(path for path in (source_root / directory).rglob("*")
                        if path.is_file() and path.suffix in suffixes)
-        require(files, f"Missing or empty asset directory: {root / directory}")
+        require(files, f"Missing or empty asset directory: {source_root / directory}")
         for path in files:
-            result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+            result[path.relative_to(source_root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
 
 

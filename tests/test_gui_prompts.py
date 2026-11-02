@@ -24,6 +24,7 @@ from pymybot.gui.protocol import ServeClient
 from pymybot.prompts import MAX_PROMPT_TOTAL, PromptLibrary
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 
 
 @pytest.fixture(scope="module")
@@ -366,7 +367,7 @@ def test_send_guard_blocks_tampered_safety_before_rpc(window, library, layer):
         assert info["protocol"] == 1
         window.serve = client
         window.agent_available = True
-        window.cfg.robot = str(ROOT / "robots" / "relay-test.sql")
+        window.cfg.robot = str(ASSETS / "robots" / "relay-test.sql")
         layer_path(library, layer).write_text("modified safety", encoding="utf-8")
         window.task_box.setPlainText("do not contact a model")
         sequence = client._seq

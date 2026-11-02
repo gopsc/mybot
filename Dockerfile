@@ -11,9 +11,6 @@ WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE MANIFEST.in build_support.py ./
 COPY pymybot ./pymybot
-COPY modules ./modules
-COPY robots ./robots
-COPY scripts ./scripts
 COPY skills ./skills
 COPY prompts ./prompts
 

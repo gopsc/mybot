@@ -25,6 +25,14 @@ HIDDEN_PACKAGES = (
     "httpx2", "httpcore2", "griffelib", "truststore", "jiter", "tiktoken",
     "lupa", "PIL", "serial", "pyftdi", "av", "mcp", "httpx", "bs4",
 )
+CONTROLLER_MODULES = (
+    "pymybot.actions", "pymybot.agent_executor", "pymybot.agent_skills",
+    "pymybot.agent_workspace", "pymybot.cli", "pymybot.daemon", "pymybot.errors",
+    "pymybot.expr", "pymybot.hal", "pymybot.hardware", "pymybot.include",
+    "pymybot.matrix", "pymybot.mcp_server", "pymybot.native", "pymybot.paths",
+    "pymybot.process", "pymybot.robot", "pymybot.runtime", "pymybot.sandbox",
+    "pymybot.scaffold", "pymybot.security", "pymybot.serve", "pymybot.sql",
+)
 
 
 def asset_datas(root):
@@ -32,9 +40,11 @@ def asset_datas(root):
     root = Path(root)
     datas = []
     for name, suffixes in ASSET_SUFFIXES.items():
-        for source in sorted((root / name).rglob("*")):
+        source_root = (root / "skills" / "hardware-controller" / "references" / "assets"
+                       if name in {"modules", "robots", "scripts"} else root)
+        for source in sorted((source_root / name).rglob("*")):
             if source.is_file() and source.suffix in suffixes:
-                relative = source.relative_to(root)
+                relative = source.relative_to(source_root)
                 datas.append((str(source), str(Path("pymybot/assets") / relative.parent)))
     for source in sorted((root / "pymybot" / "gui" / "assets").glob("*.svg")):
         datas.append((str(source), "pymybot/gui/assets"))
@@ -60,7 +70,8 @@ def metadata_datas():
 def hidden_imports():
     """Collect submodules for optional packages available in the build."""
     from PyInstaller.utils.hooks import collect_submodules
-    imports = ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtSvg"]
+    imports = ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtSvg",
+               *CONTROLLER_MODULES]
     for package in HIDDEN_PACKAGES:
         options = {}
         if package == "mcp":

@@ -12,6 +12,7 @@ from pymybot.cli import parse_args
 from pymybot.security import SecurityError
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 SQL = "CREATE TABLE Relay(name String); INSERT INTO Relay(name) VALUES('r0');\n"
 SKILL_MD = "---\nname: demo-skill\ndescription: Demo skill for tests.\n---\n\n# Demo\n\nBody text.\n"
 IS_WINDOWS = sys.platform.startswith("win")
@@ -176,7 +177,7 @@ def executor_case(tmp_path, skills):
     scripts.mkdir()
 
     async def scenario():
-        executor = RobotExecutor(robot, module_paths=[ROOT / "modules"], scripts_dir=scripts,
+        executor = RobotExecutor(robot, module_paths=[ASSETS / "modules"], scripts_dir=scripts,
                                  skills=skills)
         try:
             listed = await executor.call("list_skills", {})
@@ -216,7 +217,7 @@ def test_executor_creates_skill_in_empty_root(tmp_path):
     scripts.mkdir()
 
     async def scenario():
-        executor = RobotExecutor(robot, module_paths=[ROOT / "modules"], scripts_dir=scripts,
+        executor = RobotExecutor(robot, module_paths=[ASSETS / "modules"], scripts_dir=scripts,
                                  skills=SkillsLibrary(root))
         try:
             created = await executor.call("create_skill", {
@@ -238,7 +239,9 @@ def test_real_repository_skill_loads():
     assert "pymybot-scripting" in library.skills
     content = library.read("pymybot-scripting", "references/driver-lua.md")
     assert "require_driver" in content
-    assert len(library.index()["skills"][0]["files"]) == 7
+    entries = {item["name"]: item for item in library.index()["skills"]}
+    assert len(entries["pymybot-scripting"]["files"]) == 7
+    assert len(entries["hardware-controller"]["files"]) == 6
 
 
 def test_cli_accepts_skills_dir(tmp_path):
@@ -257,7 +260,7 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     library = SkillsLibrary(ROOT / "skills")
 
     async def scenario(skills):
-        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=ROOT / "scripts", skills=skills)
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts", skills=skills)
         session = AgentSession(executor, TestModel(custom_output_text="done"), skills=skills)
         try:
             await session.ask("hello")
@@ -313,7 +316,7 @@ def test_skill_authoring_reads_reference_before_create(tmp_path):
         return ModelResponse(parts=[TextPart("done")])
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=ROOT / "scripts",
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts",
                                  skills=library)
         session = AgentSession(executor, FunctionModel(respond),
                                AgentConfig(intent_mode="author"), skills=library, confirm=confirm)
@@ -339,7 +342,7 @@ def test_workspace_cannot_write_skill_files(tmp_path):
     skills.mkdir()
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=ROOT / "scripts",
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts",
                                  skills=SkillsLibrary(skills), workspace_dir=workspace)
         try:
             blocked = await executor.call("write_file", {
@@ -370,7 +373,7 @@ def test_create_skill_requires_host_approval(tmp_path):
     library = SkillsLibrary(root)
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=ROOT / "scripts", skills=library)
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts", skills=library)
 
         async def confirm(name, _arguments):
             return name == "create_skill" and _arguments["name"] == "approved-skill"

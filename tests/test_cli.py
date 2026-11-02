@@ -16,6 +16,7 @@ from pymybot.robot import Robot
 from pymybot.security import MAX_BODY, SecurityError, checked_text, dumps, read_file
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 VIRTUAL_SQL = """
 CREATE TABLE Relay(name String);
 INSERT INTO Relay(name) VALUES('relay0');
@@ -445,6 +446,8 @@ def test_scripts_default_source_and_installed_package(workspace, capsys):
     package.mkdir(parents=True)
     for file in (ROOT / "pymybot").glob("*.py"):
         shutil.copyfile(file, package / file.name)
+    for file in (ROOT / "skills" / "hardware-controller" / "scripts" / "pymybot").glob("*.py"):
+        shutil.copyfile(file, package / file.name)
     scripts = package / "assets" / "scripts"
     scripts.mkdir(parents=True)
     (scripts / "wheel.mt").write_text("# only packaged copy")
@@ -474,7 +477,7 @@ def test_faulthandler_cannot_break_json_on_lua_errors(workspace):
         "CREATE TABLE Boom(name String); INSERT INTO Boom(name) VALUES('b');", encoding="utf-8")
     result = subprocess.run(
         [sys.executable, "-X", "faulthandler", "-m", "pymybot", "sample", "--robot", "boom.sql",
-         "--name", "b", "--module-path", str(modules), "--module-path", str(ROOT / "modules")],
+         "--name", "b", "--module-path", str(modules), "--module-path", str(ASSETS / "modules")],
         cwd=workspace, env=dict(os.environ, PYTHONPATH=str(ROOT)), input="", encoding="utf-8",
         capture_output=True, timeout=10)
     assert result.returncode == 1, result.stderr
@@ -607,11 +610,11 @@ def test_module_and_camera_paths_passed_through(workspace, monkeypatch, capsys):
             super().__init__(text, **kwargs)
     monkeypatch.setattr(cli, "Robot", ObservedRobot)
     code, _, _ = invoke(capsys, "sample", "--robot", workspace / "robot.sql", "--name", "dev",
-                         "--module-path", workspace, "--module-path", ROOT / "modules",
+                         "--module-path", workspace, "--module-path", ASSETS / "modules",
                          "--camera-src-dir", workspace, "--allow-hardware")
     assert code == 0
     assert constructed[0]["allow_hardware"] is True
-    assert constructed[0]["module_paths"] == [str(workspace), str(ROOT / "modules")]
+    assert constructed[0]["module_paths"] == [str(workspace), str(ASSETS / "modules")]
     assert constructed[0]["camera_src_root"] == str(workspace)
 
 
@@ -822,8 +825,8 @@ def test_windowed_build_replaces_missing_console_streams():
 
 
 def test_camwin_example_checks(capsys):
-    code, result, _ = invoke(capsys, "check", "--robot", ROOT / "robots" / "camwin.sql",
-                             "--input", ROOT / "scripts" / "Camera.mt")
+    code, result, _ = invoke(capsys, "check", "--robot", ASSETS / "robots" / "camwin.sql",
+                             "--input", ASSETS / "scripts" / "Camera.mt")
     assert code == 0 and result["valid"] and result["activated"] is False
 
 
@@ -836,7 +839,7 @@ def test_camera_script_captures_a_file_image(workspace, capsys):
         "INSERT INTO Camera (name, path, src) VALUES ('cam', '0', 'frame.png');\n",
         encoding="utf-8")
     code, result, _ = invoke(capsys, "run", "--robot", workspace / "camera.sql",
-                             "--input", ROOT / "scripts" / "Camera.mt",
+                             "--input", ASSETS / "scripts" / "Camera.mt",
                              "--camera-src-dir", workspace, "--timeout", "10")
     assert code == 0 and result["ok"]
     shot = result["outputs"][0]

@@ -23,6 +23,7 @@ from pymybot.robot import Robot
 from pymybot.security import dumps
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 SQL = """
 CREATE TABLE Relay(name String); INSERT INTO Relay(name) VALUES('sensor');
 CREATE TABLE Camera(name String); INSERT INTO Camera(name) VALUES('camera');
@@ -1053,8 +1054,8 @@ def test_real_relay_action_and_read(tmp_path):
     scripts.mkdir()
     (scripts / "relay.mt").write_text("@Action\nrelay0.test;\n1;\n@", encoding="utf-8")
     async def scenario():
-        ex = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=scripts,
-                           module_paths=[ROOT / "modules"], allow_hardware=False, read_vars=("relay0",))
+        ex = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=scripts,
+                           module_paths=[ASSETS / "modules"], allow_hardware=False, read_vars=("relay0",))
         try:
             assert (await ex.start())["robot"] == "relay-test"
             result = await ex.call("run_action_script", {"script": "relay.mt"})
@@ -1186,7 +1187,7 @@ def test_max_depth_nested_controls_survive_agent_freeze(tmp_path, pattern, inclu
         script = "@Reflex(step)\n" + script + "@\n@Action\nstep.unused;\n0;\n@\n"
     script = "@Vars\nname value;\ncount 0;\n@\n" + script
     parsed = parse_matrices(script)
-    with Robot((ROOT / "robots/relay-test.sql").read_text(encoding="utf-8")) as robot:
+    with Robot((ASSETS / "robots/relay-test.sql").read_text(encoding="utf-8")) as robot:
         assert [item["slept"] for item in robot.run(script)] == [1]
     path = tmp_path / "nested.mt"
     path.write_text(script, encoding="utf-8")
@@ -1197,7 +1198,7 @@ def test_max_depth_nested_controls_survive_agent_freeze(tmp_path, pattern, inclu
     assert parse_matrices(frozen) == parsed
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots/relay-test.sql", scripts_dir=tmp_path)
+        executor = RobotExecutor(ASSETS / "robots/relay-test.sql", scripts_dir=tmp_path)
         try:
             result = await executor.call("run_action_script", {"script": path.name})
             assert result["ok"], result
@@ -1224,7 +1225,7 @@ def test_include_merge_and_control_frozen_for_real_robot(tmp_path):
         "@Action\nrelay0.test;\n1;\n@\n@", encoding="utf-8")
     (tmp_path / "fragment.mt").write_text("@Action\ntimer-0.delay;\n1;\n@", encoding="utf-8")
     async def scenario():
-        ex = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path, allow_hardware=False)
+        ex = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=tmp_path, allow_hardware=False)
         try:
             result = await ex.call("run_action_script", {"script": "main.mt"})
             assert result["ok"], result
@@ -1268,7 +1269,7 @@ $(count) $count=slept;
 ''', encoding="utf-8")
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path)
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=tmp_path)
         try:
             for _ in range(2):
                 result = await executor.call("run_action_script", {"script": "main.mt"})
@@ -1308,7 +1309,7 @@ $(last+1);
 ''', encoding="utf-8")
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path)
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=tmp_path)
         try:
             result = await executor.call("run_action_script", {"script": "main.mt"})
             assert result["ok"], result
@@ -1341,7 +1342,7 @@ $(state.count+1) -;
 ''', encoding="utf-8")
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path)
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=tmp_path)
         try:
             for _ in range(2):
                 result = await executor.call("run_action_script", {"script": "main.mt"})
@@ -1358,7 +1359,7 @@ def test_struct_invalid_json_rejected_before_agent_activation(tmp_path, monkeypa
     monkeypatch.setattr(Robot, "active", lambda self: pytest.fail("Invalid JSON must not activate the robot"))
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path)
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=tmp_path)
         try:
             result = await executor.call("run_action_script", {"script": "main.mt"})
             assert result["ok"] is False and result["executed"] is False

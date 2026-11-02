@@ -20,6 +20,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 
 
 def _read_timeout(seconds):
@@ -36,8 +37,8 @@ TOOLS = {"get_status", "list_hardware", "list_action_scripts", "read_action_scri
 
 
 def command(robot=None, scripts=None, extra=()):
-    return ["-m", "pymybot", "mcp", "--robot", str(robot or ROOT / "robots/relay-test.sql"),
-            "--scripts-dir", str(scripts or ROOT / "scripts"), *extra]
+    return ["-m", "pymybot", "mcp", "--robot", str(robot or ASSETS / "robots/relay-test.sql"),
+            "--scripts-dir", str(scripts or ASSETS / "scripts"), *extra]
 
 
 @asynccontextmanager
@@ -137,7 +138,7 @@ def test_run_read_deactivate_and_reactivate(tmp_path):
 def test_paths_allowlists_and_unknown_tools_are_rejected(tmp_path):
     async def scenario():
         async with client(tmp_path, extra=("--allow-execution",)) as session:
-            for path in ("../scripts/relay-test.mt", str(ROOT / "scripts/relay-test.mt"), "missing.mt"):
+            for path in ("../scripts/relay-test.mt", str(ASSETS / "scripts/relay-test.mt"), "missing.mt"):
                 result = data(await session.call_tool("run_action_script", {"script": path}))
                 assert not result["ok"] and not result["executed"]
             assert (await session.call_tool("capture_image", {"name": "relay0"})).isError

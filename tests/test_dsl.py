@@ -1177,7 +1177,8 @@ def test_top_level_merge_retains_only_first_action_like_cpp(tmp_path, caplog):
 
 
 def test_bundled_relay_script():
-    path = Path(__file__).resolve().parents[1] / "scripts" / "relay-test.mt"
+    path = (Path(__file__).resolve().parents[1] / "skills" / "hardware-controller" / "references" / "assets"
+            / "scripts" / "relay-test.mt")
     assert parse_matrices(path.read_text(encoding="utf-8")) == [
         Matrix("Action", [["relay0.test"], ["1"]]),
     ]

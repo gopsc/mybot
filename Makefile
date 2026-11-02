@@ -29,7 +29,7 @@ lint:
 	$(PY) -m ruff check pymybot tests tools build_support.py --select E9,F63,F7,F82
 
 check:
-	$(PY) -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
+	$(PY) -m pymybot check --robot skills/hardware-controller/references/assets/robots/relay-test.sql --input skills/hardware-controller/references/assets/scripts/relay-test.mt
 
 wheel:
 	$(PY) -I tools/ci_smoke.py wheel

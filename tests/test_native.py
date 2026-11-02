@@ -13,7 +13,8 @@ from pymybot.robot import Robot
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ROOT / "modules"
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+MODULES = ASSETS / "modules"
 SQL = "CREATE TABLE Probe(name String); INSERT INTO Probe(name) VALUES('dev');"
 PROBE = '''
 from dataclasses import dataclass
@@ -310,10 +311,10 @@ INSERT INTO Probe(name, initial, controller) VALUES('dev', 2, '-');
 
 
 def test_native_uart_example_and_borrowed_handle():
-    with Robot.from_file(ROOT / "robots" / "uart-loopback.sql") as robot:
+    with Robot.from_file(ASSETS / "robots" / "uart-loopback.sql") as robot:
         assert {var.kind for var in robot.registry.values()} == {"python"}
         assert robot.registry["bus"].runtime._virtual is None
-        action = (ROOT / "scripts" / "uart-loopback.mt").read_text()
+        action = (ASSETS / "scripts" / "uart-loopback.mt").read_text()
         assert [item["rx"] for item in robot.run(action)] == [0, 127, 255]
         assert len(robot.hal._handles) == 1
     assert not robot.hal._handles
@@ -324,8 +325,8 @@ def test_executor_can_sample_and_run_native_drivers():
     from pymybot.agent_executor import RobotExecutor
 
     async def scenario():
-        executor = RobotExecutor(ROOT / "robots" / "uart-loopback.sql",
-                                 scripts_dir=ROOT / "scripts", read_vars=("echo",))
+        executor = RobotExecutor(ASSETS / "robots" / "uart-loopback.sql",
+                                 scripts_dir=ASSETS / "scripts", read_vars=("echo",))
         try:
             await executor.start()
             sampled = await executor.call("read_variables", {"names": ["echo"]})
@@ -398,7 +399,7 @@ def test_native_resource_panel_preview_and_filter(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])
     panel = ResourcePanel()
     panel.resize(1100, 700)
-    panel.set_roots(ROOT / "scripts", robots_root=ROOT / "robots", module_paths=[MODULES])
+    panel.set_roots(ASSETS / "scripts", robots_root=ASSETS / "robots", module_paths=[MODULES])
     panel.show()
     panel.ensure_loaded()
     QTest.qWait(100)

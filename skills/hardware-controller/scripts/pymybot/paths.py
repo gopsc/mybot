@@ -25,8 +25,12 @@ def package_dir() -> Path:
 
 
 def source_root() -> Path:
-    """Repository root for a source checkout (the package's parent)."""
-    return package_dir().parent
+    """Repository root for a source checkout, including from the Skill runtime."""
+    package = package_dir()
+    for candidate in (package.parent, *package.parents):
+        if (candidate / "pyproject.toml").is_file() and (candidate / "pymybot").is_dir():
+            return candidate
+    return package.parent
 
 
 def asset_dir() -> Path:
@@ -56,4 +60,8 @@ def asset_path(name: str) -> Path:
     packaged = asset_dir() / name
     if frozen() or packaged.exists():
         return packaged
+    if name in {"modules", "robots", "scripts"}:
+        skill_asset = package_dir().parent.parent / "references" / "assets" / name
+        if skill_asset.is_dir():
+            return skill_asset
     return source_root() / name

@@ -1,10 +1,13 @@
 # Skills
 
-This directory holds operator-trusted, agent-facing reference material. It is
-loaded only when the agent is enabled and is never executed.
+This directory holds operator-trusted, agent-facing reference material and the
+self-contained hardware-controller Runtime. `read_skill` never executes content;
+the controller Runtime explicitly loads trusted code and assets from
+`hardware-controller/`.
 
 | Skill | Purpose |
 | --- | --- |
+| [`hardware-controller/`](hardware-controller/SKILL.md) | Self-contained Python controller, MCP server, authoritative controller docs and default robots/scripts/modules assets |
 | [`pymybot-scripting/`](pymybot-scripting/SKILL.md) | Structure SQL, MT actions, Python/Lua drivers, daemon, virtbus and error workflow references |
 | [`skill-authoring/`](skill-authoring/SKILL.md) | 技能编写规范: SKILL.md layout, frontmatter, trigger descriptions, references and the approved `create_skill` workflow |
 
@@ -22,10 +25,16 @@ already own. Each topic has exactly one authority:
 | Daemon sampling | [`../docs/architecture.md`](../docs/architecture.md) | [`references/daemon.md`](pymybot-scripting/references/daemon.md) |
 | Virtual device models | [`../docs/testing.md`](../docs/testing.md) | [`references/virt-model.md`](pymybot-scripting/references/virt-model.md) |
 | CLI commands and gates | [`../docs/cli.md`](../docs/cli.md), [`../docs/security.md`](../docs/security.md) | [`references/workflow-errors.md`](pymybot-scripting/references/workflow-errors.md) |
+| Controller architecture | `hardware-controller/scripts/pymybot/` | [`references/architecture.md`](hardware-controller/references/architecture.md) |
+| Controller CLI and serve | `hardware-controller/scripts/pymybot/{cli,serve}.py` | [`references/cli.md`](hardware-controller/references/cli.md) |
+| Controller MCP | `hardware-controller/scripts/pymybot/mcp_server.py` | [`references/mcp.md`](hardware-controller/references/mcp.md) |
+| Controller security | `hardware-controller/scripts/pymybot/` | [`references/security.md`](hardware-controller/references/security.md) |
+| Controller testing | `tests/` | [`references/testing.md`](hardware-controller/references/testing.md) |
 
 The scripting grammars have no prose authority outside the implementation, so
 the reference *is* the written source of truth for them; docs link here instead
-of restating the grammar. Everything else is authored in `docs/` first.
+of restating the grammar. Other topics are authored in `docs/` or in the
+`hardware-controller/references/` authority documents.
 
 Rules for editing a reference:
 

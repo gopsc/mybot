@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..agent_skills import default_skills_root
-from ..paths import source_root
+from ..paths import asset_path, source_root
 from ..robot import module_roots
 from ..roles import create_role as create_role_profile, list_roles, role_path
 from ..session_log import session_root
@@ -480,6 +480,8 @@ class App(QMainWindow):
         candidate = workspace / "robots"
         if candidate.is_dir():
             return str(candidate)
+        if workspace == source_root() and asset_path("robots").is_dir():
+            return str(asset_path("robots"))
         robot = self._robot_path()
         return str(Path(robot).parent) if robot and Path(robot).is_file() else ""
 
@@ -786,7 +788,10 @@ class App(QMainWindow):
         root = Path(self.cfg.workspace or default_workspace()).absolute()
         self._set_workspace_label(str(root))
         found = []
-        for base in (root / "robots", root):
+        bases = [root / "robots", root]
+        if root == source_root():
+            bases.insert(0, asset_path("robots"))
+        for base in bases:
             if base.is_dir():
                 found.extend(str(path) for path in sorted(base.glob("*.sql")) if path.is_file())
         current = self._robot_path()
@@ -796,7 +801,9 @@ class App(QMainWindow):
         self.robot_box.clear()
         for path in unique:
             try:
-                shown = Path(os.path.relpath(path, root)).as_posix()
+                shown = ((Path("robots") / Path(path).name).as_posix()
+                         if root == source_root() and Path(path).parent == asset_path("robots")
+                         else Path(os.path.relpath(path, root)).as_posix())
             except ValueError:
                 shown = path
             self.robot_box.addItem(shown, path)
@@ -818,7 +825,11 @@ class App(QMainWindow):
         if configured:
             return configured
         candidate = Path(root).absolute() / "scripts"
-        return str(candidate if candidate.is_dir() else Path(root).absolute())
+        if candidate.is_dir():
+            return str(candidate)
+        if Path(root).absolute() == source_root() and asset_path("scripts").is_dir():
+            return str(asset_path("scripts"))
+        return str(Path(root).absolute())
 
     def _skills_root(self):
         if self.cfg.role:
@@ -832,7 +843,11 @@ class App(QMainWindow):
 
     def _module_paths(self):
         root = self.cfg.workspace or default_workspace()
-        return [_absolute(item, root) for item in self.cfg.module_paths if str(item).strip()]
+        values = [_absolute(item, root) for item in self.cfg.module_paths if str(item).strip()]
+        if Path(root).absolute() == source_root():
+            values = [str(asset_path("modules")) if value == str(Path(root).absolute() / "modules")
+                      and not Path(value).exists() else value for value in values]
+        return values
 
     def _stop_client(self, client):
         with self._lifecycle_lock:

@@ -5,17 +5,17 @@
 | Document | Read it when you want to… |
 | --- | --- |
 | [使用指南 (Chinese)](Introduce.md) | install, run a first action, and use the GUI, agent and MCP entries |
-| [Architecture](architecture.md) | understand the layers, runtime flow and package map |
-| [CLI reference](cli.md) | run commands, parse JSON, use `serve` |
-| [MCP](mcp.md) | expose pymybot to MCP clients and give the agent external MCP tools |
+| [Controller architecture](../skills/hardware-controller/references/architecture.md) | understand the layers, runtime flow and package map |
+| [Controller CLI](../skills/hardware-controller/references/cli.md) | run commands, parse JSON, use `serve` |
+| [Controller MCP](../skills/hardware-controller/references/mcp.md) | expose pymybot to MCP clients and give the agent external MCP tools |
 | [GUI guide](gui.md) | install, configure and operate the window |
 | [Agent roles](roles.md) | create and load role-owned prompts, skills, MCP and resumable history |
 | [Development](development.md) | set up, test, lint, package and freeze |
-| [Testing](testing.md) | understand the test layers and CI channels |
+| [Controller testing](../skills/hardware-controller/references/testing.md) | understand the test layers and CI channels |
 | [Release](release.md) | cut a reproducible release |
 | [Versioning](versioning.md) | know which version means what |
 | [Roadmap](roadmap.md) | see what is next and what is explicitly out of scope |
-| [Security](security.md) | understand trust boundaries and reporting |
+| [Controller security](../skills/hardware-controller/references/security.md) | understand trust boundaries and reporting |
 | [FAQ](faq.md) | troubleshoot installation, hardware and agent issues |
 | [History](history/README.md) | understand the branch consolidation |
 | [Camera migration](history/camera-migration.md) | understand the PyAV/Pillow pipeline change |

@@ -23,6 +23,7 @@ from pymybot.gui.protocol import (CliCall, RpcError, ServeClient, cli_args, pars
                                   resolve_python, sessions_args)
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 
 
 # -- argv building ----------------------------------------------------------
@@ -394,7 +395,7 @@ def app_factory(monkeypatch, qapp, tmp_path):
     monkeypatch.setattr(gui_app, "ServeClient", FakeClient)
 
     def build(config_path=None, config=None):
-        config = config or GuiConfig(workspace=str(ROOT), robot=str(ROOT / "robots" / "relay-test.sql"))
+        config = config or GuiConfig(workspace=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"))
         with monkeypatch.context() as patch:
             patch.setattr(gui_app.App, "_refresh_hardware", lambda self: None)
             instance = gui_app.App(config, config_path or tmp_path / "settings.json")
@@ -466,7 +467,7 @@ def test_role_selector_binds_agent_params_and_reset(app_factory, monkeypatch, tm
 
     monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "home"))
     role = create_role("tech")
-    config = GuiConfig(workspace=str(ROOT), robot=str(ROOT / "robots" / "relay-test.sql"),
+    config = GuiConfig(workspace=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"),
                        role=role.name, skills_dir="global-skills", mcp_config="global-mcp.json")
     gui, app = app_factory(config=config)
     assert app.role_box.currentData() == "tech"
@@ -853,7 +854,7 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     params = client.requests[0][1]
     assert params["skillsDir"] == str(ROOT / "skills")
     assert params["cameraSrcDir"] == str(ROOT / "images")
-    assert params["modulePaths"] == [str(ROOT / "modules"), str(ROOT / "other")]
+    assert params["modulePaths"] == [str(ASSETS / "modules"), str(ROOT / "other")]
     assert params["readVars"] == ["v0", "v1"] and params["cameraVars"] == ["cam"]
     assert params["vars"] == {"user": "alice"}
     assert (params["timeout"], params["maxRequests"], params["maxToolCalls"]) == (2.5, 2, 4)
@@ -1184,7 +1185,7 @@ def test_workspace_sql_and_directory_choosers(ui, monkeypatch, tmp_path):
     app.pick_workspace()
     assert app.cfg.workspace == str(tmp_path) and app.cfg.robot == str(robot)
     assert restarted == [True]
-    external = ROOT / "robots" / "relay-test.sql"
+    external = ASSETS / "robots" / "relay-test.sql"
     monkeypatch.setattr(gui.QFileDialog, "getOpenFileName", lambda *args: (str(external), "SQL (*.sql)"))
     app.pick_robot()
     assert app.cfg.robot == str(external) and app.robot_box.currentData() == str(external)
@@ -1652,7 +1653,7 @@ def test_editor_tab_tracks_context_and_dirty_marker(ui, tmp_path):
     assert app.editor.save()
     assert app.notebook.tabText(index) == "编辑器"
 
-    other = str(ROOT / "robots" / "relay-test.sql")
+    other = str(ASSETS / "robots" / "relay-test.sql")
     app.cfg.robot = other
     app.sync_editor()
     assert app.editor.robot == other
@@ -1660,7 +1661,7 @@ def test_editor_tab_tracks_context_and_dirty_marker(ui, tmp_path):
 
 def test_editor_follows_robot_and_context_changes(ui, tmp_path):
     _gui, app = ui
-    target = str(ROOT / "robots" / "time.sql")
+    target = str(ASSETS / "robots" / "time.sql")
     index = app.robot_box.findData(target)
     assert index >= 0
     app.robot_box.setCurrentIndex(index)
@@ -1760,10 +1761,10 @@ def test_editor_runs_virtual_script_end_to_end(qapp):
     from pymybot.gui.editor import ScriptEditorPanel
 
     panel = ScriptEditorPanel(
-        python=sys.executable, cwd=str(ROOT), robot=str(ROOT / "robots" / "relay-test.sql"),
-        scripts_root=str(ROOT / "scripts"), robots_root=str(ROOT / "robots"), timeout=20)
+        python=sys.executable, cwd=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"),
+        scripts_root=str(ASSETS / "scripts"), robots_root=str(ASSETS / "robots"), timeout=20)
     try:
-        assert panel.open_path(str(ROOT / "scripts" / "relay-test.mt"))
+        assert panel.open_path(str(ASSETS / "scripts" / "relay-test.mt"))
         panel.hardware.setChecked(False)
         panel.run()
         assert qt_wait(qapp, lambda: not panel.running and "退出码" in panel.status.text(),
@@ -1771,8 +1772,8 @@ def test_editor_runs_virtual_script_end_to_end(qapp):
         assert "退出码 0" in panel.status.text()
         assert '"result": "OK"' in panel.output.toPlainText()
 
-        assert panel.open_path(str(ROOT / "robots" / "relay-test.sql"))
-        index = panel.run_script.findData(str(ROOT / "scripts" / "relay-test.mt"))
+        assert panel.open_path(str(ASSETS / "robots" / "relay-test.sql"))
+        index = panel.run_script.findData(str(ASSETS / "scripts" / "relay-test.mt"))
         assert index > 0
         panel.run_script.setCurrentIndex(index)
         panel.run()

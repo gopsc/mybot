@@ -80,11 +80,11 @@ python -m venv .venv
 
 # No hardware required:
 .venv/bin/python -m pymybot check \
-  --robot robots/relay-test.sql \
-  --input scripts/relay-test.mt
+  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
+  --input skills/hardware-controller/references/assets/scripts/relay-test.mt
 .venv/bin/python -m pymybot run \
-  --robot robots/relay-test.sql \
-  --input scripts/relay-test.mt --timeout 10
+  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
+  --input skills/hardware-controller/references/assets/scripts/relay-test.mt --timeout 10
 
 # GUI (PySide6 / Qt 6; optional for headless CLI use):
 .venv/bin/pip install -e ".[gui]"
@@ -97,7 +97,7 @@ python -m venv .venv
 export MYBOT_MODEL="deepseek:deepseek-chat"
 export DEEPSEEK_API_KEY="sk-..."
 .venv/bin/python -m pymybot --no-gui \
-  --robot robots/relay-test.sql --task "List the hardware"
+  --robot skills/hardware-controller/references/assets/robots/relay-test.sql --task "List the hardware"
 
 # Generate a runnable SQL/MT/driver skeleton:
 .venv/bin/python -m pymybot new mybot-arm
@@ -173,8 +173,8 @@ permission, handle-ownership and cancellation checks as Lua. Python drivers are
 still trusted in-process code: imports and direct native I/O are unrestricted, and
 budgets and cancellation are cooperative. See [security.md](security.md).
 
-TCP also has a direct MT interface: [robots/tcp.sql](../robots/tcp.sql) declares only
-`name`, `host` and `port`; [scripts/tcp.mt](../scripts/tcp.mt) uses `connect`, `close`,
+TCP also has a direct MT interface: [robots/tcp.sql](../skills/hardware-controller/references/assets/robots/tcp.sql) declares only
+`name`, `host` and `port`; [scripts/tcp.mt](../skills/hardware-controller/references/assets/scripts/tcp.mt) uses `connect`, `close`,
 `timeout`, `num_recv`, `send_hex`, `send_str`, `recv_hex` and `recv_str`. Activation
 does not connect. Start a local TCP echo server before running the example;
 text arguments use MT string expressions such as `$("hello")`.

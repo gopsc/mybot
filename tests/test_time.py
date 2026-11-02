@@ -11,7 +11,8 @@ from pymybot.errors import DriverError
 from pymybot.robot import Robot
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULES = ROOT / "modules"
+ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+MODULES = ASSETS / "modules"
 SQL = "CREATE TABLE Time (name String); INSERT INTO Time (name) VALUES ('clock');"
 
 
@@ -112,8 +113,8 @@ def test_time_read_returns_current_snapshot():
 
 
 def test_time_example_files_run():
-    with Robot.from_file(ROOT / "robots" / "time.sql", module_paths=[MODULES]) as robot:
-        script = (ROOT / "scripts" / "time.mt").read_text(encoding="utf-8")
+    with Robot.from_file(ASSETS / "robots" / "time.sql", module_paths=[MODULES]) as robot:
+        script = (ASSETS / "scripts" / "time.mt").read_text(encoding="utf-8")
         outputs = robot.run(script, timeout=20)
 
     assert outputs and all(out["result"] == "OK" for out in outputs)
