@@ -36,7 +36,11 @@ About dialog mark.
 - **Robot context** — scripts root, skills directory, module path, image source
   directory and MCP configuration.
 - **Hardware tree** — variables, driver type and configured metadata, read from
-  the selected structure without activating devices.
+  the selected structure without activating devices. The Camera selector lists
+  only variables present in the camera allowlist; **抓图** calls the native Agent
+  `capture_image` path through `agent.capture`, shows the approval dialog when
+  required and opens a local image preview without a model request or MT script.
+  MT-based Camera actions remain available for automated action flows.
 - **Permissions and budgets** — allow hardware, auto-approve actions, read
   variables, camera variables, timeout/model-request/tool-call/history budgets.
 - **Advanced tool permissions** — workspace file tools, file writes, shell and

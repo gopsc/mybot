@@ -7,6 +7,7 @@ owns the hardware at a time; all session robot calls run on one owner thread.
 from __future__ import annotations
 
 import asyncio
+import base64
 from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
@@ -571,13 +572,8 @@ class Server:
         return await asyncio.to_thread(clear_role_history, name)
 
     # -- agent -------------------------------------------------------------
-    async def m_agent_ask(self, ident, params, cancel):
-        if not self.enable_agent:
-            raise RpcError(METHOD_NOT_FOUND, "Agent methods are disabled (--no-agent)")
-        task = params.text("task", required=True, cap=16 * 1024)
-        if not task.strip():
-            raise RpcError(INVALID_PARAMS, "'task' must not be empty")
-        key = {
+    def _agent_key(self, params):
+        return {
             "role": params.text("role", cap=64),
             "robot": params.text("robot", required=True), "modulePaths": params.strings("modulePaths"),
             "cameraSrcDir": params.text("cameraSrcDir"), "scriptsDir": params.text("scriptsDir", required=True),
@@ -605,25 +601,21 @@ class Server:
             "enableShell": params.flag("enableShell"), "allowShell": params.flag("allowShell"),
             "allowFileWrites": params.flag("allowFileWrites"),
         }
+
+    async def m_agent_ask(self, ident, params, cancel):
+        if not self.enable_agent:
+            raise RpcError(METHOD_NOT_FOUND, "Agent methods are disabled (--no-agent)")
+        task = params.text("task", required=True, cap=16 * 1024)
+        if not task.strip():
+            raise RpcError(INVALID_PARAMS, "'task' must not be empty")
+        key = self._agent_key(params)
         self.require_owner("agent")
         if self.agent_lock.locked():
             raise RpcError(BUSY, "Another agent turn is running")
         async with self.agent_lock:
             self.owner = "agent"
             try:
-                if self.agent is not None and self.agent_key != key:
-                    await self.close_agent()
-                if self.agent is None:
-                    async def open_conversation():
-                        self.agent = await self.open_agent(key)
-                        self.agent_key = key
-                    # Cancellation must not orphan resources created during initialization.
-                    await self.finish(asyncio.create_task(open_conversation()),
-                                      lambda: self.cancel({"id": ident}))
-                    self.notify("session", self.status())
-                session = self.agent["session"]
-                session.on_event = lambda event: self.notify("agent.event", {"id": ident, "event": event})
-                self.requests[ident]["hooks"].append(session.executor.cancel)
+                session = await self._prepare_agent(ident, key)
                 if cancel.is_set():
                     session.executor.cancel()
                 mark = len(session.events)
@@ -639,6 +631,51 @@ class Server:
                     exc.tool_events = events
                     raise exc from None
                 return {**result, "tool_events": session.events[mark:]}
+            except BaseException:
+                await self.close_agent()
+                raise
+            finally:
+                if self.agent is None:
+                    self.owner = None
+
+    async def _prepare_agent(self, ident, key):
+        if self.agent is not None and self.agent_key != key:
+            await self.close_agent()
+        if self.agent is None:
+            async def open_conversation():
+                self.agent = await self.open_agent(key)
+                self.agent_key = key
+            # Cancellation must not orphan resources created during initialization.
+            await self.finish(asyncio.create_task(open_conversation()),
+                              lambda: self.cancel({"id": ident}))
+            self.notify("session", self.status())
+        session = self.agent["session"]
+        session.on_event = lambda event: self.notify("agent.event", {"id": ident, "event": event})
+        self.requests[ident]["hooks"].append(session.executor.cancel)
+        return session
+
+    async def m_agent_capture(self, ident, params, cancel):
+        if not self.enable_agent:
+            raise RpcError(METHOD_NOT_FOUND, "Agent methods are disabled (--no-agent)")
+        name = params.text("name", required=True, cap=256)
+        key = self._agent_key(params)
+        self.require_owner("agent")
+        if self.agent_lock.locked():
+            raise RpcError(BUSY, "Another agent turn is running")
+        async with self.agent_lock:
+            self.owner = "agent"
+            try:
+                session = await self._prepare_agent(ident, key)
+                if cancel.is_set():
+                    session.executor.cancel()
+                result = await session.capture(name)
+                image = result.get("image")
+                if image is not None:
+                    result = {**result, "image": {
+                        "data": base64.b64encode(image["data"]).decode("ascii"),
+                        "media_type": image["media_type"],
+                    }}
+                return result
             except BaseException:
                 await self.close_agent()
                 raise

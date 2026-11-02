@@ -1,5 +1,6 @@
 """serve: stdio JSON-RPC session server — real subprocess for protocol/session, in-process for the agent."""
 import asyncio
+import base64
 import io
 import json
 import os
@@ -1070,6 +1071,57 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
         lines.put_nowait(None)
         await task
         assert server.agent is None and server.robot is None
+
+    asyncio.run(scenario())
+
+
+def test_agent_capture_approval_and_image_response(workspace, monkeypatch):
+    pytest.importorskip("pydantic_ai")
+    from PIL import Image
+    from pydantic_ai import models
+    from pydantic_ai.models.function import FunctionModel
+    import pymybot.agent as agent_module
+
+    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
+    Image.new("RGB", (2, 3), (12, 34, 56)).save(workspace / "frame.png")
+    (workspace / "camera.sql").write_text(
+        "CREATE TABLE Camera(name String,src String);"
+        "INSERT INTO Camera(name,src) VALUES('cam','frame.png');", encoding="utf-8")
+
+    async def unexpected_model_request(messages, info):
+        raise AssertionError("agent.capture must not call the model")
+
+    class FakeClient:
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(agent_module, "create_model",
+                        lambda config: (FunctionModel(unexpected_model_request), FakeClient()))
+    params = {"name": "cam", "robot": str(workspace / "camera.sql"), "scriptsDir": str(workspace),
+              "cameraSrcDir": str(workspace), "cameraVars": ["cam"], "model": "openai:fake"}
+
+    async def scenario():
+        out = Out()
+        server = serve.Server(out, threading.Event())
+        lines = asyncio.Queue()
+        task = asyncio.create_task(server.serve(lines))
+        put = lambda message: lines.put_nowait(json.dumps({"jsonrpc": "2.0", **message}))
+        put({"id": 1, "method": "agent.capture", "params": params})
+        while True:
+            message = await asyncio.to_thread(out.lines.get, True, 20)
+            if message.get("method") == "confirm":
+                assert message["params"] == {"tool": "capture_image", "arguments": {"name": "cam"}}
+                put({"id": message["id"], "result": {"approved": True}})
+            elif message.get("id") == 1 and "method" not in message:
+                break
+        result = message["result"]
+        assert result["ok"] and result["state"] == "completed"
+        assert result["image"]["media_type"] == "image/png"
+        data = base64.b64decode(result["image"]["data"], validate=True)
+        assert data == (workspace / "frame.png").read_bytes()
+        lines.put_nowait(None)
+        await task
+        assert server.agent is None
 
     asyncio.run(scenario())
 

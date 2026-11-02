@@ -1,6 +1,7 @@
 """Native Qt window over the long-lived ``pymybot serve`` process."""
 from __future__ import annotations
 
+import base64
 import json
 import os
 import queue
@@ -30,8 +31,8 @@ from ..session_log import session_root
 from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
-from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog, PreviewDialog,
-                      PromptPanel, ResourcePanel, SessionsDialog)
+from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, ImagePreviewDialog, McpConfigDialog,
+                      PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
 from .editor import ScriptEditorPanel
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
 from .splash import SplashScreen
@@ -142,6 +143,7 @@ class App(QMainWindow):
         self._lifecycle_workers = []
         self._hardware_calls = set()
         self._hardware_generation = 0
+        self._hardware_items = []
         self._dialogs = set()
         self.font_mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
@@ -345,6 +347,14 @@ class App(QMainWindow):
         hw_layout.addWidget(self.hardware_tree)
         self.hardware_note = _label("选择结构后自动读取", secondary=True)
         hw_layout.addWidget(self.hardware_note)
+        camera_row = QHBoxLayout()
+        self.camera_box = QComboBox()
+        self.camera_box.setToolTip("仅显示已在“相机变量”中授权的 Camera")
+        self.capture_button = _button("抓图", self.capture_image)
+        self.capture_button.setToolTip("通过 Agent 原生 capture_image 抓图，不调用模型或 MT 脚本")
+        camera_row.addWidget(self.camera_box, 1)
+        camera_row.addWidget(self.capture_button)
+        hw_layout.addLayout(camera_row)
         layout.addWidget(hardware)
 
         guard = QGroupBox("权限与预算（每次启动重新确认）")
@@ -358,6 +368,7 @@ class App(QMainWindow):
             form.addRow(toggle)
         self.read_vars_entry = QLineEdit(",".join(self.cfg.read_vars))
         self.camera_vars_entry = QLineEdit(",".join(self.cfg.camera_vars))
+        self.camera_vars_entry.editingFinished.connect(self._refresh_camera_options)
         form.addRow("读取变量", self.read_vars_entry)
         form.addRow("相机变量", self.camera_vars_entry)
         self.timeout_box = _spin(self.cfg.timeout, 3600, fractional=True)
@@ -1027,6 +1038,56 @@ class App(QMainWindow):
                 status = f"{status} / {state}" if status else str(state)
             self._chat_line(f"⇦ {tool} {status}".rstrip(), "tool" if ok is not False else "toolerr")
 
+    def capture_image(self):
+        client, generation = self.serve, self.generation
+        name = self.camera_box.currentText()
+        if (self._stopping or client is None or not self.agent_available or self.busy
+                or not name):
+            return
+        if self.hardware_toggle.isChecked() and not self._confirm_hardware():
+            return
+        self._sync_config()
+        if name not in self.cfg.camera_vars:
+            self._notice("Camera 不在相机变量白名单中")
+            return
+        if self._stopping or client is not self.serve or generation != self.generation or self.busy:
+            return
+        params = {**self._agent_params(""), "name": name}
+        try:
+            ident, future = client.start_request("agent.capture", params)
+        except RpcError as exc:
+            self._chat_line(str(exc), "error")
+            return
+        self.turn_id = ident
+        self._set_busy(True)
+        self._background(lambda: future.result(),
+                         lambda value, error: self._capture_done(generation, ident, name, value, error))
+
+    def _capture_done(self, generation, ident, name, result, error):
+        if self._stopping or generation != self.generation or ident != self.turn_id:
+            return
+        self.turn_id = None
+        self._dismiss_approvals()
+        self._set_busy(False)
+        if error is not None:
+            self._chat_line("[已停止]" if isinstance(error, RpcError) and error.code == CANCELLED
+                            else str(error), "system" if isinstance(error, RpcError)
+                            and error.code == CANCELLED else "error")
+            return
+        result = result or {}
+        if not result.get("ok"):
+            self._chat_line(f"抓图失败：{result.get('error') or '未返回图片'}", "error")
+            return
+        try:
+            image = result["image"]
+            data = base64.b64decode(image["data"], validate=True)
+            dialog = ImagePreviewDialog(self, f"Camera · {name}", data, image.get("media_type", ""))
+        except (KeyError, TypeError, ValueError) as exc:
+            self._chat_line(f"抓图结果无效：{exc}", "error")
+            return
+        self._notice(f"已抓取 Camera：{name}")
+        self._exec_dialog(dialog)
+
     def send_task(self):
         if self._stopping:
             return
@@ -1439,6 +1500,17 @@ class App(QMainWindow):
         self._refresh_hardware()
         self.sync_editor()
 
+    def _refresh_camera_options(self):
+        selected = self.camera_box.currentText()
+        allowed = set(self._names(self.camera_vars_entry.text()))
+        names = [str(item.get("name", "")) for item in self._hardware_items
+                 if item.get("type") == "Camera" and item.get("name") in allowed]
+        self.camera_box.clear()
+        self.camera_box.addItems(names)
+        if selected in names:
+            self.camera_box.setCurrentText(selected)
+        self._refresh_status()
+
     def _refresh_hardware(self):
         if self._stopping:
             return
@@ -1446,6 +1518,8 @@ class App(QMainWindow):
         generation = self._hardware_generation
         robot = self._robot_path()
         self.hardware_tree.clear()
+        self._hardware_items = []
+        self._refresh_camera_options()
         self.hardware_note.setText("读取中…")
         if not robot or not Path(robot).is_file():
             self.hardware_note.setText("未选择结构文件")
@@ -1484,6 +1558,8 @@ class App(QMainWindow):
                 self.hardware_note.setText(f"读取失败：{message}")
                 return
             items = payload.get("hardware") or []
+            self._hardware_items = items
+            self._refresh_camera_options()
             for item in items:
                 QTreeWidgetItem(self.hardware_tree, [str(item.get("name", "")), str(item.get("type", "")),
                                                     _brief(item.get("metadata"), 80)])
@@ -1555,6 +1631,8 @@ class App(QMainWindow):
         self.status_busy.setText(busy + ("（" + "、".join(flags) + "）" if flags else ""))
         self.stop_button.setEnabled(self.busy or bool(self.pending_task))
         self.abort_button.setEnabled(self.serve is not None)
+        self.capture_button.setEnabled(self.serve is not None and self.agent_available
+                                       and not self.busy and self.camera_box.count() > 0)
         self._update_retry_buttons()
 
     def _set_busy(self, busy):

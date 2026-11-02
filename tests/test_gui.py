@@ -2,6 +2,8 @@
 
 Robot behaviour is not re-tested here: the window never executes robot code.
 """
+import base64
+import io
 import json
 import os
 import subprocess
@@ -855,6 +857,42 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     assert params["readVars"] == ["v0", "v1"] and params["cameraVars"] == ["cam"]
     assert params["vars"] == {"user": "alice"}
     assert (params["timeout"], params["maxRequests"], params["maxToolCalls"]) == (2.5, 2, 4)
+
+
+def test_native_camera_capture_uses_allowlist_and_previews_image(ui, monkeypatch, qapp):
+    from PIL import Image
+
+    gui, app = ui
+    client = attach_client(app)
+    app._hardware_items = [
+        {"name": "cam", "type": "Camera"}, {"name": "other", "type": "Camera"},
+        {"name": "timer", "type": "Timer"},
+    ]
+    app.camera_vars_entry.setText("cam")
+    app._refresh_camera_options()
+    assert [app.camera_box.itemText(i) for i in range(app.camera_box.count())] == ["cam"]
+    app.capture_image()
+    assert client.requests[-1][0] == "agent.capture"
+    params = client.requests[-1][1]
+    assert params["name"] == "cam" and params["cameraVars"] == ["cam"]
+    assert "task" not in params and app.busy
+
+    encoded = io.BytesIO()
+    Image.new("RGB", (2, 3), (12, 34, 56)).save(encoded, format="PNG")
+
+    shown = []
+    monkeypatch.setattr(app, "_exec_dialog", lambda dialog: shown.append(dialog) or 0)
+    client.futures[-1].set_result({
+        "ok": True, "executed": True, "state": "completed", "data": {},
+        "image": {"data": base64.b64encode(encoded.getvalue()).decode("ascii"),
+                  "media_type": "image/png"},
+    })
+    assert qt_wait(qapp, lambda: bool(shown))
+    assert not app.busy
+    assert isinstance(shown[0], gui.ImagePreviewDialog)
+    assert shown[0].windowTitle() == "Camera · cam"
+    assert app.status_notice.text() == "已抓取 Camera：cam"
+    shown[0].close()
 
 
 def test_abort_button_targets_the_server_not_the_agent_turn(ui, qapp):

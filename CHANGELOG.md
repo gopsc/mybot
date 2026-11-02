@@ -6,6 +6,15 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] – 2026-11-02
+
+### Added
+
+- Native Camera capture is available without a model request or MT script through
+  `AgentSession.capture()` and `serve.agent.capture`. The GUI lists allowlisted
+  Camera variables, keeps the existing approval flow and previews the captured
+  image locally; Camera MT actions remain supported for automation.
+
 ## [0.5.0] – 2026-11-02
 
 ### Added

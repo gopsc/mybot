@@ -214,6 +214,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
 | `agent.ask` | `task`, `robot`, `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.capture` | `name` plus the `agent.ask` conversation options except `task` | native `capture_image` receipt without a model request or MT script; `image.data` is Base64 and `image.media_type` identifies the decoded image |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |

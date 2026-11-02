@@ -837,6 +837,35 @@ class AgentSession:
         self._check()
         return value
 
+    async def capture(self, name):
+        """Run native camera capture without a model request or MT script."""
+        if self._asking:
+            raise AgentError("Concurrent turns on one robot session are not supported")
+        self._asking = True
+        self.deadline = time.monotonic() + self.config.timeout
+        self._turn += 1
+        self._last_call = None
+        self._repeat_count = 0
+        # A host-initiated capture is not part of the previous model turn's intent.
+        self.intent = None
+        try:
+            self._check()
+            if self.context is None:
+                await self.start()
+            if self.on_event is not None:
+                self.on_event({"type": "tool_call", "tool": "capture_image", "arguments": {"name": name}})
+            result = await self.dispatch("capture_image", {"name": name})
+            if self.on_event is not None:
+                self.on_event({"type": "tool_result", "tool": "capture_image",
+                               **{key: result[key] for key in ("ok", "executed", "state")}})
+            return result
+        except BaseException:
+            self.executor.cancel()
+            raise
+        finally:
+            self._asking = False
+            self.deadline = None
+
     async def ask(self, prompt):
         checked_text(prompt, MAX_PROMPT)
         if not prompt.strip():

@@ -10,12 +10,12 @@ import tempfile
 
 from PySide6.QtCore import (QEasingCurve, QFileSystemWatcher, QPropertyAnimation, QRunnable,
                             QThreadPool, QTimer, QUrl, Signal)
-from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase
+from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QFormLayout, QGraphicsOpacityEffect, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QSpinBox, QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem,
+    QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem,
     QTextBrowser, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
@@ -126,6 +126,37 @@ class PreviewDialog(QDialog):
     def open_file(self):
         QDesktopServices.openUrl(QUrl.fromLocalFile(self.path))
         self.status.setText(self.path)
+
+
+class ImagePreviewDialog(QDialog):
+    """Decode one trusted Camera result without enabling external resources."""
+
+    def __init__(self, parent, title, data, media_type=""):
+        super().__init__(parent)
+        apply_theme(self)
+        self.setWindowTitle(title)
+        self.setModal(True)
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(data):
+            raise ValueError("无法解码 Camera 返回的图片")
+        layout = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        image = QLabel()
+        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image.setPixmap(pixmap)
+        scroll.setWidget(image)
+        layout.addWidget(scroll, 1)
+        status = _label(f"{pixmap.width()} × {pixmap.height()}" +
+                        (f" · {media_type}" if media_type else ""), secondary=True)
+        layout.addWidget(status)
+        row = QHBoxLayout()
+        row.addWidget(_button("复制图片", lambda: QApplication.clipboard().setPixmap(pixmap)))
+        row.addStretch()
+        row.addWidget(_button("关闭", self.accept))
+        layout.addLayout(row)
+        self.resize(min(1100, max(480, pixmap.width() + 80)),
+                    min(820, max(360, pixmap.height() + 120)))
 
 
 class PromptPanel(QWidget):

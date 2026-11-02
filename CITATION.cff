@@ -7,7 +7,7 @@ authors:
 repository-code: "https://github.com/gopsc/mybot"
 url: "https://github.com/gopsc/mybot"
 license: MIT
-version: 0.5.0
+version: 0.5.1
 date-released: 2026-11-02
 keywords:
   - robotics
