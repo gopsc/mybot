@@ -6,6 +6,8 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.0] – 2026-11-02
+
 ### Added
 
 - Agent `run_skill` executes only actions declared by a trusted `skill.json`,

@@ -1,7 +1,7 @@
 """Python robot controller with Lua drivers."""
 from pathlib import Path
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 _runtime = Path(__file__).resolve().parent.parent / "skills" / "hardware-controller" / "scripts" / "pymybot"
 if _runtime.is_dir():
