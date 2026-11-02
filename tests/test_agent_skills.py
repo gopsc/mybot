@@ -268,6 +268,7 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     instructions, agent = asyncio.run(scenario(library))
     without, plain = asyncio.run(scenario(None))
     assert "- pymybot-scripting:" in instructions
+    assert "- skill-authoring:" in instructions
     assert "Operator-provided reference skills" in instructions
     assert "Operator-provided reference skills" not in without
     assert "before calling create_skill" in instructions

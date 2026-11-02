@@ -6,6 +6,7 @@ loaded only when the agent is enabled and is never executed.
 | Skill | Purpose |
 | --- | --- |
 | [`pymybot-scripting/`](pymybot-scripting/SKILL.md) | Structure SQL, MT actions, Python/Lua drivers, daemon, virtbus and error workflow references |
+| [`skill-authoring/`](skill-authoring/SKILL.md) | 技能编写规范: SKILL.md layout, frontmatter, trigger descriptions, references and the approved `create_skill` workflow |
 
 ## Single source of truth
 

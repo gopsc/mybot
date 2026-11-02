@@ -142,6 +142,10 @@ def fetch(url, *, policy=None):
         client.close()
 
 
+def _loopback_host(hostname):
+    return hostname in {"localhost", "127.0.0.1", "::1"}
+
+
 def search(query, *, endpoint, policy=None):
     """Query a configured SearXNG instance; no provider means no results."""
     policy = policy or WebPolicy()
@@ -151,6 +155,15 @@ def search(query, *, endpoint, policy=None):
     base = str(endpoint or "").strip().rstrip("/")
     if not base:
         raise WebError("Web search is not configured; set a SearXNG endpoint")
+    try:
+        hostname = urlsplit(base).hostname
+    except ValueError:
+        hostname = None
+    if not policy.allow_loopback and _loopback_host(hostname):
+        # AgentConfig permits an explicitly configured loopback SearXNG; the
+        # generic fetch policy must not reject that operator choice.
+        policy = WebPolicy(allow_loopback=True, timeout=policy.timeout,
+                           max_bytes=policy.max_bytes, max_chars=policy.max_chars)
     httpx = _httpx()
     url = base + "/search"
     _validate_target(url, policy)

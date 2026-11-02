@@ -10,9 +10,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- The core prompt now tells the agent to `list_skills`, read the relevant
-  skill-authoring reference with `read_skill`, and follow it before calling
-  `create_skill`. Operator skill roots are protected from generic workspace
+- The bundled `skill-authoring` skill (技能编写规范) defines the SKILL.md
+  layout, frontmatter, trigger descriptions, references and the approved
+  `create_skill` workflow. The core prompt now names it explicitly instead of
+  referring to an unspecified authoring skill. Operator skill roots are protected from generic workspace
   file tools and shell writes, so skills must go through the approved skill
   tools.
 - GUI script/structure editor tab: opens and saves `.mt` actions and
@@ -39,6 +40,12 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- GUI role creation now falls back to the packaged default skills when no
+  custom skills root is selected (or the current role's skills directory is
+  empty), instead of creating a role with no reference skills.
+- An explicitly configured loopback SearXNG endpoint (`http://127.0.0.1:PORT`)
+  is now accepted by `web_search`; the configuration layer already allowed it,
+  but the generic web policy rejected loopback targets.
 - The Lua runtime now falls back to standard Lua when the `lupa` wheel has no
   `luajit21` module (notably macOS arm64). Python drivers keep working; Lua
   drivers that depend on LuaJIT FFI/HAL report a clear error, and `doctor`

@@ -56,8 +56,10 @@ time; keys are never copied into role metadata or command output.
 
 The toolbar role selector lists the global default and every valid role.
 **新建** creates a role from the bundled prompt baseline and imports the
-currently selected Skills/MCP when present. The selected role is saved as a GUI
-preference, not as an approval grant.
+currently selected Skills/MCP when present. If no skills root is configured (or
+the selected role's skills directory is empty), it falls back to the packaged
+default skills so a new role does not silently start without references. The
+selected role is saved as a GUI preference, not as an approval grant.
 
 While a role is selected:
 

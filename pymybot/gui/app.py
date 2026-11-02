@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
+from ..agent_skills import default_skills_root
 from ..paths import source_root
 from ..robot import module_roots
 from ..roles import create_role as create_role_profile, list_roles, role_path
@@ -748,6 +749,11 @@ class App(QMainWindow):
             return
         workspace = self.cfg.workspace or default_workspace()
         skills = self._skills_root()
+        source = Path(skills) if skills else None
+        if source is None or not source.is_dir() or not any(source.glob("*/SKILL.md")):
+            bundled = Path(default_skills_root())
+            if bundled.is_dir() and any(bundled.glob("*/SKILL.md")):
+                skills = str(bundled)
         mcp = self._mcp_root()
         try:
             role = create_role_profile(

@@ -111,6 +111,12 @@ def test_search_uses_configured_endpoint_and_skips_invalid_urls(base_url):
         search("robot", endpoint="", policy=_loopback())
 
 
+def test_search_allows_an_explicit_loopback_endpoint(base_url):
+    data = search("robot", endpoint=base_url)
+    assert data["provider"] == "searx"
+    assert [item["title"] for item in data["results"]] == ["A", "C"]
+
+
 def test_agent_registers_web_tools_only_when_enabled():
     pytest.importorskip("pydantic_ai")
     from pydantic_ai.models.test import TestModel

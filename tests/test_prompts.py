@@ -15,7 +15,7 @@ import pymybot.prompts as prompts
 from pymybot.paths import asset_path
 from pymybot.security import SecurityError
 
-CORE_SHA = "ca0bc5b3244c0669b6b1cc6dcf9b4dacb2c79fdf792528db4fc862176d043e64"
+CORE_SHA = "d4cc05599f66a50cf32e6f601ad89ea62bd996affe229b0c7ced52406462c0db"
 IDS = ["0", "10", "97", "98", "99", "100"]
 
 
@@ -64,6 +64,8 @@ def test_core_routes_skill_creation_through_read_skill(library):
     text = library.read("10")["content"]
     assert "list_skills" in text
     assert "read_skill" in text
+    assert "`skill-authoring`" in text
+    assert "技能编写规范" in text
     assert "before calling create_skill" in text
     assert "create or modify them with write_file" in text
 

@@ -479,6 +479,19 @@ def test_role_selector_binds_agent_params_and_reset(app_factory, monkeypatch, tm
     assert client.requests[-1] == ("agent.reset", {"clearHistory": True, "role": "tech"})
 
 
+def test_new_role_falls_back_to_default_skills(ui, monkeypatch, tmp_path):
+    gui, app = ui
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(gui.QInputDialog, "getText",
+                        lambda *args, **kwargs: ("role-with-skills", True))
+    assert not app.cfg.role
+    app.new_role()
+    assert app.cfg.role == "role-with-skills"
+    target = (tmp_path / "home" / "roles" / "role-with-skills" / "skills"
+              / "pymybot-scripting" / "SKILL.md")
+    assert target.is_file()
+
+
 def test_window_builds_with_robot_context(ui):
     gui, app = ui
     assert isinstance(app, gui.QMainWindow)

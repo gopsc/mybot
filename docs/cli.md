@@ -270,6 +270,12 @@ Agent mode is documented in the README. The important flags are:
 | `--var`, `--var-env` | Structure `Alias`/`Vars` overrides and action-script bindings, as described above. |
 | `--no-session-log` | Do not write a session transcript (also accepted by `serve`). |
 
+`web_search` calls `GET <endpoint>/search?format=json&q=...&safesearch=1`, so a
+self-hosted SearXNG must enable the `json` output format. An explicitly
+configured loopback endpoint may use `http://127.0.0.1:PORT` (also `localhost`
+or `::1`); other endpoints must be HTTPS on port 443. `web_fetch` still refuses
+loopback and private targets independently of the configured search endpoint.
+
 A turn blocks the fourth identical tool call with a structured `not_executed`
 receipt instead of replaying a stuck loop; the transcript records `intent` and
 `loop_guard` events.
