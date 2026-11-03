@@ -5,6 +5,7 @@
     "packaged": "cli",
     "actions": {
       "doctor": {
+        "description": "Check interpreter, dependencies and assets health",
         "effect": "read",
         "output": "json",
         "argv": [
@@ -13,6 +14,7 @@
         "params": {}
       },
       "hardware": {
+        "description": "List hardware devices declared in the robot structure SQL",
         "effect": "read",
         "output": "json",
         "argv": [
@@ -33,6 +35,7 @@
         }
       },
       "check": {
+        "description": "Static check of structure SQL and action script without executing hardware",
         "effect": "read",
         "output": "json",
         "argv": [
@@ -64,6 +67,7 @@
         }
       },
       "run": {
+        "description": "Execute an action script on the robot with physical hardware access",
         "effect": "execute",
         "output": "json",
         "argv": [
@@ -104,6 +108,7 @@
         }
       },
       "scripts": {
+        "description": "List available action scripts in the scripts directory",
         "effect": "read",
         "output": "json",
         "argv": [
@@ -112,6 +117,7 @@
         "params": {}
       },
       "query": {
+        "description": "Execute a read-only SQL query against the robot structure",
         "effect": "read",
         "output": "json",
         "argv": [
@@ -139,6 +145,7 @@
         }
       },
       "sample": {
+        "description": "Sample sensor data from a named hardware variable",
         "effect": "execute",
         "output": "json",
         "argv": [

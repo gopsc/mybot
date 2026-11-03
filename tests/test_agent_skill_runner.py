@@ -1,6 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -180,3 +181,24 @@ def test_executor_grants_hardware_to_trusted_skills(tmp_path):
     result = asyncio.run(scenario())
     assert result["ok"] is True
     assert result["data"]["output"]["argv"] == ["run", "--allow-hardware"]
+
+
+def test_repository_runnable_skills_declare_existing_entrypoints():
+    library = SkillsLibrary(ROOT / "skills", required=True)
+    for skill in library.index()["skills"]:
+        if not skill["runnable"]:
+            continue
+        document = json.loads((ROOT / "skills" / skill["name"] / "skill.json").read_text(encoding="utf-8"))
+        run = document["run"]
+        entrypoint = Path(run["entrypoint"])
+        assert not entrypoint.is_absolute()
+        if run.get("packaged") != "cli":
+            assert (ROOT / "skills" / skill["name"] / entrypoint).is_file(), skill["name"]
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="i2c-dev is Linux-only")
+def test_i2c_skill_lists_buses_without_hardware():
+    result = SkillRunner(SkillsLibrary(ROOT / "skills")).run("i2c-address-probe", "list-buses", {})
+
+    assert result["exit_code"] == 0 and result["output_error"] is None
+    assert isinstance(result["output"]["buses"], list)

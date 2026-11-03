@@ -45,6 +45,21 @@ CONTROLLER_ASSETS = Path("skills/hardware-controller/assets")
 CONTROLLER_DIRECTORIES = frozenset({"modules", "robots", "scripts"})
 
 
+def skill_script_files(root):
+    """Skill entrypoints shipped with the wheel; CLI-fallback skills are excluded."""
+    for manifest in sorted((Path(root) / "skills").glob("*/skill.json")):
+        try:
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        run = document.get("run") if isinstance(document, dict) else None
+        if isinstance(run, dict) and run.get("packaged") == "cli":
+            continue
+        for source in sorted(manifest.parent.rglob("*.py")):
+            if "__pycache__" not in source.parts:
+                yield source
+
+
 def asset_manifest(root, *, source_tree=False):
     result = {}
     root = Path(root)
@@ -55,6 +70,8 @@ def asset_manifest(root, *, source_tree=False):
         require(files, f"Missing or empty asset directory: {source_root / directory}")
         for path in files:
             result[path.relative_to(source_root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+    for path in skill_script_files(root):
+        result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
 
 
@@ -180,6 +197,13 @@ def installed_smoke(manifest_path):
     for skill in skills.index()["skills"]:
         for name in skill["files"]:
             skills.read(skill["name"], name)
+        if skill["runnable"]:
+            document = json.loads((skills.root / skill["name"] / "skill.json").read_text(encoding="utf-8"))
+            spec = document.get("run") if isinstance(document, dict) else None
+            entrypoint = spec.get("entrypoint") if isinstance(spec, dict) else None
+            if isinstance(entrypoint, str) and spec.get("packaged") != "cli":
+                require((skills.root / skill["name"] / entrypoint).is_file(),
+                        f"Packaged skill entrypoint is missing: {skill['name']}/{entrypoint}")
 
     env = smoke_env()
     cli = [sys.executable, "-I", "-m", "pymybot"]

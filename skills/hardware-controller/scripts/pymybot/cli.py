@@ -150,6 +150,13 @@ def parser():
             create.add_argument("--mcp-config", metavar="FILE", help="import an mcpServers JSON configuration")
             show = actions.add_parser("show", help="show role paths and bound capabilities", allow_abbrev=False)
             show.add_argument("name")
+            repair = actions.add_parser("repair", help="fill missing files in a role's installed skills",
+                                        allow_abbrev=False)
+            repair.add_argument("name")
+            repair.add_argument("--skills-dir", metavar="DIR",
+                                help="complete skills root to repair from (default: bundled skills)")
+            repair.add_argument("--yes", action="store_true",
+                                help="confirm writing missing files into the role")
             clear = actions.add_parser("clear-history", help="clear a role's persistent model history",
                                        allow_abbrev=False)
             clear.add_argument("name")
@@ -576,7 +583,8 @@ def prompt_command(args):
 
 
 def role_command(args):
-    from .roles import clear_role_history, create_role, list_roles, load_role, roles_root
+    from .roles import (clear_role_history, create_role, list_roles, load_role,
+                        repair_role_skills, roles_root)
     if args.role_action == "list":
         return {"root": str(roles_root()), "roles": list_roles()}
     if args.role_action == "create":
@@ -584,6 +592,10 @@ def role_command(args):
                            skills_from=args.skills_dir, mcp_from=args.mcp_config).info()
     if args.role_action == "show":
         return load_role(args.name).info()
+    if args.role_action == "repair":
+        if not args.yes:
+            raise UsageError("roles repair requires --yes")
+        return repair_role_skills(args.name, source=args.skills_dir)
     if not args.yes:
         raise UsageError("roles clear-history requires --yes")
     return clear_role_history(args.name)

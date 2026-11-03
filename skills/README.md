@@ -10,7 +10,7 @@ the controller Runtime explicitly loads trusted code and assets from
 | [`hardware-controller/`](hardware-controller/SKILL.md) | Self-contained Python controller, MCP server, Agent `run_skill`, authoritative controller docs and default robots/scripts/modules assets |
 | [`pymybot-scripting/`](pymybot-scripting/SKILL.md) | Structure SQL, MT actions, Python/Lua drivers, daemon, virtbus and error workflow references |
 | [`skill-authoring/`](skill-authoring/SKILL.md) | 技能编写规范: SKILL.md layout, frontmatter, trigger descriptions, references and the approved workspace `install_skill` workflow |
-| [`i2c-address-probe/`](i2c-address-probe/SKILL.md) | 宿主侧 I2C 总线地址探测（只读读探测），sh/Python 两套脚本与判读手册 |
+| [`i2c-address-probe/`](i2c-address-probe/SKILL.md) | 宿主侧 I2C 地址探测（只读），sh/Python 脚本、判读手册，Agent 可经 `run_skill` 的 `list-buses` / `scan` 执行 |
 
 ## Single source of truth
 

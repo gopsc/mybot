@@ -427,6 +427,108 @@ def _json_schema_model(name, schema):
     return create_model(f"{safe}_args", __config__=ConfigDict(extra="forbid"), **fields)
 
 
+def _skill_action_to_tool(skill_name, action_name, action_spec):
+    """Convert one skill.json action to Anthropic tool format.
+
+    Returns (tool_name, tool_definition) where tool_definition has
+    name, description, and input_schema fields.
+    """
+    tool_name = f"{skill_name}_{action_name}".replace("-", "_")
+    effect = action_spec.get("effect", "read")
+    description = action_spec.get("description", f"Run {action_name} from {skill_name} skill")
+    if effect == "execute":
+        description += " (may access physical hardware)"
+
+    properties = {}
+    required = []
+    params = action_spec.get("params", {})
+    for param_name, param_spec in params.items():
+        param_type = param_spec.get("type") if isinstance(param_spec, dict) else "string"
+        if param_type == "path":
+            properties[param_name] = {
+                "type": "object",
+                "description": f"Path with optional scope: {param_spec.get('description', param_name)}",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative path within scope or absolute path"},
+                    "scope": {"type": "string", "description": "Scope name: " + ", ".join(param_spec.get("scope", []))}
+                },
+                "required": ["path"]
+            }
+        elif param_type == "number":
+            prop = {"type": "number", "description": param_spec.get("description", param_name)}
+            if "min" in param_spec:
+                prop["minimum"] = param_spec["min"]
+            if "max" in param_spec:
+                prop["maximum"] = param_spec["max"]
+            if "default" in param_spec:
+                prop["default"] = param_spec["default"]
+            properties[param_name] = prop
+        elif param_type == "boolean":
+            prop = {"type": "boolean", "description": param_spec.get("description", param_name)}
+            if "default" in param_spec:
+                prop["default"] = param_spec["default"]
+            properties[param_name] = prop
+        else:
+            prop = {"type": "string", "description": param_spec.get("description", param_name)}
+            if "max" in param_spec:
+                prop["maxLength"] = param_spec["max"]
+            if "default" in param_spec:
+                prop["default"] = param_spec["default"]
+            if "enum" in param_spec:
+                prop["enum"] = param_spec["enum"]
+            properties[param_name] = prop
+
+        if param_spec.get("required"):
+            required.append(param_name)
+
+    input_schema = {
+        "type": "object",
+        "properties": properties,
+        "required": required
+    }
+
+    return tool_name, {
+        "name": tool_name,
+        "description": description,
+        "input_schema": input_schema,
+        "_skill": skill_name,
+        "_action": action_name
+    }
+
+
+def _enumerate_skill_tools(skills):
+    """Enumerate all runnable skill actions as Anthropic-format tools.
+
+    Returns a dict mapping tool_name -> tool_definition.
+    """
+    if skills is None or skills.root is None:
+        return {}
+    tools = {}
+    index = skills.index() if skills.enabled else {"skills": []}
+    for skill_entry in index["skills"]:
+        if not skill_entry.get("runnable"):
+            continue
+        skill_name = skill_entry["name"]
+        directory = skills.skills[skill_name]["directory"]
+        manifest_path = directory / "skill.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        run = manifest.get("run") if isinstance(manifest, dict) else None
+        if not isinstance(run, dict):
+            continue
+        actions = run.get("actions", {})
+        if not isinstance(actions, dict):
+            continue
+        for action_name, action_spec in actions.items():
+            if not isinstance(action_spec, dict):
+                continue
+            tool_name, tool_def = _skill_action_to_tool(skill_name, action_name, action_spec)
+            tools[tool_name] = tool_def
+    return tools
+
+
 class AgentSession:
     def __init__(self, executor, model, config=None, *, confirm=None,
                  on_event=None, skills=None, workspace=False, enable_shell=False, session_log=None,
@@ -467,6 +569,7 @@ class AgentSession:
         self.project_context = build_project_context(self.executor, budget=self.config.context_bytes)
         self._sandbox_label = (describe_backend(self.config.sandbox_mode)
                                if self.enable_shell else "")
+        self._skill_tools = {}
         self.tools, self._tool_guide = self._build_tools()
         self._mcp = MCPManager(self.mcp_servers, timeout=self.config.timeout) if self.mcp_servers else None
         self._mcp_ready = False
@@ -503,11 +606,6 @@ class AgentSession:
         async def install_skill(path: str):
             """Install one workspace-authored skill directory after host approval; path is workspace-relative."""
             return await self.invoke_tool("install_skill", {"path": path})
-
-        async def run_skill(skill: str, action: str, arguments: dict[str, object] | None = None):
-            """Run one action declared by a trusted skill.json manifest. Trusted skills execute without approval and receive physical hardware access."""
-            return await self.invoke_tool("run_skill", {
-                "skill": skill, "action": action, "arguments": arguments or {}})
 
         async def list_files(path: str = "."):
             """List one workspace directory, without recursion."""
@@ -574,29 +672,54 @@ class AgentSession:
             functions.extend((("list_skills", list_skills), ("read_skill", read_skill)))
             if self.workspace:
                 functions.append(("install_skill", install_skill))
-            if any(skill.get("runnable") for skill in self.skills.index()["skills"]):
-                functions.append(("run_skill", run_skill))
-            if self.skills.enabled:
-                index = self.skills.index()["skills"]
+            index = self.skills.index()["skills"] if self.skills.enabled else []
+            runnable = [skill["name"] for skill in index if skill.get("runnable")]
+            skill_tools = _enumerate_skill_tools(self.skills) if runnable else {}
+            self._skill_tools = skill_tools
+            for tool_name, tool_def in skill_tools.items():
+                skill_name = tool_def["_skill"]
+                action_name = tool_def["_action"]
+                description = tool_def["description"]
+                input_schema = tool_def["input_schema"]
+
+                async def skill_action_call(_tool_name=tool_name, **arguments):
+                    """Run one trusted skill action."""
+                    return await self.invoke_tool(_tool_name, arguments)
+
+                skill_action_call.__doc__ = description
+                skill_action_call.__name__ = tool_name
+                tools.append(StructuredTool.from_function(
+                    coroutine=skill_action_call, name=tool_name, description=description,
+                    args_schema=_json_schema_model(tool_name, input_schema),
+                    response_format="content"))
+            if index:
                 guide.append("Operator-provided reference skills (trusted, curated documentation):")
                 guide.extend(f"- {skill['name']}: {skill['description']}"
-                             + (" (runnable via run_skill)" if skill.get("runnable") else "")
+                             + (f" (runnable: {', '.join(t for t in skill_tools if skill_tools[t]['_skill'] == skill['name'])})"
+                                if skill.get("runnable") and any(t for t in skill_tools if skill_tools[t]['_skill'] == skill['name'])
+                                else "")
                              for skill in index)
                 guide.append("Consult them with read_skill(name, file) before writing or diagnosing")
                 guide.append("structure SQL, action scripts or Lua drivers; list_skills lists the files.")
-            guide.append("Skills are trusted operator content. run_skill executes declared actions without "
-                         "approval and trusted skills may access physical hardware. File writes still need "
-                         "the file-write approval gate.")
-            guide.append("Author reusable multi-file skills under the workspace, for example "
-                         "workspace/my-skill/{SKILL.md,skill.json,references/,scripts/,assets/}, then install "
-                         "the directory with install_skill(path) after approval. Do not write untrusted code "
-                         "directly into the skills root.")
-            guide.append("Invoke only skills marked runnable with run_skill(skill, action, arguments). "
-                         "Use the actions and scoped paths documented by that skill; never invent entrypoints, "
-                         "commands, flags or absolute paths.")
-            guide.append("Hardware operations are exposed only through trusted skill actions "
-                         "(for example run_skill('hardware-controller', 'hardware'|'query'|'run'|'sample')). "
-                         "Trusted skills receive the host's hardware grant automatically.")
+            if skill_tools:
+                guide.append("Skills are trusted operator content. Skill actions execute without "
+                             "approval and trusted skills may access physical hardware. File writes still need "
+                             "the file-write approval gate.")
+                guide.append("Use the actions and scoped paths documented by each skill; never invent entrypoints, "
+                             "commands, flags or absolute paths.")
+                guide.append("Hardware operations are exposed through trusted skill action tools "
+                             "(for example hardware_controller_hardware, hardware_controller_query, "
+                             "hardware_controller_run, hardware_controller_sample). "
+                             "Trusted skills receive the host's hardware grant automatically.")
+            else:
+                guide.append("No installed skill declares skill.json, so no skill action tools are available and no "
+                             "hardware action can run from this session. Installed skills are reference-only; "
+                             "ask the operator to install a runnable skill.")
+            if self.workspace:
+                guide.append("Author reusable multi-file skills under the workspace, for example "
+                             "workspace/my-skill/{SKILL.md,skill.json,references/,scripts/,assets/}, then install "
+                             "the directory with install_skill(path) after approval. Do not write untrusted code "
+                             "directly into the skills root.")
         guide.append("Camera tools are built-in host capabilities, not robot hardware: "
                      "list_cameras lists devices, and capture_camera(device, width, height, quality) "
                      "returns one JPEG. Use an index or id from list_cameras.")
@@ -878,7 +1001,8 @@ class AgentSession:
         if not self.config.auto_stats:
             return
         events = self.events[first_event:]
-        actions = [event for event in events if event["tool"] in IO_TOOLS | SKILL_TOOLS | CAMERA_TOOLS]
+        action_tools = IO_TOOLS | SKILL_TOOLS | CAMERA_TOOLS | frozenset(self._skill_tools.keys())
+        actions = [event for event in events if event["tool"] in action_tools]
         robot = getattr(self.executor, "robot_path", "") or ""
         if not robot and isinstance(self.context, dict):
             robot = self.context.get("robot", "")
@@ -948,6 +1072,8 @@ class AgentSession:
                 result = await self._web_call(name, arguments)
             elif name in CAMERA_TOOLS:
                 result = await self._camera_call(name, arguments)
+            elif name in self._skill_tools:
+                result = await self._skill_action_call(name, arguments)
             else:
                 result = await self.executor.call(name, arguments, timeout=None)
         self.events.append({"tool": name, **{k: result[k] for k in ("ok", "executed", "state")}})
@@ -1011,6 +1137,29 @@ class AgentSession:
         detail = {key: value for key, value in shot.items() if key != "data"}
         return {"ok": True, "executed": True, "state": "completed", "data": detail,
                 "image": {"data": shot["data"], "media_type": shot["media_type"]}}
+
+    async def _skill_action_call(self, tool_name, arguments):
+        """Execute a skill action tool by routing to the executor's run_skill handler."""
+        skill_tool = self._skill_tools.get(tool_name)
+        if not skill_tool:
+            return {"ok": False, "executed": False, "state": "completed",
+                    "error": f"Unknown skill tool: {tool_name}"}
+        skill_name = skill_tool["_skill"]
+        action_name = skill_tool["_action"]
+        run_arguments = {}
+        input_schema = skill_tool.get("input_schema", {})
+        properties = input_schema.get("properties", {})
+        for param_name, param_spec in properties.items():
+            if param_name in arguments:
+                value = arguments[param_name]
+                if param_spec.get("type") == "path" and isinstance(value, dict):
+                    run_arguments[param_name] = value
+                elif param_spec.get("type") == "path" and isinstance(value, str):
+                    run_arguments[param_name] = {"path": value}
+                else:
+                    run_arguments[param_name] = value
+        return await self.executor.call("run_skill", {
+            "skill": skill_name, "action": action_name, "arguments": run_arguments}, timeout=None)
 
     async def invoke_mcp_tool(self, display, server, name, arguments):
         """Approval-gated external MCP call; results are bounded like receipts."""
@@ -1167,7 +1316,8 @@ class AgentSession:
         self._tool_calls = 0
         self._pruned_turns = 0
         self._log("user", text=prompt)
-        self.intent = classify_intent(prompt, self.config.intent_mode)
+        self.intent = classify_intent(prompt, self.config.intent_mode,
+                                      extra_tools=self._skill_tools.keys())
         self._log("intent", **self.intent.as_dict())
         try:
             self._check()

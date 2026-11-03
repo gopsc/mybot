@@ -26,6 +26,14 @@ def test_asset_plan_covers_all_runtime_roots():
     suffixes = {source.suffix for source in sources}
     assert {".py", ".lua", ".sql", ".mt", ".md", ".json", ".svg"} <= suffixes
     assert not any(source.name.endswith(".pyc") for source in sources)
+    assert any(source.name == "i2c_probe.py" for source in sources)
+
+
+def test_skill_entrypoints_are_packaged_without_duplicating_the_controller():
+    manifest = asset_manifest(ROOT, source_tree=True)
+
+    assert "skills/i2c-address-probe/scripts/i2c_probe.py" in manifest
+    assert not any(name.startswith("skills/hardware-controller/scripts/") for name in manifest)
 
 
 def test_ci_manifest_supports_source_and_bundled_layouts(tmp_path):

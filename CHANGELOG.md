@@ -10,13 +10,23 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `i2c-address-probe` skill: a read-only host-side I2C address prober with a
   zero-dependency Python implementation, an `sh` wrapper, `/sys` kernel-binding
-  annotation and a fixed JSON contract.
+  annotation, a fixed JSON contract and `skill.json` actions `list-buses` and
+  `scan`, so the Agent can run it through `run_skill`.
+- `pymybot roles repair NAME [--skills-dir DIR] --yes` fills missing files in a
+  role's installed runnable skills (manifest, entrypoint, assets) from a
+  complete source without overwriting existing files.
 
 ### Changed
 
 - The bundled core prompt now routes hardware work through `run_skill`, removes
   the stale `run_action_script` reference, and describes the shell sandbox and
   the prompt/skill approval gates as implemented.
+- The Agent only advertises `run_skill` and hardware access when at least one
+  installed skill declares `skill.json`; otherwise the runtime guide says the
+  skills are reference-only instead of naming a tool that was not registered.
+- Wheel and frozen builds now ship skill entrypoints for runnable skills that do
+  not use the `packaged: "cli"` fallback, so `run_skill` works outside a source
+  checkout.
 - Roles now own a `workspace/` directory. Selecting a role uses that workspace,
   and `install_skill(path)` copies a complete workspace-authored skill into the
   role's skills root. Role creation copies complete skill directories, including
@@ -74,6 +84,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--module-path modules`, so they failed with "Driver module not found" in the
   generated project. The commands now include the module root, with a CLI
   regression test.
+- `roles show` reports `runnable` and `incomplete` skills, and role creation
+  refuses a copied manifest whose declared entrypoint is missing. Previously a
+  role created from an older role could silently lose every `skill.json` (and
+  with it `run_skill`).
 
 ## [0.6.0] – 2026-11-02
 

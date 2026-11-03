@@ -1,7 +1,27 @@
+import json
 from pathlib import Path
 from shutil import copy2, rmtree
 
 from setuptools.command.build_py import build_py
+
+
+def _skill_scripts(root):
+    """Skill entrypoints ship with the wheel unless the manifest uses the CLI fallback.
+
+    The hardware-controller Runtime is packaged as ``pymybot/*.py`` and declares
+    ``packaged: "cli"``, so copying its skill scripts would duplicate it.
+    """
+    for manifest in sorted((root / "skills").glob("*/skill.json")):
+        try:
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        run = document.get("run") if isinstance(document, dict) else None
+        if isinstance(run, dict) and run.get("packaged") == "cli":
+            continue
+        for source in sorted(manifest.parent.rglob("*.py")):
+            if "__pycache__" not in source.parts:
+                yield source
 
 
 class BuildPy(build_py):
@@ -26,3 +46,7 @@ class BuildPy(build_py):
                 target = destination / source.relative_to(source_root)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 copy2(source, target)
+        for source in _skill_scripts(root):
+            target = destination / source.relative_to(root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            copy2(source, target)

@@ -1,6 +1,8 @@
 import asyncio
 import json
+import shutil
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -9,8 +11,10 @@ from pymybot.cli import UsageError, parse_args
 from pymybot.mcp_client import load_servers
 from pymybot.prompts import PromptLibrary
 from pymybot.roles import (clear_role_history, create_role, list_roles, load_role,
-                           read_history, write_history)
+                           read_history, repair_role_skills, write_history)
 from pymybot.security import SecurityError
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_role_uses_bundled_prompt_baseline_without_touching_global(tmp_path):
@@ -99,6 +103,8 @@ def test_role_cli_flags():
     assert args.role == "demo"
     args = parse_args(["roles", "create", "demo", "--description", "test"])
     assert args.role_action == "create" and args.name == "demo"
+    args = parse_args(["roles", "repair", "demo", "--yes"])
+    assert args.role_action == "repair" and args.yes is True
     with pytest.raises(UsageError):
         parse_args(["agent", "--robot", "robot.sql", "--task", "hi",
                     "--role", "demo", "--skills-dir", "skills"])
@@ -184,3 +190,40 @@ def test_corrupt_or_failed_role_history_does_not_reach_model(tmp_path):
     with pytest.raises(AgentConfigurationError):
         AgentSession(_Executor(), FunctionModel(model), role=role)
     assert called == []
+
+
+def test_role_info_flags_and_repair_restores_incomplete_skills(tmp_path):
+    root = tmp_path / "roles"
+    role = create_role("broken", skills_from=ROOT / "skills", root=root)
+    controller = role.skills_dir / "hardware-controller"
+    marker = controller / "SKILL.md"
+    marker.write_text(marker.read_text(encoding="utf-8") + "\n<!-- operator edit -->\n",
+                      encoding="utf-8")
+    (controller / "skill.json").unlink()
+    shutil.rmtree(controller / "scripts")
+
+    info = load_role("broken", root).info()
+    assert "hardware-controller" not in info["runnable"]
+    assert "hardware-controller" in info["incomplete"]
+
+    result = repair_role_skills("broken", source=ROOT / "skills", root=root)
+    assert "hardware-controller" in result["repaired"]
+    assert (controller / "skill.json").is_file()
+    assert (controller / "scripts" / "hardware_controller.py").is_file()
+    assert "<!-- operator edit -->" in marker.read_text(encoding="utf-8")
+    fixed = load_role("broken", root).info()
+    assert "hardware-controller" in fixed["runnable"] and not fixed["incomplete"]
+
+
+def test_create_role_rejects_manifest_without_entrypoint(tmp_path):
+    source = tmp_path / "source" / "demo"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Demo.\n---\n", encoding="utf-8")
+    (source / "skill.json").write_text(json.dumps({
+        "version": 1,
+        "run": {"entrypoint": "scripts/run.py", "actions": {"go": {"argv": []}}},
+    }), encoding="utf-8")
+
+    with pytest.raises(SecurityError, match="entrypoint"):
+        create_role("bad", skills_from=source.parent, root=tmp_path / "roles")

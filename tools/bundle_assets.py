@@ -3,6 +3,7 @@
 Keep this module free of PyInstaller imports at import time so the plan can be
 tested without the packaging extra installed.
 """
+import json
 from pathlib import Path
 
 ASSET_SUFFIXES = {
@@ -38,6 +39,21 @@ CONTROLLER_MODULES = (
 )
 
 
+def skill_script_files(root):
+    """Skill entrypoints ship unless the manifest declares the CLI fallback."""
+    for manifest in sorted((Path(root) / "skills").glob("*/skill.json")):
+        try:
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        run = document.get("run") if isinstance(document, dict) else None
+        if isinstance(run, dict) and run.get("packaged") == "cli":
+            continue
+        for source in sorted(manifest.parent.rglob("*.py")):
+            if "__pycache__" not in source.parts:
+                yield source
+
+
 def asset_datas(root):
     """Return ``(source, destination)`` pairs for bundled runtime assets."""
     root = Path(root)
@@ -49,6 +65,9 @@ def asset_datas(root):
             if source.is_file() and source.suffix in suffixes:
                 relative = source.relative_to(source_root)
                 datas.append((str(source), str(Path("pymybot/assets") / relative.parent)))
+    for source in skill_script_files(root):
+        relative = source.relative_to(root / "skills")
+        datas.append((str(source), str(Path("pymybot/assets/skills") / relative.parent)))
     for source in sorted((root / "pymybot" / "gui" / "assets").glob("*.svg")):
         datas.append((str(source), "pymybot/gui/assets"))
     for extra in ("README.md", "LICENSE", "CHANGELOG.md"):

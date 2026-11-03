@@ -34,7 +34,7 @@ python -m pymybot doctor
 | `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
 | `pymybot prompts list` | List runtime prompt layers, hashes and modification status | No |
 | `pymybot prompts restore [--missing-only \| --all --yes]` | Refill missing defaults, or back up and reset all layers | No |
-| `pymybot roles list/create/show/clear-history` | Manage role-owned prompts, skills, MCP and resumable history | No |
+| `pymybot roles list/create/show/repair/clear-history` | Manage role-owned prompts, skills, MCP and resumable history; `repair` fills missing skill files (needs `--yes`) | No |
 
 ## Agent roles
 

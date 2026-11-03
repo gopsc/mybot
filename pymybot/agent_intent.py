@@ -53,9 +53,10 @@ class IntentDecision:
     reason: str
     tools: frozenset[str] = frozenset()
     restricted: bool = True
+    extra_tools: frozenset[str] = frozenset()
 
     def allows(self, tool):
-        return not self.restricted or tool in self.tools
+        return not self.restricted or tool in self.tools or tool in self.extra_tools
 
     def as_dict(self):
         return {"name": self.name, "confidence": round(self.confidence, 2),
@@ -72,14 +73,15 @@ def _matches(text, intent):
     return hits
 
 
-def classify_intent(text, mode="auto"):
+def classify_intent(text, mode="auto", *, extra_tools=None):
     mode = str(mode or "auto").strip().lower()
+    extra = frozenset(extra_tools or ())
     if mode == "off":
         return IntentDecision("off", 1.0, "intent routing disabled by the operator",
-                              restricted=False)
+                              restricted=False, extra_tools=extra)
     if mode in INTENTS:
         return IntentDecision(mode, 1.0, "operator-selected intent",
-                              tools=TOOLS_BY_INTENT[mode])
+                              tools=TOOLS_BY_INTENT[mode], extra_tools=extra)
     if mode != "auto":
         mode = "auto"
     scored = {}
@@ -89,9 +91,9 @@ def classify_intent(text, mode="auto"):
             scored[intent] = hits
     if not scored:
         return IntentDecision("chat", 0.4, "no intent keywords; tools stay unrestricted",
-                              restricted=False)
+                              restricted=False, extra_tools=extra)
     name = next(intent for intent in _PRIORITY if intent in scored)
     tools = frozenset().union(*(TOOLS_BY_INTENT[intent] for intent in scored))
     total = sum(len(hits) for hits in scored.values())
     reason = "; ".join(f"{intent}: {', '.join(hits[:4])}" for intent, hits in scored.items())
-    return IntentDecision(name, min(0.95, 0.55 + 0.1 * total), reason, tools=tools)
+    return IntentDecision(name, min(0.95, 0.55 + 0.1 * total), reason, tools=tools, extra_tools=extra)

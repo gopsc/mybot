@@ -295,10 +295,12 @@ def test_make_agent_wires_skills_into_instructions_and_tools(tmp_path):
     assert "install_skill(path)" in instructions
     assert "install_skill(path)" in without
     assert "Skills are trusted operator content" in instructions
-    assert "run_skill executes declared actions without approval" in instructions
-    assert "runnable via run_skill" in instructions
+    assert "Skill actions execute without" in instructions
+    assert "runnable:" in instructions
     names = {tool.name for tool in tools}
-    assert {"list_skills", "read_skill", "install_skill", "run_skill"} <= names
+    assert {"list_skills", "read_skill", "install_skill"} <= names
+    assert "hardware_controller_doctor" in names
+    assert "hardware_controller_hardware" in names
     assert "install_skill" not in {tool.name for tool in plain}
 
 

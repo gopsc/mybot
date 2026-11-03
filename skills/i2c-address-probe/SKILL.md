@@ -1,6 +1,6 @@
 ---
 name: i2c-address-probe
-description: 宿主侧 I2C 总线地址探测技能，提供零第三方依赖的 Python（i2c-dev ioctl 只读读探测）与 sh 包装两套脚本，枚举 /dev/i2c-N 上 0x08~0x77 会应答的从机地址，输出网格或固定字段 JSON，并标注内核已绑定的驱动。当用户说“扫描 I2C”“i2c scan”“i2cdetect”“写个扫 I2C 的脚本”“看看总线上挂了哪些设备”“扫一下 /dev/i2c-1”“I2C 地址冲突/找不到器件”时使用。
+description: 宿主侧 I2C 总线地址探测技能（Linux），提供零第三方依赖的 Python（i2c-dev ioctl 只读读探测）与 sh 包装两套脚本，枚举 /dev/i2c-N 上 0x08~0x77 会应答的从机地址，输出网格或固定字段 JSON，并标注内核已绑定的驱动；带 skill.json，Agent 可用 run_skill 的 list-buses / scan 动作执行。当用户说“扫描 I2C”“i2c scan”“i2cdetect”“写个扫 I2C 的脚本”“看看总线上挂了哪些设备”“扫一下 /dev/i2c-1”“I2C 地址冲突/找不到器件”时使用。
 ---
 
 # 宿主侧 I2C 地址探测（sh / Python）
@@ -19,7 +19,8 @@ description: 宿主侧 I2C 总线地址探测技能，提供零第三方依赖�
 - **NACK 与“总线不通”在读取层不可区分**：Linux 对 NACK 也返回 `EREMOTEIO`。0 命中既可能是没器件，也可能是没上拉/没供电/适配器掉线——用已知地址 `--addr 0x48` 交叉验证。
 - 权限：`i2c-dev` 以 `O_RDWR` 打开，**只读探测也需要写权限**，即 `root` 或 `i2c` 组。
 - 总线必须独占：扫描期间不要跑 pymybot/Daemon 采样，否则结果抖动。
-- 本技能**不带 `skill.json`**，`run_skill` 无法启动它。扫描是硬件操作，由操作者亲自在宿主 shell 执行并授权。
+- wheel/frozen 安装只带 Python 入口（仓库打包规则会跳过 `packaged: "cli"` 的技能），sh 包装只在源码树里。
+- 本技能**带 `skill.json`**，Agent 可用 `run_skill` 的 `list-buses`（只读枚举）和 `scan`（需要总线名）两个动作。可信技能免审批并自动获得硬件权限，因此只安装你审阅过的副本；扫描本身的只读、独占和越界规则不变。
 
 ## 3. 文件清单
 
@@ -59,6 +60,17 @@ sh scripts/i2c_probe.sh 1 --addr 0x48 --repeat 3
 # 跳过 /sys 绑定标注（探测方式不变，少几次 sysfs 读）
 python3 scripts/i2c_probe.py --bus /dev/i2c-1 --no-sysfs
 ```
+
+Agent 走 `run_skill` 时等价于下列调用（输出只取脚本的 `--json`）：
+
+```text
+run_skill(skill="i2c-address-probe", action="list-buses")
+run_skill(skill="i2c-address-probe", action="scan", arguments={"bus": "/dev/i2c-1"})
+run_skill(skill="i2c-address-probe", action="scan", arguments={
+  "bus": "1", "range": "0x40-0x4f", "repeat": 3})
+```
+
+`scan` 的 `bus` 可为 `1`、`i2c-1` 或 `/dev/i2c-1`；`range` 默认 `0x08-0x77`，`repeat` 默认 1（1–10）。退出码非 0 时 `run_skill` 回执为失败，不要自动重试。
 
 人读输出：
 
@@ -118,11 +130,11 @@ failed: nack=110
 5. 扫描结果是**诊断证据**，不写回结构脚本、不当配置来源、不据此自动生成驱动。
 6. 自动化只解析 `--json`；网格排版只为给人看，不保证稳定。
 7. `0` 只表示“扫完了”。判读必须结合退出码与 `failed` 计数。
-8. 不在授权会话里代为执行真机扫描；命令交给操作者在宿主 shell 运行。
+8. Agent 只能通过 `run_skill` 的 `list-buses` / `scan` 执行；不得改用 shell、`i2cdetect` 或自写脚本绕过只读、越界和独占规则。
 
 ## 8. 验证
 
-由操作者在宿主执行（本技能不含自动执行路径）：
+宿主 shell 可直接运行；Agent 侧通过 `run_skill` 的 `list-buses` / `scan` 执行同一入口：
 
 ```sh
 python3 -m py_compile scripts/i2c_probe.py   # 语法

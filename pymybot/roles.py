@@ -15,7 +15,7 @@ import secrets
 import shutil
 import stat
 
-from .agent_skills import SkillsLibrary
+from .agent_skills import SkillsLibrary, default_skills_root
 from .mcp_client import MAX_CONFIG_BYTES, parse_servers
 from .prompts import PromptLibrary
 from .security import SecurityError, checked_text, read_file
@@ -183,6 +183,17 @@ class Role:
     def info(self):
         skills = SkillsLibrary(self.skills_dir, required=True).index()["skills"]
         history = read_history(self.history_file)
+        bundled = _bundled_runnable_skills()
+        runnable, incomplete = [], []
+        for item in skills:
+            if item.get("runnable"):
+                runnable.append(item["name"])
+                if not _skill_complete(self.skills_dir / item["name"]):
+                    incomplete.append(item["name"])
+            elif item["name"] in bundled:
+                # A bundled runnable skill lost its manifest (roles created
+                # before complete skill copies landed).
+                incomplete.append(item["name"])
         return {
             "name": self.name,
             "description": self.description,
@@ -191,6 +202,8 @@ class Role:
             "skills_dir": str(self.skills_dir),
             "workspace_dir": str(self.workspace_dir),
             "skills": [item["name"] for item in skills],
+            "runnable": runnable,
+            "incomplete": incomplete,
             "mcp_config": str(self.mcp_config) if self.mcp_config.is_file() else None,
             "history_file": str(self.history_file),
             "history_turns": len(history),
@@ -234,6 +247,68 @@ def list_roles(root=None):
             # remains available to report the validation error for that role.
             continue
     return result
+
+
+def _bundled_runnable_skills():
+    try:
+        library = SkillsLibrary(default_skills_root())
+    except (OSError, SecurityError):
+        return set()
+    return {item["name"] for item in library.index()["skills"] if item.get("runnable")}
+
+
+def _skill_complete(directory):
+    """True when a runnable skill still carries its declared entrypoint.
+
+    Reference-only skills (no ``skill.json``) are not "incomplete": they are a
+    supported shape. A manifest with a missing entrypoint is the failure mode
+    left behind by roles created before complete skill copies landed.
+    """
+    manifest = directory / "skill.json"
+    if not manifest.is_file():
+        return True
+    try:
+        document = json.loads(read_file(manifest, MAX_METADATA))
+    except (OSError, ValueError):
+        return False
+    run = document.get("run") if isinstance(document, dict) else None
+    entrypoint = run.get("entrypoint") if isinstance(run, dict) else None
+    if not isinstance(entrypoint, str) or not entrypoint:
+        return False
+    if run.get("packaged") == "cli":
+        return True
+    return (directory / entrypoint).is_file()
+
+
+def _merge_skill_tree(source_root, target_root):
+    """Copy only missing files from a complete skill into an existing one.
+
+    Existing files are never overwritten, so operator edits survive a repair.
+    """
+    target_root.mkdir(parents=True, exist_ok=True)
+    _private(target_root, 0o700)
+    added = 0
+    for base, dirs, files in os.walk(source_root, followlinks=False):
+        base_path = Path(base)
+        dirs[:] = sorted(
+            item for item in dirs
+            if item not in {"__pycache__", ".git"}
+            and not (base_path / item).is_symlink())
+        for filename in sorted(files):
+            source_file = base_path / filename
+            if filename.endswith(".pyc"):
+                continue
+            info = source_file.lstat()
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                raise SecurityError("Skill files must be regular files")
+            target = target_root / source_file.relative_to(source_root)
+            if target.exists():
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_file, target)
+            _private(target, 0o600)
+            added += 1
+    return added
 
 
 def _copy_skills(source, destination):
@@ -282,6 +357,11 @@ def create_role(name, *, description="", skills_from=None, mcp_from=None, root=N
         (staging / "workspace").mkdir(mode=0o700)
         if skills_from:
             _copy_skills(skills_from, skills)
+            for manifest in sorted(skills.glob("*/skill.json")):
+                if not _skill_complete(manifest.parent):
+                    raise SecurityError(
+                        f"Skill '{manifest.parent.name}' is missing its declared entrypoint; "
+                        "repair the source skills root or choose a complete one")
         if mcp_from:
             source = Path(mcp_from).expanduser().absolute()
             text = read_file(source, MAX_CONFIG_BYTES)
@@ -303,3 +383,35 @@ def clear_role_history(name, root=None):
     role = load_role(name, root)
     write_history(role.history_file, [])
     return role.info()
+
+
+def repair_role_skills(name, *, source=None, root=None):
+    """Fill missing files in a role's runnable skills from a complete source.
+
+    Only skills already installed in the role are considered, and only missing
+    files are copied: prompts, history, workspace files and existing skill files
+    are never replaced. The source defaults to the bundled skills root.
+    """
+    role = load_role(name, root)
+    source_root = Path(source).expanduser() if source is not None else Path(default_skills_root())
+    library = SkillsLibrary(source_root, required=True)
+    repaired, incomplete, skipped = [], [], []
+    for skill_name, entry in sorted(library.skills.items()):
+        if not entry["runnable"]:
+            continue
+        target = role.skills_dir / skill_name
+        if not target.is_dir():
+            continue
+        if (target / "skill.json").is_file() and _skill_complete(target):
+            skipped.append(skill_name)
+            continue
+        _merge_skill_tree(entry["directory"], target)
+        (repaired if (target / "skill.json").is_file() and _skill_complete(target)
+         else incomplete).append(skill_name)
+    return {
+        "name": role.name,
+        "source": str(source_root),
+        "repaired": repaired,
+        "incomplete": incomplete,
+        "skipped": skipped,
+    }

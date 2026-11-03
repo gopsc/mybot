@@ -50,7 +50,19 @@ pymybot gui --role technician
 
 # Explicitly erase only this role's resumable model history
 pymybot roles clear-history technician --yes
+
+# Fill missing skill files (manifest/entrypoint) from the bundled skills
+pymybot roles repair technician --yes
+# ... or from a known-complete skills root
+pymybot roles repair technician --skills-dir ./skills --yes
 ```
+
+`roles show` reports `runnable` (skills with a `skill.json`) and `incomplete`
+(runnable bundled skills whose declared entrypoint is missing). `roles repair`
+copies only **missing** files into skills that already exist in the role; it
+never overwrites a file, prompt, history entry or workspace file, so operator
+edits survive. A new role copies complete skill directories, and creation
+refuses a skill whose manifest declares an entrypoint that was not copied.
 
 A role owns its skills and MCP file, so CLI `--role` cannot be combined with
 `--skills-dir` or `--mcp-config`. The independent `--prompt-file` OPERATOR layer
