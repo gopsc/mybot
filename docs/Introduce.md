@@ -264,7 +264,7 @@ TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/assets
 `send_str`、`recv_hex`、`recv_str`。激活不自动连接；需要先启动本地 TCP 回显服务，
 再显式执行 `net.connect`。发送文本用 MT 字符串表达式，如 `$("你好")`。
 
-完整规则见 [驱动参考](../skills/pymybot-scripting/references/driver-lua.md)。
+完整规则见 [驱动参考](../skills/hardware-controller/references/driver-lua.md)。
 
 ## 安全边界
 

@@ -466,6 +466,82 @@ def test_scripts_default_source_and_installed_package(workspace, capsys):
     assert json.loads(result.stdout)["scripts"] == ["wheel.mt"]
 
 
+@pytest.fixture
+def asset_root(tmp_path, monkeypatch):
+    root = tmp_path / "assets"
+    for kind in ("robots", "modules", "scripts"):
+        (root / kind).mkdir(parents=True)
+    monkeypatch.setattr(cli, "asset_path", lambda name: root / name)
+    return root
+
+
+def test_assets_list_reports_each_kind(asset_root, capsys):
+    (asset_root / "robots" / "a.sql").write_text("x", encoding="utf-8")
+    (asset_root / "modules" / "lib").mkdir()
+    (asset_root / "modules" / "lib" / "b.lua").write_text("x", encoding="utf-8")
+    (asset_root / "modules" / "c.py").write_text("x", encoding="utf-8")
+    (asset_root / "scripts" / "d.mt").write_text("x", encoding="utf-8")
+    code, result, _ = invoke(capsys, "assets", "list")
+    assert code == 0 and result["activated"] is False
+    assert result["assets"]["robots"]["files"] == ["a.sql"]
+    assert result["assets"]["modules"]["files"] == ["c.py", "lib/b.lua"]
+    assert result["assets"]["scripts"]["files"] == ["d.mt"]
+    code, result, _ = invoke(capsys, "assets", "list", "--kind", "robots")
+    assert code == 0 and result["kind"] == "robots" and result["files"] == ["a.sql"]
+
+
+def test_assets_write_read_delete_roundtrip(asset_root, capsys):
+    sql = "CREATE TABLE Demo(name String);"
+    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
+                             "--path", "demo.sql", "--content", sql)
+    assert code == 0 and result["created"] is True and result["path"] == "demo.sql"
+    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
+                             "--path", "demo.sql", "--content", sql)
+    assert code == 2 and result["error"]["type"] == "UsageError"
+    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
+                             "--path", "demo.sql", "--content", "SELECT 1;", "--force")
+    assert code == 0 and result["overwritten"] is True
+    code, result, _ = invoke(capsys, "assets", "read", "--kind", "robots", "--path", "demo.sql")
+    assert code == 0 and result["content"] == "SELECT 1;"
+    code, result, _ = invoke(capsys, "assets", "delete", "--kind", "robots", "--path", "demo.sql")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+    code, result, _ = invoke(capsys, "assets", "delete", "--kind", "robots",
+                             "--path", "demo.sql", "--yes")
+    assert code == 0 and result["deleted"] is True
+    assert not (asset_root / "robots" / "demo.sql").exists()
+
+
+def test_assets_reject_traversal_and_bad_suffix(asset_root, capsys):
+    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
+                             "--path", "../evil.sql", "--content", "x")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
+                             "--path", "demo.txt", "--content", "x")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+    code, result, _ = invoke(capsys, "assets", "read", "--kind", "robots", "--path", "missing.sql")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+
+def test_robot_and_input_resolve_under_asset_root(asset_root):
+    (asset_root / "robots" / "r.sql").write_text(VIRTUAL_SQL, encoding="utf-8")
+    (asset_root / "scripts" / "s.mt").write_text(ACTION, encoding="utf-8")
+    args = cli.parse_args(["check", "--robot", "r.sql", "--input", "s.mt"])
+    assert args.robot == str(asset_root / "robots" / "r.sql")
+    assert args.input == str(asset_root / "scripts" / "s.mt")
+    absolute = str(asset_root / "robots" / "r.sql")
+    args = cli.parse_args(["check", "--robot", absolute])
+    assert args.robot == absolute
+
+
+def test_robot_relative_existing_cwd_wins(asset_root, monkeypatch, tmp_path):
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "local.sql").write_text(VIRTUAL_SQL, encoding="utf-8")
+    monkeypatch.chdir(cwd)
+    args = cli.parse_args(["check", "--robot", "local.sql"])
+    assert args.robot == "local.sql"
+
+
 def test_real_virtual_relay_dummy_json_and_stderr(workspace):
     result = run_cli(workspace, "run", "--robot", "robot.sql", "--input", "action.mt")
     assert result.returncode == 0, result.stderr

@@ -8,6 +8,16 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `pymybot assets list/read/write/delete` manages the bundled `robots` (`.sql`),
+  `modules` (`.py`/`.lua`) and `scripts` (`.mt`) asset files in place, with
+  traversal/symlink/suffix guards, `--force` to overwrite and `--yes` to delete.
+  The hardware-controller Skill exposes these to the Agent as `assets_list`,
+  `assets_read`, `assets_write`, `assets_overwrite` and `assets_delete`
+  `run_skill` actions, so the model can create, retrieve, overwrite and then run
+  robot scripts through one self-contained skill.
+- `--robot` and `--input` now resolve against the bundled asset roots: an
+  absolute path or a path that already exists relative to CWD is used as-is,
+  otherwise a bare or relative name falls back to `assets/robots` / `assets/scripts`.
 - `pymybot roles delete NAME --yes` permanently removes a role directory, and
   the GUI's **删除** button does the same after confirmation, closing the Agent
   conversation first. Both cover prompts, skills, workspace files and history.
@@ -26,6 +36,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The `pymybot-scripting` skill is merged into `hardware-controller`: its six
+  scripting-grammar references (`structure-sql`, `action-mt`, `driver-lua`,
+  `virt-model`, `daemon`, `workflow-errors`) and the three-layer hard rules now
+  live in `hardware-controller`, and the standalone skill directory is removed.
 - The bundled core prompt now routes hardware work through `run_skill`, removes
   the stale `run_action_script` reference, and describes the shell sandbox and
   the prompt/skill approval gates as implemented.

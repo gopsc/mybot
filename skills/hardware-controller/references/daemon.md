@@ -1,7 +1,7 @@
 # Daemon 后台采样
 
 Source: 线程模型与分层的权威是
-[controller architecture](../../hardware-controller/references/architecture.md)；本文件只写
+[controller architecture](architecture.md)；本文件只写
 Daemon 表字段与消费者写法，实现见 `pymybot/daemon.py`、`modules/lib/sensor_daemon.lua`（采样
 chunk）与 `modules/lib/sensor_aggregate.lua`（聚合）。
 

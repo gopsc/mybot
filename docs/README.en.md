@@ -189,7 +189,7 @@ text arguments use MT string expressions such as `$("hello")`.
 For a complete runnable example, the [Chinese usage guide](Introduce.md#写一个驱动)
 has a Python UART loopback driver, structure SQL and action script that run without
 a board. The driver contract is documented in
-[`skills/pymybot-scripting/references/driver-lua.md`](../skills/pymybot-scripting/references/driver-lua.md).
+[`skills/hardware-controller/references/driver-lua.md`](../skills/hardware-controller/references/driver-lua.md).
 
 ## Documentation
 
@@ -197,7 +197,7 @@ Architecture, CLI, MCP, testing and security for the controller are authored in
 [`skills/hardware-controller/references/`](../skills/hardware-controller/references/architecture.md);
 the same-named pages in [`docs/`](README.md) are redirects. GUI, development,
 roles, release and versioning guides live in [`docs/`](README.md). Scripting
-references live in [`skills/pymybot-scripting/`](../skills/pymybot-scripting/SKILL.md).
+references live in [`skills/hardware-controller/`](../skills/hardware-controller/SKILL.md).
 
 ## Contributing
 

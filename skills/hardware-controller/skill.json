@@ -180,6 +180,161 @@
             "default": 1
           }
         }
+      },
+      "assets_list": {
+        "description": "List bundled asset files under robots, modules or scripts",
+        "effect": "read",
+        "output": "json",
+        "argv": [
+          "assets",
+          "list",
+          "--kind",
+          "{kind}"
+        ],
+        "params": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "all",
+              "robots",
+              "modules",
+              "scripts"
+            ],
+            "default": "all"
+          }
+        }
+      },
+      "assets_read": {
+        "description": "Read one bundled asset file as UTF-8 text",
+        "effect": "read",
+        "output": "json",
+        "argv": [
+          "assets",
+          "read",
+          "--kind",
+          "{kind}",
+          "--path",
+          "{path}"
+        ],
+        "params": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "robots",
+              "modules",
+              "scripts"
+            ],
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "max": 4096,
+            "required": true
+          }
+        }
+      },
+      "assets_write": {
+        "description": "Create one new bundled asset file; fails if it already exists",
+        "effect": "write",
+        "output": "json",
+        "argv": [
+          "assets",
+          "write",
+          "--kind",
+          "{kind}",
+          "--path",
+          "{path}",
+          "--content",
+          "{content}"
+        ],
+        "params": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "robots",
+              "modules",
+              "scripts"
+            ],
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "max": 4096,
+            "required": true
+          },
+          "content": {
+            "type": "string",
+            "max": 24576,
+            "required": true
+          }
+        }
+      },
+      "assets_overwrite": {
+        "description": "Overwrite an existing bundled asset file with new content",
+        "effect": "write",
+        "output": "json",
+        "argv": [
+          "assets",
+          "write",
+          "--kind",
+          "{kind}",
+          "--path",
+          "{path}",
+          "--content",
+          "{content}",
+          "--force"
+        ],
+        "params": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "robots",
+              "modules",
+              "scripts"
+            ],
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "max": 4096,
+            "required": true
+          },
+          "content": {
+            "type": "string",
+            "max": 24576,
+            "required": true
+          }
+        }
+      },
+      "assets_delete": {
+        "description": "Delete one bundled asset file",
+        "effect": "write",
+        "output": "json",
+        "argv": [
+          "assets",
+          "delete",
+          "--kind",
+          "{kind}",
+          "--path",
+          "{path}",
+          "--yes"
+        ],
+        "params": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "robots",
+              "modules",
+              "scripts"
+            ],
+            "required": true
+          },
+          "path": {
+            "type": "string",
+            "max": 4096,
+            "required": true
+          }
+        }
       }
     }
   }

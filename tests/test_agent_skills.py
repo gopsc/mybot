@@ -311,12 +311,11 @@ def test_executor_installs_workspace_skill(tmp_path):
 
 def test_real_repository_skill_loads():
     library = SkillsLibrary(ROOT / "skills")
-    assert "pymybot-scripting" in library.skills
-    content = library.read("pymybot-scripting", "references/driver-lua.md")
+    assert "hardware-controller" in library.skills
+    content = library.read("hardware-controller", "references/driver-lua.md")
     assert "require_driver" in content
     entries = {item["name"]: item for item in library.index()["skills"]}
-    assert len(entries["pymybot-scripting"]["files"]) == 7
-    assert len(entries["hardware-controller"]["files"]) == 6
+    assert len(entries["hardware-controller"]["files"]) == 12
 
 
 def test_cli_rejects_skills_dir_because_the_role_owns_skills(tmp_path):
@@ -348,7 +347,7 @@ def test_make_agent_wires_skills_into_instructions_and_tools(tmp_path):
 
     instructions, tools = asyncio.run(scenario(library))
     without, plain = asyncio.run(scenario(None))
-    assert "- pymybot-scripting:" in instructions
+    assert "- hardware-controller:" in instructions
     assert "- skill-authoring:" in instructions
     assert "Operator-provided reference skills" in instructions
     assert "Operator-provided reference skills" not in without

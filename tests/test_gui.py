@@ -521,7 +521,7 @@ def test_new_role_falls_back_to_default_skills(app_factory, monkeypatch, tmp_pat
     assert app.cfg.role == "role-with-skills"
     assert (tmp_path / "home" / "roles" / "role-with-skills" / "workspace").is_dir()
     target = (tmp_path / "home" / "roles" / "role-with-skills" / "skills"
-              / "pymybot-scripting" / "SKILL.md")
+              / "hardware-controller" / "SKILL.md")
     assert target.is_file()
 
 

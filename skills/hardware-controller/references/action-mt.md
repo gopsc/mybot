@@ -2,7 +2,7 @@
 
 Source: 本文件是 MT 文法的书面来源，以实现为准——`pymybot/matrix.py`（字符文法）、`pymybot/expr.py`
 （表达式）、`pymybot/actions.py`（派发/捕获/控制块/命名 Reflex）、`pymybot/include.py`（Include/Merge）；
-运行动作的命令见 [controller CLI](../../hardware-controller/references/cli.md)。
+运行动作的命令见 [controller CLI](cli.md)。
 
 ## 1. 字符文法
 

@@ -142,7 +142,7 @@ sh scripts/i2c_probe.sh /dev/i2c-1 --repeat 3
    head -40 modules/<driver>.lua
    ```
 
-2. 读 `read_skill("pymybot-scripting", "references/driver-lua.md")` 了解驱动契约；
+2. 读 `read_skill("hardware-controller", "references/driver-lua.md")` 了解驱动契约；
    需要 pymybot HAL 路线（结构 SQL + 动作脚本 + 驱动）时读 `read_skill("i2c-scan")`。
 
 3. 同一地址常有多家芯片（0x40 既有 CHT8305 也有 INA219 族，0x68 既有 DS1307 也有 MPU6050），**必须靠 ID 寄存器或行为区分**。

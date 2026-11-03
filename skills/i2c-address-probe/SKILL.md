@@ -150,5 +150,5 @@ sh scripts/i2c_probe.sh /dev/i2c-1 --repeat 3
 ## 9. 参考资料
 
 - `read_skill("i2c-address-probe", "references/usage.md")` — 权限、errno 对照、0 命中排查顺序、抖动复核、地址→驱动流程。
-- `read_skill("pymybot-scripting", "references/driver-lua.md")` — 命中地址后查/写驱动时的契约。
+- `read_skill("hardware-controller", "references/driver-lua.md")` — 命中地址后查/写驱动时的契约。
 - `read_skill("i2c-scan")` — pymybot HAL 路线（驱动 + 结构 SQL + 动作脚本）与地址族表。

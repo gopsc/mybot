@@ -213,4 +213,4 @@ for the packaging flow.
 - [GUI guide](../../../docs/gui.md)
 - [Security model](security.md)
 - [Testing](testing.md)
-- [Scripting reference](../../pymybot-scripting/SKILL.md)
+- [Scripting reference](../SKILL.md)

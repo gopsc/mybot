@@ -21,7 +21,7 @@
 | [Windows faulthandler](history/windows-faulthandler.md) | debug LuaJIT SEH errors on Windows |
 
 Scripting references live under
-[`../skills/pymybot-scripting/references/`](../skills/pymybot-scripting/references).
+[`../skills/hardware-controller/references/`](../skills/hardware-controller/references).
 They are the written source of truth for the structure SQL and MT grammars;
 [`../skills/README.md`](../skills/README.md) maps every other topic back to the
 document that owns it.

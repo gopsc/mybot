@@ -30,11 +30,36 @@ python -m pymybot doctor
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
 | `pymybot new NAME [--dir DIR] [--force]` | Generate a runnable `robots/`, `scripts/` and `modules/` skeleton | No |
+| `pymybot assets list/read/write/delete` | List, read, create, overwrite or delete bundled `robots`/`modules`/`scripts` asset files | No |
 | `pymybot doctor` | Environment/dependency/asset diagnostics, including prompt manifest and safety hashes | No |
 | `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
 | `pymybot prompts list` | List runtime prompt layers, hashes and modification status | No |
 | `pymybot prompts restore [--missing-only \| --all --yes]` | Refill missing defaults, or back up and reset all layers | No |
 | `pymybot roles list/create/show/repair/clear-history/delete` | Manage role-owned prompts, skills, MCP and resumable history; `repair` fills missing skill files and `delete` removes the role directory (both need `--yes`) | No |
+
+## Asset files
+
+`pymybot assets` manages the bundled `robots` (`.sql`), `modules` (`.py`/`.lua`) and
+`scripts` (`.mt`) asset files in place, so the Skill can create, retrieve, overwrite and
+delete robot scripts without leaving the controller:
+
+```sh
+pymybot assets list [--kind robots|modules|scripts|all]
+pymybot assets read   --kind robots  --path relay-test.sql
+pymybot assets write  --kind scripts --path mybot-arm.mt --content "@Action ..."   # create
+pymybot assets write  --kind scripts --path mybot-arm.mt --content-file arm.mt --force  # overwrite
+pymybot assets delete --kind scripts --path mybot-arm.mt --yes
+```
+
+`--path` is relative to the kind's asset root; traversal, absolute paths, symlink escape
+and wrong suffixes are refused. `write` creates and refuses an existing file unless
+`--force`; `delete` requires `--yes`. Content is bounded UTF-8 (`--content` inline or
+`--content-file` for larger bodies). The command never activates hardware.
+
+`--robot` and `--input` on every command resolve against these roots: an absolute path or
+a path that already exists relative to CWD is used as-is, otherwise a bare or relative
+name falls back to `assets/robots` (`--robot`) or `assets/scripts` (`--input`). This keeps
+the Skill self-contained without breaking absolute or CWD-relative callers.
 
 ## Agent roles
 
@@ -179,8 +204,8 @@ python -m pymybot serve
 Every SQL statement must end with `;`, including a single statement. A missing
 semicolon is `SQL: unexpected end of script`. The structure SQL and MT action
 grammars are documented in
-[`structure-sql.md`](../../pymybot-scripting/references/structure-sql.md) and
-[`action-mt.md`](../../pymybot-scripting/references/action-mt.md).
+[`structure-sql.md`](structure-sql.md) and
+[`action-mt.md`](action-mt.md).
 
 ## JSON contract
 

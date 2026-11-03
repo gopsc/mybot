@@ -7,8 +7,7 @@ the controller Runtime explicitly loads trusted code and assets from
 
 | Skill | Purpose |
 | --- | --- |
-| [`hardware-controller/`](hardware-controller/SKILL.md) | Self-contained Python controller, MCP server, Agent `run_skill`, authoritative controller docs and default robots/scripts/modules assets |
-| [`pymybot-scripting/`](pymybot-scripting/SKILL.md) | Structure SQL, MT actions, Python/Lua drivers, daemon, virtbus and error workflow references |
+| [`hardware-controller/`](hardware-controller/SKILL.md) | Self-contained Python controller, MCP server, Agent `run_skill`, `assets` CRUD, authoritative controller docs, the three-layer scripting grammar references, and default robots/scripts/modules assets |
 | [`skill-authoring/`](skill-authoring/SKILL.md) | 技能编写规范: SKILL.md layout, frontmatter, trigger descriptions, references and the approved workspace `install_skill` workflow |
 | [`brave-heart/`](brave-heart/SKILL.md) | 勇气与意志力支持：恐惧场景识别、激励引导、微小第一步与呼吸练习 |
 | [`i2c-address-probe/`](i2c-address-probe/SKILL.md) | 宿主侧 I2C 地址探测（只读），sh/Python 脚本、判读手册，Agent 可经 `run_skill` 的 `list-buses` / `scan` 执行 |
@@ -23,12 +22,12 @@ the same-named pages in [`../docs/`](../docs) are redirect stubs for human reade
 
 | Topic | Authority | Skill reference |
 | --- | --- | --- |
-| Structure SQL grammar | `pymybot/sql.py`, `pymybot/robot.py` | [`references/structure-sql.md`](pymybot-scripting/references/structure-sql.md) |
-| MT action grammar | `pymybot/{matrix,expr,actions,include}.py` | [`references/action-mt.md`](pymybot-scripting/references/action-mt.md) |
-| Python/Lua driver contract | [`references/architecture.md`](hardware-controller/references/architecture.md), [`security.md`](hardware-controller/references/security.md) | [`references/driver-lua.md`](pymybot-scripting/references/driver-lua.md) |
-| Daemon sampling | [`references/architecture.md`](hardware-controller/references/architecture.md) | [`references/daemon.md`](pymybot-scripting/references/daemon.md) |
-| Virtual device models | [`references/testing.md`](hardware-controller/references/testing.md) | [`references/virt-model.md`](pymybot-scripting/references/virt-model.md) |
-| CLI commands and gates | [`references/cli.md`](hardware-controller/references/cli.md), [`security.md`](hardware-controller/references/security.md) | [`references/workflow-errors.md`](pymybot-scripting/references/workflow-errors.md) |
+| Structure SQL grammar | `pymybot/sql.py`, `pymybot/robot.py` | [`references/structure-sql.md`](hardware-controller/references/structure-sql.md) |
+| MT action grammar | `pymybot/{matrix,expr,actions,include}.py` | [`references/action-mt.md`](hardware-controller/references/action-mt.md) |
+| Python/Lua driver contract | [`references/architecture.md`](hardware-controller/references/architecture.md), [`security.md`](hardware-controller/references/security.md) | [`references/driver-lua.md`](hardware-controller/references/driver-lua.md) |
+| Daemon sampling | [`references/architecture.md`](hardware-controller/references/architecture.md) | [`references/daemon.md`](hardware-controller/references/daemon.md) |
+| Virtual device models | [`references/testing.md`](hardware-controller/references/testing.md) | [`references/virt-model.md`](hardware-controller/references/virt-model.md) |
+| CLI commands and gates | [`references/cli.md`](hardware-controller/references/cli.md), [`security.md`](hardware-controller/references/security.md) | [`references/workflow-errors.md`](hardware-controller/references/workflow-errors.md) |
 | Controller architecture | `hardware-controller/scripts/pymybot/` | [`references/architecture.md`](hardware-controller/references/architecture.md) |
 | Controller CLI and serve | `hardware-controller/scripts/pymybot/{cli,serve}.py` | [`references/cli.md`](hardware-controller/references/cli.md) |
 | Controller MCP | `hardware-controller/scripts/pymybot/mcp_server.py` | [`references/mcp.md`](hardware-controller/references/mcp.md) |
