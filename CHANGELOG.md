@@ -8,6 +8,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The Agent gains a `create_directory` workspace tool. It creates one directory
+  below an existing, already-verified parent, applies the same traversal, link
+  and protected-prompt checks as the file tools, and stays behind the file-write
+  approval gate. Windows sessions can now create directories without the
+  bubblewrap-gated `shell` tool.
 - `i2c-address-probe` skill: a read-only host-side I2C address prober with a
   zero-dependency Python implementation, an `sh` wrapper, `/sys` kernel-binding
   annotation, a fixed JSON contract and `skill.json` actions `list-buses` and

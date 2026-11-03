@@ -305,7 +305,7 @@ def test_workspace_approvals_are_independent(tool, arguments, permission, mode, 
 def test_workspace_tool_registration(workspace, enable_shell):
     async def respond(messages, info):
         names = {tool.name for tool in info.function_tools}
-        assert ({"list_files", "read_file", "write_file", "edit_file"} <= names) is workspace
+        assert ({"list_files", "read_file", "write_file", "create_directory", "edit_file"} <= names) is workspace
         assert ("shell" in names) is enable_shell
         return ModelResponse(parts=[TextPart("done")])
 

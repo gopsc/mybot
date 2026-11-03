@@ -51,6 +51,7 @@ def test_interface_and_constructor(workspace, tmp_path):
         "list_files": (set(), {"path"}),
         "read_file": ({"path"}, {"path", "offset", "limit"}),
         "write_file": ({"path", "content"}, {"path", "content", "overwrite"}),
+        "create_directory": ({"path"}, {"path"}),
         "edit_file": ({"path", "old_string", "new_string"},
                       {"path", "old_string", "new_string", "replace_all"}),
         "shell": ({"command"}, {"command", "cwd"}),
@@ -239,6 +240,29 @@ def test_parent_must_exist_and_file_must_be_regular(workspace, tmp_path):
     with pytest.raises(FileNotFoundError):
         invoke(workspace, "edit_file", {"path": "missing", "old_string": "x", "new_string": "y"}, starts=starts)
     assert not starts
+
+
+def test_create_directory_creates_one_level_below_an_existing_parent(workspace, tmp_path):
+    assert invoke(workspace, "create_directory", {"path": "build"}) == {"path": "build", "created": True}
+    assert (tmp_path / "build").is_dir()
+    assert invoke(workspace, "create_directory", {"path": "build/sub"})["created"] is True
+    assert (tmp_path / "build" / "sub").is_dir()
+    with pytest.raises(FileExistsError):
+        invoke(workspace, "create_directory", {"path": "build"})
+    with pytest.raises(OSError):
+        invoke(workspace, "create_directory", {"path": "missing/child"})
+
+
+def test_create_directory_rejects_escape_and_protected_paths(workspace, tmp_path):
+    for path in ("../escape", "/absolute", ".", "a/../../escape"):
+        with pytest.raises(ValueError):
+            invoke(workspace, "create_directory", {"path": path})
+    protected = tmp_path / "prompts"
+    protected.mkdir()
+    guarded = Workspace(tmp_path, enable_shell=True, protected_paths=[protected])
+    with pytest.raises(ValueError, match="protected"):
+        invoke(guarded, "create_directory", {"path": "prompts/sub"})
+    assert not (protected / "sub").exists()
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs")

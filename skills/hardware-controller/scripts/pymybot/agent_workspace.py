@@ -28,6 +28,7 @@ WORKSPACE_TOOLS = {
     "list_files": (set(), {"path"}),
     "read_file": ({"path"}, {"path", "offset", "limit"}),
     "write_file": ({"path", "content"}, {"path", "content", "overwrite"}),
+    "create_directory": ({"path"}, {"path"}),
     "edit_file": ({"path", "old_string", "new_string"},
                   {"path", "old_string", "new_string", "replace_all"}),
     "shell": ({"command"}, {"command", "cwd"}),
@@ -190,7 +191,9 @@ class Workspace:
                 raise SecurityError("cmd.exe runs a single line; join commands with && instead of newlines")
             _relative(arguments.get("cwd", "."), directory=True)
         else:
-            _relative(arguments.get("path", "."), directory=name == "list_files")
+            parts = _relative(arguments.get("path", "."), directory=name in {"list_files", "create_directory"})
+            if name == "create_directory" and not parts:
+                raise SecurityError("create_directory requires a directory path")
         if name == "read_file":
             for field, default, maximum in (("offset", 1, None), ("limit", 200, 1000)):
                 value = arguments.get(field, default)
@@ -282,14 +285,17 @@ class Workspace:
             raise PermissionError("Shell is disabled; explicitly enable shell access first")
         directory = name in {"list_files", "shell"}
         relative = arguments.get("cwd" if name == "shell" else "path", ".")
-        parts = _relative(relative, directory=directory)
-        self._check_protected_path(self.path.joinpath(*parts), writing=name in {"write_file", "edit_file"})
+        parts = _relative(relative, directory=directory or name == "create_directory")
+        self._check_protected_path(self.path.joinpath(*parts),
+                                   writing=name in {"write_file", "edit_file", "create_directory"})
         with self._directory(parts if directory else parts[:-1], check) as (parent, fd, guard):
             if name == "shell":
                 self._check_protected_shell(check)
                 result = self._shell(arguments["command"], parent, fd, guard, check, started,
                                      sandbox=self.sandbox, workspace=self.path,
                                      protected_paths=self.shell_protected_paths)
+            elif name == "create_directory":
+                result = self._create_directory(parts, parent, fd, guard, check)
             elif name == "list_files":
                 result = self._listing(relative, parent, fd, check)
             elif name == "read_file":
@@ -329,6 +335,37 @@ class Workspace:
             check()
             guard()
             return result
+
+    def _create_directory(self, parts, parent, fd, guard, check):
+        """Create one directory below a verified parent; linked paths are rejected."""
+        check()
+        guard()
+        name = parts[-1]
+
+        def current():
+            try:
+                return (os.stat(name, dir_fd=fd, follow_symlinks=False) if fd is not None
+                        else (parent / name).lstat())
+            except FileNotFoundError:
+                return None
+
+        info = current()
+        if info is not None:
+            if _linked(info):
+                raise SecurityError("Linked paths are not allowed")
+            raise FileExistsError("Directory already exists")
+        try:
+            if fd is not None:
+                os.mkdir(name, dir_fd=fd)
+            else:
+                os.mkdir(parent / name)
+        except FileExistsError:
+            raise FileExistsError("Directory already exists") from None
+        guard()
+        info = current()
+        if info is None or _linked(info) or not stat.S_ISDIR(info.st_mode):
+            raise SecurityError("Created path is not a regular directory; inspect the workspace")
+        return {"path": "/".join(parts), "created": True}
 
     def _listing(self, relative, parent, fd, check):
         entries, skipped, truncated = [], 0, False

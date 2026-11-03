@@ -61,7 +61,7 @@ MAX_CONTEXT_TOKENS = 2 * 1024 * 1024
 IO_TOOLS = frozenset({"run_action_script", "read_variables"})
 SKILL_TOOLS = frozenset({"run_skill", "install_skill"})
 CAMERA_TOOLS = frozenset({"list_cameras", "capture_camera"})
-FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
+FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file", "create_directory"})
 WEB_TOOLS = frozenset({"web_fetch", "web_search"})
 MAX_IDENTICAL_CALLS = 3
 # Single source of truth: validation, key lookup, rejection message and the provider tests all derive from this.
@@ -620,6 +620,10 @@ class AgentSession:
             return await self.invoke_tool("write_file", {
                 "path": path, "content": content, "overwrite": overwrite})
 
+        async def create_directory(path: str):
+            """Create one workspace directory below an existing parent after approval; path is workspace-relative."""
+            return await self.invoke_tool("create_directory", {"path": path})
+
         async def edit_file(path: str, old_string: str, new_string: str, replace_all: bool = False):
             """Replace exact text after approval; old_string must match uniquely unless replace_all=True."""
             return await self.invoke_tool("edit_file", {
@@ -661,7 +665,8 @@ class AgentSession:
                      ("list_cameras", list_cameras), ("capture_camera", capture_camera)]
         if self.workspace:
             functions.extend((("list_files", list_files), ("read_file", read_file),
-                              ("write_file", write_file), ("edit_file", edit_file)))
+                              ("write_file", write_file), ("create_directory", create_directory),
+                              ("edit_file", edit_file)))
         if self.enable_shell:
             functions.append(("shell", shell))
         if self.config.enable_web:
