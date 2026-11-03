@@ -10,7 +10,7 @@ from pymybot.agent_skills import SkillsLibrary
 from pymybot.cli import UsageError, parse_args
 from pymybot.mcp_client import load_servers
 from pymybot.prompts import PromptLibrary
-from pymybot.roles import (clear_role_history, create_role, list_roles, load_role,
+from pymybot.roles import (clear_role_history, create_role, delete_role, list_roles, load_role,
                            read_history, repair_role_skills, write_history)
 from pymybot.security import SecurityError
 
@@ -105,9 +105,39 @@ def test_role_cli_flags():
     assert args.role_action == "create" and args.name == "demo"
     args = parse_args(["roles", "repair", "demo", "--yes"])
     assert args.role_action == "repair" and args.yes is True
+    args = parse_args(["roles", "delete", "demo", "--yes"])
+    assert args.role_action == "delete" and args.name == "demo" and args.yes is True
     with pytest.raises(UsageError):
         parse_args(["agent", "--robot", "robot.sql", "--task", "hi",
                     "--role", "demo", "--skills-dir", "skills"])
+
+
+def test_delete_role_removes_the_whole_directory(tmp_path):
+    root = tmp_path / "roles"
+    role = create_role("disposable", root=root)
+    (role.workspace_dir / "note.txt").write_text("private", encoding="utf-8")
+    create_role("keeper", root=root)
+    result = delete_role("disposable", root)
+    assert result["deleted"] is True and result["name"] == "disposable"
+    assert not role.root.exists()
+    assert [item["name"] for item in list_roles(root)] == ["keeper"]
+    with pytest.raises((OSError, SecurityError)):
+        load_role("disposable", root)
+    with pytest.raises((OSError, SecurityError)):
+        delete_role("disposable", root)
+
+
+def test_role_delete_cli_requires_yes(tmp_path, monkeypatch, capsys):
+    from pymybot import cli
+
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "home"))
+    role = create_role("disposable")
+    assert cli.main(["roles", "delete", "disposable"]) == 2
+    assert role.root.exists()
+    assert cli.main(["roles", "delete", "disposable", "--yes"]) == 0
+    assert not role.root.exists()
+    payload = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert payload["deleted"] is True and payload["name"] == "disposable"
 
 
 class _Executor:

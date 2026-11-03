@@ -6,6 +6,10 @@ an optional external MCP configuration and resumable model history. Robot
 structures, action scripts, hardware permissions and approval grants remain
 operator/session settings; a role never grants them.
 
+**Agent conversations require a role.** `pymybot agent` without `--role`, the
+GUI without a selected role and `serve` `agent.ask` without `role` are rejected;
+there is no global default conversation.
+
 ## Directory format
 
 ```text
@@ -51,6 +55,9 @@ pymybot gui --role technician
 # Explicitly erase only this role's resumable model history
 pymybot roles clear-history technician --yes
 
+# Permanently delete the role directory (prompts, skills, workspace, history)
+pymybot roles delete technician --yes
+
 # Fill missing skill files (manifest/entrypoint) from the bundled skills
 pymybot roles repair technician --yes
 # ... or from a known-complete skills root
@@ -71,12 +78,14 @@ time; keys are never copied into role metadata or command output.
 
 ## GUI
 
-The toolbar role selector lists the global default and every valid role.
-**新建** creates a role from the bundled prompt baseline and imports the
-currently selected Skills/MCP when present. If no skills root is configured (or
-the selected role's skills directory is empty), it falls back to the packaged
-default skills so a new role does not silently start without references. The
-selected role is saved as a GUI preference, not as an approval grant.
+The toolbar role selector lists every valid role. **新建** creates a role from
+the bundled prompt baseline and imports the currently selected Skills/MCP when
+present. If no skills root is configured (or the selected role's skills
+directory is empty), it falls back to the packaged default skills so a new role
+does not silently start without references. The selected role is saved as a GUI
+preference, not as an approval grant. **删除** asks for confirmation, closes the
+Agent conversation and permanently deletes the selected role's whole directory;
+without a role the composer refuses to send and asks you to create one.
 
 While a role is selected:
 
@@ -123,6 +132,6 @@ role directory accordingly.
 | `roles.show` | Inspect role paths, skills and history counts |
 | `roles.clear_history` | Clear an inactive role's history |
 
-`agent.ask` accepts `role`. `agent.reset` accepts optional `role` and
+`agent.ask` requires `role`. `agent.reset` accepts optional `role` and
 `clearHistory`; without `clearHistory`, closing or switching a role preserves
 its history. Role management performs no hardware activation or model request.

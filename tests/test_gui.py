@@ -260,7 +260,8 @@ def test_no_gui_keeps_the_terminal_agent(monkeypatch, capsys, tmp_path):
         return {"mode": "agent", "output": "offline", "tool_events": []}
 
     monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
-    code = cli.main(["--no-gui", "--robot", str(robot), "--task", "hi", "--model", "openai:test"])
+    code = cli.main(["--no-gui", "--robot", str(robot), "--task", "hi", "--role", "test-role",
+                     "--model", "openai:test"])
     payload = json.loads(capsys.readouterr().out)
     assert code == 0 and payload["mode"] == "agent" and called[0].command == "agent"
 
@@ -393,7 +394,12 @@ def app_factory(monkeypatch, qapp, tmp_path):
     monkeypatch.setattr(gui_app, "ServeClient", FakeClient)
 
     def build(config_path=None, config=None):
-        config = config or GuiConfig(workspace=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"))
+        if config is None:
+            from pymybot.roles import create_role, load_role, role_path
+            # Conversations require a role; most window tests need a usable one.
+            role = load_role("test-role") if role_path("test-role").exists() else create_role("test-role")
+            config = GuiConfig(workspace=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"),
+                               role=role.name)
         with monkeypatch.context() as patch:
             instance = gui_app.App(config, config_path or tmp_path / "settings.json")
         instance._start_timer.stop()
@@ -480,8 +486,33 @@ def test_role_selector_binds_agent_params_and_reset(app_factory, monkeypatch, tm
     assert client.requests[-1] == ("agent.reset", {"clearHistory": True, "role": "tech"})
 
 
-def test_new_role_falls_back_to_default_skills(ui, monkeypatch, tmp_path):
-    gui, app = ui
+def test_conversation_requires_a_role(app_factory):
+    _, app = app_factory(config=GuiConfig(workspace=str(ROOT)))
+    client = attach_client(app)
+    app.task_box.setPlainText("列出硬件")
+    app.send_button.click()
+    assert client.requests == []
+    assert "对话需要角色" in app.chat.toPlainText()
+
+
+def test_delete_role_closes_the_conversation_and_removes_the_directory(ui, qapp, monkeypatch):
+    from pymybot.roles import role_path
+
+    _, app = ui
+    client = attach_client(app)
+    monkeypatch.setattr(app, "_message", lambda *args, **kwargs: True)
+    root = role_path("test-role")
+    assert root.is_dir() and app.delete_role_button.isEnabled()
+    app.delete_role_button.click()
+    assert client.requests[-1] == ("agent.reset", {})
+    client.futures[-1].set_result({})
+    assert qt_wait(qapp, lambda: not root.exists())
+    assert app.cfg.role == ""
+    assert not app.delete_role_button.isEnabled()
+
+
+def test_new_role_falls_back_to_default_skills(app_factory, monkeypatch, tmp_path):
+    gui, app = app_factory(config=GuiConfig(workspace=str(ROOT)))
     monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(gui.QInputDialog, "getText",
                         lambda *args, **kwargs: ("role-with-skills", True))
@@ -764,7 +795,8 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     app.task_box.setPlainText("hello")
     app.send_button.click()
     params = client.requests[0][1]
-    assert params["skillsDir"] == str(ROOT / "skills")
+    assert params["role"] == "test-role"
+    assert "skillsDir" not in params and "mcpConfig" not in params
     assert "modulePaths" not in params
     assert params["vars"] == {"user": "alice"}
     assert "timeout" not in params
@@ -825,7 +857,7 @@ def test_stop_and_reset_native_buttons(ui, qapp):
     assert qt_wait(qapp, lambda: not app.busy)
     assert "[已停止]" in app.chat.toPlainText()
     app.new_button.click()
-    assert client.requests[-1] == ("agent.reset", {"clearHistory": True})
+    assert client.requests[-1] == ("agent.reset", {"clearHistory": True, "role": "test-role"})
     client.futures[-1].set_result({})
     assert qt_wait(qapp, lambda: "新对话，硬件已释放" in app.chat.toPlainText())
     transcript = app.chat.toPlainText()
@@ -842,7 +874,7 @@ def test_new_conversation_queues_reset_until_server_is_ready(ui, qapp, monkeypat
     client = FakeClient()
     app._server_started(app.generation, (client, {"agent": True, "protocol": 1}), None)
     assert app.pending_reset is False and app.pending_task == ""
-    assert client.requests[-1] == ("agent.reset", {"clearHistory": True})
+    assert client.requests[-1] == ("agent.reset", {"clearHistory": True, "role": "test-role"})
     client.futures[-1].set_result({})
     assert qt_wait(qapp, lambda: "新对话，硬件已释放" in app.chat.toPlainText())
     assert "旧问题" not in app.chat.toPlainText()
@@ -1068,8 +1100,8 @@ def test_session_logging_flag_reaches_server(ui, monkeypatch, qapp):
     assert app.serve.options["python_args"] == ("-m", "pymybot", "serve", "--no-session-log")
 
 
-def test_workspace_and_directory_choosers(ui, monkeypatch, tmp_path):
-    gui, app = ui
+def test_workspace_and_directory_choosers(app_factory, monkeypatch, tmp_path):
+    gui, app = app_factory(config=GuiConfig(workspace=str(ROOT)))
     restarted = []
     monkeypatch.setattr(app, "_restart_server", lambda: restarted.append(True))
     monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", lambda *args: str(tmp_path))
@@ -1153,7 +1185,7 @@ def test_send_enables_all_tools_without_approval(ui):
     assert app._send("列出硬件")
     method, params = client.requests[-1]
     assert method == "agent.ask"
-    assert params["workspaceDir"] == str(Path(app.cfg.workspace).absolute())
+    assert params["workspaceDir"] == app._workspace_root()
     assert params["allowFileWrites"] is True
     assert params["enableShell"] is True
     assert params["allowMcpTools"] is True

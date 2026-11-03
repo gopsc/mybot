@@ -34,7 +34,7 @@ python -m pymybot doctor
 | `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
 | `pymybot prompts list` | List runtime prompt layers, hashes and modification status | No |
 | `pymybot prompts restore [--missing-only \| --all --yes]` | Refill missing defaults, or back up and reset all layers | No |
-| `pymybot roles list/create/show/repair/clear-history` | Manage role-owned prompts, skills, MCP and resumable history; `repair` fills missing skill files (needs `--yes`) | No |
+| `pymybot roles list/create/show/repair/clear-history/delete` | Manage role-owned prompts, skills, MCP and resumable history; `repair` fills missing skill files and `delete` removes the role directory (both need `--yes`) | No |
 
 ## Agent roles
 
@@ -45,14 +45,21 @@ semantics. Typical usage:
 pymybot roles create technician --description "Field technician"
 pymybot roles list
 pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"
-pymybot agent --robot robots/my.sql --scripts-dir scripts --task "运行自检"
+pymybot agent --role technician --robot robots/my.sql --scripts-dir scripts --task "运行自检"
 pymybot roles clear-history technician --yes
+pymybot roles delete technician --yes        # permanently remove the role directory
 ```
+
+Agent conversations require a role: `pymybot agent` without `--role` and
+`serve` `agent.ask` without `role` fail with a usage/invalid-params error. There
+is no global default conversation.
 
 Creation copies the bundled prompt baseline. Optional `--skills-dir` and
 `--mcp-config` on `roles create` import those capabilities into the role. Once
 loaded, `--role` owns these resources and is therefore not combined with the
-agent-level `--skills-dir`/`--mcp-config` overrides.
+agent-level `--skills-dir`/`--mcp-config` overrides. `roles delete` removes the
+whole role directory (prompts, skills, workspace and history) and requires
+`--yes`; close that role's conversation first.
 
 ## Runtime prompts
 
@@ -215,7 +222,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, optional `robot`, optional `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.ask` | `task`, `role` (required), optional `robot`, optional `scriptsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested, preferring the named role over the active conversation's role |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |
@@ -249,7 +256,7 @@ Agent mode is documented in the README. The important flags are:
 | `--base-url URL` | Custom OpenAI-compatible endpoint; HTTPS required except loopback. |
 | `--api-key-env NAME` | Environment variable holding the key; never pass the key itself. |
 | `--task TEXT` | One-shot task; without it, start the REPL. `/clear` explicitly clears the current role history. |
-| `--role NAME` | Load role-owned prompts, skills, MCP and resumable model history from `~/.mybot/roles/NAME`. |
+| `--role NAME` | Load role-owned prompts, skills, MCP and resumable model history from `~/.mybot/roles/NAME`. Required for agent conversations. |
 | `--workspace-dir DIR` | Enable bounded file tools inside `DIR`. |
 | `--enable-shell` | Enable the shell tool inside the workspace; protected prompts require usable bubblewrap, with no unisolated fallback. |
 | `--allow-actions` | Legacy compatibility flag for the executor's action-script and variable-read tools; they are no longer model tools and trusted skills need no approval. |

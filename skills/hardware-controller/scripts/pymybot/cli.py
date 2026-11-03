@@ -161,6 +161,11 @@ def parser():
                                        allow_abbrev=False)
             clear.add_argument("name")
             clear.add_argument("--yes", action="store_true", help="confirm permanent history removal")
+            delete = actions.add_parser("delete", help="delete a role and every file it owns",
+                                        allow_abbrev=False)
+            delete.add_argument("name")
+            delete.add_argument("--yes", action="store_true",
+                                help="confirm permanently deleting the role directory")
             continue
         if name == "prompts":
             command.add_argument("--no-agent", action="store_true",
@@ -387,6 +392,8 @@ def parse_args(argv=None):
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
         args.command = "run"
         return args
+    if not args.role:
+        raise UsageError("Agent conversations require --role NAME; create one with 'pymybot roles create NAME'")
     if args.role and args.workspace_dir:
         raise UsageError("--role owns its workspace; do not combine it with --workspace-dir")
     if (args.enable_shell or args.allow_file_writes) and not (args.workspace_dir or args.role):
@@ -583,7 +590,7 @@ def prompt_command(args):
 
 
 def role_command(args):
-    from .roles import (clear_role_history, create_role, list_roles, load_role,
+    from .roles import (clear_role_history, create_role, delete_role, list_roles, load_role,
                         repair_role_skills, roles_root)
     if args.role_action == "list":
         return {"root": str(roles_root()), "roles": list_roles()}
@@ -596,6 +603,10 @@ def role_command(args):
         if not args.yes:
             raise UsageError("roles repair requires --yes")
         return repair_role_skills(args.name, source=args.skills_dir)
+    if args.role_action == "delete":
+        if not args.yes:
+            raise UsageError("roles delete requires --yes")
+        return delete_role(args.name)
     if not args.yes:
         raise UsageError("roles clear-history requires --yes")
     return clear_role_history(args.name)

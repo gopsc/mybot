@@ -260,11 +260,12 @@ def test_real_repository_skill_loads():
     assert len(entries["hardware-controller"]["files"]) == 6
 
 
-def test_cli_accepts_skills_dir(tmp_path):
-    args = parse_args(["agent", "--robot", "x.sql", "--task", "hi", "--skills-dir", str(tmp_path)])
-    assert args.skills_dir == str(tmp_path)
-    args = parse_args(["agent", "--robot", "x.sql", "--task", "hi"])
-    assert args.skills_dir is None
+def test_cli_rejects_skills_dir_because_the_role_owns_skills(tmp_path):
+    from pymybot.cli import UsageError
+
+    with pytest.raises(UsageError, match="--role owns its skills"):
+        parse_args(["agent", "--robot", "x.sql", "--task", "hi", "--role", "demo",
+                    "--skills-dir", str(tmp_path)])
 
 
 def test_make_agent_wires_skills_into_instructions_and_tools(tmp_path):

@@ -465,7 +465,11 @@ class LifecycleHarness:
         self.errors = set()
         self.robots = []
         self.agents = []
-        self.params = {"robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace), "task": "test"}
+        self.params = {"robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace), "task": "test",
+                       "role": "test-role"}
+        from pymybot.roles import create_role, load_role, role_path
+        # Tests that restore the real open_agent need a loadable role on disk.
+        self.role = load_role("test-role") if role_path("test-role").exists() else create_role("test-role")
         harness = self
 
         class FakeRobot:
@@ -664,6 +668,13 @@ def test_abort_agent_closes_an_idle_conversation(workspace, monkeypatch):
         assert receipt["state"] == "Aborted"
         assert h.agents[0]["session"].closed and h.agents[0]["client"].closed
         await h.check_free()
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
+def test_agent_ask_requires_a_role(workspace, monkeypatch):
+    async def scenario(h):
+        await h.error("agent.ask", serve.INVALID_PARAMS, {"task": "hi"})
+        assert not h.agents
     lifecycle_scenario(workspace, monkeypatch, scenario)
 
 
@@ -1053,8 +1064,9 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
             pass
 
     monkeypatch.setattr(agent_module, "create_model", lambda config: (make_model(), FakeClient()))
+    from pymybot.roles import create_role
     params = {"task": "写文件", "robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace),
-              "workspaceDir": str(workspace), "model": "openai:fake"}
+              "workspaceDir": str(workspace), "model": "openai:fake", "role": create_role("test-role").name}
 
     async def scenario():
         out = Out()

@@ -604,6 +604,9 @@ class Server:
         if not task.strip():
             raise RpcError(INVALID_PARAMS, "'task' must not be empty")
         key = self._agent_key(params)
+        if not key["role"]:
+            raise RpcError(INVALID_PARAMS, "Agent conversations require a role; pass 'role' "
+                                           "(create one with 'pymybot roles create NAME')")
         self.require_owner("agent")
         if self.agent_lock.locked():
             raise RpcError(BUSY, "Another agent turn is running")

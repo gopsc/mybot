@@ -191,7 +191,7 @@ def test_doctor_marks_invalid_bundle_unhealthy_without_writes(corruption, tmp_pa
 def test_no_prompt_stats_cli_boolean(entry, disabled):
     arguments = [entry]
     if entry == "agent":
-        arguments += ["--robot", "unused.sql", "--task", "hello"]
+        arguments += ["--robot", "unused.sql", "--task", "hello", "--role", "test-role"]
     if disabled:
         arguments += ["--no-prompt-stats"]
     assert cli.parse_args(arguments).no_prompt_stats is disabled
@@ -222,7 +222,7 @@ def test_serve_autostats_defaults_type_validation_and_conversation_key(monkeypat
             return {"session": Session(), "client": Client()}
 
         monkeypatch.setattr(server, "open_agent", open_agent)
-        params = {"task": "hello", "robot": "unused.sql", "scriptsDir": "unused"}
+        params = {"task": "hello", "robot": "unused.sql", "scriptsDir": "unused", "role": "test-role"}
         try:
             for ident, extra in enumerate(({}, {"autoStats": True}, {"autoStats": False},
                                            {"autoStats": False}, {}), 1):
@@ -257,6 +257,8 @@ def test_serve_propagates_auto_stats_into_real_agent_config(auto_stats, monkeypa
         raise StopBeforeModel
 
     monkeypatch.setattr(agent, "create_model", create_model)
+    from pymybot.roles import create_role
+    role = create_role("test-role")
 
     async def scenario():
         server = serve.Server(io.StringIO(), threading.Event(), enable_session_log=False)
@@ -271,7 +273,8 @@ def test_serve_propagates_auto_stats_into_real_agent_config(auto_stats, monkeypa
         try:
             with pytest.raises(StopBeforeModel):
                 await server.m_agent_ask(1, serve.Params({"task": "hello", "robot": "unused.sql",
-                                                        "scriptsDir": "unused", "autoStats": auto_stats}),
+                                                        "scriptsDir": "unused", "autoStats": auto_stats,
+                                                        "role": role.name}),
                                          threading.Event())
             assert len(configs) == 1 and configs[0].auto_stats is auto_stats
         finally:

@@ -8,6 +8,9 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `pymybot roles delete NAME --yes` permanently removes a role directory, and
+  the GUI's **删除** button does the same after confirmation, closing the Agent
+  conversation first. Both cover prompts, skills, workspace files and history.
 - The Agent gains a `create_directory` workspace tool. It creates one directory
   below an existing, already-verified parent, applies the same traversal, link
   and protected-prompt checks as the file tools, and stays behind the file-write
@@ -77,6 +80,16 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Role history format is now version 2 and stores LangChain messages. Version 1
   PydanticAI history is detected and ignored, so affected roles start a fresh
   conversation without failing to load.
+
+### Changed
+
+- **Agent conversations now require a role at every entry point.** `pymybot
+  agent` without `--role`, `serve` `agent.ask` without `role` and the GUI
+  composer without a selected role are rejected with an actionable message;
+  the global default conversation is gone. The GUI role selector lists only
+  real roles, auto-selects the first one and asks you to create a role when
+  none exists. Since a role owns its workspace, skills and MCP file, combining
+  `--role` with `--workspace-dir`/`--skills-dir`/`--mcp-config` stays an error.
 
 ### Removed
 

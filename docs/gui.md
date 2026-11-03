@@ -109,11 +109,14 @@ is not interrupted by new tokens.
 
 ## Agent roles
 
-The toolbar's **角色** selector chooses either the global default or a role from
-`~/.mybot/roles`. **新建** copies the bundled prompt baseline and imports the
-currently configured Skills/MCP when present. Role-owned paths replace the
-Skills/MCP context fields; the MCP editor and Prompt settings operate on the
-selected role. The role name is a saved preference, never a permission grant.
+The toolbar's **角色** selector lists the roles from `~/.mybot/roles`; a role is
+required before sending a task, and the window asks you to create one when none
+exists. **新建** copies the bundled prompt baseline and imports the currently
+configured Skills/MCP when present. **删除** asks for confirmation, closes the
+Agent conversation and permanently deletes the selected role's directory.
+Role-owned paths replace the Skills/MCP context fields; the MCP editor and
+Prompt settings operate on the selected role. The role name is a saved
+preference, never a permission grant.
 
 Each successful turn updates the role's resumable model history. Switching roles
 preserves both roles' histories. **新对话** clears the selected role's saved

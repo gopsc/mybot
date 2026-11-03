@@ -53,10 +53,18 @@ def test_existing_commands_always_bypass_agent(files, capsys, no_agent_import, p
 
 
 def test_missing_optional_dependency_is_actionable_not_fallback(files, capsys, no_agent_import):
-    code, result, _ = invoke(capsys, "--robot", files[0], "--task", "list hardware", "--model", "openai:test")
+    code, result, _ = invoke(capsys, "--robot", files[0], "--task", "list hardware", "--role", "test-role",
+                             "--model", "openai:test")
     assert code == 1 and result["ok"] is False
     assert "pymybot[agent]" in result["error"]["message"]
     assert "--no-agent" in result["error"]["message"]
+
+
+def test_agent_requires_a_role(files, capsys, no_agent_import):
+    code, result, _ = invoke(capsys, "--robot", files[0], "--task", "list hardware")
+    assert code == 2 and result["error"]["type"] == "UsageError"
+    assert "--role" in result["error"]["message"]
+    assert "roles create" in result["error"]["message"]
 
 
 @pytest.mark.parametrize("extra", [
@@ -65,7 +73,8 @@ def test_missing_optional_dependency_is_actionable_not_fallback(files, capsys, n
     ["--timeout", "nan"],
 ])
 def test_invalid_mode_options_fail_before_optional_import(files, capsys, no_agent_import, extra):
-    code, result, _ = invoke(capsys, "--robot", files[0], *extra)
+    role = [] if "--no-agent" in extra else ["--role", "test-role"]
+    code, result, _ = invoke(capsys, "--robot", files[0], *role, *extra)
     assert code == 2 and result["error"]["type"] == "UsageError"
 
 
@@ -76,8 +85,8 @@ def test_agent_accepts_session_bindings(files, capsys, monkeypatch):
         return {"mode": "agent", "output": "offline mock", "tool_events": []}
     monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
     monkeypatch.setenv("PYMYBOT_TEST_PASS", "from-env")
-    code, _, _ = invoke(capsys, "--robot", files[0], "--task", "t", "--var", "user=alice",
-                        "--var-env", "pass=PYMYBOT_TEST_PASS")
+    code, _, _ = invoke(capsys, "--robot", files[0], "--task", "t", "--role", "test-role",
+                        "--var", "user=alice", "--var-env", "pass=PYMYBOT_TEST_PASS")
     assert code == 0 and called[0].bindings == {"user": "alice", "pass": "from-env"}
 
 
@@ -89,20 +98,20 @@ def test_agent_accepts_context_token_budget(files, capsys, monkeypatch):
         return {"mode": "agent", "output": "offline mock", "tool_events": []}
 
     monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
-    code, _, _ = invoke(capsys, "--robot", files[0], "--task", "t",
+    code, _, _ = invoke(capsys, "--robot", files[0], "--task", "t", "--role", "test-role",
                         "--max-context-tokens", "32768", "--context-reserve-tokens", "1024")
     assert code == 0
     assert called[0].max_context_tokens == 32768 and called[0].context_reserve_tokens == 1024
 
 
 def test_input_is_not_implicitly_a_model_task(files, capsys, no_agent_import):
-    code, result, _ = invoke(capsys, "--robot", files[0], "--input", files[1])
+    code, result, _ = invoke(capsys, "--robot", files[0], "--input", files[1], "--role", "test-role")
     assert code == 2 and "--no-agent" in result["error"]["message"]
 
 
 def test_non_tty_requires_task(files, capsys, monkeypatch, no_agent_import):
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: False))
-    code, result, _ = invoke(capsys, "--robot", files[0])
+    code, result, _ = invoke(capsys, "--robot", files[0], "--role", "test-role")
     assert code == 2 and "--task" in result["error"]["message"]
 
 
@@ -114,36 +123,38 @@ def test_default_and_explicit_agent_routing(files, capsys, monkeypatch, prefix):
         return {"mode": "agent", "output": "offline mock", "tool_events": []}
     monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
     code, result, _ = invoke(capsys, *prefix, "--robot", files[0], "--task", "列出硬件",
-                             "--model", "openai:test")
+                             "--role", "test-role", "--model", "openai:test")
     assert code == 0 and result["mode"] == "agent" and result["output"] == "offline mock"
     assert called[0].allow_hardware is False
     assert called[0].allow_actions is False
 
 
 def test_flag_like_task_text_not_removed(files):
-    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task=--no-agent"])
+    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task=--no-agent", "--role", "test-role"])
     assert args.command == "agent" and args.task == "--no-agent"
 
 
 @pytest.mark.parametrize("extra,message", [
-    (["--enable-shell"], "require --workspace-dir"),
-    (["--allow-file-writes"], "require --workspace-dir"),
     (["--no-agent", "--input", "a.mt", "--workspace-dir", "."], "--no-agent cannot"),
     (["--no-agent", "--input", "a.mt", "--enable-shell"], "--no-agent cannot"),
     (["--no-agent", "--input", "a.mt", "--allow-file-writes"], "--no-agent cannot"),
+    (["--workspace-dir", "."], "--role owns its workspace"),
+    (["--skills-dir", "skills"], "--role owns its skills"),
+    (["--mcp-config", "mcp.json"], "--role owns its skills"),
 ])
-def test_workspace_options_require_explicit_capabilities(files, no_agent_import, extra, message):
-    task = [] if "--no-agent" in extra else ["--task", "test"]
+def test_role_owns_workspace_skills_and_mcp(files, no_agent_import, extra, message):
     with pytest.raises(cli.UsageError, match=message):
-        cli.parse_args(["--no-gui", "--robot", str(files[0]), *task, *extra])
+        cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "test", "--role", "test-role", *extra])
 
 
-def test_workspace_options_do_not_grant_other_permissions(files):
-    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "test", "--workspace-dir", ".",
+def test_role_workspace_enables_shell_and_file_writes(files):
+    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "test", "--role", "test-role",
                            "--enable-shell", "--allow-file-writes"])
-    assert args.workspace_dir == "." and args.enable_shell and args.allow_file_writes
+    assert args.role == "test-role" and args.workspace_dir is None
+    assert args.enable_shell and args.allow_file_writes
     assert not args.allow_actions and not args.allow_hardware
-    defaults = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "test", "--allow-actions"])
+    defaults = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "test", "--role", "test-role",
+                               "--allow-actions"])
     assert defaults.workspace_dir is None and not defaults.enable_shell
     assert not defaults.allow_file_writes
 
@@ -152,14 +163,15 @@ def test_agent_interrupt_has_exit_130(files, capsys, monkeypatch):
     async def run_cli_agent(args, stop):
         raise KeyboardInterrupt
     monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
-    code, result, _ = invoke(capsys, "--robot", files[0], "--task", "wait")
+    code, result, _ = invoke(capsys, "--robot", files[0], "--task", "wait", "--role", "test-role")
     assert code == 130 and result["ok"] is False
 
 
 def test_no_session_log_flag(files):
-    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "t", "--no-session-log"])
+    args = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "t", "--role", "test-role",
+                           "--no-session-log"])
     assert args.no_session_log is True
-    default = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "t"])
+    default = cli.parse_args(["--no-gui", "--robot", str(files[0]), "--task", "t", "--role", "test-role"])
     assert default.no_session_log is False
 
 

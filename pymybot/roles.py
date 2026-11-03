@@ -385,6 +385,13 @@ def clear_role_history(name, root=None):
     return role.info()
 
 
+def delete_role(name, root=None):
+    """Delete a role and every file it owns. Confirmation belongs to the caller."""
+    role = load_role(name, root)
+    shutil.rmtree(role.root)
+    return {"name": role.name, "root": str(role.root), "deleted": True}
+
+
 def repair_role_skills(name, *, source=None, root=None):
     """Fill missing files in a role's runnable skills from a complete source.
 

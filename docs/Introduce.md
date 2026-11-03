@@ -80,7 +80,7 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 
 GUI 用 PySide6（Qt 6）；只在命令行里用的话，不需要装 `gui` 可选依赖。
 
-第一次打开，在 **设置** 里选 workspace、结构文件和模型。如果你只想控制硬件，不配模型也能用。
+第一次打开，在 **设置** 里选 workspace、结构文件和模型。如果你只想控制硬件，不配模型也能用。要和 Agent 对话，先点工具栏的「新建」创建一个角色；未选择角色时不会发送任务，「删除」会在确认后移除整个角色目录。
 
 ### 3. 启用 AI Agent
 
@@ -88,10 +88,14 @@ GUI 用 PySide6（Qt 6）；只在命令行里用的话，不需要装 `gui` 可
 .venv/bin/pip install -e ".[agent,test]"
 export MYBOT_MODEL="deepseek:deepseek-chat"
 export DEEPSEEK_API_KEY="sk-..."
+.venv/bin/python -m pymybot roles create technician --description "Field technician"
 .venv/bin/python -m pymybot --no-gui \
+  --role technician \
   --robot skills/hardware-controller/assets/robots/relay-test.sql \
   --task "列出硬件并解释每个变量的作用"
 ```
+
+**对话必须属于一个角色**：角色的提示词、技能、工作区和模型历史互相隔离，不再有全局默认对话。没有 `--role` 的 `pymybot agent`、未选角色的 GUI，以及缺少 `role` 的 `serve` `agent.ask` 都会被拒绝。角色可以随时用 `pymybot roles delete NAME --yes` 或 GUI 的「删除」移除（整个目录，不可恢复）。
 
 支持的模型提供商有 `openai`、`openai-chat`、`anthropic` 和 `deepseek`。密钥只从环境变量读；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
 
@@ -99,13 +103,14 @@ Agent 也能通过 `--mcp-config` 接外部 MCP 服务，把它们的工具放�
 
 ```sh
 .venv/bin/pip install -e ".[agent,mcp]"
+.venv/bin/python -m pymybot roles create researcher --mcp-config ./mcp.json
 .venv/bin/python -m pymybot --no-gui \
+  --role researcher \
   --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --task "列出硬件" \
-  --mcp-config ./mcp.json
+  --task "列出硬件"
 ```
 
-提示词和普通配置不太一样：它直接决定模型能做什么，所以不能随便改。`prompts/` 下的六层按 `manifest.json` 排顺序。0 和 100 是安全前后缀，校验的是打包时写死的哈希，改一个字节就会失败；10 是 core，只有操作员能改；97/98/99 是 SOUL、USER、STATS。Agent 想改这三层，每次都要单独确认（GUI 弹窗、CLI 终端提示），其它工具的自动批准管不到这里。
+提示词和普通配置不太一样：它直接决定模型能做什么，所以不能随便改。Agent 对话使用所选角色自己的 `~/.mybot/roles/<角色>/prompts`；下面的全局库仍用于 `pymybot prompts` 管理和新建角色时的基线。`prompts/` 下的六层按 `manifest.json` 排顺序。0 和 100 是安全前后缀，校验的是打包时写死的哈希，改一个字节就会失败；10 是 core，只有操作员能改；97/98/99 是 SOUL、USER、STATS。Agent 想改这三层，每次都要单独确认（GUI 弹窗、CLI 终端提示），其它工具的自动批准管不到这里。
 
 第一次用到提示词时，默认文件会复制到 `$MYBOT_HOME/prompts`（默认 `~/.mybot/prompts`），你已经改过的文件不会被悄悄覆盖。整个组合上限 128 KiB。GUI 状态栏显示这一轮实际使用的提示词短哈希，设置里的「提示词」页可以查看、编辑 97/98/99，也能补齐缺失或整库恢复。
 

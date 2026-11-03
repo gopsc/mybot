@@ -177,9 +177,9 @@ flowchart TB
 - **Agent modes** execute tools through `RobotExecutor`, which runs hardware
   work on a dedicated owner thread. Host-gated tools ask for approval through a
   callback; trusted skill actions execute without approval.
-  An optional role under `~/.mybot/roles` supplies the session's PromptLibrary,
-  Skills, MCP configuration and resumable model history; it does not change
-  hardware ownership or approval boundaries.
+  The selected role under `~/.mybot/roles` supplies the session's PromptLibrary,
+  Skills, MCP configuration and resumable model history, and is required for
+  agent conversations; it does not change hardware ownership or approval boundaries.
   External MCP tools stay outside that owner thread and are surfaced by
   LangGraph tools, but approval, result bounding and transcripts use the
   same session rules.

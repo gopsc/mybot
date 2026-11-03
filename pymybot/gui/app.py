@@ -131,6 +131,7 @@ class App(QMainWindow):
         self._assistant_markdown = ""
         self.pending_task = ""
         self.pending_reset = False
+        self._delete_role_name = ""
         self.last_task = ""
         self.last_failed = False
         self._resource_roots = None
@@ -189,6 +190,8 @@ class App(QMainWindow):
         toolbar.addWidget(self.role_box)
         self.create_role_button = _button("新建", self.new_role)
         toolbar.addWidget(self.create_role_button)
+        self.delete_role_button = _button("删除", self.delete_role)
+        toolbar.addWidget(self.delete_role_button)
         toolbar.addWidget(_button("刷新", self.refresh_context))
         toolbar.addStretch(1)
         self.manage_button = QToolButton()
@@ -569,17 +572,23 @@ class App(QMainWindow):
             roles = []
         self.role_box.blockSignals(True)
         self.role_box.clear()
-        self.role_box.addItem("默认（全局 Prompt）", "")
         for item in roles:
             self.role_box.addItem(item["name"], item["name"])
             index = self.role_box.count() - 1
             self.role_box.setItemData(index, item.get("description") or item["root"],
                                       Qt.ItemDataRole.ToolTipRole)
         index = self.role_box.findData(current)
-        self.role_box.setCurrentIndex(index if index >= 0 else 0)
+        if index < 0 and self.role_box.count():
+            # Conversations are role-scoped; never fall back to a global prompt.
+            index = 0
+        self.role_box.setCurrentIndex(index)
+        self.role_box.setPlaceholderText("未创建角色")
         self.cfg.role = self.role_box.currentData() or ""
         self.role_box.blockSignals(False)
+        self.delete_role_button.setEnabled(bool(self.cfg.role))
         self._sync_role_paths()
+        if not roles:
+            self._notice("对话需要角色：点工具栏「新建」创建后再发送", seconds=10)
 
     def _sync_role_paths(self):
         role = self.cfg.role
@@ -598,11 +607,12 @@ class App(QMainWindow):
 
     def on_role_changed(self):
         self.cfg.role = self.role_box.currentData() or ""
+        self.delete_role_button.setEnabled(bool(self.cfg.role))
         self._sync_role_paths()
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         self._resource_roots = None
         self._save()
-        self._notice(f"已选择角色：{self.cfg.role}" if self.cfg.role else "已使用全局 Prompt 与默认能力")
+        self._notice(f"已选择角色：{self.cfg.role}" if self.cfg.role else "请先新建角色再对话")
 
     def new_role(self):
         if self._stopping or self.busy:
@@ -635,6 +645,55 @@ class App(QMainWindow):
         self._notice(f"角色 {role.name} 已创建：{role.root}")
         if workspace:
             self._resource_roots = None
+
+    def delete_role(self):
+        if self._stopping or self.busy:
+            return
+        name = self.cfg.role
+        if not name:
+            self._notice("没有选中的角色")
+            return
+        if not self._message("删除角色",
+                             f"将永久删除角色「{name}」及其提示词、技能、工作区文件和对话历史，不可恢复。\n确定删除？",
+                             confirm=True):
+            return
+        self._delete_role_name = name
+        if self.serve is None:
+            self._finish_delete_role(self.generation, None)
+            return
+        generation = self.generation
+        self._notice("正在关闭该角色的会话…")
+        try:
+            # Close the Agent before removing the directory it reads and writes.
+            _, future = self.serve.start_request("agent.reset", {})
+        except RpcError as exc:
+            self._finish_delete_role(generation, exc)
+            return
+        self._background(lambda: future.result(),
+                         lambda _value, error: self._finish_delete_role(generation, error))
+
+    def _finish_delete_role(self, generation, error):
+        if generation != self.generation or self._stopping:
+            return
+        name, self._delete_role_name = self._delete_role_name, ""
+        if not name:
+            return
+        if error is not None:
+            self._message("删除角色失败", f"无法关闭当前会话：{error}")
+            return
+        try:
+            from ..roles import delete_role as remove_role
+            remove_role(name)
+        except Exception as exc:
+            self._message("删除角色失败", str(exc))
+            return
+        self.cfg.role = ""
+        self._load_role_list()
+        self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
+        self._resource_roots = None
+        self._save()
+        self._notice(f"已删除角色：{name}")
+        self.refresh_context()
 
     def _workspace_root(self):
         if self.cfg.role:
@@ -885,6 +944,13 @@ class App(QMainWindow):
                 status = f"{status} / {state}" if status else str(state)
             self._chat_line(f"⇦ {tool} {status}".rstrip(), "tool" if ok is not False else "toolerr")
 
+    def _require_role(self):
+        if self.cfg.role:
+            return True
+        self._notice("请先新建一个角色再对话")
+        self._chat_line("对话需要角色：点工具栏「新建」创建角色后再发送。", "system")
+        return False
+
     def send_task(self):
         if self._stopping:
             return
@@ -893,6 +959,8 @@ class App(QMainWindow):
             return
         if self.busy:
             self._notice("上一轮还在执行，先点停止或等待完成")
+            return
+        if not self._require_role():
             return
         if self.serve is None:
             self.pending_task = task
@@ -905,6 +973,8 @@ class App(QMainWindow):
     def _submit_task(self, task):
         if not self.agent_available:
             self._notice("智能体不可用：缺少 LangGraph/LangChain 依赖")
+            return
+        if not self._require_role():
             return
         self._sync_config()
         scripts = self._scripts_root()

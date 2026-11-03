@@ -82,7 +82,9 @@ def panel(widgets):
 @pytest.fixture
 def window(widgets, tmp_path):
     # Empty workspace: constructor has no hardware process or chosen robot.
-    app = App(GuiConfig(workspace=str(tmp_path)), tmp_path / "settings.json")
+    from pymybot.roles import create_role, load_role, role_path
+    role = load_role("test-role") if role_path("test-role").exists() else create_role("test-role")
+    app = App(GuiConfig(workspace=str(tmp_path), role=role.name), tmp_path / "settings.json")
     app._start_timer.stop()
     return widgets(app)
 
@@ -360,7 +362,11 @@ def test_open_prompt_folder_uses_library_root(panel, monkeypatch):
 
 
 @pytest.mark.parametrize("layer", ["0", "100"])
-def test_send_guard_blocks_tampered_safety_before_rpc(window, library, layer):
+def test_send_guard_blocks_tampered_safety_before_rpc(window, layer):
+    from pymybot.roles import role_path
+
+    library = PromptLibrary(home=role_path(window.cfg.role) / "prompts")
+    library.ensure_home()
     client = ServeClient(sys.executable, ROOT)
     try:
         info = client.request("initialize", timeout=30)

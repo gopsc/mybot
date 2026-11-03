@@ -584,7 +584,14 @@ def test_workspace_console_approval_displays_scope(monkeypatch, capsys, name, ar
     assert repr(agent_module.dumps(args)) in output.err
 
 
+def ensure_role(name="test-role"):
+    """CLI conversations require a loadable role; reuse one within a test."""
+    from pymybot.roles import create_role, load_role, role_path
+    return load_role(name) if role_path(name).exists() else create_role(name)
+
+
 def install_cli_fakes(monkeypatch, executor, model, client):
+    ensure_role()
     def factory(*args, stop_event, **kwargs):
         executor.stop_event = stop_event
         return executor
@@ -616,7 +623,7 @@ def test_cli_cleanup_failures_preserve_receipts_and_primary_error(monkeypatch, c
         executor.call = unknown_call
     model = scripted_model([ToolCallPart("list_skills", {})], [TextPart("done")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=close_client))
-    code = cli.main(["--no-gui", "--robot", "unused.sql", "--task", "list skills"])
+    code = cli.main(["--no-gui", "--robot", "unused.sql", "--task", "list skills", "--role", "test-role"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 1 and not payload["ok"] and closed == ["executor", "client"]
@@ -640,7 +647,7 @@ def test_interactive_cli_confirms_and_emits_only_final_json(monkeypatch, capsys,
         [TextPart("已完成")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=close_client))
     monkeypatch.setattr(sys, "stdin", FakeTTY("创建技能\ny\n/exit\n"))
-    code = cli.main(["--no-gui", "--robot", "unused.sql", "--workspace-dir", str(tmp_path)])
+    code = cli.main(["--no-gui", "--robot", "unused.sql", "--role", "test-role"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 0 and len(captured.out.splitlines()) == 1
@@ -654,7 +661,7 @@ def test_interactive_cli_streams_to_stderr_and_does_not_reprint(monkeypatch, cap
     model = scripted_model([ToolCallPart("list_skills", {})], [TextPart("AAAA BBBB")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=lambda: asyncio.sleep(0)))
     monkeypatch.setattr(sys, "stdin", FakeTTY("list\n/exit\n"))
-    code = cli.main(["--no-gui", "--robot", "unused.sql"])
+    code = cli.main(["--no-gui", "--robot", "unused.sql", "--role", "test-role"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 0 and len(captured.out.splitlines()) == 1
@@ -734,7 +741,8 @@ def completion(message, *, tool=False):
 def test_cli_real_sdk_model_loop_with_generic_tools(tmp_path, monkeypatch, capsys):
     from pymybot import cli
     monkeypatch.setenv("OPENAI_API_KEY", "offline-fake-key")
-    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+    workspace = ensure_role().workspace_dir
+    (workspace / "note.txt").write_text("hello", encoding="utf-8")
 
     def respond(body, count):
         assert body["model"] == "test" and body["parallel_tool_calls"] is False
@@ -750,7 +758,7 @@ def test_cli_real_sdk_model_loop_with_generic_tools(tmp_path, monkeypatch, capsy
 
     with fake_openai(respond) as (url, requests):
         code = cli.main(["--no-gui", "agent", "--task", "list files", "--model", "openai:test",
-                         "--base-url", url, "--workspace-dir", str(tmp_path)])
+                         "--base-url", url, "--role", "test-role"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 0 and payload["output"] == "文件已列出" and len(requests) == 2
@@ -764,6 +772,7 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
     monkeypatch.setenv("OPENAI_API_KEY", "offline-fake-key")
     path = tmp_path / "robot.sql"
     path.write_text("CREATE TABLE dummy(name String);", encoding="utf-8")
+    ensure_role()
     ports = []
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"  # Offer keep-alive.
@@ -786,7 +795,7 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
     thread.start()
     try:
         code = cli.main(["--no-gui", "--robot", str(path), "--task", "列出硬件", "--model", "openai-chat:test",
-                         "--base-url", f"http://127.0.0.1:{server.server_port}/v1"])
+                         "--role", "test-role", "--base-url", f"http://127.0.0.1:{server.server_port}/v1"])
     finally:
         server.shutdown()
         server.server_close()
@@ -798,6 +807,8 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
 def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
     from pymybot import cli, sandbox
     from pymybot.robot import Robot
+
+    workspace = ensure_role().workspace_dir
 
     robot = tmp_path / "robot.sql"
     robot.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
@@ -836,12 +847,12 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(agent_module, "create_model", lambda _: (FunctionModel(respond, stream_function=stream), None))
     flags = ["--enable-shell"] if shell else []
     code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),
-                     "--workspace-dir", str(tmp_path), *flags,
+                     "--role", "test-role", *flags,
                      "--allow-file-writes", "--task", "write, edit, read and run shell"])
     captured = capsys.readouterr()
     assert code == 0 and len(captured.out.splitlines()) == 1, captured.out + captured.err
     assert json.loads(captured.out)["output"] == "completed"
-    assert (tmp_path / "note.txt").read_text(encoding="utf-8") == "after\n"
+    assert (workspace / "note.txt").read_text(encoding="utf-8") == "after\n"
     assert receipts[2]["data"]["content"] == "after\n"
     if shell:
         assert receipts[3]["data"]["exit_code"] == 0
@@ -853,11 +864,12 @@ def test_provider_error_is_sanitized_and_not_retried(tmp_path, monkeypatch, caps
     from pymybot import cli
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", True)
     monkeypatch.setenv("OPENAI_API_KEY", "offline-fake-key")
+    ensure_role()
     path = tmp_path / "robot.sql"
     path.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
     with fake_openai(lambda *_: (500, {"error": {"message": "SECRET must not leak", "type": "server_error"}})) as (url, requests):
         code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
-                         "--model", "openai:test", "--base-url", url])
+                         "--role", "test-role", "--model", "openai:test", "--base-url", url])
     captured = capsys.readouterr()
     assert code == 1 and len(requests) == 1
     assert "SECRET" not in captured.out + captured.err
@@ -871,18 +883,21 @@ def test_unusable_skills_root_fails_as_configuration_before_any_request(tmp_path
     path = tmp_path / "robot.sql"
     path.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
 
+    role = ensure_role("broken-skills")
+    # The role owns its skills root; removing it must fail before any request.
+    role.skills_dir.rename(role.root / "skills-removed")
+
     def forbid(*_):
         pytest.fail("skills root must be validated before a model request is sent")
 
     with fake_openai(forbid) as (url, requests):
         code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
-                         "--skills-dir", str(tmp_path / "absent"),
-                         "--model", "openai:test", "--base-url", url])
+                         "--role", role.name, "--model", "openai:test", "--base-url", url])
     captured = capsys.readouterr()
     assert requests == []
     assert code == 1
     assert json.loads(captured.out)["error"]["type"] == "AgentConfigurationError"
-    assert "Skills root does not exist" in captured.err
+    assert "Cannot load role" in captured.err
 
 
 @pytest.mark.parametrize("model", ["", "gpt-example", "unknown:x", "openai:"])
@@ -1034,7 +1049,8 @@ def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
     model = scripted_model([TextPart("done")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=lambda: asyncio.sleep(0)))
 
-    code = cli.main(["--no-gui", "--robot", "unused.sql", "--model", "openai:test", "--task", "hello"])
+    code = cli.main(["--no-gui", "--robot", "unused.sql", "--model", "openai:test", "--task", "hello",
+                     "--role", "test-role"])
     captured = capsys.readouterr()
     assert code == 0 and "session log:" in captured.err
     sessions = list((tmp_path / "sessions").iterdir())
