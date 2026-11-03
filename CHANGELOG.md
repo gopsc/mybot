@@ -85,6 +85,12 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Frozen builds merge the root `pymybot` package and the hardware-controller
+  Skill sources into one staging package before PyInstaller analysis, so
+  `pymybot.cli`, the Agent modules and the GUI are present in the bundle
+  instead of failing at startup. `sqlparse` is an explicit hidden import for
+  the controller's SQL grammar.
+
 - `pymybot new` printed follow-up `check`/`run` commands without
   `--module-path modules`, so they failed with "Driver module not found" in the
   generated project. The commands now include the module root, with a CLI
@@ -93,6 +99,15 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refuses a copied manifest whose declared entrypoint is missing. Previously a
   role created from an older role could silently lose every `skill.json` (and
   with it `run_skill`).
+- `agent.reset` with `clearHistory` erased the active conversation's role even
+  when the caller named a different role, so switching roles and pressing
+  **新对话** kept the selected role's history and the model still answered with
+  old context. The explicitly named role now wins; the active role is only a
+  fallback.
+- The GUI's **新对话** did nothing when `serve` was still starting. The reset is
+  now queued and sent once the server is ready, and a successful reset clears
+  the visible transcript as well. **清空对话** still only clears the window and
+  now says so, since it keeps the model context.
 
 ## [0.6.0] – 2026-11-02
 

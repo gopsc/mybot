@@ -216,7 +216,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
 | `agent.ask` | `task`, optional `robot`, optional `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
-| `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested |
+| `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested, preferring the named role over the active conversation's role |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |
 | `roles.clear_history` | `name` | clear an inactive role's resumable history |

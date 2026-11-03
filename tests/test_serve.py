@@ -667,6 +667,30 @@ def test_abort_agent_closes_an_idle_conversation(workspace, monkeypatch):
     lifecycle_scenario(workspace, monkeypatch, scenario)
 
 
+def test_reset_clears_requested_role_history(workspace, monkeypatch):
+    cleared = []
+    monkeypatch.setattr("pymybot.roles.clear_role_history", lambda name, root=None: cleared.append(name))
+
+    async def scenario(h):
+        await h.call("agent.ask")
+        h.agents[0]["session"].role = type("Role", (), {"name": "previous"})()
+        await h.call("agent.reset", {"clearHistory": True, "role": "selected"})
+        # The operator-selected role wins over the conversation being closed.
+        assert cleared == ["selected"]
+        assert h.agents[0]["session"].closed
+
+        # No active conversation and no role: nothing to erase.
+        await h.call("agent.reset", {"clearHistory": True})
+        assert cleared == ["selected"]
+
+        # Without an explicit role the active conversation's role is the fallback.
+        await h.call("agent.ask")
+        h.agents[1]["session"].role = type("Role", (), {"name": "previous"})()
+        await h.call("agent.reset", {"clearHistory": True})
+        assert cleared == ["selected", "previous"]
+    lifecycle_scenario(workspace, monkeypatch, scenario)
+
+
 def test_owner_session_cleanup_blocks_new_owners(workspace, monkeypatch):
     async def scenario(h):
         await h.call("session.activate")

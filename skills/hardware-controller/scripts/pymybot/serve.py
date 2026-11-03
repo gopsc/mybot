@@ -761,9 +761,13 @@ class Server:
             raise RpcError(BUSY, "Cancel the running agent turn first")
         async with self.agent_lock:
             try:
-                active_role = getattr(self.agent["session"], "role", None) if self.agent is not None else None
-                if active_role is not None:
-                    role_name = active_role.name
+                # The request names the role the operator is looking at; only fall
+                # back to the active conversation's role when the caller sent none.
+                # Overwriting it would erase an inactive role after a role switch.
+                if not role_name and self.agent is not None:
+                    active_role = getattr(self.agent["session"], "role", None)
+                    if active_role is not None:
+                        role_name = active_role.name
                 await self.close_agent()
                 if clear_history and role_name:
                     from .roles import clear_role_history

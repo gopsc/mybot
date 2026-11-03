@@ -117,7 +117,8 @@ selected role. The role name is a saved preference, never a permission grant.
 
 Each successful turn updates the role's resumable model history. Switching roles
 preserves both roles' histories. **新对话** clears the selected role's saved
-history and releases hardware; **清空对话** only clears the visible window. See
+history, releases hardware and clears the visible window; **清空对话** only clears
+the visible window and keeps the model context. See
 [roles.md](roles.md) for the format and CLI/JSON-RPC equivalents.
 
 ## Runtime prompt management

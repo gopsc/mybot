@@ -130,6 +130,7 @@ class App(QMainWindow):
         self._assistant_start = None
         self._assistant_markdown = ""
         self.pending_task = ""
+        self.pending_reset = False
         self.last_task = ""
         self.last_failed = False
         self._resource_roots = None
@@ -768,7 +769,14 @@ class App(QMainWindow):
             self.greeted = True
             self._chat_line("与机器人对话即可：模型会通过可信技能列出硬件、查询结构并执行动作。", "system")
         self._refresh_status()
-        if self.pending_task:
+        if self.pending_reset:
+            # The reset was requested before the server was ready; any task queued
+            # in the meantime belongs to the conversation being discarded.
+            self.pending_reset = False
+            self.pending_task = ""
+            self._request_reset()
+            self._refresh_status()
+        elif self.pending_task:
             task, self.pending_task = self.pending_task, ""
             self._submit_task(task)
             self._refresh_status()
@@ -1065,10 +1073,20 @@ class App(QMainWindow):
             self._notice("先停止当前这一轮")
             return
         if self.serve is None:
+            # Queue the reset instead of silently doing nothing on the first click.
+            self.pending_reset = True
+            self._notice("正在启动 pymybot serve，就绪后开始新对话…")
             self._start_server()
             return
+        self._request_reset()
+
+    def _request_reset(self):
+        if self.serve is None or self._stopping:
+            return
         generation = self.generation
-        params = ({"clearHistory": True, "role": self.cfg.role} if self.cfg.role else {})
+        params = {"clearHistory": True}
+        if self.cfg.role:
+            params["role"] = self.cfg.role
         try:
             _, future = self.serve.start_request("agent.reset", params)
         except RpcError as exc:
@@ -1079,7 +1097,13 @@ class App(QMainWindow):
     def _on_reset(self, generation, error):
         if generation != self.generation or self._stopping:
             return
-        self._chat_line(f"重置失败：{error}" if error else "[新对话，硬件已释放]", "error" if error else "system")
+        if error is not None:
+            self._chat_line(f"重置失败：{error}", "error")
+            return
+        # A new conversation must look new: drop the visible transcript too.
+        self._clear_transcript()
+        self._chat_line("[新对话，硬件已释放]", "system")
+        self._refresh_status()
 
     def retry_task(self):
         if self.busy:
@@ -1098,14 +1122,17 @@ class App(QMainWindow):
     def clear_chat(self):
         if not self.chat.toPlainText().strip():
             return
-        if not self._message("清空对话", "清空窗口中的对话记录？磁盘上的会话转录不受影响。", confirm=True):
+        if not self._message("清空对话", "只清空窗口中的记录；模型上下文和磁盘转录都不受影响。\n要重置模型上下文，请用工具栏的「新对话」。", confirm=True):
             return
+        self._clear_transcript()
+        self._notice("对话已清空（模型上下文未变）")
+
+    def _clear_transcript(self):
         self.chat.clear()
         self.at_line_start = True
         self.turn_text = 0
         self._assistant_start = None
         self._assistant_markdown = ""
-        self._notice("对话已清空")
 
     def copy_chat(self):
         text = self.chat.toPlainText().strip()

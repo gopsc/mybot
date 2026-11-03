@@ -84,9 +84,9 @@ While a role is selected:
 - **工具 → MCP 配置** edits the role's `mcp.json`;
 - **设置 → 提示词**, send-time safety validation and prompt-update diffs use the
   role's PromptLibrary;
-- **新对话** closes the Agent, releases hardware and clears that role's saved
-  model history;
-- **清空对话** only clears the visible window, as before.
+- **新对话** closes the Agent, releases hardware, clears that role's saved
+  model history and clears the visible window;
+- **清空对话** only clears the visible window and keeps the model context, as before.
 
 Switching roles does not erase either role's history. The next request opens
 the newly selected role with its own capabilities and context.

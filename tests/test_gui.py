@@ -825,9 +825,28 @@ def test_stop_and_reset_native_buttons(ui, qapp):
     assert qt_wait(qapp, lambda: not app.busy)
     assert "[已停止]" in app.chat.toPlainText()
     app.new_button.click()
-    assert client.requests[-1] == ("agent.reset", {})
+    assert client.requests[-1] == ("agent.reset", {"clearHistory": True})
     client.futures[-1].set_result({})
     assert qt_wait(qapp, lambda: "新对话，硬件已释放" in app.chat.toPlainText())
+    transcript = app.chat.toPlainText()
+    assert "hello" not in transcript and "[已停止]" not in transcript
+
+
+def test_new_conversation_queues_reset_until_server_is_ready(ui, qapp, monkeypatch):
+    _, app = ui
+    monkeypatch.setattr(app, "_start_server", lambda: None)
+    app._chat_line("你：旧问题", "user")
+    app.pending_task = "queued task"
+    app.new_button.click()
+    assert app.pending_reset is True
+    client = FakeClient()
+    app._server_started(app.generation, (client, {"agent": True, "protocol": 1}), None)
+    assert app.pending_reset is False and app.pending_task == ""
+    assert client.requests[-1] == ("agent.reset", {"clearHistory": True})
+    client.futures[-1].set_result({})
+    assert qt_wait(qapp, lambda: "新对话，硬件已释放" in app.chat.toPlainText())
+    assert "旧问题" not in app.chat.toPlainText()
+    assert "queued task" not in app.chat.toPlainText()
 
 
 def test_stale_generations_and_reused_turn_ids_are_ignored(ui):
