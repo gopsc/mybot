@@ -229,14 +229,30 @@ def list_roles(root=None):
 
 
 def _copy_skills(source, destination):
+    """Copy each trusted skill in full, including manifests, scripts and assets."""
     library = SkillsLibrary(Path(source).expanduser(), required=True)
     for name, entry in library.skills.items():
-        for relative in entry["files"]:
-            source_file = entry["directory"].joinpath(*relative.split("/"))
-            target = destination / name / Path(*relative.split("/"))
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(read_file(source_file), encoding="utf-8")
-            _private(target, 0o600)
+        source_root = entry["directory"]
+        target_root = destination / name
+        target_root.mkdir(parents=True, exist_ok=True)
+        _private(target_root, 0o700)
+        for base, dirs, files in os.walk(source_root, followlinks=False):
+            base_path = Path(base)
+            dirs[:] = sorted(
+                item for item in dirs
+                if item not in {"__pycache__", ".git"}
+                and not (base_path / item).is_symlink())
+            for filename in sorted(files):
+                source_file = base_path / filename
+                if filename.endswith(".pyc"):
+                    continue
+                info = source_file.lstat()
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                    raise SecurityError("Skill files must be regular files")
+                target = target_root / source_file.relative_to(source_root)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source_file, target)
+                _private(target, 0o600)
 
 
 def create_role(name, *, description="", skills_from=None, mcp_from=None, root=None):

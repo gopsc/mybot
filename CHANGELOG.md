@@ -8,6 +8,9 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Role creation now copies complete skill directories, including `skill.json`,
+  `scripts/` and `assets/`, so runnable skills stay runnable inside a role. The
+  `control` intent also exposes `write_file`, `edit_file` and `shell`.
 - The GUI no longer shows the structure selector, hardware tree, scripts root or
   module path, and the script/structure editor tab is removed. The Agent starts
   without a selected structure; scripts and modules use the packaged/source

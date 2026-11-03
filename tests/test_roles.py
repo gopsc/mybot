@@ -38,13 +38,24 @@ def test_role_imports_skills_and_mcp(tmp_path):
     (skills / "demo" / "SKILL.md").write_text(
         "---\nname: demo\ndescription: Demo skill\n---\n# Demo\n", encoding="utf-8")
     (skills / "demo" / "references" / "guide.md").write_text("guide", encoding="utf-8")
+    (skills / "demo" / "skill.json").write_text(json.dumps({
+        "version": 1, "run": {"entrypoint": "scripts/run.py", "actions": {
+            "echo": {"effect": "read", "output": "json", "argv": []}}}}), encoding="utf-8")
+    (skills / "demo" / "scripts").mkdir()
+    (skills / "demo" / "scripts" / "run.py").write_text("print(1)\n", encoding="utf-8")
+    (skills / "demo" / "assets").mkdir()
+    (skills / "demo" / "assets" / "data.txt").write_text("data", encoding="utf-8")
     mcp = tmp_path / "mcp.json"
     mcp.write_text(json.dumps({"mcpServers": {"demo": {
         "command": "python", "args": ["server.py"],
     }}}), encoding="utf-8")
 
     role = create_role("researcher", skills_from=skills, mcp_from=mcp, root=tmp_path / "roles")
-    assert SkillsLibrary(role.skills_dir, required=True).read("demo", "references/guide.md") == "guide"
+    copied = SkillsLibrary(role.skills_dir, required=True)
+    assert copied.read("demo", "references/guide.md") == "guide"
+    assert copied.skills["demo"]["runnable"] is True
+    assert (role.skills_dir / "demo" / "scripts" / "run.py").is_file()
+    assert (role.skills_dir / "demo" / "assets" / "data.txt").read_text(encoding="utf-8") == "data"
     assert load_servers(role.mcp_config)[0].name == "demo"
     assert role.info()["skills"] == ["demo"]
 

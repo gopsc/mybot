@@ -262,7 +262,7 @@ Agent mode is documented in the README. The important flags are:
 | `--prompt-file FILE` | Additional operator-owned UTF-8 profile (max 8 KiB); does not replace runtime USER or the safety prefix/suffix. |
 | `--no-prompt-stats` | Disable automatic host-generated STATS updates (also accepted by `gui`; default false). |
 | `--context-bytes N` | Budget for the generated project inventory (workspace top level, structures, scripts, drivers, skills); 0 disables it (0–64 KiB, default 4096). |
-| `--intent MODE` | `auto` (default), `off`, `chat`, `inspect`, `control`, `author` or `diagnose`. Auto narrows the tool allowlist and budget when the request clearly matches an intent; mixed requests union their tools; messages with no keywords stay unrestricted. |
+| `--intent MODE` | `auto` (default), `off`, `chat`, `inspect`, `control`, `author` or `diagnose`. Auto narrows the tool allowlist when the request clearly matches an intent; mixed requests union their tools; messages with no keywords stay unrestricted. |
 | `--sandbox MODE` | `auto` (default), `off` or `bwrap`. Agent prompt protection requires usable bubblewrap: unavailable backends or `off` refuse shell execution. The host is read-only, the workspace is writable with prompt roots re-mounted read-only, the environment is cleared and network/PID/IPC/UTS namespaces are unshared. This protects prompt integrity, not host-file confidentiality. |
 | `--web` | Enable `web_fetch` (HTTPS only) and, with `--search-endpoint`, `web_search`. Requires `pymybot[web]`. Private/link-local/loopback targets, redirects past three hops, non-text content and oversized bodies are refused. |
 | `--allow-web` | Pre-approve web requests for this session (requires `--web`). |

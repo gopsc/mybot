@@ -78,7 +78,8 @@ def test_no_keywords_stays_unrestricted():
 def test_operator_override_and_off():
     forced = classify_intent("hello", "control")
     assert forced.name == "control" and forced.confidence == 1.0
-    assert forced.allows("run_skill") and not forced.allows("write_file")
+    assert forced.allows("run_skill")
+    assert forced.allows("write_file") and forced.allows("edit_file") and forced.allows("shell")
     disabled = classify_intent("run the robot", "off")
     assert disabled.name == "off" and not disabled.restricted
     assert disabled.allows("shell")
