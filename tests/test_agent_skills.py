@@ -13,7 +13,7 @@ from pymybot.cli import parse_args
 from pymybot.security import SecurityError
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 SQL = "CREATE TABLE Relay(name String); INSERT INTO Relay(name) VALUES('r0');\n"
 SKILL_MD = "---\nname: demo-skill\ndescription: Demo skill for tests.\n---\n\n# Demo\n\nBody text.\n"
 IS_WINDOWS = sys.platform.startswith("win")

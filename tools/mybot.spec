@@ -66,7 +66,7 @@ import shutil
 
 bundle = Path(DISTPATH) / "mybot"
 for name in ("robots", "scripts"):
-    shutil.copytree(ROOT / "skills" / "hardware-controller" / "references" / "assets" / name,
+    shutil.copytree(ROOT / "skills" / "hardware-controller" / "assets" / name,
                     bundle / name, dirs_exist_ok=True)
 for extra in ("README.md", "LICENSE"):
     if (ROOT / extra).is_file():

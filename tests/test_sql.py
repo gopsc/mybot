@@ -576,7 +576,7 @@ def test_large_quoted_value_and_wide_column_list_do_not_recurse():
 
 
 def test_bundled_relay_sql():
-    path = (Path(__file__).resolve().parents[1] / "skills" / "hardware-controller" / "references" / "assets"
+    path = (Path(__file__).resolve().parents[1] / "skills" / "hardware-controller" / "assets"
             / "robots" / "relay-test.sql")
     tables = load_structure(path.read_text(encoding="utf-8"))
     assert list(tables) == ["Timer", "Relay"]

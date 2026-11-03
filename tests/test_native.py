@@ -13,7 +13,7 @@ from pymybot.robot import Robot
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 MODULES = ASSETS / "modules"
 SQL = "CREATE TABLE Probe(name String); INSERT INTO Probe(name) VALUES('dev');"
 PROBE = '''

@@ -29,8 +29,8 @@ Use the platform paths under Windows (`.venv\Scripts\pip`).
 ```sh
 python -m pytest -q                       # full suite, no hardware
 python -m pytest tests/test_gui.py -q     # Qt widgets tested offscreen, including headless CI
-python -m pymybot check --robot skills/hardware-controller/references/assets/robots/relay-test.sql --input skills/hardware-controller/references/assets/scripts/relay-test.mt
-python -m pymybot run --robot skills/hardware-controller/references/assets/robots/relay-test.sql --input skills/hardware-controller/references/assets/scripts/relay-test.mt --timeout 10
+python -m pymybot check --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt
+python -m pymybot run --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt --timeout 10
 python -I tools/ci_smoke.py base        # fail if LangChain/LangGraph leaked into base env
 python -I tools/ci_smoke.py agent       # fail if agent imports are missing
 python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
@@ -47,7 +47,7 @@ controller subcommands such as `check` and `run` always use the terminal.
 pymybot/            Python compatibility package and Agent/GUI modules
 skills/hardware-controller/scripts/pymybot/  controller and MCP Runtime
 skills/hardware-controller/references/       controller authority documents
-skills/hardware-controller/references/assets/ default modules, robots and MT scripts
+skills/hardware-controller/assets/ default modules, robots and MT scripts
 skills/             operator-trusted agent reference skills
 tests/              pytest suite and virtual-device fixtures
 docs/               operator and maintainer documentation

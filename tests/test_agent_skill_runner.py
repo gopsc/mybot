@@ -11,7 +11,7 @@ from pymybot.errors import BudgetExceeded
 from pymybot.security import SecurityError
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 
 SKILL_MD = "---\nname: demo-skill\ndescription: Demo runnable skill.\n---\n\n# Demo\n"
 
@@ -22,7 +22,7 @@ def make_skill(tmp_path, *, argv=None, params=None, hardware_flag=None, entry=No
     scripts = skill / "scripts"
     scripts.mkdir(parents=True)
     (skill / "SKILL.md").write_text(SKILL_MD, encoding="utf-8")
-    data = skill / "references" / "assets" / "data.txt"
+    data = skill / "assets" / "data.txt"
     data.parent.mkdir(parents=True)
     data.write_text("ok", encoding="utf-8")
     (scripts / "task.py").write_text(entry or (

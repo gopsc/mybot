@@ -134,7 +134,7 @@ VALUES ('qs', '$cloud', '$user', '$pass', '$(device)');
 
 ```sh
 export QS_USER=iot_01 QS_PASS=pass123
-pymybot run --robot skills/hardware-controller/references/assets/robots/qsont.sql --input skills/hardware-controller/references/assets/scripts/qsont.mt \
+pymybot run --robot skills/hardware-controller/assets/robots/qsont.sql --input skills/hardware-controller/assets/scripts/qsont.mt \
   --timeout 30 --allow-hardware \
   --var-env user=QS_USER --var-env pass=QS_PASS --var device=1
 ```
@@ -153,17 +153,17 @@ python -m pymybot new mybot-arm
 
 # Static validation, no hardware
 python -m pymybot check \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/references/assets/scripts/relay-test.mt
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
+  --input skills/hardware-controller/assets/scripts/relay-test.mt
 
 # Pure-software end-to-end run (Timer + Relay)
 python -m pymybot run \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/references/assets/scripts/relay-test.mt \
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
+  --input skills/hardware-controller/assets/scripts/relay-test.mt \
   --timeout 10
 
 # Query the structure without activating it
-python -m pymybot query --robot skills/hardware-controller/references/assets/robots/relay-test.sql --sql "SHOW TABLES;"
+python -m pymybot query --robot skills/hardware-controller/assets/robots/relay-test.sql --sql "SHOW TABLES;"
 
 # Serve a long-lived session to an IDE
 python -m pymybot serve

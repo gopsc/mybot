@@ -93,11 +93,11 @@ def audit(root):
                 suffix = candidate.removeprefix("pymybot/assets/")
                 candidates.append(root / suffix)
                 if suffix.split("/", 1)[0] in {"modules", "robots", "scripts"}:
-                    candidates.append(root / "skills" / "hardware-controller" / "references" / "assets" / suffix)
+                    candidates.append(root / "skills" / "hardware-controller" / "assets" / suffix)
             elif candidate.startswith("pymybot/"):
                 candidates.append(root / "skills" / "hardware-controller" / "scripts" / candidate)
             elif candidate.split("/", 1)[0] in {"modules", "robots", "scripts"}:
-                candidates.append(root / "skills" / "hardware-controller" / "references" / "assets" / candidate)
+                candidates.append(root / "skills" / "hardware-controller" / "assets" / candidate)
             if not any(path.exists() for path in candidates):
                 problems.append(f"{relative}: referenced path does not exist: {candidate}")
         if path.name == "SKILL.md":

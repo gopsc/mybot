@@ -9,7 +9,7 @@ from pymybot.daemon import DaemonVariable, Slot, validate_config
 from pymybot.errors import DriverError, ScriptError
 from pymybot.hardware import Registry
 
-MODULES = Path(__file__).resolve().parents[1] / "skills" / "hardware-controller" / "references" / "assets" / "modules"
+MODULES = Path(__file__).resolve().parents[1] / "skills" / "hardware-controller" / "assets" / "modules"
 
 
 class FakeRuntime:

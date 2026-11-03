@@ -21,7 +21,7 @@ from pymybot.cli import main
 from pymybot.mcp_client import McpConfigError, load_servers
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 
 SERVER_SCRIPT = '''
 try:

@@ -18,7 +18,7 @@ from pymybot import serve
 from pymybot.errors import BudgetExceeded
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 VIRTUAL_SQL = """
 CREATE TABLE Timer(name String);
 INSERT INTO Timer(name) VALUES('t0');

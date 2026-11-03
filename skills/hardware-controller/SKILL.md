@@ -5,7 +5,7 @@ description: Control and program robots through the self-contained pymybot Runti
 
 # Hardware Controller
 
-使用 `scripts/` 内的 Python Runtime 控制机器人。Structure SQL 声明硬件，Python/Lua driver 实现设备行为，MT action 描述时序动作。默认 robots、scripts 和 modules 位于 `references/assets/`。
+使用 `scripts/` 内的 Python Runtime 控制机器人。Structure SQL 声明硬件，Python/Lua driver 实现设备行为，MT action 描述时序动作。默认 robots、scripts 和 modules 位于 `assets/`。
 
 ## 运行入口
 
@@ -13,7 +13,7 @@ description: Control and program robots through the self-contained pymybot Runti
 
 ```sh
 python skills/hardware-controller/scripts/hardware_controller.py doctor
-python skills/hardware-controller/scripts/hardware_controller.py hardware --robot skills/hardware-controller/references/assets/robots/relay-test.sql
+python skills/hardware-controller/scripts/hardware_controller.py hardware --robot skills/hardware-controller/assets/robots/relay-test.sql
 ```
 
 也可以继续使用兼容入口 `python -m pymybot`；两者共享同一套 Runtime，不要复制或另建控制器实现。
@@ -23,7 +23,7 @@ python skills/hardware-controller/scripts/hardware_controller.py hardware --robo
 1. 用 `doctor` 检查解释器、依赖和 assets。
 2. 用 `hardware`、`query` 或 `check` 静态检查结构与动作；这些命令不得激活硬件。
 3. 编写 SQL、MT 或 Driver 前，阅读 `../pymybot-scripting/SKILL.md` 及对应 reference。
-4. 先用 `references/assets/` 的虚拟设备或项目 fixtures 验证，再考虑物理设备。
+4. 先用 `assets/` 的虚拟设备或项目 fixtures 验证，再考虑物理设备。
 5. 先 `check`，再 `run`。物理设备、非回环网络及 Shell 必须显式授权。
 6. 检查单行 JSON、退出码和测试。动作派发后异常可能意味着结果未知，不自动重试，也不声称已回滚。
 
@@ -32,13 +32,13 @@ python skills/hardware-controller/scripts/hardware_controller.py hardware --robo
 将 `scripts/` 加入 Python 模块搜索路径后，使用标准模块入口：
 
 ```sh
-python -m pymybot mcp --robot references/assets/robots/relay-test.sql --scripts-dir references/assets/scripts
+python -m pymybot mcp --robot assets/robots/relay-test.sql --scripts-dir assets/scripts
 ```
 
 在仓库根目录也可使用：
 
 ```sh
-python skills/hardware-controller/scripts/hardware_controller.py mcp --robot skills/hardware-controller/references/assets/robots/relay-test.sql --scripts-dir skills/hardware-controller/references/assets/scripts
+python skills/hardware-controller/scripts/hardware_controller.py mcp --robot skills/hardware-controller/assets/robots/relay-test.sql --scripts-dir skills/hardware-controller/assets/scripts
 ```
 
 MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物理硬件另需 `--allow-hardware`。

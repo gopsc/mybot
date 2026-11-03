@@ -68,7 +68,7 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Moved the self-contained controller and MCP Runtime to
   `skills/hardware-controller/scripts/pymybot/`, with authoritative controller
   docs in `references/` and default robots/scripts/modules in
-  `references/assets/`. Existing `pymybot.*` imports, CLI/GUI/Agent entries and
+  `assets/`. Existing `pymybot.*` imports, CLI/GUI/Agent entries and
   packaged asset layouts remain compatible.
 
 ## [0.5.1] – 2026-11-02

@@ -18,7 +18,7 @@ from pymybot.errors import DriverError
 from pymybot.robot import Robot
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 MODULES = ASSETS / "modules"
 USER, PASSWORD, DEVICE_ID = "iot_probe", "secret7", 7
 FOREIGN_ID, FOREIGN_KEY = 8, "flower-key-1234"

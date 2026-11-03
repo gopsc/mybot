@@ -24,7 +24,7 @@ from pymybot.gui.protocol import ServeClient
 from pymybot.prompts import MAX_PROMPT_TOTAL, PromptLibrary
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 
 
 @pytest.fixture(scope="module")

@@ -199,7 +199,7 @@ flowchart TB
 Controller sources live in `skills/hardware-controller/scripts/pymybot/`; the root
 `pymybot` package extends its search path so existing `pymybot.*` imports and the
 Agent/GUI keep working. Default source assets live in
-`skills/hardware-controller/references/assets/{modules,robots,scripts}`. Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills,prompts}`; module
+`skills/hardware-controller/assets/{modules,robots,scripts}`. Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills,prompts}`; module
 assets include both `.py` and `.lua`. Doctor counts both; agent inventory and
 GUI previews include both within their existing budgets, with Python syntax
 highlighting for `.py`. In a source checkout the code falls back to the

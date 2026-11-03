@@ -30,7 +30,7 @@ def test_asset_plan_covers_all_runtime_roots():
 
 def test_ci_manifest_supports_source_and_bundled_layouts(tmp_path):
     source = tmp_path / "source"
-    controller = source / "skills" / "hardware-controller" / "references" / "assets"
+    controller = source / "skills" / "hardware-controller" / "assets"
     for directory, filename in (("modules", "demo.lua"), ("robots", "demo.sql"), ("scripts", "demo.mt")):
         (controller / directory).mkdir(parents=True)
         (controller / directory / filename).write_text("return 1", encoding="utf-8")

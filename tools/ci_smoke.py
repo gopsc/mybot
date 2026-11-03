@@ -41,7 +41,7 @@ def preflight(mode):
     print(f"{mode} dependency preflight passed", flush=True)
 
 
-CONTROLLER_ASSETS = Path("skills/hardware-controller/references/assets")
+CONTROLLER_ASSETS = Path("skills/hardware-controller/assets")
 CONTROLLER_DIRECTORIES = frozenset({"modules", "robots", "scripts"})
 
 

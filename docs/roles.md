@@ -40,7 +40,7 @@ pymybot roles create researcher \
 
 pymybot roles list
 pymybot roles show technician
-pymybot agent --role technician --robot skills/hardware-controller/references/assets/robots/relay-test.sql --task "列出硬件"
+pymybot agent --role technician --robot skills/hardware-controller/assets/robots/relay-test.sql --task "列出硬件"
 pymybot gui --role technician
 
 # Explicitly erase only this role's resumable model history

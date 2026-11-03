@@ -105,7 +105,7 @@ description: 为 mybot 创建 Markdown 技能（SKILL.md），包含 frontmatter
 - [ ] 目录名 == frontmatter `name`
 - [ ] description 单行、≤1024 字符、包含触发词
 - [ ] SKILL.md 以 `---` 开头并有闭合 frontmatter
-- [ ] 正文简洁，references 为 `.md`（hardware-controller 的可信 `references/assets/` 除外）
+- [ ] 正文简洁，references 为 `.md`（hardware-controller 的可信 `assets/` 除外）
 - [ ] 需要 `run_skill` 时，`skill.json` 只声明固定 action、typed params 和受信入口；绝不接受模型提供的 argv
 - [ ] `list_skills` 能看到新技能
 - [ ] `read_skill(name)` 能读到正文和引用

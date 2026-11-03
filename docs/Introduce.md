@@ -56,12 +56,12 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 
 ```sh
 .venv/bin/python -m pymybot check \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/references/assets/scripts/relay-test.mt
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
+  --input skills/hardware-controller/assets/scripts/relay-test.mt
 
 .venv/bin/python -m pymybot run \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/references/assets/scripts/relay-test.mt \
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
+  --input skills/hardware-controller/assets/scripts/relay-test.mt \
   --timeout 10
 ```
 
@@ -89,7 +89,7 @@ GUI 用 PySide6（Qt 6）；只在命令行里用的话，不需要装 `gui` 可
 export MYBOT_MODEL="deepseek:deepseek-chat"
 export DEEPSEEK_API_KEY="sk-..."
 .venv/bin/python -m pymybot --no-gui \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
   --task "列出硬件并解释每个变量的作用"
 ```
 
@@ -100,7 +100,7 @@ Agent 也能通过 `--mcp-config` 接外部 MCP 服务，把它们的工具放�
 ```sh
 .venv/bin/pip install -e ".[agent,mcp]"
 .venv/bin/python -m pymybot --no-gui \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
   --task "列出硬件" \
   --mcp-config ./mcp.json
 ```
@@ -128,8 +128,8 @@ CLI 的联网工具仍默认关闭：`--web` 打开 HTTPS 抓取，配了 `--sea
 ```sh
 .venv/bin/pip install -e ".[mcp]"
 .venv/bin/python -m pymybot mcp \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
-  --scripts-dir skills/hardware-controller/references/assets/scripts
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
+  --scripts-dir skills/hardware-controller/assets/scripts
 ```
 
 默认只读：`list_hardware`、`query_sql`、`read_action_script` 这些静态工具可以直接用；执行脚本和读变量要显式加 `--allow-execution`，要碰物理硬件再加 `--allow-hardware`。完整工具表、资源 URI 和客户端配置见 [docs/mcp.md](mcp.md)。
@@ -201,7 +201,7 @@ SQL 普通表名会选择 `modules/<表名>.py` 或 `.lua`（`Alias` / `Vars` / 
 - `context.call(operation, *args)` 调用已有的 HAL 操作，权限检查、句柄归属和取消检查都还在；`context.check()` 检查协作预算。`check` 只编译 Python 源码，不执行模块、构造器或驱动方法。
 - 内置的 I2C/SPI/UART/TCP/HTTP/Shell 普通表已经迁到 Python；HAL 总线句柄仍然可以给 Lua 器件驱动用。Python I2C/SPI/UART 会把显式 `proto=virt` 或 `virt-*` 路径的总线打开为纯内存 HAL 句柄，禁止物理访问；既有的 `proto=virt` 搭配 `/dev/...` 路径写法仍保持虚拟语义，不会悄悄回落到真实硬件。Lua 器件驱动继续复用现有 `virtbus` 模型与实例隔离。既有 Daemon chunk 仍只支持 Lua；如果选中 Python 驱动，静态检查会直接拒绝。
 
-仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件、模型或凭据。结构 [`skills/hardware-controller/references/assets/robots/uart-loopback.sql`](../skills/hardware-controller/references/assets/robots/uart-loopback.sql)：
+仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件、模型或凭据。结构 [`skills/hardware-controller/assets/robots/uart-loopback.sql`](../skills/hardware-controller/assets/robots/uart-loopback.sql)：
 
 ```sql
 CREATE TABLE UART (name String, path String, baud Number);
@@ -210,7 +210,7 @@ CREATE TABLE LoopbackProbe (name String, UART String);
 INSERT INTO LoopbackProbe (name, UART) VALUES ('echo', '$bus');
 ```
 
-动作 [`skills/hardware-controller/references/assets/scripts/uart-loopback.mt`](../skills/hardware-controller/references/assets/scripts/uart-loopback.mt)：
+动作 [`skills/hardware-controller/assets/scripts/uart-loopback.mt`](../skills/hardware-controller/assets/scripts/uart-loopback.mt)：
 
 ```mt
 @Action
@@ -221,7 +221,7 @@ echo.value;
 @
 ```
 
-自定义驱动 [`modules/LoopbackProbe.py`](../skills/hardware-controller/references/assets/modules/LoopbackProbe.py)（`$bus` 合并出的 `fd` 由 UART 行拥有并释放）：
+自定义驱动 [`modules/LoopbackProbe.py`](../skills/hardware-controller/assets/modules/LoopbackProbe.py)（`$bus` 合并出的 `fd` 由 UART 行拥有并释放）：
 
 ```python
 from pymybot.errors import DriverError
@@ -249,13 +249,13 @@ class Driver:
 
 ```sh
 .venv/bin/python -m pymybot check --module-path modules \
-  --robot skills/hardware-controller/references/assets/robots/uart-loopback.sql --input skills/hardware-controller/references/assets/scripts/uart-loopback.mt
+  --robot skills/hardware-controller/assets/robots/uart-loopback.sql --input skills/hardware-controller/assets/scripts/uart-loopback.mt
 .venv/bin/python -m pymybot run --module-path modules \
-  --robot skills/hardware-controller/references/assets/robots/uart-loopback.sql --input skills/hardware-controller/references/assets/scripts/uart-loopback.mt --timeout 10
+  --robot skills/hardware-controller/assets/robots/uart-loopback.sql --input skills/hardware-controller/assets/scripts/uart-loopback.mt --timeout 10
 ```
 
-TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/references/assets/robots/tcp.sql) 只配置 `name`、`host`、`port`，
-[动作示例](../skills/hardware-controller/references/assets/scripts/tcp.mt) 使用 `connect`、`close`、`timeout`、`num_recv`、`send_hex`、
+TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/assets/robots/tcp.sql) 只配置 `name`、`host`、`port`，
+[动作示例](../skills/hardware-controller/assets/scripts/tcp.mt) 使用 `connect`、`close`、`timeout`、`num_recv`、`send_hex`、
 `send_str`、`recv_hex`、`recv_str`。激活不自动连接；需要先启动本地 TCP 回显服务，
 再显式执行 `net.connect`。发送文本用 MT 字符串表达式，如 `$("你好")`。
 
@@ -299,9 +299,9 @@ Python 驱动仍可用，但依赖 LuaJIT FFI 的 Lua 驱动不可用。`doctor`
 pymybot/                  Python 包：CLI、SQL、动作执行、HAL、Daemon、Agent、GUI、MCP
 skills/hardware-controller/scripts/pymybot/  控制器与 MCP Python Runtime
 skills/hardware-controller/references/       控制器权威文档
-skills/hardware-controller/references/assets/modules/   Python 原生驱动、保留的 Lua 驱动和公共库
-skills/hardware-controller/references/assets/robots/    结构 SQL 示例（含虚拟设备）
-skills/hardware-controller/references/assets/scripts/   MT 动作示例
+skills/hardware-controller/assets/modules/   Python 原生驱动、保留的 Lua 驱动和公共库
+skills/hardware-controller/assets/robots/    结构 SQL 示例（含虚拟设备）
+skills/hardware-controller/assets/scripts/   MT 动作示例
 skills/                   Agent 参考技能
 prompts/                  默认提示词层及 manifest（运行时副本位于 MYBOT_HOME/prompts）
 tests/                    pytest 与逐驱动虚拟夹具

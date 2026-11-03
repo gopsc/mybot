@@ -22,7 +22,7 @@ from pymybot.robot import Robot
 from pymybot.runtime import LuaState
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 MODULES = ASSETS / "modules"
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "virt"
 VIRT_SQL = sorted(FIXTURES.glob("*_virt.sql"))

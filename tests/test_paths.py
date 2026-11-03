@@ -11,7 +11,7 @@ def test_source_assets_fall_back_to_the_checkout(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "source_root", lambda: tmp_path)
 
     assert paths.asset_path("modules") == packaged
-    skill_robots = package.parent.parent / "references" / "assets" / "robots"
+    skill_robots = package.parent.parent / "assets" / "robots"
     skill_robots.mkdir(parents=True)
     assert paths.asset_path("robots") == skill_robots
     assert paths.asset_path("prompts") == tmp_path / "prompts"
@@ -51,7 +51,7 @@ def test_nuitka_build_counts_as_frozen(monkeypatch):
 
 
 def test_real_checkout_uses_skill_assets_and_shared_directories():
-    assets = paths.source_root() / "skills" / "hardware-controller" / "references" / "assets"
+    assets = paths.source_root() / "skills" / "hardware-controller" / "assets"
     assert paths.asset_path("modules") == assets / "modules"
     assert paths.asset_path("scripts") == assets / "scripts"
     assert paths.asset_path("prompts") == paths.source_root() / "prompts"

@@ -139,7 +139,7 @@ class SkillRunner:
         directory, entrypoint, actions, packaged = self._manifest(skill)
         spec = self._action(actions, action)
         roots = {**self.roots, "skill": directory,
-                 "skill_assets": directory / "references" / "assets"}
+                 "skill_assets": directory / "assets"}
         values = self._arguments(spec, arguments, roots)
         argv = self._argv(spec, values, allow_hardware, bindings or {})
         candidate = directory / entrypoint

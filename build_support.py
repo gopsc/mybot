@@ -15,7 +15,7 @@ class BuildPy(build_py):
             target = Path(self.build_lib) / "pymybot" / source.name
             target.parent.mkdir(parents=True, exist_ok=True)
             copy2(source, target)
-        asset_root = root / "skills" / "hardware-controller" / "references" / "assets"
+        asset_root = root / "skills" / "hardware-controller" / "assets"
         for name, suffix in (
             ("modules", ".py"), ("modules", ".lua"),
             ("robots", ".sql"), ("scripts", ".mt"), ("skills", ".md"),

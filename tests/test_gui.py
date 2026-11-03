@@ -21,7 +21,7 @@ from pymybot.gui.protocol import (CliCall, RpcError, ServeClient, cli_args, pars
                                   resolve_python, sessions_args)
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 
 
 # -- argv building ----------------------------------------------------------

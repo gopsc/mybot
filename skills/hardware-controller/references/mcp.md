@@ -21,8 +21,8 @@ pip install -e ".[agent,mcp]"    # Agent + MCP 客户端
 
 ```sh
 pymybot mcp \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
-  --scripts-dir skills/hardware-controller/references/assets/scripts
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
+  --scripts-dir skills/hardware-controller/assets/scripts
 ```
 
 stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。客户端断开 stdin
@@ -82,7 +82,7 @@ Claude Desktop（`claude_desktop_config.json`）或 Cursor（`.cursor/mcp.json`�
       "command": "pymybot",
       "args": [
         "mcp",
-        "--robot", "/abs/path/skills/hardware-controller/references/assets/robots/relay-test.sql",
+        "--robot", "/abs/path/skills/hardware-controller/assets/robots/relay-test.sql",
         "--scripts-dir", "/abs/path/scripts",
         "--allow-execution"
       ]
@@ -105,8 +105,8 @@ Source checkout 中可用 `python -m pymybot` 代替 `pymybot`，并用绝对路
 
 ```sh
 pymybot --no-gui agent \
-  --robot skills/hardware-controller/references/assets/robots/relay-test.sql \
-  --scripts-dir skills/hardware-controller/references/assets/scripts \
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
+  --scripts-dir skills/hardware-controller/assets/scripts \
   --model deepseek:deepseek-chat \
   --mcp-config ./mcp.json \
   --task "先用外部检索工具查资料，再列出机器人硬件"

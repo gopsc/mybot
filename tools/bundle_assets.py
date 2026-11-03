@@ -43,7 +43,7 @@ def asset_datas(root):
     root = Path(root)
     datas = []
     for name, suffixes in ASSET_SUFFIXES.items():
-        source_root = (root / "skills" / "hardware-controller" / "references" / "assets"
+        source_root = (root / "skills" / "hardware-controller" / "assets"
                        if name in {"modules", "robots", "scripts"} else root)
         for source in sorted((source_root / name).rglob("*")):
             if source.is_file() and source.suffix in suffixes:

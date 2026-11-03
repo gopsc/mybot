@@ -18,7 +18,7 @@ from pymybot.errors import BudgetExceeded
 from pymybot.hal import HALManager
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 MODULES = ASSETS / "modules"
 I2C_URL = "ftdi://ftdi:232h:TEST/1"
 SPI_URL = "ftdi://ftdi:2232h:TEST/2"

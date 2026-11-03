@@ -16,7 +16,7 @@ from pymybot.robot import Robot
 from pymybot.security import MAX_BODY, SecurityError, checked_text, dumps, read_file
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
+ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
 VIRTUAL_SQL = """
 CREATE TABLE Relay(name String);
 INSERT INTO Relay(name) VALUES('relay0');
