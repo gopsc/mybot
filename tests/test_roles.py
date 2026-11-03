@@ -29,6 +29,7 @@ def test_role_uses_bundled_prompt_baseline_without_touching_global(tmp_path):
     info = load_role(role.name, root).info()
     assert info["description"] == "现场诊断"
     assert info["history_turns"] == 0 and info["mcp_config"] is None
+    assert role.workspace_dir.is_dir() and info["workspace_dir"] == str(role.workspace_dir)
     assert [item["name"] for item in list_roles(root)] == [role.name]
 
 
@@ -58,6 +59,14 @@ def test_role_imports_skills_and_mcp(tmp_path):
     assert (role.skills_dir / "demo" / "assets" / "data.txt").read_text(encoding="utf-8") == "data"
     assert load_servers(role.mcp_config)[0].name == "demo"
     assert role.info()["skills"] == ["demo"]
+
+
+def test_load_role_repairs_a_missing_workspace(tmp_path):
+    root = tmp_path / "roles"
+    role = create_role("legacy", root=root)
+    role.workspace_dir.rmdir()
+    loaded = load_role("legacy", root)
+    assert loaded.workspace_dir.is_dir()
 
 
 def test_role_validation_and_history_clear(tmp_path):

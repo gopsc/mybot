@@ -153,7 +153,7 @@ class App(QMainWindow):
         self._start_timer.setSingleShot(True)
         self._start_timer.timeout.connect(self._start_server)
         self._load_role_list()
-        self._set_workspace_label(str(Path(self.cfg.workspace or default_workspace()).absolute()))
+        self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         self._start_timer.start(120)
         self.task_box.setPlainText(self.cfg.task.strip())
         self._refresh_status()
@@ -378,7 +378,7 @@ class App(QMainWindow):
             self.show_resources()
 
     def _robots_root(self):
-        workspace = Path(self.cfg.workspace or default_workspace()).absolute()
+        workspace = Path(self._workspace_root()).absolute()
         candidate = workspace / "robots"
         if candidate.is_dir():
             return str(candidate)
@@ -537,7 +537,7 @@ class App(QMainWindow):
         self._sync_role_paths()
 
     def _browse_into(self, entry):
-        chosen = QFileDialog.getExistingDirectory(self, "选择目录", self.cfg.workspace or default_workspace())
+        chosen = QFileDialog.getExistingDirectory(self, "选择目录", self._workspace_root())
         if chosen:
             entry.setText(chosen)
             self._sync_config()
@@ -549,7 +549,10 @@ class App(QMainWindow):
         self.model_label.setText(f"模型：{model or '未设置（需 MYBOT_MODEL）'}\n端点：{endpoint}\n密钥变量：{key_env}")
 
     def pick_workspace(self):
-        chosen = QFileDialog.getExistingDirectory(self, "打开工作区", self.cfg.workspace or default_workspace())
+        if self.cfg.role:
+            self._notice(f"当前角色使用固定工作区：{self._workspace_root()}", seconds=8)
+            return
+        chosen = QFileDialog.getExistingDirectory(self, "打开工作区", self._workspace_root())
         if not chosen or self._stopping:
             return
         self.cfg.workspace = chosen
@@ -595,6 +598,8 @@ class App(QMainWindow):
     def on_role_changed(self):
         self.cfg.role = self.role_box.currentData() or ""
         self._sync_role_paths()
+        self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
+        self._resource_roots = None
         self._save()
         self._notice(f"已选择角色：{self.cfg.role}" if self.cfg.role else "已使用全局 Prompt 与默认能力")
 
@@ -605,7 +610,7 @@ class App(QMainWindow):
         name = name.strip()
         if not accepted or not name:
             return
-        workspace = self.cfg.workspace or default_workspace()
+        workspace = self._workspace_root()
         skills = self._skills_root()
         source = Path(skills) if skills else None
         if source is None or not source.is_dir() or not any(source.glob("*/SKILL.md")):
@@ -624,16 +629,22 @@ class App(QMainWindow):
             return
         self.cfg.role = role.name
         self._load_role_list()
+        self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         self._save()
         self._notice(f"角色 {role.name} 已创建：{role.root}")
         if workspace:
             self._resource_roots = None
 
+    def _workspace_root(self):
+        if self.cfg.role:
+            return str(role_path(self.cfg.role) / "workspace")
+        return self.cfg.workspace or default_workspace()
+
     def _robot_path(self):
-        return _absolute(self.cfg.robot, self.cfg.workspace or default_workspace())
+        return _absolute(self.cfg.robot, self._workspace_root())
 
     def _scripts_root(self):
-        root = self.cfg.workspace or default_workspace()
+        root = self._workspace_root()
         configured = _absolute(self.cfg.scripts_dir, root)
         if configured:
             return configured
@@ -647,15 +658,15 @@ class App(QMainWindow):
     def _skills_root(self):
         if self.cfg.role:
             return str(role_path(self.cfg.role) / "skills")
-        return _absolute(self.cfg.skills_dir, self.cfg.workspace or default_workspace())
+        return _absolute(self.cfg.skills_dir, self._workspace_root())
 
     def _mcp_root(self):
         if self.cfg.role:
             return str(role_path(self.cfg.role) / "mcp.json")
-        return _absolute(self.cfg.mcp_config, self.cfg.workspace or default_workspace())
+        return _absolute(self.cfg.mcp_config, self._workspace_root())
 
     def _module_paths(self):
-        root = self.cfg.workspace or default_workspace()
+        root = self._workspace_root()
         values = [_absolute(item, root) for item in self.cfg.module_paths if str(item).strip()]
         if Path(root).absolute() == source_root():
             values = [str(asset_path("modules")) if value == str(Path(root).absolute() / "modules")
@@ -690,7 +701,7 @@ class App(QMainWindow):
         generation = self.generation
         self.serve_state = "启动中…"
         self._refresh_status()
-        workspace = self.cfg.workspace or default_workspace()
+        workspace = self._workspace_root()
         python = resolve_python(workspace, self.cfg.python)
         serve_args = ["-m", "pymybot", "serve"]
         if not self.cfg.session_log:
@@ -932,7 +943,7 @@ class App(QMainWindow):
         return True
 
     def _agent_params(self, task):
-        workspace = self.cfg.workspace or default_workspace()
+        workspace = self._workspace_root()
         params = {
             "task": task, "role": self.cfg.role or None,
             "scriptsDir": self._scripts_root(),
@@ -1107,7 +1118,7 @@ class App(QMainWindow):
         if self._stopping:
             return
         self._sync_config()
-        workspace = self.cfg.workspace or default_workspace()
+        workspace = self._workspace_root()
         path = self._mcp_root()
         dialog = McpConfigDialog(self, path, base_dir=Path(path).parent if self.cfg.role else workspace)
         if self._exec_dialog(dialog) == QDialog.DialogCode.Accepted and dialog.saved_path:
@@ -1131,7 +1142,7 @@ class App(QMainWindow):
         if self._stopping:
             return
         self._sync_config()
-        workspace = self.cfg.workspace or default_workspace()
+        workspace = self._workspace_root()
         dialog = CommandDialog(
             self, python=resolve_python(workspace, self.cfg.python), cwd=workspace,
             robot=self._robot_path(), module_paths=self._module_paths(),
@@ -1168,7 +1179,7 @@ class App(QMainWindow):
         is_prompt = tool == "prompt:update_prompt"
         # Prompt diffs and skill documents can exceed the ordinary small-tool
         # bound. Never truncate approval content; oversized requests are denied.
-        limit = 2 * 1024 * 1024 if is_prompt else (512 * 1024 if tool == "create_skill" else MAX_DIALOG_ARGS)
+        limit = 2 * 1024 * 1024 if is_prompt else MAX_DIALOG_ARGS
         if len(arguments) > limit:
             self._message("拒绝：参数过长", f"工具 {tool} 的参数超过 {limit} 字符，无法完整审阅，已拒绝。")
             self._chat_line(f"{tool} 已拒绝（参数过长）", "toolerr")
@@ -1199,13 +1210,13 @@ class App(QMainWindow):
     def refresh_context(self):
         self._sync_config()
         self._load_role_list()
-        self._set_workspace_label(str(Path(self.cfg.workspace or default_workspace()).absolute()))
+        self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
 
     def open_settings(self):
         if self._stopping:
             return
         self._sync_config()
-        dialog = SettingsDialog(self, self.cfg, self.cfg.workspace or default_workspace(), str(self.config_path))
+        dialog = SettingsDialog(self, self.cfg, self._workspace_root(), str(self.config_path))
         if self._exec_dialog(dialog) != QDialog.DialogCode.Accepted or self._stopping:
             return
         before = (self.cfg.workspace, self.cfg.python, self.cfg.session_log)
@@ -1215,7 +1226,7 @@ class App(QMainWindow):
         self._sync_controls()
         saved = self._save()
         self._refresh_model_label()
-        self._set_workspace_label(str(Path(self.cfg.workspace or default_workspace()).absolute()))
+        self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         if before != (self.cfg.workspace, self.cfg.python, self.cfg.session_log):
             self._restart_server()
         self._notice("设置已保存" if saved else "设置已应用，但配置文件写入失败（见日志）")
@@ -1355,6 +1366,7 @@ class SettingsDialog(QDialog):
         self.values = None
         self.entries = {}
         self._workspace = workspace
+        self._role = cfg.role
         layout = QVBoxLayout(self)
         self.tabs = tabs = QTabWidget()
         layout.addWidget(tabs, 1)
@@ -1364,6 +1376,10 @@ class SettingsDialog(QDialog):
         self._field(general_form, cfg, "workspace", "工作区", browse=True)
         self._field(general_form, cfg, "python", "Python 解释器")
         self._field(general_form, cfg, "skills_dir", "技能目录", browse=True)
+        if self._role:
+            workspace_entry = self.entries["workspace"]
+            workspace_entry.setText(str(role_path(self._role) / "workspace"))
+            workspace_entry.setEnabled(False)
         tabs.addTab(general, "通用")
 
         model = QWidget()
@@ -1482,6 +1498,8 @@ class SettingsDialog(QDialog):
             return
         values = {}
         for name, widget in self.entries.items():
+            if name == "workspace" and self._role:
+                continue
             if name == "vars":
                 values[name] = _parse_bindings(widget.toPlainText())
             else:

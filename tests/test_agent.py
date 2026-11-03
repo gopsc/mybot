@@ -630,7 +630,7 @@ def test_cli_cleanup_failures_preserve_receipts_and_primary_error(monkeypatch, c
     if primary_failure:
         assert "outcome is unknown" in payload["error"]["message"]
 
-def test_interactive_cli_confirms_and_emits_only_final_json(monkeypatch, capsys):
+def test_interactive_cli_confirms_and_emits_only_final_json(monkeypatch, capsys, tmp_path):
     from pymybot import cli
     executor = FakeExecutor()
     closed = []
@@ -638,17 +638,16 @@ def test_interactive_cli_confirms_and_emits_only_final_json(monkeypatch, capsys)
     async def close_client():
         closed.append(True)
 
-    model = scripted_model([ToolCallPart("create_skill", {
-        "name": "cli-created", "description": "Created by CLI test.", "content": "Body."})],
+    model = scripted_model([ToolCallPart("install_skill", {"path": "cli-created"})],
         [TextPart("已完成")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=close_client))
     monkeypatch.setattr(sys, "stdin", FakeTTY("创建技能\ny\n/exit\n"))
-    code = cli.main(["--no-gui", "--robot", "unused.sql"])
+    code = cli.main(["--no-gui", "--robot", "unused.sql", "--workspace-dir", str(tmp_path)])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 0 and len(captured.out.splitlines()) == 1
     assert payload["turns"] == 1 and payload["output"] == "已完成"
-    assert "Approve create_skill" in captured.err and "已完成" in captured.err
+    assert "Approve install_skill" in captured.err and "已完成" in captured.err
     assert len(executor.calls) == 1 and executor.closed and closed == [True]
 
 def test_interactive_cli_streams_to_stderr_and_does_not_reprint(monkeypatch, capsys):

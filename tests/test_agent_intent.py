@@ -53,7 +53,7 @@ def test_skill_authoring_request_allows_skill_tools():
     decision = classify_intent("创建一个技能")
     assert decision.name == "author"
     assert decision.restricted
-    assert decision.allows("read_skill") and decision.allows("create_skill")
+    assert decision.allows("read_skill") and decision.allows("install_skill")
 
 
 def test_english_intent_classification():

@@ -13,6 +13,7 @@ operator/session settings; a role never grants them.
 ├── role.json          # format version, name and operator description
 ├── prompts/           # complete PromptLibrary
 ├── skills/            # complete skill directories (SKILL.md, skill.json, scripts, assets)
+├── workspace/         # role-owned workspace; Agent file tools write here
 ├── mcp.json           # optional mcpServers configuration
 └── history.json       # complete LangChain messages, grouped by turn (format 2)
 ```
@@ -20,7 +21,9 @@ operator/session settings; a role never grants them.
 `pymybot roles create` copies the trusted bundled `prompts/` baseline, including
 its manifest and safety hashes, plus complete skill directories with their
 `skill.json`, `scripts/` and `assets/`, so runnable skills stay runnable inside a
-role. Editing a role does not change the global
+role. Selecting a role makes the Agent use `~/.mybot/roles/<name>/workspace`
+instead of the global workspace; use `install_skill(path)` to install a skill
+the Agent authored under that workspace. Editing a role does not change the global
 `~/.mybot/prompts` library or another role. Safety layers 0/100 remain immutable;
 SOUL/USER/STATS retain the existing ownership and approval rules.
 

@@ -21,7 +21,7 @@ TOOLS_BY_INTENT = {
     "chat": READ_TOOLS,
     "inspect": READ_TOOLS | {"run_skill"},
     "control": READ_TOOLS | {"run_skill", "capture_camera", "write_file", "edit_file", "shell"},
-    "author": READ_TOOLS | {"write_file", "edit_file", "update_prompt", "create_skill", "run_skill"},
+    "author": READ_TOOLS | {"write_file", "edit_file", "update_prompt", "install_skill", "run_skill"},
     "diagnose": READ_TOOLS | {"shell", "run_skill", "capture_camera"},
 }
 _RULES = {

@@ -47,8 +47,8 @@ _TOOLS = {
     "read_variables": ({"names"}, {"names"}),
     "list_skills": (set(), set()),
     "read_skill": ({"name"}, {"name", "file"}),
-    "create_skill": ({"name", "description", "content"}, {"name", "description", "content"}),
     "run_skill": ({"skill", "action"}, {"skill", "action", "arguments"}),
+    "install_skill": ({"path"}, {"path"}),
     **WORKSPACE_TOOLS,
 }
 EXECUTION_TOOLS = frozenset({"run_action_script", "read_variables"})
@@ -660,9 +660,8 @@ class RobotExecutor:
             checked_text(arguments["name"])
             if "file" in arguments:
                 checked_text(arguments["file"])
-        elif name == "create_skill":
-            for field in ("name", "description", "content"):
-                checked_text(arguments[field])
+        elif name == "install_skill":
+            checked_text(arguments["path"])
         elif name == "run_skill":
             checked_text(arguments["skill"], 64)
             checked_text(arguments["action"], 64)
@@ -753,11 +752,15 @@ class RobotExecutor:
                 file = arguments.get("file", "SKILL.md")
                 data = {"name": arguments["name"], "file": file,
                         "content": self._skills.read(arguments["name"], file)}
-            elif name == "create_skill":
+            elif name == "install_skill":
+                if self._workspace is None:
+                    raise SecurityError("Workspace is not configured")
                 if self._skills is None or self._skills.root is None:
                     raise SecurityError("Skills are not configured")
-                data = self._skills.create(arguments["name"], arguments["description"],
-                                           arguments["content"], started=started)
+                source = self._workspace.resolve_directory(
+                    arguments["path"], lambda: self._check(deadline))
+                executed = True
+                data = self._skills.install(source, started=started)
             elif name == "run_skill":
                 if self._skills is None or self._skills.root is None:
                     raise SecurityError("Skills are not configured")

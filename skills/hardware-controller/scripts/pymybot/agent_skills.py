@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path, PureWindowsPath
+import secrets
+import shutil
 import stat
 
 from .paths import asset_path
@@ -20,6 +22,7 @@ from .security import SecurityError, checked_text, read_file
 MAX_SKILL_FILE = 256 * 1024
 MAX_DESCRIPTION = 1024
 MAX_LIST = 1000
+MAX_SKILL_BYTES = 64 * 1024 * 1024
 _NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
 
 
@@ -146,56 +149,66 @@ class SkillsLibrary:
                   for name, item in sorted(self.skills.items())]
         return {"skills": skills, "truncated": len(skills) == MAX_LIST}
 
-    def create(self, name, description, content, *, started=None):
-        """Create one approved skill and make it readable immediately."""
+    def install(self, source, *, started=None):
+        """Copy one workspace-authored skill tree into this skills root."""
         if self.root is None:
             raise SecurityError("Skills root does not exist")
-        checked_text(name, 64)
+        source = Path(source)
+        try:
+            source = source.resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise SecurityError("Skill source does not exist") from None
+        if not source.is_dir():
+            raise SecurityError("Skill source must be a directory")
+        _no_links(source, source)
+        name = source.name
         if not _NAME.fullmatch(name):
             raise SecurityError("Skill name must be 1..64 lowercase letters, digits, '.', '_' or '-'")
-        checked_text(description, MAX_DESCRIPTION)
-        description = description.strip()
-        if not description or "\n" in description or "\r" in description:
-            raise SecurityError("Skill description must be a nonempty single line")
-        checked_text(content, MAX_SKILL_FILE)
-        if not content.strip():
-            raise SecurityError("Skill content must not be empty")
-        document = (f"---\nname: {name}\ndescription: {description}\n---\n\n"
-                    + content.strip() + "\n")
-        if len(document.encode("utf-8")) > MAX_SKILL_FILE:
-            raise SecurityError("SKILL.md exceeds the file size limit")
+        self._frontmatter(source / "SKILL.md", name)
         _no_links(self.root, self.root)
-        path = self.root / name
-        try:
-            path.lstat()
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            raise SecurityError("Cannot inspect skill path") from exc
-        else:
+        destination = self.root / name
+        if destination.exists():
             raise SecurityError(f"Skill '{name}' already exists")
+        staging = self.root / f".{name}.{secrets.token_hex(8)}.tmp"
         try:
-            path.mkdir()
-            _no_links(path, self.root)
-        except FileExistsError:
-            raise SecurityError(f"Skill '{name}' already exists") from None
-        except OSError as exc:
-            raise SecurityError("Cannot create skill directory") from exc
-        if started is not None:
-            started()
-        target = path / "SKILL.md"
-        try:
-            with target.open("x", encoding="utf-8", newline="\n") as stream:
-                stream.write(document)
-        except Exception:
-            try:
-                target.unlink()
-                path.rmdir()
-            except OSError:
-                pass
+            staging.mkdir(mode=0o700)
+            if started is not None:
+                started()
+            files = total = 0
+            for base, dirs, names in os.walk(source, followlinks=False):
+                base_path = Path(base)
+                keep = []
+                for item in sorted(dirs):
+                    child = base_path / item
+                    if item in {"__pycache__", ".git"}:
+                        continue
+                    if child.is_symlink():
+                        raise SecurityError("Linked Skill paths are not allowed")
+                    keep.append(item)
+                dirs[:] = keep
+                for filename in sorted(names):
+                    if filename.endswith(".pyc"):
+                        continue
+                    source_file = base_path / filename
+                    info = source_file.lstat()
+                    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                        raise SecurityError("Skill files must be regular files")
+                    files += 1
+                    total += info.st_size
+                    if files > MAX_LIST or total > MAX_SKILL_BYTES:
+                        raise SecurityError("Skill exceeds the install size limit")
+                    target = staging / source_file.relative_to(source)
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(source_file, target)
+                    os.chmod(target, 0o600)
+            os.replace(staging, destination)
+            self._scan()
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
             raise
-        self._scan()
-        return {"name": name, "file": "SKILL.md", "description": description}
+        entry = self.skills.get(name)
+        return {"name": name, "files": sorted(entry["files"]) if entry else [],
+                "runnable": bool(entry and entry["runnable"])}
 
     def read(self, name, file):
         checked_text(name)

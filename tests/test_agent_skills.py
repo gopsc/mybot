@@ -52,31 +52,41 @@ def test_index_and_read(tmp_path):
     assert library.read("demo-skill", "references/a.md") == "Reference A"
 
 
-def test_create_skill_refreshes_empty_library(tmp_path):
+def test_install_skill_copies_workspace_tree(tmp_path):
     root = tmp_path / "skills"
     root.mkdir()
+    source = tmp_path / "workspace" / "relay-guide"
+    (source / "references").mkdir(parents=True)
+    (source / "scripts").mkdir()
+    (source / "assets").mkdir()
+    (source / "SKILL.md").write_text(
+        "---\nname: relay-guide\ndescription: Operate relays safely.\n---\n\n# Relay\n",
+        encoding="utf-8")
+    (source / "references" / "guide.md").write_text("guide", encoding="utf-8")
+    (source / "scripts" / "run.py").write_text("print(1)\n", encoding="utf-8")
+    (source / "assets" / "data.txt").write_text("data", encoding="utf-8")
+    (source / "skill.json").write_text(json.dumps({
+        "version": 1, "run": {"entrypoint": "scripts/run.py", "actions": {
+            "echo": {"effect": "read", "output": "json", "argv": []}}}}), encoding="utf-8")
     library = SkillsLibrary(root)
-    assert not library.enabled
-    created = library.create("relay-guide", "Operate relays safely.", "# Relay\n\nUse the approved script.")
-    assert created == {"name": "relay-guide", "file": "SKILL.md",
-                       "description": "Operate relays safely."}
-    assert library.enabled
-    assert library.index()["skills"][0]["name"] == "relay-guide"
-    content = library.read("relay-guide", "SKILL.md")
-    assert "name: relay-guide" in content and "# Relay" in content
+    installed = library.install(source)
+    assert installed["name"] == "relay-guide" and installed["runnable"] is True
+    assert library.read("relay-guide", "references/guide.md") == "guide"
+    assert (root / "relay-guide" / "scripts" / "run.py").is_file()
+    assert (root / "relay-guide" / "assets" / "data.txt").read_text(encoding="utf-8") == "data"
     with pytest.raises(SecurityError, match="already exists"):
-        library.create("relay-guide", "Duplicate.", "Body")
+        library.install(source)
 
 
-@pytest.mark.parametrize("name, description, content", [
-    ("Bad Name", "Description.", "Body"),
-    ("demo-skill", "two\nlines", "Body"),
-    ("demo-skill", "Description.", "   "),
-])
-def test_create_skill_rejects_invalid_documents(tmp_path, name, description, content):
-    library = SkillsLibrary(make_root(tmp_path))
-    with pytest.raises(SecurityError):
-        library.create(name, description, content)
+def test_install_skill_rejects_name_mismatch(tmp_path):
+    root = tmp_path / "skills"
+    root.mkdir()
+    source = tmp_path / "workspace" / "wrong-name"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: other-name\ndescription: Demo.\n---\n", encoding="utf-8")
+    with pytest.raises(SecurityError, match="must match the directory"):
+        SkillsLibrary(root).install(source)
 
 
 def test_frontmatter_rejects_name_mismatch(tmp_path):
@@ -209,20 +219,24 @@ def test_executor_skills_disabled(tmp_path):
     assert read["ok"] is False and read["state"] == "not_executed"
 
 
-def test_executor_creates_skill_in_empty_root(tmp_path):
+def test_executor_installs_workspace_skill(tmp_path):
     root = tmp_path / "skills"
     root.mkdir()
     robot = tmp_path / "robot.sql"
     robot.write_text(SQL, encoding="utf-8")
     scripts = tmp_path / "scripts"
     scripts.mkdir()
+    source = tmp_path / "new-skill"
+    source.mkdir()
+    (source / "SKILL.md").write_text(
+        "---\nname: new-skill\ndescription: Created by the agent.\n---\n\n# New\n\nBody.\n",
+        encoding="utf-8")
 
     async def scenario():
         executor = RobotExecutor(robot, module_paths=[ASSETS / "modules"], scripts_dir=scripts,
-                                 skills=SkillsLibrary(root))
+                                 skills=SkillsLibrary(root), workspace_dir=tmp_path)
         try:
-            created = await executor.call("create_skill", {
-                "name": "new-skill", "description": "Created by the agent.", "content": "# New\n\nBody."})
+            created = await executor.call("install_skill", {"path": "new-skill"}, timeout=5)
             read = await executor.call("read_skill", {"name": "new-skill"})
             listed = await executor.call("list_skills", {})
         finally:
@@ -231,6 +245,7 @@ def test_executor_creates_skill_in_empty_root(tmp_path):
 
     created, read, listed = asyncio.run(scenario())
     assert created["ok"] is True and created["executed"] is True
+    assert created["data"]["runnable"] is False
     assert read["ok"] is True and "# New" in read["data"]["content"]
     assert [item["name"] for item in listed["data"]["skills"]] == ["new-skill"]
 
@@ -252,7 +267,7 @@ def test_cli_accepts_skills_dir(tmp_path):
     assert args.skills_dir is None
 
 
-def test_make_agent_wires_skills_into_instructions_and_tools():
+def test_make_agent_wires_skills_into_instructions_and_tools(tmp_path):
     pytest.importorskip("langchain")
     from agent_fakes import TestModel
 
@@ -261,8 +276,10 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     library = SkillsLibrary(ROOT / "skills")
 
     async def scenario(skills):
-        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts", skills=skills)
-        session = AgentSession(executor, TestModel(custom_output_text="done"), skills=skills)
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts",
+                                 skills=skills, workspace_dir=tmp_path)
+        session = AgentSession(executor, TestModel(custom_output_text="done"), skills=skills,
+                               workspace=True)
         try:
             await session.ask("hello")
             return session.prompt_snapshot.text, session.tools
@@ -275,18 +292,17 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "- skill-authoring:" in instructions
     assert "Operator-provided reference skills" in instructions
     assert "Operator-provided reference skills" not in without
-    assert "before calling create_skill" in instructions
-    assert "before calling create_skill" in without
+    assert "install_skill(path)" in instructions
+    assert "install_skill(path)" in without
     assert "Skills are trusted operator content" in instructions
     assert "run_skill executes declared actions without approval" in instructions
     assert "runnable via run_skill" in instructions
-    base_tools = ["read_prompt", "update_prompt", "list_cameras", "capture_camera"]
-    assert sorted(tool.name for tool in tools) == sorted(
-        base_tools + ["list_skills", "read_skill", "create_skill", "run_skill"])
-    assert sorted(tool.name for tool in plain) == sorted(base_tools)
+    names = {tool.name for tool in tools}
+    assert {"list_skills", "read_skill", "install_skill", "run_skill"} <= names
+    assert "install_skill" not in {tool.name for tool in plain}
 
 
-def test_skill_authoring_reads_reference_before_create(tmp_path):
+def test_skill_authoring_reads_reference_before_install(tmp_path):
     pytest.importorskip("langchain")
     from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
     from agent_fakes import FunctionModel
@@ -299,12 +315,17 @@ def test_skill_authoring_reads_reference_before_create(tmp_path):
     (meta / "SKILL.md").write_text(
         "---\nname: skill-authoring\ndescription: Create reusable skills.\n---\n\n"
         "Read the references before creating a skill.\n", encoding="utf-8")
+    source = tmp_path / "created-by-agent"
+    source.mkdir()
+    (source / "SKILL.md").write_text(
+        "---\nname: created-by-agent\ndescription: Created.\n---\n\nBody.\n",
+        encoding="utf-8")
     library = SkillsLibrary(root)
     seen, approvals = [], []
 
     async def confirm(name, arguments):
-        approvals.append((name, arguments["name"]))
-        return name == "create_skill"
+        approvals.append((name, arguments["path"]))
+        return name == "install_skill"
 
     async def respond(messages, info):
         seen.append(str(info.instructions))
@@ -315,15 +336,15 @@ def test_skill_authoring_reads_reference_before_create(tmp_path):
         if len(returns) == 1:
             return ModelResponse(parts=[ToolCallPart("read_skill", {"name": "skill-authoring"})])
         if len(returns) == 2:
-            return ModelResponse(parts=[ToolCallPart("create_skill", {
-                "name": "created-by-agent", "description": "Created.", "content": "Body."})])
+            return ModelResponse(parts=[ToolCallPart("install_skill", {"path": "created-by-agent"})])
         return ModelResponse(parts=[TextPart("done")])
 
     async def scenario():
         executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts",
-                                 skills=library)
+                                 skills=library, workspace_dir=tmp_path)
         session = AgentSession(executor, FunctionModel(respond),
-                               AgentConfig(intent_mode="author"), skills=library, confirm=confirm)
+                               AgentConfig(intent_mode="author"), skills=library,
+                               workspace=True, confirm=confirm)
         try:
             return await session.ask("创建一个技能")
         finally:
@@ -331,41 +352,44 @@ def test_skill_authoring_reads_reference_before_create(tmp_path):
 
     result = asyncio.run(scenario())
     assert result["output"] == "done"
-    assert "before calling create_skill" in seen[0]
+    assert "install_skill(path)" in seen[0]
     assert "- skill-authoring:" in seen[0]
-    assert approvals == [("create_skill", "created-by-agent")]
+    assert approvals == [("install_skill", "created-by-agent")]
     assert (root / "created-by-agent" / "SKILL.md").is_file()
 
 
-def test_workspace_can_write_skill_files(tmp_path):
+def test_workspace_authors_and_installs_a_skill(tmp_path):
     pytest.importorskip("langchain")
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    skills = workspace / "skills"
+    skills = tmp_path / "skills"
     skills.mkdir()
+    (workspace / "approved" / "references").mkdir(parents=True)
 
     async def scenario():
         executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts",
                                  skills=SkillsLibrary(skills), workspace_dir=workspace)
         try:
-            blocked = await executor.call("write_file", {
-                "path": "skills/manual.md", "content": "manual"}, timeout=5)
-            allowed = await executor.call("write_file", {
-                "path": "note.txt", "content": "ok"}, timeout=5)
-            created = await executor.call("create_skill", {
-                "name": "approved", "description": "Approved.", "content": "Body."}, timeout=5)
+            written = await executor.call("write_file", {
+                "path": "approved/SKILL.md",
+                "content": "---\nname: approved\ndescription: Approved.\n---\n\nBody."}, timeout=5)
+            reference = await executor.call("write_file", {
+                "path": "approved/references/guide.md", "content": "guide"}, timeout=5)
+            installed = await executor.call("install_skill", {"path": "approved"}, timeout=5)
         finally:
             await executor.close()
-        return blocked, allowed, created
+        return written, reference, installed
 
-    written, allowed, created = asyncio.run(scenario())
-    assert written["ok"] is True and (skills / "manual.md").read_text(encoding="utf-8") == "manual"
-    assert allowed["ok"] is True and (workspace / "note.txt").read_text(encoding="utf-8") == "ok"
-    assert created["ok"] is True and (skills / "approved" / "SKILL.md").is_file()
+    written, reference, installed = asyncio.run(scenario())
+    assert written["ok"] and reference["ok"]
+    assert (workspace / "approved" / "references" / "guide.md").read_text(encoding="utf-8") == "guide"
+    assert installed["ok"] is True and installed["executed"] is True
+    assert (skills / "approved" / "SKILL.md").is_file()
+    assert (skills / "approved" / "references" / "guide.md").read_text(encoding="utf-8") == "guide"
 
 
-def test_create_skill_requires_host_approval(tmp_path):
+def test_install_skill_requires_host_approval(tmp_path):
     pytest.importorskip("langchain")
     from agent_fakes import TestModel
 
@@ -374,19 +398,25 @@ def test_create_skill_requires_host_approval(tmp_path):
     root = tmp_path / "skills"
     root.mkdir()
     library = SkillsLibrary(root)
+    workspace = tmp_path / "workspace"
+    for name in ("denied-skill", "approved-skill"):
+        target = workspace / name
+        target.mkdir(parents=True)
+        (target / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Demo.\n---\n\nBody.\n", encoding="utf-8")
 
     async def scenario():
-        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts", skills=library)
+        executor = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=ASSETS / "scripts",
+                                 skills=library, workspace_dir=workspace)
 
-        async def confirm(name, _arguments):
-            return name == "create_skill" and _arguments["name"] == "approved-skill"
+        async def confirm(name, arguments):
+            return name == "install_skill" and arguments["path"] == "approved-skill"
 
-        session = AgentSession(executor, TestModel(custom_output_text="done"), skills=library, confirm=confirm)
+        session = AgentSession(executor, TestModel(custom_output_text="done"), skills=library,
+                               workspace=True, confirm=confirm)
         try:
-            denied = await session.dispatch("create_skill", {
-                "name": "denied-skill", "description": "Denied.", "content": "Body"})
-            approved = await session.dispatch("create_skill", {
-                "name": "approved-skill", "description": "Approved.", "content": "Body"})
+            denied = await session.dispatch("install_skill", {"path": "denied-skill"})
+            approved = await session.dispatch("install_skill", {"path": "approved-skill"})
         finally:
             await session.close()
         return denied, approved

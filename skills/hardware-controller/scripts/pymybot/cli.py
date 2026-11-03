@@ -382,8 +382,10 @@ def parse_args(argv=None):
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
         args.command = "run"
         return args
-    if (args.enable_shell or args.allow_file_writes) and not args.workspace_dir:
-        raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir")
+    if args.role and args.workspace_dir:
+        raise UsageError("--role owns its workspace; do not combine it with --workspace-dir")
+    if (args.enable_shell or args.allow_file_writes) and not (args.workspace_dir or args.role):
+        raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir or --role")
     if args.role and (args.skills_dir or args.mcp_config):
         raise UsageError("--role owns its skills and MCP configuration; do not combine it with --skills-dir/--mcp-config")
     if args.allow_shell and not args.enable_shell:

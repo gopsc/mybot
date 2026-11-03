@@ -267,6 +267,14 @@ class Workspace:
             for descriptor in reversed(opened):
                 os.close(descriptor)
 
+    def resolve_directory(self, relative, check):
+        """Return one existing workspace directory after link/root checks."""
+        self._check_root()
+        parts = _relative(relative, directory=True)
+        with self._directory(parts, check) as (path, _fd, guard):
+            guard()
+        return path
+
     def call(self, name, arguments, check, started):
         check()
         self.validate(name, arguments)

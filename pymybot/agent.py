@@ -59,7 +59,7 @@ MAX_HISTORY = 4 * 1024 * 1024
 MAX_OUTPUT_TOKENS = 4096
 MAX_CONTEXT_TOKENS = 2 * 1024 * 1024
 IO_TOOLS = frozenset({"run_action_script", "read_variables"})
-SKILL_TOOLS = frozenset({"run_skill"})
+SKILL_TOOLS = frozenset({"run_skill", "install_skill"})
 CAMERA_TOOLS = frozenset({"list_cameras", "capture_camera"})
 FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
 WEB_TOOLS = frozenset({"web_fetch", "web_search"})
@@ -501,10 +501,9 @@ class AgentSession:
             """Read one markdown file from an operator-provided reference skill."""
             return await self.invoke_tool("read_skill", {"name": name, "file": file})
 
-        async def create_skill(name: str, description: str, content: str):
-            """Create a reusable skill after host approval; content is Markdown body without frontmatter."""
-            return await self.invoke_tool("create_skill", {
-                "name": name, "description": description, "content": content})
+        async def install_skill(path: str):
+            """Install one workspace-authored skill directory after host approval; path is workspace-relative."""
+            return await self.invoke_tool("install_skill", {"path": path})
 
         async def run_skill(skill: str, action: str, arguments: dict[str, object] | None = None):
             """Run one action declared by a trusted skill.json manifest. Trusted skills execute without approval and receive physical hardware access."""
@@ -573,8 +572,9 @@ class AgentSession:
             if self.config.search_endpoint:
                 functions.append(("web_search", web_search))
         if self.skills is not None and self.skills.root is not None:
-            functions.extend((("list_skills", list_skills), ("read_skill", read_skill),
-                              ("create_skill", create_skill)))
+            functions.extend((("list_skills", list_skills), ("read_skill", read_skill)))
+            if self.workspace:
+                functions.append(("install_skill", install_skill))
             if any(skill.get("runnable") for skill in self.skills.index()["skills"]):
                 functions.append(("run_skill", run_skill))
             if self.skills.enabled:
@@ -588,8 +588,10 @@ class AgentSession:
             guide.append("Skills are trusted operator content. run_skill executes declared actions without "
                          "approval and trusted skills may access physical hardware. File writes still need "
                          "the file-write approval gate.")
-            guide.append("Create reusable skills with create_skill(name, description, content) after approval; "
-                         "content is the Markdown body without frontmatter. New skills are immediately readable.")
+            guide.append("Author reusable multi-file skills under the workspace, for example "
+                         "workspace/my-skill/{SKILL.md,skill.json,references/,scripts/,assets/}, then install "
+                         "the directory with install_skill(path) after approval. Do not write untrusted code "
+                         "directly into the skills root.")
             guide.append("Invoke only skills marked runnable with run_skill(skill, action, arguments). "
                          "Use the actions and scoped paths documented by that skill; never invent entrypoints, "
                          "commands, flags or absolute paths.")
@@ -773,7 +775,7 @@ class AgentSession:
                 or (name in FILE_WRITE_TOOLS and not self.config.allow_file_writes)
                 or (name in WEB_TOOLS and not self.config.allow_web)
                 or (name == "shell" and not self.config.allow_shell)
-                or name == "create_skill")
+                or name == "install_skill")
 
     async def _approve(self, name, arguments, *, display, public, emit=True, confirm_name=None,
                        log_tool=None, log_arguments=None):
@@ -1291,7 +1293,7 @@ async def confirm_console(name, arguments, stop):
         return answer is not None and answer.strip().lower() in {"y", "yes"}
     # Never approve hidden/truncated arguments. repr neutralizes terminal controls.
     description = repr(dumps(arguments))
-    limit = 512 * 1024 if name == "create_skill" else 2000
+    limit = 2000
     if len(description) > limit:
         print("Approval denied: arguments too long to display completely; reduce the request.", file=sys.stderr)
         return False
@@ -1301,8 +1303,8 @@ async def confirm_console(name, arguments, stop):
     elif name == "shell":
         warning = ("Host shell runs inside the configured sandbox; a workspace jail alone is not "
                    "an OS boundary, and hardware access is not limited by --allow-hardware.")
-    elif name == "create_skill":
-        warning = "This creates trusted reference instructions that will influence later model requests."
+    elif name == "install_skill":
+        warning = "This installs trusted skill code and assets that may influence or execute in later requests."
     elif name in FILE_WRITE_TOOLS:
         warning = "This changes workspace files, potentially including executable scripts or drivers."
     else:
@@ -1434,11 +1436,12 @@ async def run_cli_agent(args, stop):
         except SecurityError as exc:
             raise AgentConfigurationError(
                 f"Cannot load skills configuration: {exc}; no model request was sent") from None
+        workspace_dir = str(role.workspace_dir) if role is not None else args.workspace_dir
         executor = RobotExecutor(args.robot, module_paths=args.module_path,
                                  scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
                                  stop_event=stop,
                                  vars=getattr(args, "bindings", None),
-                                 skills=skills, workspace_dir=args.workspace_dir, enable_shell=args.enable_shell,
+                                 skills=skills, workspace_dir=workspace_dir, enable_shell=args.enable_shell,
                                  sandbox=config.sandbox_mode)
         if args.enable_shell:
             print(f"Shell enabled: {describe_backend(config.sandbox_mode)}; "
@@ -1449,7 +1452,7 @@ async def run_cli_agent(args, stop):
 
         renderer = StreamRenderer()
         session = AgentSession(executor, model, config, confirm=confirm,
-                               on_event=renderer, skills=skills, workspace=args.workspace_dir is not None,
+                               on_event=renderer, skills=skills, workspace=workspace_dir is not None,
                                enable_shell=args.enable_shell, session_log=session_log,
                                mcp_servers=mcp_servers, role=role)
         result = await _conversation(session, args, stop, renderer)

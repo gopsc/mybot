@@ -97,7 +97,8 @@ is not interrupted by new tokens.
      validates with the same loader as the agent and never displays environment
      variable values.
 
-3. Pick the workspace. The model summary updates immediately.
+3. Pick the workspace. When a role is selected, its fixed
+   `~/.mybot/roles/<name>/workspace` is used instead of the global workspace.
 
 4. Type a task. Tool calls that can move hardware, write files or run shell
    commands show a confirmation dialog; closing the dialog means deny.

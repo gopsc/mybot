@@ -472,6 +472,7 @@ def test_role_selector_binds_agent_params_and_reset(app_factory, monkeypatch, tm
     assert not app.context_entries["skills_dir"].isEnabled()
     params = app._agent_params("hello")
     assert params["role"] == "tech"
+    assert params["workspaceDir"] == str(role.workspace_dir)
     assert "skillsDir" not in params and "mcpConfig" not in params
 
     client = attach_client(app)
@@ -487,6 +488,7 @@ def test_new_role_falls_back_to_default_skills(ui, monkeypatch, tmp_path):
     assert not app.cfg.role
     app.new_role()
     assert app.cfg.role == "role-with-skills"
+    assert (tmp_path / "home" / "roles" / "role-with-skills" / "workspace").is_dir()
     target = (tmp_path / "home" / "roles" / "role-with-skills" / "skills"
               / "pymybot-scripting" / "SKILL.md")
     assert target.is_file()

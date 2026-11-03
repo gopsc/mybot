@@ -1,6 +1,6 @@
 ---
 name: skill-authoring
-description: 技能编写规范：创建或更新 mybot 技能时先读本技能，说明 SKILL.md 目录结构、frontmatter、description 触发词、references、大小限制、create_skill 审批流程与验证方法。当用户说“创建技能”“编写/修改 SKILL.md”“技能描述/触发词怎么写”或提到 skill-authoring 时使用。
+description: 技能编写规范：创建或更新 mybot 技能时先读本技能，说明 SKILL.md 目录结构、frontmatter、description 触发词、references/scripts/assets、大小限制、工作区编写与 install_skill 审批流程。当用户说“创建技能”“编写/修改 SKILL.md”“技能描述/触发词怎么写”或提到 skill-authoring 时使用。
 ---
 
 # mybot 技能编写规范
@@ -14,8 +14,9 @@ description: 技能编写规范：创建或更新 mybot 技能时先读本技能
 <skills-root>/<name>/
 ├── SKILL.md              # 必需
 ├── skill.json            # 可选，Agent run_skill 的可执行 action 清单
-└── references/           # 可选，通常只放 .md；hardware-controller 另可含 assets/
-    └── example.md
+├── references/           # 可选，通常只放 .md
+├── scripts/              # 可选，可执行技能的 Python 入口
+└── assets/               # 可选，技能自带的数据、驱动或示例
 ```
 
 - `<skills-root>` 是当前活动的技能根：
@@ -69,28 +70,31 @@ description: 为 mybot 创建 Markdown 技能（SKILL.md），包含 frontmatter
 
 ## 5. 创建流程（Agent）
 
+技能根是可信目录，不能用 `write_file` 直接写。先在当前工作区准备完整技能目录：
+
+```text
+<workspace>/<name>/
+├── SKILL.md
+├── skill.json            # 可执行技能才需要
+├── references/*.md
+├── scripts/*
+└── assets/*
+```
+
 1. `list_skills` 确认当前活动技能根里有什么；
 2. `read_skill("skill-authoring")` 读取本规范；
-3. 确定技能名、单行 description、正文；
-4. 调用 `create_skill(name, description, content)`：
-   - `content` 是 **frontmatter 之后的 Markdown 正文**；
-   - 工具会自动加 frontmatter 并写入当前活动技能根；
-   - 每次调用都需要操作者审批；
-5. 用 `list_skills` 和 `read_skill(name)` 验证；
-6. 新技能对后续请求立即可读；如果 GUI/旧会话仍看不到，新开对话或重启。
+3. 在 workspace 下用 `write_file` 创建完整 `<name>/` 目录；文件内容必须包含 frontmatter；
+4. 调用 `install_skill(path)`，`path` 是 workspace 相对目录，例如 `my-skill`；
+5. 安装工具会校验 frontmatter、禁止链接和覆盖，复制完整目录后刷新技能索引；
+6. 每次安装都需要操作者审批；用 `list_skills` 和 `read_skill(name)` 验证；
+7. 新技能对后续请求立即可读；如果 GUI/旧会话仍看不到，新开对话或重启。
 
-`create_skill` 只能**新建**一个 `SKILL.md`。它不能：
-
-- 覆盖已有技能；
-- 创建 `references/` 或其他文件；
-- 安装市场技能包或执行脚本。
-
-需要 references 或多文件时，先创建 `SKILL.md`，再请操作者在宿主机补充文件。
+`install_skill` 只能安装新技能，不能覆盖已有技能。需要修改时由操作者在宿主机更新，或删除后重新安装。
 
 ## 6. 更新流程
 
 - 技能根对 `write_file`、`edit_file`、shell 是只读的；不要尝试绕过。
-- 更新已有技能由操作者在宿主机编辑，或删除后重新创建。
+- 修改技能应先在 workspace 重新编写，再由操作者替换；`install_skill` 不覆盖已有技能。
 - 修改后需要新开对话/重启，让 `SkillsLibrary` 重新扫描。
 
 ## 7. 安全与信任

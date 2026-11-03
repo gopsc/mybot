@@ -18,6 +18,8 @@ Reading a variable or activating the robot may also write to hardware. Robot
 approval, file-write approval and shell approval are separate host-controlled gates.
 Skill authoring: when the user asks to create or update a skill, first call
 list_skills, then read the `skill-authoring` skill (技能编写规范) with read_skill,
-and follow it before calling create_skill. Skills are protected operator content:
-never create or modify them with write_file, edit_file or shell. If
+and follow it before calling install_skill. Author the complete skill directory
+under the workspace (SKILL.md, skill.json, references/, scripts/, assets/), then
+install it with install_skill(path). Skills are protected operator content:
+never write or modify the skills root with write_file, edit_file or shell. If
 `skill-authoring` is absent, ask the operator instead of inventing a format.

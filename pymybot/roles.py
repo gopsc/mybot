@@ -166,6 +166,10 @@ class Role:
         return self.root / "skills"
 
     @property
+    def workspace_dir(self):
+        return self.root / "workspace"
+
+    @property
     def mcp_config(self):
         return self.root / "mcp.json"
 
@@ -185,6 +189,7 @@ class Role:
             "root": str(self.root),
             "prompts_dir": str(self.prompts_dir),
             "skills_dir": str(self.skills_dir),
+            "workspace_dir": str(self.workspace_dir),
             "skills": [item["name"] for item in skills],
             "mcp_config": str(self.mcp_config) if self.mcp_config.is_file() else None,
             "history_file": str(self.history_file),
@@ -205,6 +210,9 @@ def load_role(name, root=None):
     role = Role(name=name, description=document["description"], root=path)
     if not role.prompts_dir.is_dir() or not role.skills_dir.is_dir():
         raise SecurityError("Role prompts and skills directories are required")
+    if not role.workspace_dir.is_dir():
+        role.workspace_dir.mkdir(mode=0o700)
+    _private(role.workspace_dir, 0o700)
     _regular_file(role.mcp_config)
     _regular_file(role.history_file)
     return role
@@ -271,6 +279,7 @@ def create_role(name, *, description="", skills_from=None, mcp_from=None, root=N
         PromptLibrary(home=staging / "prompts").ensure_home()
         skills = staging / "skills"
         skills.mkdir(mode=0o700)
+        (staging / "workspace").mkdir(mode=0o700)
         if skills_from:
             _copy_skills(skills_from, skills)
         if mcp_from:

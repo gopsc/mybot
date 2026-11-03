@@ -661,7 +661,8 @@ class Server:
             raise AgentConfigurationError(f"Cannot load role: {exc}; no model request was sent") from None
         mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
                       else key["mcpConfig"] or None if role is None else None)
-        workspace = Path(key["workspaceDir"]).absolute() if key["workspaceDir"] else None
+        workspace = (role.workspace_dir if role is not None
+                     else Path(key["workspaceDir"]).absolute() if key["workspaceDir"] else None)
         if key["enableShell"] and workspace is None:
             raise AgentConfigurationError("Shell tools require a workspace; no model request was sent")
         if key["allowShell"] and not key["enableShell"]:
