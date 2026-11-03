@@ -75,13 +75,10 @@ provided `*_virt.sql` examples for hardware-free work.
 
 ## A long conversation hits the model context limit
 
-pymybot retains six complete turns by default and applies a byte budget. Use
-`--history-turns` (1–20) to adjust the retained-turn limit. A structured JSON
-error is returned instead of crashing when the provider rejects a request.
-Use `--max-history-bytes` (64 KiB–64 MiB, default 4 MiB),
-start a new conversation, or lower `--max-requests` / `--max-tool-calls` for a
-smaller working set. The runtime does not guess a model’s context window; the
-byte budget is an explicit, provider-independent guard.
+pymybot keeps all complete turns and applies a byte budget. Use
+`--max-history-bytes` (64 KiB–64 MiB, default 4 MiB) or start a new
+conversation. The runtime does not guess a model’s context window; the byte
+budget is an explicit, provider-independent guard.
 
 For request-time protection, set `--max-context-tokens` to the model's context
 window. Before every model request, including requests inside a tool loop,

@@ -36,14 +36,6 @@ def _paths(value, cap=32):
     return [item for item in (_text(entry) for entry in value) if item][:cap]
 
 
-def _names(value, cap=64):
-    checked = []
-    for item in _paths(value, cap):
-        if item.isidentifier() and item not in checked:
-            checked.append(item)
-    return checked
-
-
 def _key_env(value):
     """Only a variable *name* is ever stored, never the secret it holds."""
     text = _text(value, 256)
@@ -77,12 +69,8 @@ class GuiConfig:
     model: str = ""
     base_url: str = ""
     api_key_env: str = ""
-    read_vars: list[str] = field(default_factory=list)
     vars: dict[str, str] = field(default_factory=dict)
     timeout: float = 180.0
-    max_requests: int = 8
-    max_tool_calls: int = 16
-    history_turns: int = 6
     max_history_bytes: int = 4 * 1024 * 1024
     max_context_tokens: int | None = None
     context_reserve_tokens: int = 2048
@@ -119,12 +107,8 @@ class GuiConfig:
             model=_text(self.model, 1024),
             base_url=_text(self.base_url, 2048),
             api_key_env=_key_env(self.api_key_env),
-            read_vars=_names(self.read_vars),
             vars=_bindings(self.vars),
             timeout=self.timeout if isinstance(self.timeout, (int, float)) and 0 < self.timeout <= 3600 else 180.0,
-            max_requests=self.max_requests if isinstance(self.max_requests, int) and 1 <= self.max_requests <= 100 else 8,
-            max_tool_calls=self.max_tool_calls if isinstance(self.max_tool_calls, int) and 1 <= self.max_tool_calls <= 1000 else 16,
-            history_turns=self.history_turns if isinstance(self.history_turns, int) and 1 <= self.history_turns <= 20 else 6,
             max_history_bytes=(self.max_history_bytes if isinstance(self.max_history_bytes, int)
                                and 64 * 1024 <= self.max_history_bytes <= 64 * 1024 * 1024
                                else 4 * 1024 * 1024),
@@ -203,8 +187,6 @@ def merge_args(cfg, args):
         "base_url": getattr(args, "base_url", None),
         "api_key_env": getattr(args, "api_key_env", None),
         "timeout": getattr(args, "timeout", None),
-        "max_requests": getattr(args, "max_requests", None),
-        "max_tool_calls": getattr(args, "max_tool_calls", None),
         "prompt_file": getattr(args, "prompt_file", None),
         "context_bytes": getattr(args, "context_bytes", None),
         "intent_mode": getattr(args, "intent", None),
@@ -220,8 +202,6 @@ def merge_args(cfg, args):
             setattr(cfg, name, value)
     if getattr(args, "module_path", None):
         cfg.module_paths = list(args.module_path)
-    if getattr(args, "read_var", None):
-        cfg.read_vars = _names(args.read_var)
     if getattr(args, "no_prompt_stats", False):
         cfg.auto_stats = False
     if not cfg.workspace:

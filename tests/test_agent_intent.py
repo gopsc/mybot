@@ -67,7 +67,6 @@ def test_mixed_request_unions_tool_sets():
     decision = classify_intent("write a script and run it with shell")
     assert decision.name == "author"
     assert {"write_file", "edit_file", "run_skill", "shell"} <= decision.tools
-    assert decision.max_requests == 8 and decision.max_tool_calls == 20
 
 
 def test_no_keywords_stays_unrestricted():

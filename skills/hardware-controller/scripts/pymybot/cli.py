@@ -195,13 +195,10 @@ def parser():
             command.add_argument("--model", help="provider:model; defaults to MYBOT_MODEL")
             command.add_argument("--base-url", help="provider endpoint; defaults to MYBOT_BASE_URL")
             command.add_argument("--api-key-env", help="environment variable holding the API key")
-            command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
             command.add_argument("--allow-actions", action="store_true",
                                  help="preapprove variable reads; trusted skills need no approval")
             command.add_argument("--allow-hardware", action="store_true",
                                  help="allow direct hardware; trusted skills always receive hardware access")
-            command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
-            command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
             command.add_argument("--prompt-file", metavar="FILE",
                                  help="additional operator prompt/profile (UTF-8, max 8 KiB); does not replace runtime USER")
             command.add_argument("--context-bytes", type=bounded_int(0, 64 * 1024), default=4 * 1024,
@@ -218,7 +215,7 @@ def parser():
             command.add_argument("--search-endpoint", metavar="URL",
                                  help="SearXNG base URL for web_search; requires --web")
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
-                                 help="per-task wall-clock budget (default: 180)")
+                                 help="provider/MCP/network timeout; Agent turns have no wall-clock limit (default: 180)")
             continue
         if name == "mcp":
             command.add_argument("--robot", required=True, metavar="FILE",
@@ -234,8 +231,6 @@ def parser():
                                       "static tools stay available either way")
             command.add_argument("--allow-hardware", action="store_true",
                                  help="permit physical devices; requires --allow-execution")
-            command.add_argument("--read-var", type=safe_ident, action="append", default=[], metavar="NAME",
-                                 help="allowlist a readable variable; repeatable")
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help=f"cooperative execution budget, >0 and <={MAX_TIMEOUT} (default: 180)")
             command.add_argument("--var", type=variable, action="append", default=[], metavar="NAME=VALUE",
@@ -282,7 +277,7 @@ def parser():
                                  help="permit physical devices for direct commands; trusted skills always receive hardware access")
         if name in {"run", "sample", "agent"}:
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
-                                 help=f"cooperative execution/task budget, >0 and <={MAX_TIMEOUT} (default: 180)")
+                                 help=f"provider/MCP/network timeout, >0 and <={MAX_TIMEOUT}; Agent turns have no wall-clock limit (default: 180)")
         command.add_argument("--var", type=variable, action="append", default=[], metavar="NAME=VALUE",
                              help="session alias binding (text) and Alias/Vars structure override;"
                                   " repeat with distinct names")
@@ -304,7 +299,6 @@ def parser():
             command.add_argument("--skills-dir", metavar="DIR",
                                  help="trusted root of operator skill directories (SKILL.md + markdown references);"
                                       " default: packaged assets/skills, else source skills")
-            command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
             command.add_argument("--allow-actions", action="store_true",
                                  help="preapprove variable reads; trusted skills need no approval")
             command.add_argument("--workspace-dir", metavar="DIR",
@@ -315,10 +309,6 @@ def parser():
                                  help="preapprove shell commands; requires --enable-shell; grants host-user permissions")
             command.add_argument("--allow-file-writes", action="store_true",
                                  help="preapprove workspace file creation/edits; requires --workspace-dir")
-            command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
-            command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
-            command.add_argument("--history-turns", type=bounded_int(1, 20), default=6,
-                                 help="retained complete conversation turns (default: 6)")
             command.add_argument("--max-history-bytes", type=bounded_int(64 * 1024, 64 * 1024 * 1024),
                                  default=4 * 1024 * 1024,
                                  help="upper bound for retained conversation history (default: 4 MiB)")
@@ -383,7 +373,7 @@ def parse_args(argv=None):
         return args  # Existing subcommands always bypass the model.
     if args.no_agent:
         if (args.task is not None or args.model or args.base_url or args.api_key_env
-                or args.allow_actions or args.read_var or args.workspace_dir
+                or args.allow_actions or args.workspace_dir
                 or args.enable_shell or args.allow_shell or args.allow_file_writes
                  or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
                  or args.role or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
@@ -412,8 +402,6 @@ def parse_args(argv=None):
         checked_text(args.task, 16 * 1024)
         if not args.task.strip():
             raise UsageError("--task must not be empty")
-    for name in args.read_var:
-        safe_ident(name)
     args.scripts_dir = args.scripts_dir or default_scripts_dir()
     return args
 
@@ -659,7 +647,7 @@ def execute(args, stop):
         return run_server(stop, robot_path=args.robot, scripts_dir=args.scripts_dir,
                           module_paths=args.module_path,
                           vars=bindings, allow_execution=args.allow_execution,
-                          allow_hardware=args.allow_hardware, read_vars=args.read_var,
+                          allow_hardware=args.allow_hardware,
                           timeout=args.timeout, skills_dir=args.skills_dir)
     bindings = session_bindings(args)
     if args.command == "agent":

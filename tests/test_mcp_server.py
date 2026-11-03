@@ -118,7 +118,7 @@ def test_read_only_by_default_never_activates(tmp_path):
 
 def test_run_read_deactivate_and_reactivate(tmp_path):
     async def scenario():
-        async with client(tmp_path, extra=("--allow-execution", "--read-var", "relay0")) as session:
+        async with client(tmp_path, extra=("--allow-execution",)) as session:
             first = data(await session.call_tool("run_action_script", {"script": "relay-test.mt"}))
             assert first["ok"] and first["executed"]
             assert first["data"]["outputs"][-1]["slept"] == 1
@@ -134,14 +134,16 @@ def test_run_read_deactivate_and_reactivate(tmp_path):
     asyncio.run(scenario())
 
 
-def test_paths_allowlists_and_unknown_tools_are_rejected(tmp_path):
+def test_paths_reads_and_unknown_tools_are_validated(tmp_path):
     async def scenario():
         async with client(tmp_path, extra=("--allow-execution",)) as session:
             for path in ("../scripts/relay-test.mt", str(ASSETS / "scripts/relay-test.mt"), "missing.mt"):
                 result = data(await session.call_tool("run_action_script", {"script": path}))
                 assert not result["ok"] and not result["executed"]
-            assert (await session.call_tool("read_variables", {"names": ["relay0"]})).isError
-            assert data(await session.call_tool("get_status", {}))["data"]["state"] == "loaded"
+            read = data(await session.call_tool("read_variables", {"names": ["relay0"]}))
+            assert read["ok"] and read["data"]["relay0"]["delay"] == 0
+            assert (await session.call_tool("read_variables", {"names": ["missing"]})).isError
+            assert data(await session.call_tool("get_status", {}))["data"]["state"] == "active"
             assert (await session.call_tool("not_a_tool", {})).isError
     asyncio.run(scenario())
 

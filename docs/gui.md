@@ -28,16 +28,14 @@ About dialog mark.
 
 ## What the window contains
 
-- **Menu bar** — 文件 (workspace, structure, refresh, settings, quit),
+- **Menu bar** — 文件 (workspace, refresh, settings, quit),
   工具 (MCP editor, sessions, diagnostics, resources, session folder, clear/copy
   chat) and 帮助 (docs, about). Every entry has a shortcut.
-- **Toolbar** — workspace picker, Agent role selector/create, structure SQL
-  selector, refresh, a 管理 menu, new conversation, stop and settings.
+- **Toolbar** — workspace picker, Agent role selector/create, refresh,
+  a 管理 menu, new conversation, stop and settings.
 - **Robot context** — skills directory and MCP configuration. The agent lists
   and captures host cameras with the built-in `list_cameras` / `capture_camera`
   tools; cameras are not declared in the structure.
-- **Capability and budgets** — read variables, timeout, model-request,
-  tool-call and history budgets.
 - **Model summary** — current provider/model/endpoint/key-variable state.
 - **Chat, logs and resources** — streaming transcript, tool receipts,
   diagnostics, and a lazy resource browser for scripts, skills and docs.
@@ -51,14 +49,14 @@ The GUI exposes the backend surface described in [cli.md](cli.md) and
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
+| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, the history byte cap, model context-window and project-context budgets, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
 | 工具 → 环境诊断 | Renders `pymybot doctor`: interpreter, assets and optional dependencies, colour-coded by status, with copy-JSON. |
 | 资源 tab | Structures (`*.sql`), Python/Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
 | 停止对话 / 急停 | **停止对话** cancels the running Agent turn. **急停** has no confirmation dialog: it sends `abort`, cancels the turn, calls driver `safe()` hooks and releases hardware. It is best-effort, not a hardware emergency stop. |
-| 重试 | Re-sends the last task after an error, cancellation or timeout, disabled while a turn is running. |
+| 重试 | Re-sends the last task after an error or cancellation, disabled while a turn is running. |
 | 清空 / 复制对话 | Clear the window transcript (after confirmation) or copy it to the clipboard. |
 | 打开会话目录 | Opens `~/.mybot/sessions` in the file manager. |
 
@@ -92,16 +90,14 @@ is not interrupted by new tokens.
      starts `serve` with `--no-session-log`. `MYBOT_SESSION_LOG=0` in the
      environment still disables transcripts regardless of this checkbox. Use
      **工具 → 会话管理** or `pymybot sessions` to inspect or prune transcripts;
-   - the retained history turns and history byte cap (`--history-turns`,
-     `--max-history-bytes`);
+   - the history byte cap (`--max-history-bytes`);
    - the optional model context-window and safety-reserve token budgets
      (`--max-context-tokens`, `--context-reserve-tokens`);
    - the MCP configuration file. The JSON editor
      validates with the same loader as the agent and never displays environment
      variable values.
 
-3. Pick the workspace and optionally a `robots/*.sql` structure. The model
-   summary updates immediately.
+3. Pick the workspace. The model summary updates immediately.
 
 4. Type a task. Tool calls that can move hardware, write files or run shell
    commands show a confirmation dialog; closing the dialog means deny.

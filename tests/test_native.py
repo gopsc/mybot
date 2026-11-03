@@ -325,7 +325,7 @@ def test_executor_can_sample_and_run_native_drivers():
 
     async def scenario():
         executor = RobotExecutor(ASSETS / "robots" / "uart-loopback.sql",
-                                 scripts_dir=ASSETS / "scripts", read_vars=("echo",))
+                                 scripts_dir=ASSETS / "scripts")
         try:
             await executor.start()
             sampled = await executor.call("read_variables", {"names": ["echo"]})

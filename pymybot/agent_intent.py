@@ -1,7 +1,7 @@
 """Deterministic bilingual intent routing for the agent harness.
 
 The classifier runs before each model request. Explicit control, authoring,
-diagnosis and inspection requests get a bounded tool allowlist and budget;
+diagnosis and inspection requests get a bounded tool allowlist;
 messages with no intent keywords stay unrestricted so ordinary conversation
 and provider-specific tool flows are not narrowed by a guess. When several
 intents match, their tool sets are unioned: a request such as “write a script
@@ -24,8 +24,6 @@ TOOLS_BY_INTENT = {
     "author": READ_TOOLS | {"write_file", "edit_file", "update_prompt", "create_skill", "run_skill"},
     "diagnose": READ_TOOLS | {"shell", "run_skill", "capture_camera"},
 }
-BUDGETS = {"chat": (3, 4), "inspect": (4, 8), "control": (8, 16),
-           "author": (8, 20), "diagnose": (6, 12)}
 _RULES = {
     "control": ("运行", "执行", "启动", "停止", "自检", "动作", "读取", "采样", "拍照",
                 "拍一张", "拍张", "run", "execute", "start", "stop", "activate",
@@ -55,8 +53,6 @@ class IntentDecision:
     reason: str
     tools: frozenset[str] = frozenset()
     restricted: bool = True
-    max_requests: int = 8
-    max_tool_calls: int = 16
 
     def allows(self, tool):
         return not self.restricted or tool in self.tools
@@ -64,8 +60,7 @@ class IntentDecision:
     def as_dict(self):
         return {"name": self.name, "confidence": round(self.confidence, 2),
                 "reason": self.reason, "restricted": self.restricted,
-                "allowed_tools": sorted(self.tools) if self.restricted else None,
-                "max_requests": self.max_requests, "max_tool_calls": self.max_tool_calls}
+                "allowed_tools": sorted(self.tools) if self.restricted else None}
 
 
 def _matches(text, intent):
@@ -84,9 +79,7 @@ def classify_intent(text, mode="auto"):
                               restricted=False)
     if mode in INTENTS:
         return IntentDecision(mode, 1.0, "operator-selected intent",
-                              tools=TOOLS_BY_INTENT[mode],
-                              max_requests=BUDGETS[mode][0],
-                              max_tool_calls=BUDGETS[mode][1])
+                              tools=TOOLS_BY_INTENT[mode])
     if mode != "auto":
         mode = "auto"
     scored = {}
@@ -99,9 +92,6 @@ def classify_intent(text, mode="auto"):
                               restricted=False)
     name = next(intent for intent in _PRIORITY if intent in scored)
     tools = frozenset().union(*(TOOLS_BY_INTENT[intent] for intent in scored))
-    requests = max(BUDGETS[intent][0] for intent in scored)
-    calls = max(BUDGETS[intent][1] for intent in scored)
     total = sum(len(hits) for hits in scored.values())
     reason = "; ".join(f"{intent}: {', '.join(hits[:4])}" for intent, hits in scored.items())
-    return IntentDecision(name, min(0.95, 0.55 + 0.1 * total), reason,
-                          tools=tools, max_requests=requests, max_tool_calls=calls)
+    return IntentDecision(name, min(0.95, 0.55 + 0.1 * total), reason, tools=tools)

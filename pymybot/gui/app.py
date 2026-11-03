@@ -153,7 +153,7 @@ class App(QMainWindow):
         self._start_timer.setSingleShot(True)
         self._start_timer.timeout.connect(self._start_server)
         self._load_role_list()
-        self._load_robot_list()
+        self._set_workspace_label(str(Path(self.cfg.workspace or default_workspace()).absolute()))
         self._start_timer.start(120)
         self.task_box.setPlainText(self.cfg.task.strip())
         self._refresh_status()
@@ -188,12 +188,8 @@ class App(QMainWindow):
         toolbar.addWidget(self.role_box)
         self.create_role_button = _button("新建", self.new_role)
         toolbar.addWidget(self.create_role_button)
-        toolbar.addWidget(_label("结构"))
-        self.robot_box = QComboBox()
-        self.robot_box.setMinimumWidth(160)
-        self.robot_box.activated.connect(self.on_robot_changed)
-        toolbar.addWidget(self.robot_box, 1)
         toolbar.addWidget(_button("刷新", self.refresh_context))
+        toolbar.addStretch(1)
         self.manage_button = QToolButton()
         self.manage_button.setText("管理")
         self.manage_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -256,7 +252,6 @@ class App(QMainWindow):
         bar = self.menuBar()
         files = bar.addMenu("文件")
         action(files, "打开工作区…", self.pick_workspace, "Ctrl+O")
-        action(files, "选择结构…", self.pick_robot, "Ctrl+Shift+O")
         action(files, "刷新上下文", self.refresh_context, "F5")
         files.addSeparator()
         action(files, "设置…", self.open_settings, "Ctrl+,")
@@ -319,25 +314,11 @@ class App(QMainWindow):
             elif mode == "edit":
                 row.addWidget(_button("编辑", self.open_mcp))
             form.addRow(label, row)
-        layout.addWidget(robot)
-
-        guard = QGroupBox("能力与预算")
-        form = QFormLayout(guard)
         form.addRow(_label(
             "可信技能（run_skill）执行免审批并默认获得硬件权限；只安装你信任的技能。"
-            "文件、Shell、联网和 MCP 工具默认开启并免审批；提示词更新与宿主抓图仍逐次确认。",
+            "文件、Shell、联网和 MCP 工具默认开启并免审批；提示词更新仍逐次确认。",
             secondary=True))
-        self.read_vars_entry = QLineEdit(",".join(self.cfg.read_vars))
-        form.addRow("读取变量", self.read_vars_entry)
-        self.timeout_box = _spin(self.cfg.timeout, 3600, fractional=True)
-        self.requests_box = _spin(self.cfg.max_requests, 100)
-        self.tools_box = _spin(self.cfg.max_tool_calls, 1000)
-        self.history_box = _spin(self.cfg.history_turns, 20)
-        form.addRow("超时（秒）", self.timeout_box)
-        form.addRow("请求预算", self.requests_box)
-        form.addRow("工具预算", self.tools_box)
-        form.addRow("历史轮数", self.history_box)
-        layout.addWidget(guard)
+        layout.addWidget(robot)
 
         model = QGroupBox("模型（在设置中修改）")
         model_layout = QVBoxLayout(model)
@@ -403,8 +384,7 @@ class App(QMainWindow):
             return str(candidate)
         if workspace == source_root() and asset_path("robots").is_dir():
             return str(asset_path("robots"))
-        robot = self._robot_path()
-        return str(Path(robot).parent) if robot and Path(robot).is_file() else ""
+        return ""
 
     def show_resources(self):
         modules = self._module_paths() or [str(path) for path in module_roots()]
@@ -550,20 +530,10 @@ class App(QMainWindow):
             if self.cfg.role and name in {"skills_dir", "mcp_config"}:
                 continue
             setattr(self.cfg, name, entry.text().strip())
-        self.cfg.read_vars = self._names(self.read_vars_entry.text())
-        self.cfg.timeout = self.timeout_box.value()
-        self.cfg.max_requests = self.requests_box.value()
-        self.cfg.max_tool_calls = self.tools_box.value()
-        self.cfg.history_turns = self.history_box.value()
 
     def _sync_controls(self):
         for name, entry in self.context_entries.items():
             entry.setText(getattr(self.cfg, name))
-        self.read_vars_entry.setText(",".join(self.cfg.read_vars))
-        self.timeout_box.setValue(self.cfg.timeout)
-        self.requests_box.setValue(self.cfg.max_requests)
-        self.tools_box.setValue(self.cfg.max_tool_calls)
-        self.history_box.setValue(self.cfg.history_turns)
         self._sync_role_paths()
 
     def _browse_into(self, entry):
@@ -586,13 +556,6 @@ class App(QMainWindow):
         self.cfg.robot = ""
         self.refresh_context()
         self._restart_server()
-
-    def pick_robot(self):
-        chosen, _ = QFileDialog.getOpenFileName(
-            self, "选择机器人结构", self.cfg.workspace or default_workspace(), "SQL (*.sql)")
-        if chosen and not self._stopping:
-            self.cfg.robot = chosen
-            self.refresh_context()
 
     def _load_role_list(self):
         current = self.cfg.role
@@ -665,36 +628,6 @@ class App(QMainWindow):
         self._notice(f"角色 {role.name} 已创建：{role.root}")
         if workspace:
             self._resource_roots = None
-
-    def _load_robot_list(self):
-        root = Path(self.cfg.workspace or default_workspace()).absolute()
-        self._set_workspace_label(str(root))
-        found = []
-        bases = [root / "robots", root]
-        if root == source_root():
-            bases.insert(0, asset_path("robots"))
-        for base in bases:
-            if base.is_dir():
-                found.extend(str(path) for path in sorted(base.glob("*.sql")) if path.is_file())
-        current = self._robot_path()
-        if current and Path(current).is_file():
-            found.insert(0, current)
-        unique = list(dict.fromkeys(found))
-        self.robot_box.clear()
-        for path in unique:
-            try:
-                shown = ((Path("robots") / Path(path).name).as_posix()
-                         if root == source_root() and Path(path).parent == asset_path("robots")
-                         else Path(os.path.relpath(path, root)).as_posix())
-            except ValueError:
-                shown = path
-            self.robot_box.addItem(shown, path)
-        index = self.robot_box.findData(current)
-        self.robot_box.setCurrentIndex(index if index >= 0 else (0 if unique else -1))
-        self.cfg.robot = self.robot_box.currentData() or ""
-
-    def on_robot_changed(self):
-        self.cfg.robot = self.robot_box.currentData() or ""
 
     def _robot_path(self):
         return _absolute(self.cfg.robot, self.cfg.workspace or default_workspace())
@@ -955,10 +888,6 @@ class App(QMainWindow):
             self._notice("智能体不可用：缺少 LangGraph/LangChain 依赖")
             return
         self._sync_config()
-        robot = self._robot_path()
-        if not robot or not Path(robot).is_file():
-            self._message("需要结构文件", "先选择机器人结构（.sql）文件。")
-            return
         scripts = self._scripts_root()
         if not Path(scripts).is_dir():
             self._message("脚本目录不存在", f"脚本根目录不存在：\n{scripts}")
@@ -1006,10 +935,9 @@ class App(QMainWindow):
         workspace = self.cfg.workspace or default_workspace()
         params = {
             "task": task, "role": self.cfg.role or None,
-            "robot": self._robot_path(), "scriptsDir": self._scripts_root(),
+            "scriptsDir": self._scripts_root(),
             "skillsDir": "" if self.cfg.role else self._skills_root(),
             "mcpConfig": "" if self.cfg.role else self._mcp_root(),
-            "readVars": self.cfg.read_vars,
             "vars": self.cfg.vars or None,
             "allowActions": bool(self.cfg.allow_actions),
             "allowHardware": True,
@@ -1018,7 +946,6 @@ class App(QMainWindow):
             "enableShell": True,
             "allowShell": True,
             "allowFileWrites": True,
-            "historyTurns": self.cfg.history_turns,
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "maxContextTokens": self.cfg.max_context_tokens,
             "contextReserveTokens": self.cfg.context_reserve_tokens,
@@ -1030,8 +957,7 @@ class App(QMainWindow):
             "enableWeb": True,
             "allowWeb": True,
             "searchEndpoint": self.cfg.search_endpoint,
-            "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
-            "maxToolCalls": self.cfg.max_tool_calls, "modulePaths": self._module_paths(),
+            "modulePaths": self._module_paths(),
         }
         for key, name in (("model", "model"), ("baseUrl", "base_url"), ("apiKeyEnv", "api_key_env")):
             value = getattr(self.cfg, name)
@@ -1273,16 +1199,7 @@ class App(QMainWindow):
     def refresh_context(self):
         self._sync_config()
         self._load_role_list()
-        self._load_robot_list()
-
-    @staticmethod
-    def _names(text):
-        names = []
-        for item in str(text).replace("，", ",").split(","):
-            name = item.strip()
-            if name and name.isidentifier() and name not in names:
-                names.append(name)
-        return names
+        self._set_workspace_label(str(Path(self.cfg.workspace or default_workspace()).absolute()))
 
     def open_settings(self):
         if self._stopping:
@@ -1298,7 +1215,7 @@ class App(QMainWindow):
         self._sync_controls()
         saved = self._save()
         self._refresh_model_label()
-        self._load_robot_list()
+        self._set_workspace_label(str(Path(self.cfg.workspace or default_workspace()).absolute()))
         if before != (self.cfg.workspace, self.cfg.python, self.cfg.session_log):
             self._restart_server()
         self._notice("设置已保存" if saved else "设置已应用，但配置文件写入失败（见日志）")
@@ -1447,7 +1364,6 @@ class SettingsDialog(QDialog):
         self._field(general_form, cfg, "workspace", "工作区", browse=True)
         self._field(general_form, cfg, "python", "Python 解释器")
         self._field(general_form, cfg, "skills_dir", "技能目录", browse=True)
-        self._field(general_form, cfg, "read_vars", "读取变量（逗号分隔）")
         tabs.addTab(general, "通用")
 
         model = QWidget()
@@ -1455,10 +1371,6 @@ class SettingsDialog(QDialog):
         self._field(model_form, cfg, "model", "模型（provider:model）")
         self._field(model_form, cfg, "base_url", "端点 Base URL")
         self._field(model_form, cfg, "api_key_env", "API Key 环境变量名")
-        self.timeout = _spin(cfg.timeout, 3600, fractional=True)
-        self.requests = _spin(cfg.max_requests, 100)
-        self.tools = _spin(cfg.max_tool_calls, 1000)
-        self.history_turns = _spin(cfg.history_turns, 20)
         self.history_bytes = _spin(max(1, cfg.max_history_bytes // 1024), 65536)
         self.max_context_enabled = QCheckBox("限制模型上下文窗口")
         self.max_context_enabled.setChecked(cfg.max_context_tokens is not None)
@@ -1470,9 +1382,7 @@ class SettingsDialog(QDialog):
         self.context_reserve_tokens.setEnabled(self.max_context_enabled.isChecked())
         self.max_context_enabled.toggled.connect(self.max_context_tokens.setEnabled)
         self.max_context_enabled.toggled.connect(self.context_reserve_tokens.setEnabled)
-        for label, widget in (("超时（秒）", self.timeout), ("请求预算", self.requests),
-                              ("工具预算", self.tools), ("历史轮数", self.history_turns),
-                              ("历史上限（KiB）", self.history_bytes),
+        for label, widget in (("历史上限（KiB）", self.history_bytes),
                               ("最大上下文（tokens）", self.max_context_tokens),
                               ("上下文预留（tokens）", self.context_reserve_tokens)):
             model_form.addRow(label, widget)
@@ -1574,13 +1484,9 @@ class SettingsDialog(QDialog):
         for name, widget in self.entries.items():
             if name == "vars":
                 values[name] = _parse_bindings(widget.toPlainText())
-            elif name == "read_vars":
-                values[name] = App._names(widget.text())
             else:
                 values[name] = widget.text().strip()
-        values.update(timeout=self.timeout.value(), max_requests=self.requests.value(),
-                      max_tool_calls=self.tools.value(), history_turns=self.history_turns.value(),
-                      max_history_bytes=max(64, self.history_bytes.value()) * 1024,
+        values.update(max_history_bytes=max(64, self.history_bytes.value()) * 1024,
                       max_context_tokens=(self.max_context_tokens.value()
                                           if self.max_context_enabled.isChecked() else None),
                       context_reserve_tokens=self.context_reserve_tokens.value(),

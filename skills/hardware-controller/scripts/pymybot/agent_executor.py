@@ -341,7 +341,7 @@ class RobotExecutor:
     """
 
     def __init__(self, robot_path=None, *, module_paths=None,
-                 scripts_dir=None, allow_hardware=False, read_vars=(),
+                 scripts_dir=None, allow_hardware=False,
                  stop_event=None, robot_factory=Robot, skills=None, workspace_dir=None, enable_shell=False,
                  vars=None, sandbox="off"):
         if enable_shell and workspace_dir is None:
@@ -362,7 +362,6 @@ class RobotExecutor:
         self._skills = skills if isinstance(skills, SkillsLibrary) else None
         self._module_paths = module_paths
         self._allow_hardware = allow_hardware is True
-        self._read_vars = frozenset(read_vars)
         self._stop = stop_event if stop_event is not None else threading.Event()
         self._factory = robot_factory
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="robot-owner")
@@ -455,6 +454,8 @@ class RobotExecutor:
 
     def _remaining(self, deadline):
         self._check(None)
+        if deadline is None:
+            return math.inf
         remaining = deadline - time.monotonic()
         # Budget treats zero/negative timeout as unbounded. Never pass one,
         # including when path checks or preparation used the last of the budget.
@@ -673,7 +674,7 @@ class RobotExecutor:
         # which blocks actual physical opens while still allowing virtual/file IO.
         if name == "read_variables":
             for variable in arguments["names"]:
-                if variable not in self._read_vars or variable not in self._rows:
+                if variable not in self._rows:
                     raise PermissionError("Variable is not allowed")
                 if self._rows[variable][0].name in {"Alias", "Vars"}:
                     raise PermissionError("Variable kind is not readable by this tool")
@@ -847,17 +848,19 @@ class RobotExecutor:
                 result["error"]["message"] = str(exc)
         return self._record(name, result)
 
-    async def call(self, name, arguments: dict, *, timeout: float = 180) -> dict:
+    async def call(self, name, arguments: dict, *, timeout: float | None = 180) -> dict:
         began = time.monotonic()
         if self._closing:
             return self._record(name, self._failure(SecurityError()))
         try:
-            if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
-                raise ValueError("Timeout must be finite and positive")
+            if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                                        or not math.isfinite(timeout) or timeout <= 0):
+                raise ValueError("Timeout must be finite and positive, or None")
             # Snapshot JSON arguments before queuing: caller mutation must not
             # change the operation that is awaiting its owner-thread preflight.
             arguments = copy.deepcopy(arguments)
-            future = self._pool.submit(self._call, name, arguments, began + timeout)
+            deadline = began + timeout if timeout is not None else None
+            future = self._pool.submit(self._call, name, arguments, deadline)
         except Exception as exc:
             return self._record(name, self._failure(exc))
         return await self._wait(asyncio.wrap_future(future))

@@ -114,9 +114,9 @@ def test_default_and_explicit_agent_routing(files, capsys, monkeypatch, prefix):
         return {"mode": "agent", "output": "offline mock", "tool_events": []}
     monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
     code, result, _ = invoke(capsys, *prefix, "--robot", files[0], "--task", "列出硬件",
-                             "--model", "openai:test", "--read-var", "dev")
+                             "--model", "openai:test")
     assert code == 0 and result["mode"] == "agent" and result["output"] == "offline mock"
-    assert called[0].read_var == ["dev"] and called[0].allow_hardware is False
+    assert called[0].allow_hardware is False
     assert called[0].allow_actions is False
 
 

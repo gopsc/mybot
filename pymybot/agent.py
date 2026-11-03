@@ -91,9 +91,6 @@ class AgentConfig:
     base_url: str | None = None
     api_key_env: str | None = None
     timeout: float = 180
-    request_limit: int = 8
-    tool_calls_limit: int = 16
-    history_turns: int = 6
     history_bytes: int = MAX_HISTORY
     max_context_tokens: int | None = None
     context_reserve_tokens: int = 2048
@@ -116,8 +113,7 @@ class AgentConfig:
             raise AgentConfigurationError("auto_stats must be a boolean")
         if not math.isfinite(self.timeout) or not 0 < self.timeout <= 3600:
             raise AgentConfigurationError("Agent timeout must be in (0, 3600] seconds")
-        for name, low, high in (("request_limit", 1, 100), ("tool_calls_limit", 1, 1000),
-                                ("history_turns", 1, 20), ("history_bytes", 64 * 1024, 64 * 1024 * 1024),
+        for name, low, high in (("history_bytes", 64 * 1024, 64 * 1024 * 1024),
                                 ("context_bytes", 0, 64 * 1024)):
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
@@ -433,7 +429,7 @@ def _json_schema_model(name, schema):
 
 
 class AgentSession:
-    def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(),
+    def __init__(self, executor, model, config=None, *, confirm=None,
                  on_event=None, skills=None, workspace=False, enable_shell=False, session_log=None,
                  mcp_servers=(), role=None):
         self.executor = executor
@@ -443,7 +439,6 @@ class AgentSession:
         self.confirm = confirm
         self.on_event = on_event
         self.session_log: SessionLog | None = session_log
-        self.read_vars = tuple(read_vars)
         self.skills = skills
         self.workspace = bool(workspace)
         self.enable_shell = bool(enable_shell)
@@ -459,8 +454,6 @@ class AgentSession:
         self._in_graph = False
         self._requests = 0
         self._tool_calls = 0
-        self._request_limit = self.config.request_limit
-        self._tool_limit = self.config.tool_calls_limit
         try:
             read_operator_prompt(self.config.prompt_file)
             self.prompts = role.prompt_library() if role is not None else PromptLibrary()
@@ -483,7 +476,6 @@ class AgentSession:
         self.turns = []
         self._load_history()
         self.events = []
-        self.deadline = None
         self._asking = False
         self._last_call = None
         self._repeat_count = 0
@@ -649,7 +641,7 @@ class AgentSession:
 
     # -- lifecycle ---------------------------------------------------------
     async def start(self):
-        context = await self.executor.start(deadline=self.deadline)
+        context = await self.executor.start()
         if context.get("ok") is False:
             # A start that ran out of time or was stopped must not be reported
             # as a configuration error the operator could try to "fix".
@@ -682,9 +674,6 @@ class AgentSession:
                         self.session_log.close()
 
     def _check(self):
-        if self.deadline is not None and time.monotonic() >= self.deadline:
-            self.executor.cancel()
-            raise AgentBudgetExceeded("Agent timed out; already dispatched actions are not rolled back")
         if getattr(self.executor, "faulted", False) and not getattr(self.executor, "interrupted", False):
             raise AgentError("Execution outcome is unknown; inspect the robot and workspace before restarting. "
                              "Actions are not rolled back or automatically retried")
@@ -737,10 +726,9 @@ class AgentSession:
 
     def _prune_history(self):
         # Prune complete turns only: never orphan a tool call from its receipt.
-        while self.turns and (
-                len(self.turns) > self.config.history_turns
-                or sum(len(dumps(messages_to_dict(turn)).encode("utf-8")) for turn in self.turns)
-                > self.config.history_bytes):
+        while self.turns and sum(
+                len(dumps(messages_to_dict(turn)).encode("utf-8")) for turn in self.turns
+        ) > self.config.history_bytes:
             self.turns.pop(0)
 
     def _load_history(self):
@@ -907,11 +895,6 @@ class AgentSession:
             print(f"mybot: prompt STATS update failed ({type(exc).__name__}); continuing", file=sys.stderr)
 
     # -- tool execution ----------------------------------------------------
-    def _assert_tool_budget(self):
-        if self._tool_calls >= self._tool_limit:
-            raise AgentBudgetExceeded(
-                f"Tool call limit {self._tool_limit} exceeded; already dispatched actions are not rolled back")
-
     def _count_tool_call(self):
         self._tool_calls += 1
 
@@ -926,7 +909,6 @@ class AgentSession:
                 emit=emit, call_event=True)
         if name in PROMPT_TOOLS:
             return await self._prompt_call(name, arguments, emit=emit)
-        self._assert_tool_budget()
         if self._needs_approval(name):
             approved = await self._approve(name, arguments, display=name, public=arguments, emit=emit)
             if not approved:
@@ -961,14 +943,13 @@ class AgentSession:
                             **{key: result[key] for key in ("ok", "executed", "state")}})
             return result
         self._check()
-        remaining = max(0.001, self.deadline - time.monotonic()) if self.deadline else self.config.timeout
         async with self._tool_lock:
             if name in WEB_TOOLS:
                 result = await self._web_call(name, arguments)
             elif name in CAMERA_TOOLS:
                 result = await self._camera_call(name, arguments)
             else:
-                result = await self.executor.call(name, arguments, timeout=remaining)
+                result = await self.executor.call(name, arguments, timeout=None)
         self.events.append({"tool": name, **{k: result[k] for k in ("ok", "executed", "state")}})
         self._log("tool_result", tool=name,
                   **{key: result[key] for key in ("ok", "executed", "state") if key in result},
@@ -980,9 +961,6 @@ class AgentSession:
         if result["state"] == "unknown":
             if getattr(self.executor, "interrupted", False):
                 raise AgentInterrupted("Interrupted; already dispatched actions are not rolled back")
-            if self.deadline is not None and time.monotonic() >= self.deadline:
-                raise AgentBudgetExceeded(
-                    "Agent timed out; already dispatched actions are not rolled back")
             error = result.get("error")
             kind = error.get("type") if isinstance(error, dict) else None
             detail = f" ({kind})" if isinstance(kind, str) and kind else ""
@@ -1042,7 +1020,6 @@ class AgentSession:
                                 f"Tool '{display}' is outside the active intent '{self.intent.name}'; do not bypass it.",
                                 emit=True, call_event=True)
             return [{"type": "text", "text": dumps(denied)}], {"images": []}
-        self._assert_tool_budget()
         if not self.config.allow_mcp_tools:
             approved = await self._approve("mcp:" + display, arguments, display=display,
                                            public=arguments, emit=True)
@@ -1137,9 +1114,6 @@ class AgentSession:
         async def hook(request, handler):
             self._check()
             self._requests += 1
-            if self._requests > self._request_limit:
-                raise AgentBudgetExceeded(
-                    f"Model request limit {self._request_limit} exceeded; already dispatched actions are not rolled back")
             messages = list(request.messages)
             trimmed = self._trim_messages(messages)
             overrides = {}
@@ -1186,7 +1160,6 @@ class AgentSession:
         self._asking = True
         started = time.monotonic()
         first_event = len(self.events)
-        self.deadline = started + self.config.timeout
         self._turn += 1
         self._last_call = None
         self._repeat_count = 0
@@ -1196,10 +1169,6 @@ class AgentSession:
         self._log("user", text=prompt)
         self.intent = classify_intent(prompt, self.config.intent_mode)
         self._log("intent", **self.intent.as_dict())
-        self._request_limit = (self.config.request_limit if not self.intent.restricted
-                               else min(self.config.request_limit, self.intent.max_requests))
-        self._tool_limit = (self.config.tool_calls_limit if not self.intent.restricted
-                            else min(self.config.tool_calls_limit, self.intent.max_tool_calls))
         try:
             self._check()
             try:
@@ -1214,27 +1183,26 @@ class AgentSession:
             messages = [*history, HumanMessage(prompt)]
             graph = self._build_graph()
             config = {"configurable": {"thread_id": f"{id(self)}-{self._turn}"},
-                      "recursion_limit": 2 * self._request_limit + 10}
+                      "recursion_limit": 10_000}
             inputs = {"messages": messages}
             self._in_graph = True
             try:
-                async with asyncio.timeout(self.config.timeout):
-                    while True:
-                        interrupted = None
-                        async for mode, data in graph.astream(
-                                inputs, config, stream_mode=["messages", "updates"]):
-                            self._check()
-                            if mode == "messages":
-                                chunk, _metadata = data
-                                if isinstance(chunk, AIMessageChunk):
-                                    text = _message_text(chunk)
-                                    if text:
-                                        self._emit({"type": "text_delta", "text": text})
-                            elif mode == "updates" and "__interrupt__" in data:
-                                interrupted = data["__interrupt__"]
-                        if not interrupted:
-                            break
-                        inputs = await self._resume(interrupted)
+                while True:
+                    interrupted = None
+                    async for mode, data in graph.astream(
+                            inputs, config, stream_mode=["messages", "updates"]):
+                        self._check()
+                        if mode == "messages":
+                            chunk, _metadata = data
+                            if isinstance(chunk, AIMessageChunk):
+                                text = _message_text(chunk)
+                                if text:
+                                    self._emit({"type": "text_delta", "text": text})
+                        elif mode == "updates" and "__interrupt__" in data:
+                            interrupted = data["__interrupt__"]
+                    if not interrupted:
+                        break
+                    inputs = await self._resume(interrupted)
             finally:
                 self._in_graph = False
             state = await graph.aget_state(config)
@@ -1266,10 +1234,6 @@ class AgentSession:
             return {"output": output, "usage": usage, "intent": self.intent.as_dict(),
                     "prompt_version": self.prompt_version,
                     "role": self.role.name if self.role is not None else None}
-        except TimeoutError:
-            self.executor.cancel()
-            raise AgentBudgetExceeded(
-                "Agent timed out; already dispatched actions are not rolled back") from None
         except BaseException as exc:
             # Do not resume a partially executed turn after cancellation, model
             # failure or a limit exception. No tool/action replay is attempted.
@@ -1279,7 +1243,6 @@ class AgentSession:
         finally:
             self._in_graph = False
             self._asking = False
-            self.deadline = None
 
 
 async def console_line(prompt, stop):
@@ -1437,14 +1400,9 @@ async def run_cli_agent(args, stop):
             raise AgentConfigurationError(f"Cannot load role: {exc}; no model request was sent") from None
         mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
                       else getattr(args, "mcp_config", None) if role is None else None)
-        if getattr(args, "robot", None) is None and getattr(args, "read_var", None):
-            raise AgentConfigurationError(
-                "--read-var requires --robot; no model request was sent")
         config = AgentConfig(model=args.model or os.environ.get("MYBOT_MODEL", ""),
                              base_url=args.base_url or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=args.api_key_env, timeout=args.timeout,
-                             request_limit=args.max_requests, tool_calls_limit=args.max_tool_calls,
-                             history_turns=getattr(args, "history_turns", 6),
                              history_bytes=args.max_history_bytes,
                              max_context_tokens=getattr(args, "max_context_tokens", None),
                              context_reserve_tokens=getattr(args, "context_reserve_tokens", 2048),
@@ -1478,7 +1436,7 @@ async def run_cli_agent(args, stop):
                 f"Cannot load skills configuration: {exc}; no model request was sent") from None
         executor = RobotExecutor(args.robot, module_paths=args.module_path,
                                  scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
-                                 read_vars=args.read_var, stop_event=stop,
+                                 stop_event=stop,
                                  vars=getattr(args, "bindings", None),
                                  skills=skills, workspace_dir=args.workspace_dir, enable_shell=args.enable_shell,
                                  sandbox=config.sandbox_mode)
@@ -1491,7 +1449,6 @@ async def run_cli_agent(args, stop):
 
         renderer = StreamRenderer()
         session = AgentSession(executor, model, config, confirm=confirm,
-                               read_vars=args.read_var,
                                on_event=renderer, skills=skills, workspace=args.workspace_dir is not None,
                                enable_shell=args.enable_shell, session_log=session_log,
                                mcp_servers=mcp_servers, role=role)

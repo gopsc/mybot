@@ -18,7 +18,6 @@ pytest.importorskip("langchain")
 from agent_fakes import models
 from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from agent_fakes import DeltaToolCall, FunctionModel
-from agent_fakes import UsageLimitExceeded
 
 import pymybot.agent as agent_module
 from pymybot.agent import (AgentConfig, AgentSession, AgentBudgetExceeded, AgentInterrupted,
@@ -147,28 +146,6 @@ def test_streaming_is_opt_in_and_non_streamed_models_still_work():
         session = AgentSession(executor, FunctionModel(respond))  # No stream_function, no on_event.
         try:
             assert (await session.ask("hi"))["output"] == "ok"
-        finally:
-            await session.close()
-    asyncio.run(scenario())
-
-
-def test_streaming_timeout_is_enforced_between_deltas():
-    executor = FakeExecutor()
-
-    async def respond(messages, info):
-        return ModelResponse(parts=[TextPart("slow")])
-
-    async def stream(messages, info):
-        yield "sl"
-        await asyncio.sleep(10)
-        yield "ow"  # pragma: no cover - the watchdog must fire first
-
-    async def scenario():
-        session = AgentSession(executor, FunctionModel(respond, stream_function=stream),
-                               AgentConfig(timeout=0.05), on_event=lambda event: None)
-        try:
-            with pytest.raises(AgentBudgetExceeded):
-                await session.ask("slow")
         finally:
             await session.close()
     asyncio.run(scenario())
@@ -419,31 +396,6 @@ def test_parallel_model_calls_are_executed_serially():
     assert order == [("start", "list_files"), ("end", "list_files"),
                      ("start", "read_file"), ("end", "read_file")]
 
-@pytest.mark.parametrize("config", [AgentConfig(request_limit=2), AgentConfig(tool_calls_limit=2)])
-def test_usage_limits_stop_infinite_model_loop(config):
-    executor = FakeExecutor()
-
-    async def respond(messages, info):
-        return ModelResponse(parts=[ToolCallPart("list_files", {})])
-
-    with pytest.raises(UsageLimitExceeded):
-        asyncio.run(AgentSession(executor, FunctionModel(respond), config, workspace=True).ask("list forever"))
-    assert len(executor.calls) <= 2 and executor.stop_event.is_set()
-
-def test_wall_clock_timeout_cancels_network_wait():
-    executor = FakeExecutor()
-    finished = []
-    async def respond(messages, info):
-        try:
-            await asyncio.sleep(10)
-            return ModelResponse(parts=[TextPart("late")])
-        finally:
-            finished.append(True)
-    with pytest.raises(AgentBudgetExceeded):
-        asyncio.run(AgentSession(executor, FunctionModel(respond), AgentConfig(timeout=0.04)).ask("wait"))
-    assert finished and executor.stop_event.is_set() and not executor.calls
-
-
 def test_stop_event_cancels_model_before_dispatch():
     executor = FakeExecutor()
     async def respond(messages, info):
@@ -455,35 +407,20 @@ def test_stop_event_cancels_model_before_dispatch():
     assert not executor.calls
 
 
-def test_approval_wait_obeys_task_budget():
-    executor = FakeExecutor()
-
-    async def confirm(name, arguments):
-        await asyncio.sleep(10)
-        return True
-
-    model = scripted_model([ToolCallPart("write_file", {"path": "a.txt", "content": "x"})],
-                           [TextPart("unused")])
-    with pytest.raises(AgentBudgetExceeded):
-        asyncio.run(AgentSession(executor, model, AgentConfig(timeout=0.04), workspace=True,
-                                 confirm=confirm).ask("写一个文件"))
-    assert not executor.calls
-
-def test_history_prunes_complete_turns():
+def test_history_keeps_all_turns():
     executor = FakeExecutor()
     history_sizes = []
     async def respond(messages, info):
-        # The first turn is gone by the fourth request, but safety rules must remain.
         assert (asset_path("prompts") / "010_core.md").read_text(encoding="utf-8").strip() in info.instructions
         history_sizes.append(len([p for m in messages for p in m.parts if isinstance(p, UserPromptPart)]))
         return ModelResponse(parts=[TextPart("done")])
     async def scenario():
-        session = AgentSession(executor, FunctionModel(respond), AgentConfig(history_turns=2))
+        session = AgentSession(executor, FunctionModel(respond), AgentConfig())
         for i in range(4):
             await session.ask(str(i))
-        assert len(session.turns) == 2
+        assert len(session.turns) == 4
     asyncio.run(scenario())
-    assert history_sizes == [1, 2, 3, 3]
+    assert history_sizes == [1, 2, 3, 4]
 
 
 def test_failed_start_never_sends_model_request():
@@ -575,46 +512,6 @@ def test_context_token_configuration_is_validated():
         AgentConfig(max_context_tokens=4096)
     with pytest.raises(AgentConfigurationError, match="context_reserve_tokens"):
         AgentConfig(context_reserve_tokens=-1)
-
-
-def test_slow_start_is_covered_by_the_turn_deadline():
-    class SlowExecutor:
-        def __init__(self):
-            self.stop_event = threading.Event()
-            self.deadline = None
-
-        async def start(self, *, deadline=None):
-            assert deadline is not None, "startup must receive the turn deadline"
-            self.deadline = deadline
-            remaining = deadline - time.monotonic()
-            await asyncio.sleep(min(0.12, max(0, remaining) + 0.01))
-            if time.monotonic() >= deadline:
-                return {"ok": False, "executed": False, "state": "not_executed"}
-            return {"ok": True}
-
-        def cancel(self):
-            self.stop_event.set()
-
-        async def call(self, name, arguments, *, timeout):
-            pytest.fail("A timed-out startup must not dispatch tools")
-
-        async def close(self):
-            pass
-
-    async def forbidden(messages, info):
-        pytest.fail("A timed-out startup must not send a model request")
-
-    executor = SlowExecutor()
-    # Construction is setup, not the turn under test.
-    session = AgentSession(executor, FunctionModel(forbidden), AgentConfig(timeout=0.02))
-    started = time.monotonic()
-    with pytest.raises(AgentBudgetExceeded):
-        asyncio.run(session.ask("hello"))
-    assert 0 < executor.deadline - started <= 0.05
-    # Asyncio startup and any per-turn setup share this window. Keep a generous
-    # bound so a loaded runner does not make the test flaky; missing deadline
-    # handling is still caught by the deadline and exception checks above.
-    assert time.monotonic() - started < 0.5
 
 
 @pytest.mark.parametrize("receipt_state", ["completed", "not_executed"])

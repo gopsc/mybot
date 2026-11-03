@@ -181,7 +181,7 @@ flowchart LR
 GUI 是一个前端，不重复实现机器人逻辑：窗口只启动一个 `serve` 子进程，所有机器人和模型调用都走同一条链路。
 
 - 启动先显示复古风入口界面：SVG 机器人 logo、扫描线、真实的 serve 状态、`进入控制台` 按钮和淡入过渡；`--no-splash` 可以跳过。
-- 左侧是 workspace、技能/MCP 配置、能力与预算，以及模型摘要。
+- 左侧是 workspace、技能/MCP 配置和模型摘要。
 - 摄像头不再出现在结构 SQL 或控制器驱动里。Agent 内置 `list_cameras` 和 `capture_camera` 两个基础工具，直接枚举宿主摄像头并把 JPEG 作为图片内容返回模型；运行时需要 `pip install "pymybot[camera]"`。
 - 右侧是对话、日志、资源三个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
 - 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。

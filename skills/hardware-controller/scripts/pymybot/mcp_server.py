@@ -75,7 +75,7 @@ def tool_definitions(timeout):
         ("run_action_script", "Execute an existing trusted MT script. Never retry an unknown outcome.",
          {"script": script, "vars": {"type": "object", "maxProperties": MAX_LIST,
           "additionalProperties": {"type": "string", "maxLength": 65536}}, "timeout": seconds}, ["script"]),
-        ("read_variables", "Read allowlisted variables. Activation and reads may write to devices.",
+        ("read_variables", "Read declared variables. Activation and reads may write to devices.",
          {"names": {"type": "array", "items": ident, "minItems": 1, "maxItems": MAX_LIST,
                     "uniqueItems": True}, "timeout": seconds}, ["names"]),
         ("deactivate", "Release an idle robot; not an emergency stop and never clears a fault.", {}, []),
@@ -303,7 +303,7 @@ async def _run(out, stop, *, timeout, allow_execution, **config):
 
 
 def run_server(stop, *, robot_path, scripts_dir, module_paths=None,
-               vars=None, allow_execution=False, allow_hardware=False, read_vars=(),
+               vars=None, allow_execution=False, allow_hardware=False,
                timeout=180, skills_dir=None):
     """Serve MCP on stdout; exits with a stderr diagnostic instead of JSON."""
     if allow_hardware and not allow_execution:
@@ -320,7 +320,7 @@ def run_server(stop, *, robot_path, scripts_dir, module_paths=None,
             asyncio.run(_run(out, stop, timeout=timeout, allow_execution=allow_execution,
                              robot_path=robot_path, scripts_dir=scripts_dir,
                              module_paths=module_paths,
-                             vars=vars, allow_hardware=allow_hardware, read_vars=read_vars,
+                             vars=vars, allow_hardware=allow_hardware,
                              skills=skills))
     except KeyboardInterrupt:
         # The CLI installs SIGINT/SIGTERM handlers that set stop; a direct or

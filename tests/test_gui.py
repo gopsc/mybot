@@ -81,14 +81,14 @@ def test_parse_result_ignores_foreign_lines(stdout):
 def test_config_roundtrip_drops_runtime_grants(tmp_path):
     path = tmp_path / "settings.json"
     cfg = GuiConfig(workspace=str(tmp_path), robot="robots/a.sql", task="hello",
-                    module_paths=["a", "", 3], model="openai:gpt-4o", read_vars=["v0", "bad name"],
+                    module_paths=["a", "", 3], model="openai:gpt-4o",
                     vars={"user": "alice"}, allow_hardware=True, allow_actions=True, timeout=30,
                     session_log=False)
     cfg.store(path)
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert "task" not in stored and "allow_hardware" not in stored and "allow_actions" not in stored
     assert "vars" not in stored
-    assert stored["module_paths"] == ["a"] and stored["read_vars"] == ["v0"]
+    assert stored["module_paths"] == ["a"]
     assert stored["session_log"] is False
     loaded = GuiConfig.load(path)
     assert loaded.workspace == str(tmp_path) and loaded.timeout == 30
@@ -102,7 +102,7 @@ def test_config_keeps_tool_preferences_but_drops_grants(tmp_path):
     cfg = GuiConfig(workspace=str(tmp_path), mcp_config="mcp.json",
                     enable_file_tools=True, enable_shell=True,
                     allow_file_writes=True, allow_shell=True, allow_mcp_tools=True,
-                    history_turns=9, max_history_bytes=8 * 1024 * 1024,
+                    max_history_bytes=8 * 1024 * 1024,
                     max_context_tokens=32768, context_reserve_tokens=1024)
     cfg.store(path)
     stored = json.loads(path.read_text(encoding="utf-8"))
@@ -110,7 +110,7 @@ def test_config_keeps_tool_preferences_but_drops_grants(tmp_path):
     assert "allow_file_writes" not in stored and "allow_shell" not in stored
     assert "allow_mcp_tools" not in stored
     loaded = GuiConfig.load(path)
-    assert loaded.history_turns == 9 and loaded.max_history_bytes == 8 * 1024 * 1024
+    assert loaded.max_history_bytes == 8 * 1024 * 1024
     assert loaded.max_context_tokens == 32768 and loaded.context_reserve_tokens == 1024
     assert loaded.enable_file_tools and loaded.enable_shell
     assert not loaded.allow_file_writes and not loaded.allow_shell and not loaded.allow_mcp_tools
@@ -118,17 +118,17 @@ def test_config_keeps_tool_preferences_but_drops_grants(tmp_path):
 
 def test_config_rejects_hostile_values(tmp_path):
     path = tmp_path / "settings.json"
-    path.write_text(json.dumps({"timeout": "soon", "max_requests": 0, "api_key_env": "bad name",
+    path.write_text(json.dumps({"timeout": "soon", "api_key_env": "bad name",
                                 "workspace": 5, "python": "x" * 9000}), encoding="utf-8")
     cfg = GuiConfig.load(path)
-    assert cfg.timeout == 180 and cfg.max_requests == 8 and cfg.api_key_env == ""
+    assert cfg.timeout == 180 and cfg.api_key_env == ""
     assert cfg.workspace == "" and cfg.python == ""
 
 
 def test_merge_args_prefers_explicit_flags():
     cfg = GuiConfig(workspace="/stored", model="openai:stored", module_paths=["old"])
     args = SimpleNamespace(workspace_dir="/flag", robot="r.sql", model="deepseek:chat",
-                           module_path=["m1", "m2"], read_var=[], timeout=12)
+                           module_path=["m1", "m2"], timeout=12)
     merged = merge_args(cfg, args)
     assert merged.workspace == "/flag" and merged.model == "deepseek:chat"
     assert merged.module_paths == ["m1", "m2"] and merged.timeout == 12
@@ -495,7 +495,6 @@ def test_new_role_falls_back_to_default_skills(ui, monkeypatch, tmp_path):
 def test_window_builds_with_robot_context(ui):
     gui, app = ui
     assert isinstance(app, gui.QMainWindow)
-    assert app.robot_box.currentText() == "robots/relay-test.sql"
     assert app.send_button.isEnabled() and not app.stop_button.isEnabled()
     assert "未启动" in app.status_state.text()
     assert [app.notebook.tabText(i) for i in range(2)] == ["对话", "日志"]
@@ -536,7 +535,7 @@ def test_theme_is_readable_without_changing_system_palette(app_factory, qapp, da
             palette = widget.palette()
             assert palette.color(QPalette.ColorRole.Window).lightnessF() > 0.9
             assert color_contrast(palette.windowText().color(), palette.window().color()) >= 4.5
-        for widget in (app.chat, app.log, app.task_box, app.robot_box, app.timeout_box,
+        for widget in (app.chat, app.log, app.task_box,
                        dialogs[0].entries["model"], dialogs[1].arguments):
             for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
                 palette = widget.palette()
@@ -692,11 +691,7 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     def save(dialog, test):
         assert isinstance(dialog, gui.SettingsDialog)
         dialog.entries["model"].setText("openai:test")
-        dialog.entries["read_vars"].setText("v0,v0,bad name,v1")
         dialog.entries["vars"].setPlainText("user=alice\npass=secret\nbad line")
-        dialog.timeout.setValue(12.5)
-        dialog.requests.setValue(3)
-        dialog.tools.setValue(5)
         dialog.session_log.setChecked(False)
         test.mouseClick(dialog.buttons.button(gui.QDialogButtonBox.StandardButton.Save), gui.Qt.MouseButton.LeftButton)
 
@@ -704,12 +699,10 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     app.open_settings()
     assert restarted == [True]
     assert app.cfg.model == "openai:test"
-    assert app.timeout_box.value() == 12.5 and app.requests_box.value() == 3 and app.tools_box.value() == 5
-    assert app.read_vars_entry.text() == "v0,v1"
     assert app.cfg.vars == {"user": "alice", "pass": "secret"}
     assert "openai:test" in app.model_label.text()
     stored = json.loads((tmp_path / "settings.json").read_text())
-    assert stored["session_log"] is False and stored["timeout"] == 12.5
+    assert stored["session_log"] is False
     assert "vars" not in stored
     assert "设置已保存" in app.status_notice.text()
 
@@ -765,19 +758,15 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     _, app = ui
     client = attach_client(app)
     app.context_entries["skills_dir"].setText("skills")
-    app.read_vars_entry.setText("v0，v1,v0,bad name")
-    app.timeout_box.setValue(2.5)
-    app.requests_box.setValue(2)
-    app.tools_box.setValue(4)
     app.cfg.vars = {"user": "alice"}
     app.task_box.setPlainText("hello")
     app.send_button.click()
     params = client.requests[0][1]
     assert params["skillsDir"] == str(ROOT / "skills")
     assert "modulePaths" not in params
-    assert params["readVars"] == ["v0", "v1"]
     assert params["vars"] == {"user": "alice"}
-    assert (params["timeout"], params["maxRequests"], params["maxToolCalls"]) == (2.5, 2, 4)
+    assert "timeout" not in params
+    assert "maxRequests" not in params and "maxToolCalls" not in params
 
 
 def test_abort_button_targets_the_server_not_the_agent_turn(ui, qapp):
@@ -1058,23 +1047,17 @@ def test_session_logging_flag_reaches_server(ui, monkeypatch, qapp):
     assert app.serve.options["python_args"] == ("-m", "pymybot", "serve", "--no-session-log")
 
 
-def test_workspace_sql_and_directory_choosers(ui, monkeypatch, tmp_path):
+def test_workspace_and_directory_choosers(ui, monkeypatch, tmp_path):
     gui, app = ui
-    robot = tmp_path / "outside.sql"
-    robot.write_text("-- structure", encoding="utf-8")
     restarted = []
     monkeypatch.setattr(app, "_restart_server", lambda: restarted.append(True))
     monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", lambda *args: str(tmp_path))
     app.pick_workspace()
-    assert app.cfg.workspace == str(tmp_path) and app.cfg.robot == str(robot)
+    assert app.cfg.workspace == str(tmp_path) and app.cfg.robot == ""
     assert restarted == [True]
-    external = ASSETS / "robots" / "relay-test.sql"
-    monkeypatch.setattr(gui.QFileDialog, "getOpenFileName", lambda *args: (str(external), "SQL (*.sql)"))
-    app.pick_robot()
-    assert app.cfg.robot == str(external) and app.robot_box.currentData() == str(external)
     monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", lambda *args: "")
     app.pick_workspace()
-    assert app.cfg.robot == str(external) and restarted == [True]
+    assert app.cfg.robot == "" and restarted == [True]
 
 
 def test_missing_display_fails_before_qapplication(ui, monkeypatch):
@@ -1126,15 +1109,12 @@ def test_settings_cover_backend_budgets(ui):
     dialog = gui.SettingsDialog(app, app.cfg, app.cfg.workspace, "")
     try:
         assert dialog.entries["mcp_config"].text() == app.cfg.mcp_config
-        assert dialog.history_turns.value() == app.cfg.history_turns
         assert dialog.history_bytes.value() == app.cfg.max_history_bytes // 1024
-        dialog.history_turns.setValue(9)
         dialog.history_bytes.setValue(4096)
         dialog.max_context_enabled.setChecked(True)
         dialog.max_context_tokens.setValue(32768)
         dialog.context_reserve_tokens.setValue(1024)
         dialog._save()
-        assert dialog.values["history_turns"] == 9
         assert dialog.values["max_history_bytes"] == 4096 * 1024
         assert dialog.values["max_context_tokens"] == 32768
         assert dialog.values["context_reserve_tokens"] == 1024
@@ -1147,7 +1127,6 @@ def test_send_enables_all_tools_without_approval(ui):
     client = attach_client(app)
     app.cfg.mcp_config = str(ROOT / "mcp.json")
     app.context_entries["mcp_config"].setText(str(ROOT / "mcp.json"))
-    app.history_box.setValue(9)
     app.cfg.max_context_tokens = 32768
     app.cfg.context_reserve_tokens = 1024
     assert app._send("列出硬件")
@@ -1159,7 +1138,6 @@ def test_send_enables_all_tools_without_approval(ui):
     assert params["allowMcpTools"] is True
     assert params["enableWeb"] is True and params["allowWeb"] is True
     assert params["allowActions"] is False and params["allowHardware"] is True
-    assert params["historyTurns"] == 9
     assert params["maxHistoryBytes"] == app.cfg.max_history_bytes
     assert params["maxContextTokens"] == 32768
     assert params["contextReserveTokens"] == 1024

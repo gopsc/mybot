@@ -1110,9 +1110,9 @@ def test_open_agent_wires_workspace_shell_and_file_write_grants(monkeypatch, tmp
     server = serve.Server(io.StringIO(), threading.Event())
     key = {
         "robot": "r.sql", "modulePaths": [], "scriptsDir": "scripts",
-        "skillsDir": "", "model": "", "baseUrl": "", "apiKeyEnv": "", "readVars": [],
+        "skillsDir": "", "model": "", "baseUrl": "", "apiKeyEnv": "",
         "allowActions": False, "allowHardware": False, "vars": {},
-        "timeout": 10, "maxRequests": 1, "maxToolCalls": 1, "historyTurns": 6,
+        "timeout": 10,
         "maxHistoryBytes": 65536, "maxContextTokens": 32768, "contextReserveTokens": 1024,
         "mcpConfig": "", "allowMcpTools": False,
         "workspaceDir": str(tmp_path), "enableShell": True, "allowShell": True,

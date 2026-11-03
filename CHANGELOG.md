@@ -8,9 +8,15 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- The GUI left sidebar no longer shows the hardware tree, scripts root or module
-  path, and the script/structure editor tab is removed. Scripts and modules use
-  the packaged/source defaults; the command panel and resource browser remain.
+- The GUI no longer shows the structure selector, hardware tree, scripts root or
+  module path, and the script/structure editor tab is removed. The Agent starts
+  without a selected structure; scripts and modules use the packaged/source
+  defaults, and the command panel and resource browser remain. The timeout,
+  request, tool and history-turn controls are gone.
+- The Agent no longer enforces request, tool-call, history-turn or wall-clock
+  turn limits, and variable reads no longer use an allowlist. Provider/MCP
+  request timeouts and the history byte cap remain; direct tools, MCP and the
+  CLI expose no budget flags or `--read-var` gate.
 - Cameras are now Agent built-in tools. `list_cameras` enumerates host devices
   and `capture_camera` returns a bounded JPEG image block, backed by PyAV/Pillow
   (`pymybot[camera]`). The controller no longer declares cameras, exposes HAL

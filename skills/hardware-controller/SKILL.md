@@ -41,7 +41,7 @@ python -m pymybot mcp --robot references/assets/robots/relay-test.sql --scripts-
 python skills/hardware-controller/scripts/hardware_controller.py mcp --robot skills/hardware-controller/references/assets/robots/relay-test.sql --scripts-dir skills/hardware-controller/references/assets/scripts
 ```
 
-MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物理硬件另需 `--allow-hardware`。变量读取继续使用白名单。
+MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物理硬件另需 `--allow-hardware`。
 
 ## Agent 原生 run_skill
 

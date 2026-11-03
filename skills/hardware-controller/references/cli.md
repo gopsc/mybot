@@ -215,7 +215,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, optional `robot`, optional `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.ask` | `task`, optional `robot`, optional `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |
@@ -255,8 +255,8 @@ Agent mode is documented in the README. The important flags are:
 | `--allow-actions` | Pre-approve host capture and variable reads; trusted skills need no approval. |
 | `--allow-file-writes` | Pre-approve file creation/editing. |
 | `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
-| `--max-requests`, `--max-tool-calls`, `--max-history-bytes`, `--timeout` | Budgets. `--max-history-bytes` bounds retained conversation history (64 KiB–64 MiB, default 4 MiB). |
-| `--history-turns` | Complete turns retained across tasks (1–20, default 6). |
+| `--max-history-bytes` | Retained conversation history byte cap (64 KiB–64 MiB). |
+| `--timeout` | Per-operation timeout for direct commands and provider/MCP requests; Agent turns have no wall-clock limit. |
 | `--max-context-tokens` | Optional model context-window budget (1024–2 MiB tokens, disabled by default). Prunes old complete turns before every model request; must exceed output plus reserve tokens. |
 | `--context-reserve-tokens` | Safety reserve within the context window (0–65536, default 2048), in addition to the 4096-token output budget. |
 | `--prompt-file FILE` | Additional operator-owned UTF-8 profile (max 8 KiB); does not replace runtime USER or the safety prefix/suffix. |

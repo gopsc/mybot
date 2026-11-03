@@ -577,12 +577,9 @@ class Server:
             "scriptsDir": params.text("scriptsDir"),
             "skillsDir": params.text("skillsDir"), "model": params.text("model", "", cap=1024),
             "baseUrl": params.text("baseUrl", cap=2048), "apiKeyEnv": params.text("apiKeyEnv", cap=256),
-            "readVars": params.strings("readVars", ident=True),
             "allowActions": params.flag("allowActions"), "allowHardware": params.flag("allowHardware"),
             "vars": params.bindings("vars"),
-            "timeout": params.seconds("timeout", 180), "maxRequests": params.integer("maxRequests", 1, 100, 8),
-            "maxToolCalls": params.integer("maxToolCalls", 1, 1000, 16),
-            "historyTurns": params.integer("historyTurns", 1, 20, 6),
+            "timeout": params.seconds("timeout", 180),
             "maxHistoryBytes": params.integer("maxHistoryBytes", 64 * 1024, 64 * 1024 * 1024,
                                               4 * 1024 * 1024),
             "maxContextTokens": params.integer("maxContextTokens", 1024, 2 * 1024 * 1024),
@@ -674,8 +671,7 @@ class Server:
         config = AgentConfig(model=key["model"] or os.environ.get("MYBOT_MODEL", ""),
                              base_url=key["baseUrl"] or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=key["apiKeyEnv"], timeout=key["timeout"],
-                             request_limit=key["maxRequests"], tool_calls_limit=key["maxToolCalls"],
-                             history_turns=key["historyTurns"], history_bytes=key["maxHistoryBytes"],
+                             history_bytes=key["maxHistoryBytes"],
                              max_context_tokens=key.get("maxContextTokens"),
                              context_reserve_tokens=key.get("contextReserveTokens", 2048),
                              allow_actions=key["allowActions"],
@@ -707,7 +703,7 @@ class Server:
             skills = SkillsLibrary(skills_dir, required=role is not None or key["skillsDir"] is not None)
             executor = RobotExecutor(key["robot"] or None, module_paths=key["modulePaths"] or None,
                                      scripts_dir=key["scriptsDir"] or None,
-                                     allow_hardware=key["allowHardware"], read_vars=key["readVars"],
+                                     allow_hardware=key["allowHardware"],
                                      vars=key["vars"], skills=skills,
                                      workspace_dir=workspace, enable_shell=key["enableShell"],
                                      sandbox=config.sandbox_mode)
@@ -716,7 +712,7 @@ class Server:
                 reply = await self.ask_client("confirm", {"tool": name, "arguments": arguments})
                 return isinstance(reply, dict) and reply.get("approved") is True
 
-            session = AgentSession(executor, model, config, confirm=confirm, read_vars=key["readVars"],
+            session = AgentSession(executor, model, config, confirm=confirm,
                                    skills=skills, session_log=session_log,
                                    workspace=workspace is not None, enable_shell=key["enableShell"],
                                    mcp_servers=mcp_servers, role=role)

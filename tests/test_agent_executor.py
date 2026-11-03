@@ -112,7 +112,7 @@ def setup(tmp_path):
             self.state = "Inactive"
 
     def factory(**kwargs):
-        defaults = dict(scripts_dir=scripts, allow_hardware=False, read_vars=("sensor",),
+        defaults = dict(scripts_dir=scripts, allow_hardware=False,
                         robot_factory=FakeRobot)
         defaults.update(kwargs)
         return RobotExecutor(robot_path, **defaults)
@@ -379,7 +379,7 @@ def test_schema_closed_before_activation(setup, name, args):
 @pytest.mark.parametrize("variable", ["number", "alias", "missing"])
 def test_read_kind_and_whitelist_preflight(setup, variable):
     async def scenario():
-        ex = setup.factory(read_vars=(variable, "sensor"))
+        ex = setup.factory()
         try:
             rejected(await ex.call("read_variables", {"names": ["sensor", variable]}))
             assert not any(name == "active" for name, _ in setup.trace)
@@ -994,7 +994,7 @@ def test_real_relay_action_and_read(tmp_path):
     (scripts / "relay.mt").write_text("@Action\nrelay0.test;\n1;\n@", encoding="utf-8")
     async def scenario():
         ex = RobotExecutor(ASSETS / "robots" / "relay-test.sql", scripts_dir=scripts,
-                           module_paths=[ASSETS / "modules"], allow_hardware=False, read_vars=("relay0",))
+                           module_paths=[ASSETS / "modules"], allow_hardware=False)
         try:
             assert (await ex.start())["robot"] == "relay-test"
             result = await ex.call("run_action_script", {"script": "relay.mt"})
@@ -1017,7 +1017,7 @@ def test_physical_boundary_never_silently_simulates(tmp_path, monkeypatch, allow
         raise OSError("test unavailable, no real hardware access")
     monkeypatch.setattr(HALManager, "_i2c_open", unavailable)
     async def scenario():
-        ex = RobotExecutor(path, scripts_dir=tmp_path, read_vars=("bus",), allow_hardware=allow)
+        ex = RobotExecutor(path, scripts_dir=tmp_path, allow_hardware=allow)
         try:
             result = await ex.call("read_variables", {"names": ["bus"]})
             unknown(result)
@@ -1299,7 +1299,7 @@ def test_real_daemon_keeps_its_independent_worker(tmp_path, synthetic_modules):
             made.append(self)
     async def scenario():
         ex = RobotExecutor(robot_path, scripts_dir=tmp_path, module_paths=synthetic_modules,
-                           read_vars=("sample",), allow_hardware=False, robot_factory=ObservedRobot)
+                           allow_hardware=False, robot_factory=ObservedRobot)
         try:
             result = await ex.call("read_variables", {"names": ["sample"]}, timeout=10)
             assert result["ok"], result

@@ -38,7 +38,7 @@ stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。�
 | `read_action_script` | 读取一个 `.mt` 原文，不执行 | 否 |
 | `query_sql` | `SHOW TABLES` / `SELECT *`，只读 | 否 |
 | `run_action_script` | 执行已有 `.mt`，需要 `--allow-execution` | 是 |
-| `read_variables` | 读取 `--read-var` 白名单变量 | 是 |
+| `read_variables` | 读取已声明变量 | 是 |
 | `deactivate` | 释放空闲机器人；不是急停，也不清除故障锁存 | 否 |
 
 所有工具返回同一信封：
@@ -65,9 +65,8 @@ stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。�
 | 开关 | 默认 | 效果 |
 | --- | --- | --- |
 | — | 只读 | 静态工具可用；执行类工具返回 `not_executed` |
-| `--allow-execution` | 关 | 允许动作脚本和变量读取（变量仍需白名单） |
+| `--allow-execution` | 关 | 允许动作脚本和变量读取 |
 | `--allow-hardware` | 关 | 打开物理总线、非回环 HTTP 和 Shell 驱动；要求同时给出 `--allow-execution` |
-| `--read-var NAME` | 空 | 允许 `read_variables` 读取该变量；可重复 |
 | `--var NAME=VALUE` / `--var-env NAME=ENVVAR` | 空 | 激活前的结构 `Alias`/`Vars` 覆盖与动作绑定 |
 
 `--allow-hardware` 是能力开关，不是安全认证。Lua 驱动是可信代码；Shell 驱动不是沙箱。
@@ -85,8 +84,7 @@ Claude Desktop（`claude_desktop_config.json`）或 Cursor（`.cursor/mcp.json`�
         "mcp",
         "--robot", "/abs/path/skills/hardware-controller/references/assets/robots/relay-test.sql",
         "--scripts-dir", "/abs/path/scripts",
-        "--allow-execution",
-        "--read-var", "relay0"
+        "--allow-execution"
       ]
     }
   }
@@ -153,7 +151,6 @@ pymybot --no-gui agent \
 | --- | --- | --- |
 | `mcpConfig` | string | 服务端的 `mcpServers` JSON 路径 |
 | `allowMcpTools` | boolean | 预批准外部 MCP 工具调用 |
-| `historyTurns` | integer | 保留的完整对话轮数（1–20，默认 6） |
 
 GUI 的 **设置 → MCP 配置** 和左侧 **MCP 配置（mcpServers JSON）** 字段可指定路径；
 未填写时不启用外部 MCP。
