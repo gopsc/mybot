@@ -25,19 +25,18 @@ def require(condition, message):
 
 def preflight(mode):
     if mode == "base":
-        require(importlib.util.find_spec("pydantic_ai") is None,
-                "Base CI must not have pydantic_ai installed")
+        for optional in ("pydantic_ai", "langchain", "langgraph"):
+            require(importlib.util.find_spec(optional) is None,
+                    f"Base CI must not have {optional} installed")
         if sys.platform.startswith("linux"):
             require(importlib.util.find_spec("smbus2") is not None,
                     "Linux base install must include smbus2")
     else:
         # Missing agent/MCP dependencies must fail rather than silently skip tests.
-        for name in ("pydantic_ai", "pymybot.agent", "pytest", "openai", "anthropic",
-                     "pydantic_ai.models.function", "pydantic_ai.models.openai",
-                     "pydantic_ai.models.anthropic", "pydantic_ai.providers.openai",
-                     "pydantic_ai.providers.anthropic", "pydantic_ai.providers.deepseek",
+        for name in ("langchain", "langgraph", "langchain_openai", "langchain_anthropic",
+                     "pymybot.agent", "pytest", "openai", "anthropic",
                      "mcp", "pymybot.mcp_server", "pymybot.mcp_client",
-                     "pydantic_ai.mcp", "httpx", "bs4", "pymybot.agent_web"):
+                     "httpx", "httpx2", "bs4", "pymybot.agent_web"):
             importlib.import_module(name)
     print(f"{mode} dependency preflight passed", flush=True)
 

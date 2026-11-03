@@ -240,10 +240,10 @@ def test_prune_validates_arguments():
 
 
 def test_agent_session_records_text_turn(monkeypatch, tmp_path):
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai import models
-    from pydantic_ai.messages import ModelResponse, TextPart
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import models
+    from agent_fakes import ModelResponse, TextPart
+    from agent_fakes import FunctionModel
 
     from pymybot.agent import AgentConfig, AgentSession
 
@@ -273,9 +273,9 @@ def test_agent_session_records_text_turn(monkeypatch, tmp_path):
 
 
 def test_agent_session_records_tool_call_and_image(monkeypatch, tmp_path):
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.messages import ModelResponse, TextPart
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import ModelResponse, TextPart
+    from agent_fakes import FunctionModel
 
     from pymybot.agent import AgentConfig, AgentSession
 

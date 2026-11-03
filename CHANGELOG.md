@@ -6,6 +6,22 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The Agent backend now uses LangGraph/LangChain instead of PydanticAI. Tool
+  approval uses LangGraph interrupts with an in-memory checkpointer; the
+  serve/GUI protocol, receipt shapes and streaming event names are unchanged.
+  Model specs (`openai:`, `openai-chat:`, `anthropic:`, `deepseek:`) and the
+  `--base-url`/`--api-key-env` contract keep working.
+- Role history format is now version 2 and stores LangChain messages. Version 1
+  PydanticAI history is detected and ignored, so affected roles start a fresh
+  conversation without failing to load.
+
+### Removed
+
+- The `pydantic-ai-slim` dependency; install `pymybot[agent]` for
+  `langchain`, `langgraph` and the provider integrations.
+
 ## [0.6.0] – 2026-11-02
 
 ### Added

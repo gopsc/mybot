@@ -741,7 +741,7 @@ def test_owner_exception_releases_after_cleanup(workspace, monkeypatch, phase):
 @pytest.mark.parametrize("cancel_kind", ["rpc", "task"])
 @pytest.mark.parametrize("phase", ["open", "ask"])
 def test_owner_agent_cancel_closes_before_reopen(workspace, monkeypatch, phase, cancel_kind):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
 
     async def scenario(h):
         gate = h.block(phase)
@@ -770,7 +770,7 @@ def test_owner_agent_cancel_closes_before_reopen(workspace, monkeypatch, phase, 
 
 @pytest.mark.parametrize("phase", ["ask", "agent_close", "client_close"])
 def test_owner_agent_failure_cleanup_is_exclusive(workspace, monkeypatch, phase):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
 
     async def scenario(h):
         h.errors.add(phase)
@@ -927,7 +927,7 @@ def test_owner_run_failure_keeps_session_but_releases_operation(workspace, monke
 
 @pytest.mark.parametrize("constructor", ["executor", "session"])
 def test_owner_real_open_agent_cleans_partial_construction(workspace, monkeypatch, constructor):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
     from pymybot import agent as agent_module, agent_executor
 
     async def scenario(h):
@@ -969,7 +969,7 @@ def test_owner_real_open_agent_cleans_partial_construction(workspace, monkeypatc
 
 @pytest.mark.parametrize("owner", ["session", "agent"])
 def test_owner_eof_waits_for_initialization_and_cleanup(workspace, monkeypatch, owner):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
 
     async def scenario(h):
         gate = h.block("activate" if owner == "session" else "open")
@@ -1001,10 +1001,10 @@ def test_owner_eof_waits_for_initialization_and_cleanup(workspace, monkeypatch, 
 
 
 def test_agent_tool_approval_round_trip(workspace, monkeypatch):
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai import models
-    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-    from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import models
+    from agent_fakes import ModelResponse, TextPart, ToolCallPart
+    from agent_fakes import DeltaToolCall, FunctionModel
     import pymybot.agent as agent_module
 
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
@@ -1077,10 +1077,10 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
 
 
 def test_agent_capture_approval_and_image_response(workspace, monkeypatch):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
     from PIL import Image
-    from pydantic_ai import models
-    from pydantic_ai.models.function import FunctionModel
+    from agent_fakes import models
+    from agent_fakes import FunctionModel
     import pymybot.agent as agent_module
 
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
@@ -1128,7 +1128,7 @@ def test_agent_capture_approval_and_image_response(workspace, monkeypatch):
 
 
 def test_open_agent_wires_workspace_shell_and_file_write_grants(monkeypatch, tmp_path):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
     import io
 
     from pymybot import agent as agent_module, agent_executor

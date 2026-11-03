@@ -63,6 +63,17 @@ def test_role_validation_and_history_clear(tmp_path):
     assert read_history(role.history_file) == []
 
 
+def test_legacy_pydanticai_history_is_ignored(tmp_path):
+    role = create_role("legacy", root=tmp_path / "roles")
+    role.history_file.write_text(
+        json.dumps({"version": 1, "turns": [[{"kind": "request"}]]}), encoding="utf-8")
+    assert read_history(role.history_file) == []
+    role.history_file.write_text(
+        json.dumps({"version": 3, "turns": []}), encoding="utf-8")
+    with pytest.raises(SecurityError):
+        read_history(role.history_file)
+
+
 def test_role_cli_flags():
     args = parse_args(["agent", "--robot", "robot.sql", "--task", "hi", "--role", "demo"])
     assert args.role == "demo"
@@ -92,9 +103,9 @@ class _Executor:
 
 
 def test_role_history_reopens_and_clears(tmp_path):
-    pydantic_ai = pytest.importorskip("pydantic_ai")
-    from pydantic_ai.messages import ModelResponse, TextPart, UserPromptPart
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import ModelResponse, TextPart, UserPromptPart
+    from agent_fakes import FunctionModel
     from pymybot.agent import AgentConfig, AgentSession
 
     role = create_role("memory", root=tmp_path / "roles")
@@ -138,8 +149,8 @@ def test_role_history_reopens_and_clears(tmp_path):
 
 
 def test_corrupt_or_failed_role_history_does_not_reach_model(tmp_path):
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import FunctionModel
     from pymybot.agent import AgentConfigurationError, AgentSession
 
     role = create_role("broken", root=tmp_path / "roles")

@@ -129,7 +129,7 @@ Key invariants:
 | `pymybot/native.py` | Compile-only validation, per-row Python modules, Driver context and results |
 | `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Camera/Shell host operations |
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
-| `pymybot/agent.py` | PydanticAI agent, model configuration, tool loop |
+| `pymybot/agent.py` | LangGraph agent, model configuration, tool loop |
 | `pymybot/agent_skill_runner.py` | Trusted `skill.json` parsing, scoped arguments and bounded Skill subprocess |
 | `pymybot/prompts.py` | Manifest-ordered runtime prompt layers, trusted safety hashes, bounded composition, CAS/backups and private storage |
 | `pymybot/roles.py` | Role creation/loading, role-owned prompt/skills/MCP paths and bounded atomic model-history persistence |
@@ -178,7 +178,7 @@ flowchart TB
   Skills, MCP configuration and resumable model history; it does not change
   hardware ownership or approval boundaries.
   External MCP tools stay outside that owner thread and are surfaced by
-  PydanticAI toolsets, but approval, result bounding and transcripts use the
+  LangGraph tools, but approval, result bounding and transcripts use the
   same session rules.
   `run_skill` executes only actions declared by a trusted Skill `skill.json`:
   the model supplies a skill/action plus scoped parameters, never an entrypoint,

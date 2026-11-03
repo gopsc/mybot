@@ -20,7 +20,8 @@ from .mcp_client import MAX_CONFIG_BYTES, parse_servers
 from .prompts import PromptLibrary
 from .security import SecurityError, checked_text, read_file
 
-FORMAT = 1
+FORMAT = 2
+LEGACY_FORMAT = 1
 MAX_ROLE_NAME = 64
 MAX_DESCRIPTION = 1024
 MAX_METADATA = 64 * 1024
@@ -124,7 +125,7 @@ def _write_json(path, document):
 
 
 def read_history(path):
-    """Return raw serialized turns; PydanticAI validation belongs to AgentSession."""
+    """Return raw serialized turns; message validation belongs to AgentSession."""
     path = Path(path)
     if not path.exists():
         return []
@@ -134,8 +135,12 @@ def read_history(path):
     except (OSError, ValueError) as exc:
         raise SecurityError(f"Cannot load role history: {type(exc).__name__}") from None
     if (type(document) is not dict or set(document) != {"version", "turns"}
-            or type(document["version"]) is not int or document["version"] != FORMAT
-            or type(document["turns"]) is not list):
+            or type(document["version"]) is not int or type(document["turns"]) is not list):
+        raise SecurityError("Invalid or unsupported role history")
+    if document["version"] == LEGACY_FORMAT:
+        # PydanticAI-format history cannot be converted losslessly; start fresh.
+        return []
+    if document["version"] != FORMAT:
         raise SecurityError("Invalid or unsupported role history")
     return document["turns"]
 

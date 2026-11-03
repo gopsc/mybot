@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("pydantic_ai")
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
-from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+pytest.importorskip("langchain")
+from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+from agent_fakes import DeltaToolCall, FunctionModel
 
 from pymybot.agent import AgentConfig, AgentConfigurationError, AgentSession
 from pymybot.prompts import PromptLibrary

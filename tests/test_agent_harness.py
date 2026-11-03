@@ -128,9 +128,9 @@ class _Executor:
 
 
 def test_agent_session_injects_operator_prompt_and_context(tmp_path):
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.models.function import FunctionModel
-    from pydantic_ai.messages import ModelResponse, TextPart
+    pytest.importorskip("langchain")
+    from agent_fakes import FunctionModel
+    from agent_fakes import ModelResponse, TextPart
 
     from pymybot.agent import AgentConfig, AgentSession
 

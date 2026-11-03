@@ -1,6 +1,7 @@
 """Bounded web fetch/search tools and their agent/CLI wiring."""
 from __future__ import annotations
 
+import asyncio
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
@@ -118,24 +119,43 @@ def test_search_allows_an_explicit_loopback_endpoint(base_url):
 
 
 def test_agent_registers_web_tools_only_when_enabled():
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.models.test import TestModel
+    pytest.importorskip("langchain")
+    from agent_fakes import TestModel
 
-    from pymybot.agent import make_agent
+    from pymybot.agent import AgentConfig, AgentSession
 
-    plain = make_agent(TestModel())
-    assert "web_fetch" not in plain._function_toolset.tools
-    fetch_only = make_agent(TestModel(), enable_web=True)
-    assert "web_fetch" in fetch_only._function_toolset.tools
-    assert "web_search" not in fetch_only._function_toolset.tools
-    both = make_agent(TestModel(), enable_web=True, web_search_enabled=True)
-    assert {"web_fetch", "web_search"} <= set(both._function_toolset.tools)
+    class Executor:
+        def __init__(self):
+            self.stop_event = threading.Event()
+
+        async def start(self, *, deadline=None):
+            return {"ok": True}
+
+        def cancel(self):
+            self.stop_event.set()
+
+        async def close(self):
+            return None
+
+    def names(config):
+        session = AgentSession(Executor(), TestModel(), config)
+        return session, {tool.name for tool in session.tools}
+
+    plain_session, plain = names(AgentConfig())
+    fetch_session, fetch_only = names(AgentConfig(enable_web=True))
+    both_session, both = names(AgentConfig(enable_web=True, search_endpoint="http://127.0.0.1:9/"))
+    assert "web_fetch" not in plain
+    assert "web_fetch" in fetch_only
+    assert "web_search" not in fetch_only
+    assert {"web_fetch", "web_search"} <= both
+    for session in (plain_session, fetch_session, both_session):
+        asyncio.run(session.close())
 
 
 def test_dispatch_requires_approval_and_never_calls_the_network():
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.messages import ModelResponse, TextPart
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import ModelResponse, TextPart
+    from agent_fakes import FunctionModel
 
     from pymybot.agent import AgentConfig, AgentSession
 
@@ -181,9 +201,9 @@ def asyncio_result(coro):
 
 
 def test_preapproved_web_tool_uses_the_bounded_runner(monkeypatch):
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.messages import ModelResponse, TextPart
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import ModelResponse, TextPart
+    from agent_fakes import FunctionModel
 
     from pymybot.agent import AgentConfig, AgentSession
     from pymybot import agent_web
@@ -223,7 +243,7 @@ def test_preapproved_web_tool_uses_the_bounded_runner(monkeypatch):
 
 
 def test_config_cli_and_gui_surfaces(tmp_path):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
     from pymybot.agent import AgentConfig, AgentConfigurationError
     from pymybot.cli import UsageError, parse_args
     from pymybot.gui.config import GuiConfig

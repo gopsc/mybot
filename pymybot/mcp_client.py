@@ -163,29 +163,117 @@ def describe(servers):
     return "\n".join(lines) + "\n"
 
 
-def build_toolsets(servers, make_process, *, timeout):
-    """Create PydanticAI MCP toolsets; servers start lazily inside the run.
+class MCPManager:
+    """Own one long-lived stdio session per configured MCP server.
 
-    ``make_process(server)`` returns the per-server tool hook. The hook sees the
-    server-local tool name, while the model sees ``server_tool``; passing the
-    server through lets approval prompts and transcripts name both.
+    All protocol work runs in a dedicated task so anyio cancel scopes are
+    entered and exited by the same task. Calls are queued through that task;
+    a timeout never claims the remote call did not run.
     """
-    if not servers:
-        return ()
-    if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
-            or not math.isfinite(timeout) or not 0 < timeout <= 3600):
-        raise McpConfigError("MCP timeout must be finite and positive")
-    from pydantic_ai.mcp import MCPToolset, StdioTransport
-    # Explicitly disable framework retries: an MCP tool can have side effects,
-    # and the project never replays a possibly dispatched action.
-    read_timeout = max(1.0, min(float(timeout), 180.0))
-    return tuple(
-        MCPToolset(
-            StdioTransport(command=server.command, args=list(server.args),
-                           env=server.env, cwd=server.cwd),
-            id=server.name, max_retries=0, tool_error_behavior="failed",
-            process_tool_call=make_process(server),
-            init_timeout=max(1.0, min(float(timeout), 30.0)), read_timeout=read_timeout,
-        ).prefixed(server.name)
-        for server in servers
-    )
+
+    def __init__(self, servers, *, timeout=180):
+        if (isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+                or not math.isfinite(timeout) or not 0 < timeout <= 3600):
+            raise McpConfigError("MCP timeout must be finite and positive")
+        self.servers = tuple(servers)
+        self.timeout = float(timeout)
+        self.tools: list[dict] = []
+        self._queue = None
+        self._task = None
+        self._ready = None
+
+    async def start(self):
+        if self._task is not None:
+            return
+        import asyncio
+        self._queue = asyncio.Queue()
+        self._ready = asyncio.get_running_loop().create_future()
+        self._task = asyncio.create_task(self._run(), name="mybot-mcp")
+        try:
+            await asyncio.wait_for(asyncio.shield(self._ready),
+                                   timeout=max(1.0, min(self.timeout, 30.0)))
+        except BaseException:
+            await self.close()
+            raise
+
+    async def _run(self):
+        import asyncio
+        from contextlib import AsyncExitStack
+        from datetime import timedelta
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        async with AsyncExitStack() as stack:
+            try:
+                sessions = {}
+                read_timeout = timedelta(seconds=max(1.0, min(self.timeout, 180.0)))
+                for server in self.servers:
+                    params = StdioServerParameters(
+                        command=server.command, args=list(server.args),
+                        env=server.env, cwd=server.cwd)
+                    read, write = await stack.enter_async_context(stdio_client(params))
+                    session = await stack.enter_async_context(
+                        ClientSession(read, write, read_timeout_seconds=read_timeout))
+                    await session.initialize()
+                    sessions[server.name] = session
+                    cursor = None
+                    while True:
+                        listed = await session.list_tools(cursor=cursor)
+                        for tool in listed.tools:
+                            self.tools.append({
+                                "server": server.name, "remote": tool.name,
+                                "description": tool.description or "",
+                                "input_schema": tool.inputSchema or {"type": "object", "properties": {}},
+                            })
+                        cursor = getattr(listed, "nextCursor", None)
+                        if not cursor:
+                            break
+                if not self._ready.done():
+                    self._ready.set_result(None)
+                while True:
+                    request = await self._queue.get()
+                    if request is None:
+                        break
+                    future, server, name, arguments, timeout = request
+                    try:
+                        value = await asyncio.wait_for(
+                            sessions[server].call_tool(name, arguments), timeout=timeout)
+                    except BaseException as exc:
+                        if not future.done():
+                            future.set_exception(exc)
+                    else:
+                        if not future.done():
+                            future.set_result(value)
+            except BaseException as exc:
+                if not self._ready.done():
+                    self._ready.set_exception(exc)
+                raise
+
+    async def call(self, server, name, arguments, *, timeout):
+        import asyncio
+        if self._task is None or self._task.done():
+            raise RuntimeError("MCP manager is not running")
+        future = asyncio.get_running_loop().create_future()
+        limit = max(1.0, min(float(timeout), self.timeout))
+        await self._queue.put((future, server, name, arguments, limit))
+        try:
+            return await asyncio.wait_for(asyncio.shield(future), timeout=limit + 1.0)
+        except TimeoutError:
+            raise TimeoutError("MCP tool call timed out; outcome is unknown") from None
+
+    async def close(self):
+        import asyncio
+        task, self._task = self._task, None
+        if task is None:
+            return
+        try:
+            self._queue.put_nowait(None)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(task, timeout=5.0)
+        except BaseException:
+            task.cancel()
+            try:
+                await task
+            except BaseException:
+                pass

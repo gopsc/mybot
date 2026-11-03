@@ -168,7 +168,7 @@ flowchart LR
 | `run` | 激活、执行一个动作、清理 | 是 |
 | `sample` | 采样一个命名变量 | 是 |
 | `apply-sql` | 对临时会话应用受限 SQL | 是 |
-| `agent` | PydanticAI 任务/REPL | 经审批 |
+| `agent` | LangGraph 任务/REPL | 经审批 |
 | `serve` | 长驻 JSON-RPC 服务 | 经请求 |
 | `mcp` | 标准 MCP stdio 服务端 | 经 `--allow-execution` |
 | `doctor` | 环境、依赖、资产诊断 | 否 |

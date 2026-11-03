@@ -8,7 +8,7 @@ import pytest
 
 from pymybot.agent_intent import INTENTS, TOOLS_BY_INTENT, classify_intent
 
-pytest.importorskip("pydantic_ai")
+pytest.importorskip("langchain")
 
 from pymybot.agent import AgentConfig, AgentConfigurationError, AgentSession  # noqa: E402
 
@@ -91,9 +91,9 @@ def test_agent_config_rejects_unknown_intent():
 
 
 def test_dispatch_denies_tool_outside_intent():
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.messages import ModelResponse, TextPart
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import ModelResponse, TextPart
+    from agent_fakes import FunctionModel
 
     async def respond(messages, info):
         return ModelResponse(parts=[TextPart("ok")])
@@ -117,9 +117,9 @@ def test_dispatch_denies_tool_outside_intent():
 
 
 def test_agent_result_reports_intent():
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.messages import ModelResponse, TextPart
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import ModelResponse, TextPart
+    from agent_fakes import FunctionModel
 
     async def respond(messages, info):
         return ModelResponse(parts=[TextPart("ok")])

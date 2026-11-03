@@ -22,11 +22,13 @@ try {
            --include-module=lupa.luajit21 `
            --include-package=serial --include-package=pyftdi --include-package=PIL --include-package=av `
            --include-package=openai --include-package=anthropic `
-           --include-package=pydantic_ai --include-package=httpx2 `
-           --include-package-data=genai_prices `
-           --include-distribution-metadata=pydantic-ai-slim --include-distribution-metadata=pydantic-graph `
+           --include-package=langchain --include-package=langgraph `
+           --include-package=langchain_openai --include-package=langchain_anthropic `
+           --include-package=httpx2 `
+           --include-distribution-metadata=langchain --include-distribution-metadata=langchain-core `
+           --include-distribution-metadata=langgraph --include-distribution-metadata=langgraph-checkpoint `
            --include-distribution-metadata=pydantic --include-distribution-metadata=openai `
-           --include-distribution-metadata=anthropic --include-distribution-metadata=genai-prices `
+           --include-distribution-metadata=anthropic --include-distribution-metadata=httpx2 `
            --include-distribution-metadata=httpx2 --include-distribution-metadata=httpcore2 `
            --include-distribution-metadata=lupa --include-distribution-metadata=sqlparse `
            --include-distribution-metadata=pyserial --include-distribution-metadata=pyftdi `
@@ -38,7 +40,6 @@ try {
            --include-data-dir=prompts=pymybot/assets/prompts `
            --include-data-dir=skills/hardware-controller/references/assets/robots=robots --include-data-dir=skills/hardware-controller/references/assets/scripts=scripts `
            --include-data-files=README.md=README.md --include-data-files=LICENSE=LICENSE `
-           --noinclude-custom-mode=genai_prices.data:bytecode `
            --noinclude-custom-mode=openai.types:bytecode `
            --noinclude-custom-mode=anthropic.types:bytecode
         if ($LASTEXITCODE -ne 0) { throw "Nuitka failed with exit code $LASTEXITCODE" }

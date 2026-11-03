@@ -244,7 +244,7 @@ def test_serve_autostats_defaults_type_validation_and_conversation_key(monkeypat
 
 @pytest.mark.parametrize("auto_stats", [True, False])
 def test_serve_propagates_auto_stats_into_real_agent_config(auto_stats, monkeypatch):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
     from pymybot import agent
 
     configs = []

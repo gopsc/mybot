@@ -938,7 +938,7 @@ class App(QMainWindow):
         self.serve_state = f"就绪（协议 {info.get('protocol')}）"
         self._log(f"[gui] serve 就绪：{json.dumps(info, ensure_ascii=False)}\n")
         if not self.agent_available:
-            self._chat_line("智能体不可用：当前解释器缺少 PydanticAI 依赖。", "error")
+            self._chat_line("智能体不可用：当前解释器缺少 LangGraph/LangChain 依赖。", "error")
             self._chat_line("安装 pymybot[agent] 后重启本窗口；或用 --no-gui 走命令行控制器。", "system")
         elif not self.greeted:
             self.greeted = True
@@ -1122,7 +1122,7 @@ class App(QMainWindow):
 
     def _submit_task(self, task):
         if not self.agent_available:
-            self._notice("智能体不可用：缺少 PydanticAI 依赖")
+            self._notice("智能体不可用：缺少 LangGraph/LangChain 依赖")
             return
         self._sync_config()
         robot = self._robot_path()

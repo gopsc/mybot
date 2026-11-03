@@ -1,4 +1,4 @@
-"""Dual-mode routing must work even when PydanticAI is not installed."""
+"""Dual-mode routing must work even when LangGraph is not installed."""
 import builtins
 import json
 import sys
@@ -30,8 +30,8 @@ def invoke(capsys, *args):
 def no_agent_import(monkeypatch):
     original = builtins.__import__
     def guarded(name, *args, **kwargs):
-        if name == "agent" or name.startswith(("pydantic", "openai", "anthropic")):
-            raise ModuleNotFoundError("blocked optional dependency", name="pydantic_ai")
+        if name == "agent" or name.startswith(("langchain", "langgraph", "openai", "anthropic", "httpx2")):
+            raise ModuleNotFoundError("blocked optional dependency", name="langgraph")
         return original(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", guarded)
 

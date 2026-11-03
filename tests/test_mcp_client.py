@@ -11,10 +11,10 @@ import threading
 import pytest
 
 pytest.importorskip("mcp")
-pytest.importorskip("pydantic_ai")
+pytest.importorskip("langchain")
 
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
-from pydantic_ai.models.function import FunctionModel
+from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+from agent_fakes import FunctionModel
 
 from pymybot.agent import AgentConfig, AgentSession
 from pymybot.cli import main
@@ -61,7 +61,7 @@ def clean_environment(monkeypatch):
         if key != "MYBOT_HOME" and key.startswith(("BOT4CJ_", "MYBOT_", "OPENAI_", "ANTHROPIC_", "DEEPSEEK_")):
             monkeypatch.delenv(key)
     monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
-    from pydantic_ai import models
+    from agent_fakes import models
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
 
 
@@ -208,12 +208,14 @@ def test_large_mcp_results_are_bounded(tmp_path):
         return ModelResponse(parts=[ToolCallPart(name, {"size": 200_000}, "call-1")])
 
     async def scenario():
+        from langchain_core.messages import ToolMessage
+
         session = AgentSession(FakeExecutor(), FunctionModel(respond),
                                AgentConfig(allow_mcp_tools=True), mcp_servers=servers)
         try:
             await session.ask("blob")
-            receipts.extend(part.content for message in session.turns[0]
-                            for part in message.parts if isinstance(part, ToolReturnPart))
+            receipts.extend(message.content for turn in session.turns for message in turn
+                            if isinstance(message, ToolMessage))
         finally:
             await session.close()
 

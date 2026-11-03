@@ -14,7 +14,7 @@ operator/session settings; a role never grants them.
 ├── prompts/           # complete PromptLibrary
 ├── skills/            # role-specific SKILL.md directories
 ├── mcp.json           # optional mcpServers configuration
-└── history.json       # complete PydanticAI messages, grouped by turn
+└── history.json       # complete LangChain messages, grouped by turn (format 2)
 ```
 
 `pymybot roles create` copies the trusted bundled `prompts/` baseline, including
@@ -77,7 +77,7 @@ the newly selected role with its own capabilities and context.
 ## Resumable history
 
 After each complete successful turn, `AgentSession` serializes the full
-PydanticAI message history to `history.json` with an atomic replacement. The
+LangChain message history to `history.json` with an atomic replacement. The
 next CLI, GUI or JSON-RPC session using that role restores it before the first
 model request. Existing `history_turns` and `history_bytes` limits prune whole
 turns, preserving tool-call/receipt pairs. An optional `max_context_tokens`
@@ -85,9 +85,11 @@ limit also prunes old complete turns before each model request; the current
 turn is never partially rewritten and instead fails explicitly if it alone
 exceeds the remaining input budget.
 
-Failed, cancelled or partially executed turns are not appended. Corrupt or
-unsupported history blocks the model request instead of silently starting with
-amnesia. `/clear` in the terminal REPL and `agent.reset` with
+Failed, cancelled or partially executed turns are not appended. Version 1
+(PydanticAI) history is recognized and ignored so the role starts a fresh
+conversation. Corrupt or otherwise unsupported history blocks the model
+request instead of silently starting with amnesia. `/clear` in the terminal
+REPL and `agent.reset` with
 `clearHistory=true` provide explicit erasure.
 
 `history.json` is different from `~/.mybot/sessions`: session transcripts are

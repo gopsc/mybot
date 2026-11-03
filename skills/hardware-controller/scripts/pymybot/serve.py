@@ -117,7 +117,7 @@ def _reject_constant(token):
 
 
 def agent_available():
-    return importlib.util.find_spec("pydantic_ai") is not None
+    return importlib.util.find_spec("langgraph") is not None
 
 
 class Server:

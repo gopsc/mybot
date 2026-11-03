@@ -8,10 +8,10 @@ import pytest
 
 from pymybot.agent_intent import classify_intent
 
-pytest.importorskip("pydantic_ai")
+pytest.importorskip("langchain")
 
-from pydantic_ai.messages import ModelResponse, TextPart  # noqa: E402
-from pydantic_ai.models.function import FunctionModel  # noqa: E402
+from agent_fakes import ModelResponse, TextPart  # noqa: E402
+from agent_fakes import FunctionModel  # noqa: E402
 
 from pymybot.agent import AgentConfig, AgentSession  # noqa: E402
 

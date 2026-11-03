@@ -14,16 +14,18 @@ ASSET_SUFFIXES = {
 }
 
 METADATA_DISTRIBUTIONS = (
-    "pydantic-ai-slim", "pydantic-graph", "pydantic", "openai", "anthropic",
-    "genai-prices", "httpx2", "httpcore2", "griffelib", "truststore", "jiter",
+    "langchain", "langchain-core", "langchain-openai", "langchain-anthropic",
+    "langgraph", "langgraph-checkpoint", "langgraph-prebuilt", "langgraph-sdk",
+    "langsmith", "pydantic", "openai", "anthropic",
+    "httpx2", "httpcore2", "griffelib", "truststore", "jiter",
     "tiktoken", "lupa", "sqlparse", "pyserial", "pyftdi", "pillow", "av", "PySide6",
     "mcp", "httpx", "beautifulsoup4",
 )
 
 HIDDEN_PACKAGES = (
-    "pydantic_ai", "pydantic_graph", "openai", "anthropic", "genai_prices",
-    "httpx2", "httpcore2", "griffelib", "truststore", "jiter", "tiktoken",
-    "lupa", "PIL", "serial", "pyftdi", "av", "mcp", "httpx", "bs4",
+    "langchain", "langgraph", "langchain_openai", "langchain_anthropic", "langsmith",
+    "openai", "anthropic", "httpx2", "httpcore2", "griffelib", "truststore",
+    "jiter", "tiktoken", "lupa", "PIL", "serial", "pyftdi", "av", "mcp", "httpx", "bs4",
 )
 CONTROLLER_MODULES = (
     "pymybot.actions", "pymybot.agent_executor", "pymybot.agent_skill_runner",

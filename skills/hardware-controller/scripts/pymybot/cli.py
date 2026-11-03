@@ -125,7 +125,7 @@ def parser():
         "run": "Activate, execute an action script and deactivate (virtual-only by default)",
         "sample": "Activate and read a named variable; activation itself may write to devices",
         "apply-sql": "Apply SQL to a temporarily active robot; does not write the structure file",
-        "agent": "PydanticAI task or interactive session on the terminal (see --no-gui)",
+        "agent": "LangGraph task or interactive session on the terminal (see --no-gui)",
         "gui": "PySide6 agent window (the default entry; no command required)",
         "serve": "Long-lived stdio JSON-RPC 2.0 server for IDE frontends (one JSON object per line)",
         "mcp": "Standard MCP stdio server for MCP clients (read-only unless --allow-execution)",
@@ -437,7 +437,7 @@ def doctor():
     ]
     optional = [
         ("av", "av", "camera capture", "pip install pymybot[camera]"),
-        ("pydantic_ai", "pydantic-ai-slim", "agent mode", "pip install pymybot[agent]"),
+        ("langgraph", "langgraph", "agent mode", "pip install pymybot[agent]"),
         ("mcp", "mcp", "MCP server and agent client", "pip install pymybot[mcp]"),
         ("PySide6.QtWidgets", "PySide6", "GUI", "pip install pymybot[gui]"),
         ("httpx", "httpx", "web fetch", "pip install pymybot[web]"),

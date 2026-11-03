@@ -26,7 +26,7 @@ python -m pymybot doctor
 | `pymybot run --robot SQL --input MT` | Activate, run one action, deactivate | Yes |
 | `pymybot sample --robot SQL --name VAR` | Read a named variable (`--count`, `--interval-ms`) | Yes |
 | `pymybot apply-sql --robot SQL --sql "..."` | Apply restricted SQL to a temporary session | Yes |
-| `pymybot agent ...` | PydanticAI task/REPL | Via approved tools |
+| `pymybot agent ...` | LangGraph task/REPL | Via approved tools |
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
 | `pymybot new NAME [--dir DIR] [--force]` | Generate a runnable `robots/`, `scripts/` and `modules/` skeleton | No |

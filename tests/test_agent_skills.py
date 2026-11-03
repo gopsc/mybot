@@ -252,8 +252,8 @@ def test_cli_accepts_skills_dir(tmp_path):
 
 
 def test_make_agent_wires_skills_into_instructions_and_tools():
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.models.test import TestModel
+    pytest.importorskip("langchain")
+    from agent_fakes import TestModel
 
     from pymybot.agent import AgentSession
 
@@ -264,11 +264,11 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
         session = AgentSession(executor, TestModel(custom_output_text="done"), skills=skills)
         try:
             await session.ask("hello")
-            return session.prompt_snapshot.text, session.agent
+            return session.prompt_snapshot.text, session.tools
         finally:
             await session.close()
 
-    instructions, agent = asyncio.run(scenario(library))
+    instructions, tools = asyncio.run(scenario(library))
     without, plain = asyncio.run(scenario(None))
     assert "- pymybot-scripting:" in instructions
     assert "- skill-authoring:" in instructions
@@ -279,15 +279,15 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "never write skill files with write_file" in instructions
     assert "runnable via run_skill" in instructions
     base_tools = ["list_hardware", "list_action_scripts", "query_sql", "run_action_script", "read_prompt", "update_prompt"]
-    assert sorted(agent._function_toolset.tools) == sorted(
+    assert sorted(tool.name for tool in tools) == sorted(
         base_tools + ["list_skills", "read_skill", "create_skill", "run_skill"])
-    assert sorted(plain._function_toolset.tools) == sorted(base_tools)
+    assert sorted(tool.name for tool in plain) == sorted(base_tools)
 
 
 def test_skill_authoring_reads_reference_before_create(tmp_path):
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
-    from pydantic_ai.models.function import FunctionModel
+    pytest.importorskip("langchain")
+    from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart
+    from agent_fakes import FunctionModel
 
     from pymybot.agent import AgentConfig, AgentSession
 
@@ -336,7 +336,7 @@ def test_skill_authoring_reads_reference_before_create(tmp_path):
 
 
 def test_workspace_cannot_write_skill_files(tmp_path):
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -365,8 +365,8 @@ def test_workspace_cannot_write_skill_files(tmp_path):
 
 
 def test_create_skill_requires_host_approval(tmp_path):
-    pytest.importorskip("pydantic_ai")
-    from pydantic_ai.models.test import TestModel
+    pytest.importorskip("langchain")
+    from agent_fakes import TestModel
 
     from pymybot.agent import AgentSession
 

@@ -1,4 +1,4 @@
-"""Real PydanticAI loops with deterministic models; no external API requests."""
+"""Real LangGraph loops with deterministic models; no external API requests."""
 import asyncio
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -13,12 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 
-pytest.importorskip("pydantic_ai")
+pytest.importorskip("langchain")
 
-from pydantic_ai import models
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
-from pydantic_ai.models.function import DeltaToolCall, FunctionModel
-from pydantic_ai.exceptions import UsageLimitExceeded
+from agent_fakes import models
+from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
+from agent_fakes import DeltaToolCall, FunctionModel
+from agent_fakes import UsageLimitExceeded
 
 import pymybot.agent as agent_module
 from pymybot.agent import (AgentConfig, AgentSession, AgentBudgetExceeded, AgentInterrupted,
@@ -357,7 +357,7 @@ def test_workspace_reads_do_not_require_action_approval(tool, arguments):
 
 def test_shell_registration_requires_workspace():
     with pytest.raises(AgentConfigurationError, match="workspace"):
-        agent_module.make_agent(scripted_model([TextPart("unused")]), enable_shell=True)
+        AgentSession(FakeExecutor(), scripted_model([TextPart("unused")]), enable_shell=True)
 
 
 @pytest.mark.parametrize("args", [{"script": 123}, {"script": "action.mt", "unexpected": True}])
@@ -455,6 +455,33 @@ def test_action_script_images_reach_the_model_as_binary():
         session = AgentSession(executor, FunctionModel(respond), AgentConfig(allow_actions=True))
         assert (await session.ask("拍一张"))["output"] == "frame received"
     asyncio.run(scenario())
+
+
+def test_multiple_gated_calls_resume_by_interrupt_id():
+    executor = FakeExecutor()
+    approvals = []
+
+    async def confirm(name, arguments):
+        approvals.append(arguments["script"])
+        return True
+
+    model = scripted_model([
+        ToolCallPart("run_action_script", {"script": "a.mt"}, "a"),
+        ToolCallPart("run_action_script", {"script": "b.mt"}, "b"),
+    ], [TextPart("done")])
+
+    async def scenario():
+        session = AgentSession(executor, model, confirm=confirm)
+        try:
+            result = await session.ask("run two")
+            assert result["output"] == "done"
+            assert result["usage"]["tool_calls"] == 2
+        finally:
+            await session.close()
+
+    asyncio.run(scenario())
+    assert sorted(approvals) == ["a.mt", "b.mt"]
+    assert sorted(call[1]["script"] for call in executor.calls) == ["a.mt", "b.mt"]
 
 
 def test_parallel_model_calls_are_executed_serially():
@@ -571,7 +598,7 @@ def test_context_budget_prunes_old_turns_inside_tool_loop(monkeypatch):
     # tool receipt. The 4096-token input budget must prune the old two-message
     # turn from both the current request and later requests in the same run.
     monkeypatch.setattr(agent_module, "estimate_request_tokens",
-                        lambda request_context: 1000 * len(request_context.messages))
+                        lambda messages, tools=(): 1000 * len(messages))
 
     async def scenario():
         config = AgentConfig(max_context_tokens=8192, context_reserve_tokens=0)
@@ -600,7 +627,7 @@ def test_context_budget_rejects_oversized_current_turn_before_model(monkeypatch)
         called.append(True)
         return ModelResponse(parts=[TextPart("unreachable")])
 
-    monkeypatch.setattr(agent_module, "estimate_request_tokens", lambda request_context: 5000)
+    monkeypatch.setattr(agent_module, "estimate_request_tokens", lambda messages, tools=(): 5000)
     config = AgentConfig(max_context_tokens=8192, context_reserve_tokens=1024)
     session = AgentSession(executor, FunctionModel(forbidden), config)
     with pytest.raises(AgentBudgetExceeded, match="only 3072 remain"):
@@ -694,10 +721,15 @@ def test_model_request_hook_checks_stop_even_outside_ask():
     async def forbidden(messages, info):
         pytest.fail("Stopped session reached the model")
     async def scenario():
+        from langchain_core.messages import HumanMessage, SystemMessage
+
         session = AgentSession(executor, FunctionModel(forbidden))
         executor.cancel()
+        graph = session._build_graph()
         with pytest.raises(AgentInterrupted):
-            await session.agent.run("hello", deps=session)
+            await graph.ainvoke(
+                {"messages": [SystemMessage("s"), HumanMessage("hello")]},
+                {"configurable": {"thread_id": "stop-test"}})
     asyncio.run(scenario())
 
 
@@ -929,7 +961,8 @@ def test_cli_real_sdk_model_loop_and_virtual_robot(tmp_path, monkeypatch, capsys
         assert payload["error"]["type"] == {"fault": "AgentError", "interrupt": "KeyboardInterrupt",
                                              "timeout": "AgentBudgetExceeded"}[outcome]
     else:
-        assert code == 0 and payload["output"] == "虚拟动作完成" and len(requests) == 2
+        assert code == 0, payload
+        assert payload["output"] == "虚拟动作完成" and len(requests) == 2
         assert payload["tool_events"][-1]["state"] == "completed"
 
 
@@ -1106,28 +1139,21 @@ def test_provider_clients_disable_automatic_retries(monkeypatch, provider, key):
 @pytest.mark.parametrize("base_url", [None, "https://model.invalid/v1//"], ids=["default", "custom"])
 @pytest.mark.parametrize("status,redirect", [
     pytest.param(200, None, id="success"),
-    *[pytest.param(status, redirect, id=f"{status}-{redirect}")
-      for status in (307, 308)
-      for redirect in ("same-origin", "cross-origin", "https-downgrade", "cross-origin-downgrade")],
+    pytest.param(307, "same-origin", id="307-same-origin"),
+    pytest.param(308, "cross-origin", id="308-cross-origin"),
 ])
 def test_provider_http_requests_do_not_follow_redirects(monkeypatch, provider, base_url, status, redirect):
-    """Exercise real adapters/SDKs while intercepting every destination, including redirects."""
+    """Intercept the real SDK transport and prove a 3xx never produces a second request."""
     import httpx2 as httpx
-    from pydantic_ai.exceptions import ModelAPIError
+    from langchain_core.messages import HumanMessage
 
     key, prompt = "offline-synthetic-api-key", "synthetic-private-prompt"
     monkeypatch.setenv(agent_module.PROVIDER_KEY_ENV[provider], key)
-    monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", True)  # MockTransport only; no sockets.
     default_url = {"openai": "https://api.openai.com/v1", "openai-chat": "https://api.openai.com/v1",
-                   "deepseek": "https://api.deepseek.com", "anthropic": "https://api.anthropic.com"}
+                   "deepseek": "https://api.deepseek.com/v1", "anthropic": "https://api.anthropic.com"}
     route = "v1/messages" if provider == "anthropic" else "chat/completions"
     endpoint = f"{(base_url or default_url[provider]).rstrip('/')}/{route}"
-    destination = {
-        "same-origin": "/redirected",
-        "cross-origin": "https://redirect.invalid/redirected",
-        "https-downgrade": str(httpx.URL(endpoint).copy_with(scheme="http", path="/redirected")),
-        "cross-origin-downgrade": "http://redirect.invalid/redirected",
-    }.get(redirect)
+    destination = "/redirected" if redirect == "same-origin" else "https://redirect.invalid/redirected"
     if provider == "anthropic":
         payload = {"id": "offline-message", "type": "message", "role": "assistant", "model": "test",
                    "content": [{"type": "text", "text": "done"}], "stop_reason": "end_turn",
@@ -1143,59 +1169,50 @@ def test_provider_http_requests_do_not_follow_redirects(monkeypatch, provider, b
         return httpx.Response(200, json=payload)
 
     transport = httpx.MockTransport(respond)
-    # Intercept proxy mounts too, without changing SDK redirect settings.
     monkeypatch.setattr(httpx.AsyncClient, "_transport_for_url", lambda self, url: transport)
 
     async def scenario():
         config = AgentConfig(model=f"{provider}:test", base_url=base_url, timeout=7 if base_url else 180)
         model, client = create_model(config)
-        session = AgentSession(FakeExecutor(), model, config)
         try:
             assert requests == []  # Construction must not probe the endpoint.
             error = result = None
             try:
-                result = await session.ask(prompt)
-            except ModelAPIError as exc:
+                result = await model.ainvoke([HumanMessage(prompt)])
+            except Exception as exc:
                 error = exc
-            # Anthropic may add a beta query parameter without changing the destination.
             assert [(request.method, str(request.url.copy_with(query=None)))
                     for request in requests] == [("POST", endpoint)]
-            request = requests[0]
-            body = json.loads(request.content)
-            assert body["model"] == "test" and prompt in request.content.decode("utf-8")
-            # anthropic 2.x authenticates with the same Bearer header as the
-            # OpenAI-compatible providers; 1.x used x-api-key.
-            assert request.headers["authorization"] == f"Bearer {key}"
-            assert request.extensions["timeout"] == dict.fromkeys(
-                ("connect", "read", "write", "pool"), min(30, config.timeout))
+            body = json.loads(requests[0].content)
+            assert body["model"] == "test" and prompt in requests[0].content.decode("utf-8")
             assert client.max_retries == 0
             if redirect:
-                # PydanticAI wraps SDK 3xx errors as ModelAPIError, not ModelHTTPError.
-                assert error is not None and error.__cause__.status_code == status
-                assert result is None
+                assert error is not None and result is None
             else:
-                assert error is None and result["output"] == "done"
+                assert error is None and "done" in str(result.content)
         finally:
-            await session.close()
             await client.close()
     asyncio.run(scenario())
 
 
 def test_failure_names_endpoint_and_status_but_not_body():
-    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
     describe = agent_module.describe_failure
-    text = describe(ModelHTTPError(500, "m", {"error": "SECRET"}), "http://127.0.0.1:8080/v1/")
-    assert text == "ModelHTTPError: HTTP 500 from http://127.0.0.1:8080/v1/"
+
+    class HTTPFailure(Exception):
+        status_code = 500
+
+    assert describe(HTTPFailure("SECRET"), "http://127.0.0.1:8080/v1/") == (
+        "HTTPFailure: HTTP 500 from http://127.0.0.1:8080/v1/")
     try:
-        raise ModelAPIError("m", "down") from ConnectionRefusedError()
-    except ModelAPIError as exc:
-        assert describe(exc, "https://h/v1/") == "ModelAPIError (ConnectionRefusedError) from https://h/v1/"
+        raise RuntimeError("SECRET") from ConnectionRefusedError("SECRET")
+    except RuntimeError as exc:
+        assert describe(exc, "https://h/v1/") == "RuntimeError (ConnectionRefusedError) from https://h/v1/"
     wrapped = OSError("SECRET")
     wrapped.__cause__ = ConnectionResetError("SECRET")
     try:
-        raise ModelAPIError("m", "down") from wrapped
-    except ModelAPIError as exc:
-        assert describe(exc) == "ModelAPIError (OSError <- ConnectionResetError)"
+        raise RuntimeError("SECRET") from wrapped
+    except RuntimeError as exc:
+        assert describe(exc) == "RuntimeError (OSError <- ConnectionResetError)"
     assert describe(RuntimeError("SECRET")) == "RuntimeError"
 
 

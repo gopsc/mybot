@@ -68,7 +68,7 @@ def test_workspace_auto_shell_reports_active_backend(tmp_path, monkeypatch):
 
 
 def test_agent_config_validates_sandbox_mode():
-    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("langchain")
     from pymybot.agent import AgentConfig, AgentConfigurationError
 
     assert AgentConfig(sandbox_mode="BWRAP").sandbox_mode == "bwrap"

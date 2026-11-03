@@ -31,7 +31,7 @@ python -m pytest -q                       # full suite, no hardware
 python -m pytest tests/test_gui.py -q     # Qt widgets tested offscreen, including headless CI
 python -m pymybot check --robot skills/hardware-controller/references/assets/robots/relay-test.sql --input skills/hardware-controller/references/assets/scripts/relay-test.mt
 python -m pymybot run --robot skills/hardware-controller/references/assets/robots/relay-test.sql --input skills/hardware-controller/references/assets/scripts/relay-test.mt --timeout 10
-python -I tools/ci_smoke.py base        # fail if pydantic_ai leaked into base env
+python -I tools/ci_smoke.py base        # fail if LangChain/LangGraph leaked into base env
 python -I tools/ci_smoke.py agent       # fail if agent imports are missing
 python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
 python -I tools/check_docs_skill_sync.py  # skill links/paths resolve, references declare a Source
