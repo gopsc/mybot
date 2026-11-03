@@ -64,8 +64,8 @@ actions or file writes do not cover it.
   group.
 - Camera: install `.[camera]`; on Windows the device index (`0`) must be
   correct and some cameras need administrator access.
-- Remember that physical access requires `--allow-hardware` (CLI) or the GUI
-  “允许硬件” toggle.
+- Direct controller commands require `--allow-hardware`; the GUI editor run asks
+  for confirmation. Trusted agent skills receive hardware access automatically.
 
 ## Why did a virtual run write to a device?
 

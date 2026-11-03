@@ -188,7 +188,7 @@ GUI 是一个前端，不重复实现机器人逻辑：窗口只启动一个 `se
 - 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、脚本编辑器（`Ctrl+E`）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
 - 对话支持流式输出、忙碌指示、重试、清空和复制；危险工具会逐次弹窗确认。
 - **停止对话**只取消当前 Agent 回合；**急停**不带确认弹窗，会发送 `abort`、调用驱动 `safe()` 并释放硬件，是尽力而为的软件停止，不是硬件急停。
-- `允许硬件`、`自动批准动作`、文件写入、Shell 和 MCP 自动批准都在每次启动时重新确认，不落盘；文件/Shell 工具默认关闭。
+- GUI 不再提供“允许硬件/自动批准动作”勾选；可信技能执行免审批并默认获得硬件权限，只安装你信任的技能。文件写入、Shell 和 MCP 自动批准仍在每次启动时重新确认，不落盘；文件/Shell 工具默认关闭。宿主侧抓图仍逐次确认。
 - 重启、取消和崩溃恢复都有测试覆盖。
 
 详见 [docs/gui.md](gui.md)，里面有设置、资源预览、MCP 编辑器、会话管理和诊断截图。
@@ -271,7 +271,7 @@ TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/refere
 | 物理 I2C/SPI/UART | 关闭 | `--allow-hardware` |
 | 非回环 HTTP/TCP | 关闭 | `--allow-hardware` |
 | Shell 驱动 | 关闭 | `--allow-hardware` |
-| Agent 硬件 Skill 动作 | 每次 `run_skill` 单独确认 | 无自动批准；物理硬件另需 `--allow-hardware` |
+| Agent 硬件 Skill 动作 | 免审批，默认硬件权限 | 仅限已安装的可信技能；操作员承担执行风险 |
 | Agent 宿主抓图 | 逐次确认 | `--allow-actions` 或弹窗 |
 | Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |
 | Agent Shell | 关闭 | `--enable-shell` + `--allow-shell` |

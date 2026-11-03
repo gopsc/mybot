@@ -8,6 +8,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Trusted skills now execute without approval: `run_skill` no longer prompts,
+  hardware flags are granted automatically, path/parameter/output/timeout checks
+  are removed, and skill directories are no longer write-protected. The Agent
+  turn timeout and file/shell/MCP/prompt approval gates remain. Installing a
+  skill is equivalent to installing trusted host code with hardware access.
 - The Agent core is now generic. Direct hardware tools (`list_hardware`,
   `list_action_scripts`, `query_sql`, `run_action_script`, `read_variables`,
   `capture_image`) are no longer model tools; all hardware work goes through

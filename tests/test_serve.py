@@ -1010,8 +1010,8 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
 
     def make_model():
-        responses = iter([[ToolCallPart("run_skill", {
-            "skill": "hardware-controller", "action": "doctor"}, "c1")], [TextPart("完成")]])
+        responses = iter([[ToolCallPart("write_file", {
+            "path": "note.txt", "content": "x"}, "c1")], [TextPart("完成")]])
 
         async def respond(messages, info):
             return ModelResponse(parts=next(responses))
@@ -1030,8 +1030,8 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
             pass
 
     monkeypatch.setattr(agent_module, "create_model", lambda config: (make_model(), FakeClient()))
-    params = {"task": "执行动作", "robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace),
-              "model": "openai:fake"}
+    params = {"task": "写文件", "robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace),
+              "workspaceDir": str(workspace), "model": "openai:fake"}
 
     async def scenario():
         out = Out()
@@ -1047,7 +1047,7 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
             while True:
                 message = await asyncio.to_thread(out.lines.get, True, 20)
                 if message.get("method") == "confirm":
-                    assert message["params"]["tool"] == "run_skill"
+                    assert message["params"]["tool"] == "write_file"
                     put({"id": message["id"], "result": {"approved": approve}})
                 elif message.get("id") == ident:
                     return message, seen
@@ -1057,7 +1057,7 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
         put({"id": 1, "method": "agent.ask", "params": params})
         reply, seen = await until(1, approve=True)
         assert reply["result"]["output"] == "完成"
-        assert reply["result"]["tool_events"] == [{"tool": "run_skill", "ok": True,
+        assert reply["result"]["tool_events"] == [{"tool": "write_file", "ok": True,
                                                    "executed": True, "state": "completed"}]
         assert any(m.get("method") == "agent.event" and m["params"]["event"]["type"] == "tool_call" for m in seen)
 

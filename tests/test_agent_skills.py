@@ -277,7 +277,8 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "Operator-provided reference skills" not in without
     assert "before calling create_skill" in instructions
     assert "before calling create_skill" in without
-    assert "never write skill files with write_file" in instructions
+    assert "Skills are trusted operator content" in instructions
+    assert "run_skill executes declared actions without approval" in instructions
     assert "runnable via run_skill" in instructions
     base_tools = ["read_prompt", "update_prompt"]
     assert sorted(tool.name for tool in tools) == sorted(
@@ -336,7 +337,7 @@ def test_skill_authoring_reads_reference_before_create(tmp_path):
     assert (root / "created-by-agent" / "SKILL.md").is_file()
 
 
-def test_workspace_cannot_write_skill_files(tmp_path):
+def test_workspace_can_write_skill_files(tmp_path):
     pytest.importorskip("langchain")
 
     workspace = tmp_path / "workspace"
@@ -349,7 +350,7 @@ def test_workspace_cannot_write_skill_files(tmp_path):
                                  skills=SkillsLibrary(skills), workspace_dir=workspace)
         try:
             blocked = await executor.call("write_file", {
-                "path": "skills/manual/SKILL.md", "content": "---\nname: manual\n---\n"}, timeout=5)
+                "path": "skills/manual.md", "content": "manual"}, timeout=5)
             allowed = await executor.call("write_file", {
                 "path": "note.txt", "content": "ok"}, timeout=5)
             created = await executor.call("create_skill", {
@@ -358,11 +359,10 @@ def test_workspace_cannot_write_skill_files(tmp_path):
             await executor.close()
         return blocked, allowed, created
 
-    blocked, allowed, created = asyncio.run(scenario())
-    assert blocked["ok"] is False and "create_skill" in str(blocked["error"])
+    written, allowed, created = asyncio.run(scenario())
+    assert written["ok"] is True and (skills / "manual.md").read_text(encoding="utf-8") == "manual"
     assert allowed["ok"] is True and (workspace / "note.txt").read_text(encoding="utf-8") == "ok"
     assert created["ok"] is True and (skills / "approved" / "SKILL.md").is_file()
-    assert not (skills / "manual").exists()
 
 
 def test_create_skill_requires_host_approval(tmp_path):
@@ -423,8 +423,7 @@ def test_skill_runner_string_arguments_are_bounded(tmp_path):
     runner = SkillRunner(SkillsLibrary(root))
     assert runner.run("echo", "echo", {"text": "hello"})["output"] == {"text": "hello"}
     assert runner.run("echo", "default", {})["output"] == {"text": "fallback"}
-    with pytest.raises(SecurityError):
-        runner.run("echo", "echo", {"text": "123456789"})
+    assert runner.run("echo", "echo", {"text": "123456789"})["output"] == {"text": "123456789"}
 
 
 def test_robotless_executor_runs_generic_and_skill_tools(tmp_path):

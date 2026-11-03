@@ -752,73 +752,6 @@ def test_settings_failure_notice_after_modal_save(app_factory, interact, monkeyp
     assert "已应用" in app.status_notice.text() and "写入失败" in app.status_notice.text()
 
 
-@pytest.mark.parametrize("wide", [False, True])
-def test_permission_toggle_never_persists(ui, tmp_path, wide):
-    from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QStyle, QStyleOptionButton
-
-    gui, app = ui
-    for toggle in (app.hardware_toggle, app.actions_toggle):
-        if wide:
-            toggle.setFixedWidth(toggle.sizeHint().width() * 3)
-        option = QStyleOptionButton()
-        toggle.initStyleOption(option)
-        indicator = toggle.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, toggle)
-        QTest.mouseClick(toggle, gui.Qt.MouseButton.LeftButton, pos=indicator.center())
-    assert app.hardware_toggle.isChecked() and app.actions_toggle.isChecked()
-    assert "允许硬件" in app.status_busy.text() and "自动批准动作" in app.status_busy.text()
-    app._save()
-    stored = json.loads((tmp_path / "settings.json").read_text())
-    assert "allow_hardware" not in stored and "allow_actions" not in stored
-    assert not GuiConfig.load(tmp_path / "settings.json").allow_hardware
-
-
-@pytest.mark.parametrize("allow", [True, False])
-def test_hardware_permission_is_confirmed_before_each_turn(ui, interact, allow):
-    gui, app = ui
-    client = attach_client(app)
-    app.hardware_toggle.setChecked(True)
-    app.actions_toggle.setChecked(True)
-    app.task_box.setPlainText("列出硬件")
-
-    def decide(dialog, test):
-        assert isinstance(dialog, gui.QMessageBox)
-        assert dialog.windowTitle() == "确认硬件权限"
-        button = gui.QMessageBox.StandardButton.Ok if allow else gui.QMessageBox.StandardButton.Cancel
-        test.mouseClick(dialog.button(button), gui.Qt.MouseButton.LeftButton)
-
-    interact(decide)
-    app.send_task()
-    if allow:
-        assert client.requests[0][1]["allowHardware"] is True
-        assert client.requests[0][1]["allowActions"] is True
-        app._turn_done(app.generation, app.turn_id, {}, None)
-        app.task_box.setPlainText("第二轮")
-        interact(decide)
-        app.send_task()
-        assert len(client.requests) == 2
-    else:
-        assert not client.requests and app.task_box.toPlainText() == "列出硬件"
-
-
-def test_hardware_confirmation_cannot_authorize_replacement(ui, interact):
-    gui, app = ui
-    old = attach_client(app)
-    new = FakeClient()
-    app.hardware_toggle.setChecked(True)
-    app.task_box.setPlainText("列出硬件")
-
-    def replace(dialog, test):
-        app.generation += 1
-        app.serve = new
-        test.mouseClick(dialog.button(gui.QMessageBox.StandardButton.Ok), gui.Qt.MouseButton.LeftButton)
-
-    interact(replace)
-    app.send_task()
-    assert not old.requests and not new.requests
-    assert app.task_box.toPlainText() == "列出硬件"
-
-
 @pytest.mark.parametrize("key", ["Key_Return", "Key_Enter"])
 def test_ctrl_enter_sends_with_native_shortcut(ui, qapp, key):
     from PySide6.QtTest import QTest
@@ -831,7 +764,7 @@ def test_ctrl_enter_sends_with_native_shortcut(ui, qapp, key):
     QTest.keyClick(app.task_box, getattr(gui.Qt.Key, key), gui.Qt.KeyboardModifier.ControlModifier)
     assert len(client.requests) == 1 and client.requests[0][0] == "agent.ask"
     assert client.requests[0][1]["task"] == "列出硬件"
-    assert client.requests[0][1]["allowHardware"] is False
+    assert client.requests[0][1]["allowHardware"] is True
     assert app.task_box.toPlainText() == ""
     assert not app.send_button.isEnabled() and not app.new_button.isEnabled()
     assert app.stop_button.isEnabled()

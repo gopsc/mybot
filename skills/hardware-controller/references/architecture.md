@@ -173,7 +173,8 @@ flowchart TB
 - **GUI** never executes robot logic itself; it drives one `serve` child process
   and marshals all callbacks onto the Qt GUI thread.
 - **Agent modes** execute tools through `RobotExecutor`, which runs hardware
-  work on a dedicated owner thread and asks for approval through a callback.
+  work on a dedicated owner thread. Host-gated tools ask for approval through a
+  callback; trusted skill actions execute without approval.
   An optional role under `~/.mybot/roles` supplies the session's PromptLibrary,
   Skills, MCP configuration and resumable model history; it does not change
   hardware ownership or approval boundaries.
@@ -181,9 +182,11 @@ flowchart TB
   LangGraph tools, but approval, result bounding and transcripts use the
   same session rules.
   `run_skill` executes only actions declared by a trusted Skill `skill.json`:
-  the model supplies a skill/action plus scoped parameters, never an entrypoint,
-  argv or hardware flag. The child process runs on the owner thread, so Skill and
-  native controller calls cannot activate hardware concurrently.
+  the model supplies a skill/action plus arguments, never an entrypoint or argv.
+  Trusted skills run without approval and receive `--allow-hardware`
+  automatically when the action declares it. The child process runs on the owner
+  thread, so Skill and native controller calls cannot activate hardware
+  concurrently.
 - **MCP server mode** is a protocol adapter over `RobotExecutor`: the model is
   absent, the operator passes static and execution switches at launch, and
   stdout carries only MCP JSON-RPC.

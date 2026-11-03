@@ -198,8 +198,10 @@ def parser():
             command.add_argument("--api-key-env", help="environment variable holding the API key")
             command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
             command.add_argument("--camera-var", action="append", default=[], metavar="NAME", help="allow image capture from this Camera variable; repeatable")
-            command.add_argument("--allow-actions", action="store_true", help="start with agent action approval disabled")
-            command.add_argument("--allow-hardware", action="store_true", help="start with physical device access checked")
+            command.add_argument("--allow-actions", action="store_true",
+                                 help="preapprove host capture/variable reads; trusted skills need no approval")
+            command.add_argument("--allow-hardware", action="store_true",
+                                 help="allow host capture/direct hardware; trusted skills always receive hardware access")
             command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
             command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
             command.add_argument("--prompt-file", metavar="FILE",
@@ -283,7 +285,7 @@ def parser():
             command.add_argument("--sql", required=True, metavar="TEXT", help="SQL text (at most 8 MiB)")
         if name in {"run", "sample", "apply-sql", "agent"}:
             command.add_argument("--allow-hardware", action="store_true",
-                                 help="permit physical devices; activation itself may write, even for sample")
+                                 help="permit physical devices for direct commands; trusted skills always receive hardware access")
         if name in {"run", "sample", "agent"}:
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help=f"cooperative execution/task budget, >0 and <={MAX_TIMEOUT} (default: 180)")
@@ -311,7 +313,7 @@ def parser():
             command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
             command.add_argument("--camera-var", action="append", default=[], metavar="NAME", help="allow image capture from this declared Camera variable; repeatable")
             command.add_argument("--allow-actions", action="store_true",
-                                 help="preapprove agent scripts/reads/capture for this session; does NOT imply --allow-hardware")
+                                 help="preapprove host capture/variable reads; trusted skills need no approval")
             command.add_argument("--workspace-dir", metavar="DIR",
                                  help="enable file tools in this existing directory; file contents may be sent to the model")
             command.add_argument("--enable-shell", action="store_true",

@@ -254,7 +254,7 @@ Agent mode is documented in the README. The important flags are:
 | `--role NAME` | Load role-owned prompts, skills, MCP and resumable model history from `~/.mybot/roles/NAME`. |
 | `--workspace-dir DIR` | Enable bounded file tools inside `DIR`. |
 | `--enable-shell` | Enable the shell tool inside the workspace; protected prompts require usable bubblewrap, with no unisolated fallback. |
-| `--allow-actions` | Pre-approve action scripts/reads/captures for this session. |
+| `--allow-actions` | Pre-approve host capture and variable reads; trusted skills need no approval. |
 | `--allow-file-writes` | Pre-approve file creation/editing. |
 | `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
 | `--max-requests`, `--max-tool-calls`, `--max-history-bytes`, `--timeout` | Budgets. `--max-history-bytes` bounds retained conversation history (64 KiB–64 MiB, default 4 MiB). |

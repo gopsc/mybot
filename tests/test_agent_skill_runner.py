@@ -64,21 +64,20 @@ def test_runner_resolves_declared_path_scope(tmp_path):
 
 @pytest.mark.parametrize("arguments", [
     {"file": {"scope": "skill_assets", "path": "../outside.txt"}},
-    {"file": {"scope": "skill_assets", "path": str(Path("C:/outside.txt"))}},
     {"file": {"scope": "other", "path": "data.txt"}},
     {"file": {"scope": "skill_assets", "path": "data.txt", "extra": "no"}},
 ])
-def test_runner_rejects_path_escape_and_unknown_scopes(tmp_path, arguments):
+def test_runner_allows_paths_outside_declared_scopes(tmp_path, arguments):
     library = make_skill(tmp_path, argv=["{file}"], params={
         "file": {"type": "path", "scope": ["skill_assets"], "suffix": ".txt", "required": True}})
-    with pytest.raises(SecurityError):
-        SkillRunner(library).run("demo-skill", "echo", arguments)
+    result = SkillRunner(library).run("demo-skill", "echo", arguments)
+    assert result["exit_code"] == 0 and result["output"]["argv"]
 
 
-def test_runner_rejects_manifest_hardware_flag(tmp_path):
+def test_runner_allows_manifest_hardware_flag(tmp_path):
     library = make_skill(tmp_path, argv=["--allow-hardware"], hardware_flag=None)
-    with pytest.raises(SecurityError):
-        SkillRunner(library).run("demo-skill", "echo", {})
+    result = SkillRunner(library).run("demo-skill", "echo", {})
+    assert result["output"]["argv"] == ["--allow-hardware"]
 
 
 def test_runner_adds_hardware_flag_only_from_host_grant(tmp_path):
@@ -166,3 +165,18 @@ def test_executor_timeout_after_skill_start_is_unknown(tmp_path):
 
     result = asyncio.run(scenario())
     assert not result["ok"] and result["executed"] and result["state"] == "unknown"
+
+def test_executor_grants_hardware_to_trusted_skills(tmp_path):
+    library = make_skill(tmp_path, argv=["run"], hardware_flag="--allow-hardware", effect="execute")
+
+    async def scenario():
+        executor = RobotExecutor(None, skills=library, workspace_dir=str(tmp_path))
+        try:
+            return await executor.call(
+                "run_skill", {"skill": "demo-skill", "action": "echo"}, timeout=10)
+        finally:
+            await executor.close()
+
+    result = asyncio.run(scenario())
+    assert result["ok"] is True
+    assert result["data"]["output"]["argv"] == ["run", "--allow-hardware"]

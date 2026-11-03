@@ -28,9 +28,9 @@ flowchart LR
 
 | Boundary | Rule |
 | --- | --- |
-| Model → tools | Every action/read/capture is approval-gated unless the operator pre-authorised the session. File writes and shell have separate switches. |
-| Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded. Agent prompt roots (runtime and bundled) and operator skill roots reject generic reads/writes; use the dedicated prompt or skill tools. |
-| Model → shell | Agent shell is opt-in and requires usable bubblewrap with runtime/bundled prompt and operator skill roots mounted read-only, including inside a writable workspace. If protection cannot be established, shell is refused; no unisolated fallback. Read-only mounts protect integrity, not confidentiality. |
+| Model → tools | File writes, shell, web and external MCP remain approval-gated. Trusted skill actions (`run_skill`) run without approval and receive hardware access by default. |
+| Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded. Agent prompt roots (runtime and bundled) reject generic reads/writes; skill directories are writable through the normal file tools (still subject to the file-write approval gate). |
+| Model → shell | Agent shell is opt-in and requires usable bubblewrap with runtime/bundled prompt roots mounted read-only, including inside a writable workspace. Skill directories are no longer protected. If protection cannot be established, shell is refused; no unisolated fallback. Read-only mounts protect integrity, not confidentiality. |
 | Model → network | Non-loopback HTTP/TCP requires `--allow-hardware`; TCP accepts only IPv4/IPv6 literals and has no implicit reconnect or replay. HTTP redirects are refused; URL credentials/query/fragment are rejected. Agent web tools are separate and opt-in: HTTPS only, private/loopback/link-local targets refused, every redirect re-validated, text-only bodies bounded to 512 KiB, and SearXNG is the only search provider. |
 | MCP client → host | A stdio MCP server is operator-configured host code, not a sandbox. Every external tool call is approval-gated unless `--allow-mcp-tools`; results are bounded and failures are reported as unknown. |
 | MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware`, `--read-var` and `--camera-var` stay separate gates. Resources never grant execution. |
@@ -139,19 +139,19 @@ of safety policy remains unsupported; editable memory layers do not supersede it
 
 ## Skill execution
 
-`run_skill` is an Agent-only execution surface for skills carrying a trusted
-`skill.json`. It accepts only declared actions and typed parameters; the model
-cannot provide an entrypoint, argv, absolute path, `..`, symlink target or
-`--allow-hardware`. Paths are resolved inside the workspace robots/scripts roots
-or the skill's `references/assets/`. SKILL.md content is never executed by
-`read_skill`.
+`run_skill` executes actions declared by a trusted `skill.json`. The manifest
+fixes the entrypoint and argv; the model chooses only the skill, action and
+arguments. Skills are operator-installed trusted code: `run_skill` is not
+approval-gated, path and parameter checks are removed, stdout/stderr and the
+skill subprocess timeout are unbounded, and hardware flags (`--allow-hardware`)
+are appended automatically for actions that declare them. The Agent turn
+deadline and stop checks still terminate a running skill.
 
-Every `run_skill` call requires a dedicated host approval, independent of
-`--allow-actions`. Physical hardware flags are appended by the host only when
-hardware access was granted. The child process runs without a shell, with a
-minimal environment that excludes API keys, bounded stdout/stderr, the Agent
-deadline and best-effort process-tree termination. Skill code remains trusted
-code, not a sandbox; cancellation after launch is reported as an unknown outcome.
+The child process still runs without a shell, with a minimal environment that
+excludes API keys and best-effort process-tree termination. Skill directories are
+writable through the ordinary file tools, subject to the file-write approval
+gate. Treat installing a skill as equivalent to installing and trusting host
+code that can operate real hardware.
 
 ## Reporting
 

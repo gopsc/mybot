@@ -202,8 +202,7 @@ def test_stream_renderer_neutralizes_and_truncates_tool_arguments():
     assert all(len(line) <= 140 for line in output.splitlines())
 
 
-@pytest.mark.parametrize("approved,expected", [(False, False), (True, True)])
-def test_run_skill_always_requires_independent_approval(approved, expected):
+def test_run_skill_executes_without_approval():
     from pymybot.agent_skills import SkillsLibrary
 
     executor = FakeExecutor()
@@ -214,11 +213,11 @@ def test_run_skill_always_requires_independent_approval(approved, expected):
 
     async def confirm(name, arguments):
         confirmations.append((name, arguments))
-        return approved
+        return True
 
     async def scenario():
         session = AgentSession(
-            executor, model, AgentConfig(allow_actions=True, intent_mode="diagnose"),
+            executor, model, AgentConfig(intent_mode="diagnose"),
             confirm=confirm, skills=SkillsLibrary(asset_path("skills")))
         try:
             await session.ask("诊断控制器")
@@ -227,11 +226,9 @@ def test_run_skill_always_requires_independent_approval(approved, expected):
             await session.close()
 
     event = asyncio.run(scenario())
-    assert confirmations == [("run_skill", {"skill": "hardware-controller", "action": "doctor",
-                                             "arguments": {}})]
-    assert event["executed"] is expected
-    assert len(executor.calls) == int(expected)
-
+    assert confirmations == []
+    assert event["executed"] is True
+    assert len(executor.calls) == 1
 
 def test_agent_run_skill_end_to_end():
     from pymybot.agent_executor import RobotExecutor
@@ -412,29 +409,26 @@ def test_multiple_gated_calls_resume_by_interrupt_id():
     approvals = []
 
     async def confirm(name, arguments):
-        approvals.append(arguments["arguments"]["script"])
+        approvals.append(arguments["path"])
         return True
 
-    def call(script, call_id):
-        return ToolCallPart("run_skill", {"skill": "hardware-controller", "action": "run",
-                                          "arguments": {"script": script}}, call_id)
-
-    model = scripted_model([call("a.mt", "a"), call("b.mt", "b")], [TextPart("done")])
+    model = scripted_model([
+        ToolCallPart("write_file", {"path": "a.txt", "content": "a"}, "a"),
+        ToolCallPart("write_file", {"path": "b.txt", "content": "b"}, "b"),
+    ], [TextPart("done")])
 
     async def scenario():
-        from pymybot.agent_skills import SkillsLibrary
-        session = AgentSession(executor, model, confirm=confirm,
-                               skills=SkillsLibrary(asset_path("skills")))
+        session = AgentSession(executor, model, workspace=True, confirm=confirm)
         try:
-            result = await session.ask("run two")
+            result = await session.ask("写两个文件")
             assert result["output"] == "done"
             assert result["usage"]["tool_calls"] == 2
         finally:
             await session.close()
 
     asyncio.run(scenario())
-    assert sorted(approvals) == ["a.mt", "b.mt"]
-    assert sorted(arguments["arguments"]["script"] for _name, arguments, _timeout in executor.calls) == ["a.mt", "b.mt"]
+    assert sorted(approvals) == ["a.txt", "b.txt"]
+    assert sorted(arguments["path"] for _name, arguments, _timeout in executor.calls) == ["a.txt", "b.txt"]
 
 def test_parallel_model_calls_are_executed_serially():
     executor = FakeExecutor()
@@ -775,16 +769,17 @@ def test_interactive_cli_confirms_and_emits_only_final_json(monkeypatch, capsys)
     async def close_client():
         closed.append(True)
 
-    model = scripted_model([ToolCallPart("run_skill", {
-        "skill": "hardware-controller", "action": "doctor"})], [TextPart("已完成")])
+    model = scripted_model([ToolCallPart("create_skill", {
+        "name": "cli-created", "description": "Created by CLI test.", "content": "Body."})],
+        [TextPart("已完成")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=close_client))
-    monkeypatch.setattr(sys, "stdin", FakeTTY("执行动作\ny\n/exit\n"))
+    monkeypatch.setattr(sys, "stdin", FakeTTY("创建技能\ny\n/exit\n"))
     code = cli.main(["--no-gui", "--robot", "unused.sql"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 0 and len(captured.out.splitlines()) == 1
     assert payload["turns"] == 1 and payload["output"] == "已完成"
-    assert "Approve run_skill" in captured.err and "已完成" in captured.err
+    assert "Approve create_skill" in captured.err and "已完成" in captured.err
     assert len(executor.calls) == 1 and executor.closed and closed == [True]
 
 def test_interactive_cli_streams_to_stderr_and_does_not_reprint(monkeypatch, capsys):

@@ -351,7 +351,7 @@ class App(QMainWindow):
         self.camera_box = QComboBox()
         self.camera_box.setToolTip("仅显示已在“相机变量”中授权的 Camera")
         self.capture_button = _button("抓图", self.capture_image)
-        self.capture_button.setToolTip("通过 Agent 原生 capture_image 抓图，不调用模型或 MT 脚本")
+        self.capture_button.setToolTip("宿主侧抓图，不调用模型；可信技能也可通过 run_skill capture 抓图")
         camera_row.addWidget(self.camera_box, 1)
         camera_row.addWidget(self.capture_button)
         hw_layout.addLayout(camera_row)
@@ -359,13 +359,9 @@ class App(QMainWindow):
 
         guard = QGroupBox("权限与预算（每次启动重新确认）")
         form = QFormLayout(guard)
-        self.hardware_toggle = QCheckBox("允许硬件（--allow-hardware）")
-        self.hardware_toggle.setChecked(bool(self.cfg.allow_hardware))
-        self.actions_toggle = QCheckBox("自动批准动作（不再逐次确认）")
-        self.actions_toggle.setChecked(bool(self.cfg.allow_actions))
-        for toggle in (self.hardware_toggle, self.actions_toggle):
-            toggle.toggled.connect(self.on_permission_toggle)
-            form.addRow(toggle)
+        form.addRow(_label(
+            "可信技能（run_skill）执行免审批并默认获得硬件权限；只安装你信任的技能。"
+            "宿主抓图仍逐次确认。", secondary=True))
         self.read_vars_entry = QLineEdit(",".join(self.cfg.read_vars))
         self.camera_vars_entry = QLineEdit(",".join(self.cfg.camera_vars))
         self.camera_vars_entry.editingFinished.connect(self._refresh_camera_options)
@@ -942,7 +938,7 @@ class App(QMainWindow):
             self._chat_line("安装 pymybot[agent] 后重启本窗口；或用 --no-gui 走命令行控制器。", "system")
         elif not self.greeted:
             self.greeted = True
-            self._chat_line("与机器人对话即可：模型会先列出硬件，再按需运行动作脚本。", "system")
+            self._chat_line("与机器人对话即可：模型会通过可信技能列出硬件、查询结构并执行动作。", "system")
         self._refresh_status()
         if self.pending_task:
             task, self.pending_task = self.pending_task, ""
@@ -1059,8 +1055,6 @@ class App(QMainWindow):
         if (self._stopping or client is None or not self.agent_available or self.busy
                 or not name):
             return
-        if self.hardware_toggle.isChecked() and not self._confirm_hardware():
-            return
         self._sync_config()
         if name not in self.cfg.camera_vars:
             self._notice("Camera 不在相机变量白名单中")
@@ -1140,8 +1134,6 @@ class App(QMainWindow):
         client, generation = self.serve, self.generation
         if self._stopping or client is None or not self.agent_available or self.busy:
             return False
-        if self.hardware_toggle.isChecked() and not self._confirm_hardware():
-            return False
         self._sync_config()
         if self.shell_tools_toggle.isChecked() and not self.file_tools_toggle.isChecked():
             self._notice("Shell 工具需要先启用文件工具")
@@ -1197,8 +1189,8 @@ class App(QMainWindow):
             "mcpConfig": "" if self.cfg.role else self._mcp_root(),
             "readVars": self.cfg.read_vars, "cameraVars": self.cfg.camera_vars,
             "vars": self.cfg.vars or None,
-            "allowActions": self.actions_toggle.isChecked(),
-            "allowHardware": self.hardware_toggle.isChecked(),
+            "allowActions": bool(self.cfg.allow_actions),
+            "allowHardware": True,
             "allowMcpTools": self.mcp_tools_toggle.isChecked(),
             "workspaceDir": workspace if use_workspace else "",
             "enableShell": self.shell_tools_toggle.isChecked(),
@@ -1448,12 +1440,6 @@ class App(QMainWindow):
             self._in_permission = False
         self._refresh_status()
 
-    def _confirm_hardware(self):
-        return self._message(
-            "确认硬件权限",
-            "即将以 --allow-hardware 运行：会打开物理设备，激活本身就可能写硬件。\n\n"
-            "只对已审阅的可信结构文件与驱动授权。", confirm=True)
-
     def _confirm_grant(self, kind):
         messages = {
             "file_writes": ("允许文件写入", "模型可以创建或修改工作区文件（含脚本/驱动），仍会逐次弹出审批。"),
@@ -1632,10 +1618,8 @@ class App(QMainWindow):
             agent += " · MCP：可用"
         self.status_agent.setText(agent)
         flags = []
-        if self.hardware_toggle.isChecked():
-            flags.append("允许硬件")
-        if self.actions_toggle.isChecked():
-            flags.append("自动批准动作")
+        if self.agent_available:
+            flags.append("技能默认硬件")
         if self.file_tools_toggle.isChecked():
             flags.append("文件")
         if self.shell_tools_toggle.isChecked():

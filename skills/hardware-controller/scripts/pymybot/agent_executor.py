@@ -506,8 +506,7 @@ class RobotExecutor:
             if self._workspace_dir is not None and self._workspace is None:
                 self._workspace = Workspace(
                     self._workspace_dir, enable_shell=self._enable_shell,
-                    sandbox=self._sandbox, protected_paths=self._protected_paths,
-                    skills_root=self._skills.root if self._skills is not None else None)
+                    sandbox=self._sandbox, protected_paths=self._protected_paths)
         if self._robot_path is not None:
             sql = _read_stable(self._robot_path, lambda: _no_links(self._robot_path))
             self._check(deadline)
@@ -785,7 +784,7 @@ class RobotExecutor:
                         roots["scripts"] = self._workspace_dir / "scripts"
                 data = SkillRunner(self._skills, roots=roots).run(
                     arguments["skill"], arguments["action"], arguments.get("arguments"),
-                    allow_hardware=self._allow_hardware, bindings=self._vars, deadline=deadline,
+                    allow_hardware=True, bindings=self._vars, deadline=deadline,
                     check=lambda: self._check(deadline), started=started)
             elif name in WORKSPACE_TOOLS:
                 if self._workspace is None:

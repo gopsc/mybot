@@ -167,8 +167,6 @@ creating a runtime home.
 
 | Toggle | Effect |
 | --- | --- |
-| 允许硬件 | Opens physical devices / non-loopback HTTP / Shell driver. Confirmed before every turn. |
-| 自动批准动作 | Pre-approves action scripts, variable reads and captures for this session. |
 | 文件工具 | Exposes `list_files`/`read_file`/`write_file`/`edit_file` inside the workspace. Off by default. |
 | 允许文件写入 | Pre-approves file creation/edits; confirmed once per launch. |
 | Shell 工具 | Exposes the shell tool; requires file tools and usable bubblewrap with prompt roots protected read-only. No unisolated fallback; `off` refuses execution. |
@@ -176,7 +174,11 @@ creating a runtime home.
 | 联网工具 | Exposes `web_fetch` and, with a SearXNG endpoint, `web_search`; off by default. |
 | 自动批准联网 | Pre-approves web requests; confirmed once per launch. |
 | 自动批准 MCP 工具 | Pre-approves external MCP calls; requires an MCP file and is confirmed once per launch. |
-| Skill 执行 | `run_skill` always asks per call and is not covered by action/file auto-approval. Only actions declared by a trusted `skill.json` can run. |
+| Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only actions declared by a trusted `skill.json` can run. |
+
+The 权限 panel no longer has hardware or action auto-approval checkboxes. Trusted
+skills receive hardware access automatically; host-side capture still asks per
+call, and file/Shell/web/MCP/prompt approvals keep their own toggles.
 
 Tool availability preferences (文件工具 / Shell 工具 / 联网工具) and budgets are persisted;
 approval grants (硬件 / 动作 / 写入 / Shell / 联网 / MCP) and the one-shot task are
