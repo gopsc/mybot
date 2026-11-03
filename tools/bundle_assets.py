@@ -29,7 +29,7 @@ HIDDEN_PACKAGES = (
 )
 CONTROLLER_MODULES = (
     "pymybot.actions", "pymybot.agent_executor", "pymybot.agent_skill_runner",
-    "pymybot.agent_skills",
+    "pymybot.agent_skills", "pymybot.camera", "pymybot.images",
     "pymybot.agent_workspace", "pymybot.cli", "pymybot.daemon", "pymybot.errors",
     "pymybot.expr", "pymybot.hal", "pymybot.hardware", "pymybot.include",
     "pymybot.matrix", "pymybot.mcp_server", "pymybot.native", "pymybot.paths",

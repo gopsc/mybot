@@ -189,7 +189,6 @@ def test_native_print_does_not_corrupt_stdout(tmp_path, capsys):
     ("uart_open", ["COM3", 9600]),
     ("http_open", ["https://example.com", 1000]),
     ("shell_open", [1000]),
-    ("camera_capture", [1, {}]),
 ])
 def test_native_context_keeps_hardware_permission_gate(tmp_path, operation, args):
     hal = HALManager()

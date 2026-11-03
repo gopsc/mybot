@@ -44,8 +44,8 @@ def test_transcript_and_images_are_written(monkeypatch, tmp_path):
     try:
         log.write("user", text="hello")
         image = {"data": b"\x89PNG\r\n\x1a\n" + b"x" * 10, "media_type": "image/png"}
-        log.write_image("capture_image", image, turn=1)
-        log.write_image("capture_image", image, turn=1)
+        log.write_image("tool", image, turn=1)
+        log.write_image("tool", image, turn=1)
         log.write("assistant", text="done")
     finally:
         log.close()
@@ -93,7 +93,7 @@ def test_oversized_image_is_recorded_but_not_stored(monkeypatch, tmp_path):
     monkeypatch.setattr(session_log, "MAX_IMAGE_BYTES", 4)
     log = SessionLog()
     try:
-        log.write_image("capture_image", {"data": b"12345", "media_type": "image/jpeg"})
+        log.write_image("tool", {"data": b"12345", "media_type": "image/jpeg"})
     finally:
         log.close()
     events = read_events(log.path)

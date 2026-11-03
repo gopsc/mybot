@@ -31,16 +31,15 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 
 `--module-path` **替换**默认搜索路径——自定义目录与基础 `modules` 都要给出，等价环境变量
 `BOT4CJ_MODULE_PATH`（按系统路径分隔符连接），细节见 docs/cli.md。
-`@Include` 只能引用动作脚本所在目录内的文件；图片只能来自 `--camera-src-dir`。
+`@Include` 只能引用动作脚本所在目录内的文件。
 
 ## 3. 平台要点
 
 写结构时用得到的路径形态：I2C/SPI 真机是 `ftdi://ftdi:232h/1`（SPI 可带 `?cs=0`）或 Linux
-原生 `/dev/i2c-*` / `/dev/spidev*`；UART 在 Windows 是 `COMn`，`loop://` 是无硬件回环；
-Camera 的文件输入必须落在 `--camera-src-dir` 内，真机采集的分辨率必须是摄像头支持的模式。
+原生 `/dev/i2c-*` / `/dev/spidev*`；UART 在 Windows 是 `COMn`，`loop://` 是无硬件回环。
 HTTP/TCP 的回环主机（`127.0.0.1` / `localhost` / `[::1]`）默认可用，其余主机要 `--allow-hardware`。
 
-- 可选依赖（`.[linux]` / `.[camera]`）、设备权限与「检测不到硬件」的排查见 docs/faq.md；
+- 可选依赖（`.[linux]` / Agent 摄像头 `.[camera]`）、设备权限与「检测不到硬件」的排查见 docs/faq.md；
   Windows 的 faulthandler 与 UTF-8 行为见 docs/testing.md。
 - 指令预算与可取消等待**不能中断阻塞的原生库调用**；进程退出不是物理急停。
 

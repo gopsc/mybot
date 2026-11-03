@@ -378,13 +378,13 @@ def test_repeated_lifecycle_starts_fresh_state(modules):
             assert robot.run("@Action\ndev.value;\n1;\n@")[0]["count"] == 1
 
 
-def test_repeated_lifecycle_reopens_hal():
-    robot = Robot("CREATE TABLE Camera(name String); INSERT INTO Camera(name) VALUES('cam');")
+def test_repeated_lifecycle_reopens_hal(modules):
+    robot = Robot(probe_sql(), module_paths=modules)
     previous = None
     for _ in range(2):
         with robot:
             assert robot.hal is not previous
-            assert robot.registry["cam"].runtime is not None
+            assert robot.registry["dev"].runtime is not None
             previous = robot.hal
 
 

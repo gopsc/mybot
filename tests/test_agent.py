@@ -109,8 +109,9 @@ def test_real_tool_loop_and_receipts():
     assert executor.closed and len(executor.calls) == 1
     names = {tool.name for tool in seen[0][1].function_tools}
     assert {"read_prompt", "update_prompt", "list_files"} <= names
+    assert {"list_cameras", "capture_camera"} <= names
     assert not names & {"list_hardware", "list_action_scripts", "query_sql",
-                        "run_action_script", "read_variables", "capture_image"}
+                        "run_action_script", "read_variables"}
 
 def test_stream_events_order_and_content():
     executor = FakeExecutor()
@@ -374,35 +375,6 @@ def test_invalid_model_arguments_never_dispatch(args):
             await session.ask("execute")
     asyncio.run(scenario())
     assert executor.calls == [] and executor.stop_event.is_set()
-
-def test_native_capture_uses_executor_without_model_or_mt():
-    executor = FakeExecutor()
-
-    async def capture(name, arguments, *, timeout):
-        assert name == "capture_image" and arguments == {"name": "camera"}
-        return {"ok": True, "executed": True, "state": "completed", "data": {"format": "png"},
-                "image": {"data": b"frame", "media_type": "image/png"}}
-
-    async def unexpected_model_request(messages, info):
-        raise AssertionError("native capture must not call the model")
-
-    executor.call = capture
-    events = []
-
-    async def scenario():
-        session = AgentSession(executor, FunctionModel(unexpected_model_request),
-                               AgentConfig(allow_actions=True), on_event=events.append)
-        try:
-            result = await session.capture("camera")
-            assert result["image"]["data"] == b"frame"
-            assert session.events == [{"tool": "capture_image", "ok": True,
-                                       "executed": True, "state": "completed"}]
-        finally:
-            await session.close()
-
-    asyncio.run(scenario())
-    assert [event["type"] for event in events] == ["tool_call", "tool_result"]
-
 
 def test_multiple_gated_calls_resume_by_interrupt_id():
     executor = FakeExecutor()

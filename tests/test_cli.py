@@ -611,7 +611,7 @@ def test_physical_refused_by_default_and_flag_reaches_boundary(workspace, monkey
     assert calls == ["/dev/i2c-99"]
 
 
-def test_module_and_camera_paths_passed_through(workspace, monkeypatch, capsys):
+def test_module_paths_passed_through(workspace, monkeypatch, capsys):
     constructed = []
     class ObservedRobot(Robot):
         def __init__(self, text, **kwargs):
@@ -620,11 +620,10 @@ def test_module_and_camera_paths_passed_through(workspace, monkeypatch, capsys):
     monkeypatch.setattr(cli, "Robot", ObservedRobot)
     code, _, _ = invoke(capsys, "sample", "--robot", workspace / "robot.sql", "--name", "dev",
                          "--module-path", workspace, "--module-path", ASSETS / "modules",
-                         "--camera-src-dir", workspace, "--allow-hardware")
+                         "--allow-hardware")
     assert code == 0
     assert constructed[0]["allow_hardware"] is True
     assert constructed[0]["module_paths"] == [str(workspace), str(ASSETS / "modules")]
-    assert constructed[0]["camera_src_root"] == str(workspace)
 
 
 def test_real_sample_counts_and_cleanup(workspace, capsys):
@@ -831,26 +830,3 @@ def test_windowed_build_replaces_missing_console_streams():
         for stream in (replaced_out, replaced_err):
             if stream not in (None, original_out, original_err):
                 stream.close()
-
-
-def test_camwin_example_checks(capsys):
-    code, result, _ = invoke(capsys, "check", "--robot", ASSETS / "robots" / "camwin.sql",
-                             "--input", ASSETS / "scripts" / "Camera.mt")
-    assert code == 0 and result["valid"] and result["activated"] is False
-
-
-def test_camera_script_captures_a_file_image(workspace, capsys):
-    from PIL import Image
-
-    Image.new("RGB", (2, 2), (0, 128, 255)).save(workspace / "frame.png")
-    (workspace / "camera.sql").write_text(
-        "CREATE TABLE Camera (name String, path String, src String);\n"
-        "INSERT INTO Camera (name, path, src) VALUES ('cam', '0', 'frame.png');\n",
-        encoding="utf-8")
-    code, result, _ = invoke(capsys, "run", "--robot", workspace / "camera.sql",
-                             "--input", ASSETS / "scripts" / "Camera.mt",
-                             "--camera-src-dir", workspace, "--timeout", "10")
-    assert code == 0 and result["ok"]
-    shot = result["outputs"][0]
-    assert shot["result"] == "OK" and shot["source"] == "file"
-    assert shot["format"] == "png" and (shot["width"], shot["height"]) == (2, 2)

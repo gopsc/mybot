@@ -7,7 +7,6 @@ owns the hardware at a time; all session robot calls run on one owner thread.
 from __future__ import annotations
 
 import asyncio
-import base64
 from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
@@ -317,7 +316,6 @@ class Server:
     async def m_session_activate(self, ident, params, cancel):
         robot_path = params.text("robot", required=True)
         module_paths = params.strings("modulePaths") or None
-        camera = params.text("cameraSrcDir")
         allow_hardware = params.flag("allowHardware")
         bindings = params.bindings("vars")
         self.require_owner("session")
@@ -332,7 +330,7 @@ class Server:
 
         def activate():
             path = Path(robot_path).absolute()
-            robot = Robot(read_file(path), module_paths=module_paths, camera_src_root=camera,
+            robot = Robot(read_file(path), module_paths=module_paths,
                           allow_hardware=allow_hardware, vars=bindings)
             robot.structure_path = str(path)
             holder["robot"] = robot
@@ -576,10 +574,10 @@ class Server:
         return {
             "role": params.text("role", cap=64),
             "robot": params.text("robot"), "modulePaths": params.strings("modulePaths"),
-            "cameraSrcDir": params.text("cameraSrcDir"), "scriptsDir": params.text("scriptsDir"),
+            "scriptsDir": params.text("scriptsDir"),
             "skillsDir": params.text("skillsDir"), "model": params.text("model", "", cap=1024),
             "baseUrl": params.text("baseUrl", cap=2048), "apiKeyEnv": params.text("apiKeyEnv", cap=256),
-            "readVars": params.strings("readVars", ident=True), "cameraVars": params.strings("cameraVars", ident=True),
+            "readVars": params.strings("readVars", ident=True),
             "allowActions": params.flag("allowActions"), "allowHardware": params.flag("allowHardware"),
             "vars": params.bindings("vars"),
             "timeout": params.seconds("timeout", 180), "maxRequests": params.integer("maxRequests", 1, 100, 8),
@@ -654,35 +652,6 @@ class Server:
         self.requests[ident]["hooks"].append(session.executor.cancel)
         return session
 
-    async def m_agent_capture(self, ident, params, cancel):
-        if not self.enable_agent:
-            raise RpcError(METHOD_NOT_FOUND, "Agent methods are disabled (--no-agent)")
-        name = params.text("name", required=True, cap=256)
-        key = self._agent_key(params)
-        self.require_owner("agent")
-        if self.agent_lock.locked():
-            raise RpcError(BUSY, "Another agent turn is running")
-        async with self.agent_lock:
-            self.owner = "agent"
-            try:
-                session = await self._prepare_agent(ident, key)
-                if cancel.is_set():
-                    session.executor.cancel()
-                result = await session.capture(name)
-                image = result.get("image")
-                if image is not None:
-                    result = {**result, "image": {
-                        "data": base64.b64encode(image["data"]).decode("ascii"),
-                        "media_type": image["media_type"],
-                    }}
-                return result
-            except BaseException:
-                await self.close_agent()
-                raise
-            finally:
-                if self.agent is None:
-                    self.owner = None
-
     async def open_agent(self, key):
         from .agent import AgentConfig, AgentConfigurationError, AgentSession, create_model
         from .agent_executor import RobotExecutor
@@ -737,9 +706,9 @@ class Server:
             skills_dir = role.skills_dir if role is not None else (key["skillsDir"] or default_skills_root())
             skills = SkillsLibrary(skills_dir, required=role is not None or key["skillsDir"] is not None)
             executor = RobotExecutor(key["robot"] or None, module_paths=key["modulePaths"] or None,
-                                     camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"] or None,
+                                     scripts_dir=key["scriptsDir"] or None,
                                      allow_hardware=key["allowHardware"], read_vars=key["readVars"],
-                                     camera_vars=key["cameraVars"], vars=key["vars"], skills=skills,
+                                     vars=key["vars"], skills=skills,
                                      workspace_dir=workspace, enable_shell=key["enableShell"],
                                      sandbox=config.sandbox_mode)
 
@@ -748,7 +717,7 @@ class Server:
                 return isinstance(reply, dict) and reply.get("approved") is True
 
             session = AgentSession(executor, model, config, confirm=confirm, read_vars=key["readVars"],
-                                   camera_vars=key["cameraVars"], skills=skills, session_log=session_log,
+                                   skills=skills, session_log=session_log,
                                    workspace=workspace is not None, enable_shell=key["enableShell"],
                                    mcp_servers=mcp_servers, role=role)
             return {"session": session, "client": client}

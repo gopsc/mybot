@@ -33,7 +33,7 @@ flowchart LR
 | Model → shell | Agent shell is opt-in and requires usable bubblewrap with runtime/bundled prompt roots mounted read-only, including inside a writable workspace. Skill directories are no longer protected. If protection cannot be established, shell is refused; no unisolated fallback. Read-only mounts protect integrity, not confidentiality. |
 | Model → network | Non-loopback HTTP/TCP requires `--allow-hardware`; TCP accepts only IPv4/IPv6 literals and has no implicit reconnect or replay. HTTP redirects are refused; URL credentials/query/fragment are rejected. Agent web tools are separate and opt-in: HTTPS only, private/loopback/link-local targets refused, every redirect re-validated, text-only bodies bounded to 512 KiB, and SearXNG is the only search provider. |
 | MCP client → host | A stdio MCP server is operator-configured host code, not a sandbox. Every external tool call is approval-gated unless `--allow-mcp-tools`; results are bounded and failures are reported as unknown. |
-| MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware`, `--read-var` and `--camera-var` stay separate gates. Resources never grant execution. |
+| MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware` and `--read-var` stay separate gates. Resources never grant execution. |
 | Scripts → Python / Lua | Both are trusted in-process code. Python imports/direct native I/O are unrestricted; LuaJIT FFI is available when the `lupa` wheel includes LuaJIT (otherwise a standard-Lua fallback has no FFI). Neither is a security sandbox. |
 | Driver → device | `active`/`build`/`destroy`/`sample` may write hardware even when they appear read-only. |
 | Agent → logs | Final JSON excludes arguments, secrets and images; diagnostics are escaped. Session transcripts under `~/.mybot/sessions` do contain tool arguments, bounded results and images; API keys in environment variables are not read into them. See [`cli.md`](cli.md#session-transcripts). |
@@ -54,7 +54,7 @@ handle ownership/cleanup and cancellation checks. These checks do **not** constr
 Python imports or direct file, network, subprocess or native I/O. `--allow-hardware`
 is a HAL gate, not a restriction on trusted Python code's host-account privileges.
 
-I2C/SPI/UART/TCP/HTTP/Camera/Shell ordinary-table drivers use Python with the existing
+I2C/SPI/UART/TCP/HTTP/Shell ordinary-table drivers use Python with the existing
 HAL; native bus handles remain usable by Lua device drivers. Python I2C/SPI/UART
 open virtual declarations as in-memory HAL handles with physical access disabled;
 Lua device drivers retain their existing `virtbus` models and per-runtime isolation.
@@ -166,7 +166,7 @@ a public issue for an exploitable problem.
 - Keep the workspace read-only for the agent unless file writes are required.
 - Leave `--enable-shell` and `--allow-shell` off by default.
 - Disable session transcripts (`MYBOT_SESSION_LOG=0`) when prompts, files or
-  camera images must not be kept on disk.
+  tool images must not be kept on disk.
 - Use a private model endpoint or a local model for sensitive data.
 - Pin releases by SHA-256; verify `SHA256SUMS`.
 - Review every Python/Lua driver, its imports and every skill before use; keep

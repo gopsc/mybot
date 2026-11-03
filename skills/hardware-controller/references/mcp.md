@@ -39,7 +39,6 @@ stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。�
 | `query_sql` | `SHOW TABLES` / `SELECT *`，只读 | 否 |
 | `run_action_script` | 执行已有 `.mt`，需要 `--allow-execution` | 是 |
 | `read_variables` | 读取 `--read-var` 白名单变量 | 是 |
-| `capture_image` | 从 `--camera-var` 白名单相机抓图，返回 MCP 图片内容 | 是 |
 | `deactivate` | 释放空闲机器人；不是急停，也不清除故障锁存 | 否 |
 
 所有工具返回同一信封：
@@ -66,10 +65,9 @@ stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。�
 | 开关 | 默认 | 效果 |
 | --- | --- | --- |
 | — | 只读 | 静态工具可用；执行类工具返回 `not_executed` |
-| `--allow-execution` | 关 | 允许动作脚本、变量读取和抓图（仍需各自的变量白名单） |
+| `--allow-execution` | 关 | 允许动作脚本和变量读取（变量仍需白名单） |
 | `--allow-hardware` | 关 | 打开物理总线、非回环 HTTP 和 Shell 驱动；要求同时给出 `--allow-execution` |
 | `--read-var NAME` | 空 | 允许 `read_variables` 读取该变量；可重复 |
-| `--camera-var NAME` | 空 | 允许从该 `Camera` 变量抓图；可重复 |
 | `--var NAME=VALUE` / `--var-env NAME=ENVVAR` | 空 | 激活前的结构 `Alias`/`Vars` 覆盖与动作绑定 |
 
 `--allow-hardware` 是能力开关，不是安全认证。Lua 驱动是可信代码；Shell 驱动不是沙箱。

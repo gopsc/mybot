@@ -24,7 +24,7 @@ Source: 驱动契约与信任边界的权威是 [docs/architecture.md](../../../
 - 每个 SQL 行有独立的模块命名空间与 `Driver(context)` 实例，但**不是沙箱、也不是进程隔离**；
   `check` 只编译源码，不执行导入、构造器或生命周期方法，入口是否齐全在激活时才检查。
   权限边界与 `--allow-hardware` 的作用范围见 docs/security.md 的 Native driver trust 一节。
-- 内置 I2C/SPI/UART/TCP/HTTP/Camera/Shell 普通表已是 Python，HAL 总线句柄仍与 Lua 器件驱动共享。
+- 内置 I2C/SPI/UART/TCP/HTTP/Shell 普通表已是 Python，HAL 总线句柄仍与 Lua 器件驱动共享。
   Python I2C/SPI/UART 将显式 `proto=virt` 或 `virt-*` 路径的总线打开为纯内存 HAL 句柄并禁止
   物理访问；既有 `proto=virt` 搭配 `/dev/...` 路径写法仍保持虚拟语义，绝不回落真机。
   Lua 器件驱动继续复用现有 `virtbus` 模型和逐运行时隔离；其他原生模块没有自动虚拟模型。
@@ -209,13 +209,11 @@ HTTP（标准库 urllib；`modules/HTTP.py` 是总线范本、`modules/Qsont.lua
 其他：
 
 - `milli_sleep(ms)`：阻塞（上限 4294967ms）。
-- Camera：`HAL.camera_open(device, w, h)` / `HAL.camera_capture(handle, options)` /
-  `HAL.camera_close(handle)`；文件图片必须落在 `--camera-src-dir` 内。
 - **不支持的后端会响亮报错**（`HAL: xxx is not supported by the portable backend`）：
   `gpio_*`、`pwm_*`、`speaker_*`、原生 `open/ioctl/read/write/termios` 族。
   需要这些外设时用受支持总线写协议实现。
 - 未加 `--allow-hardware` 时，物理 `i2c_open` / `spi_open`、非 `loop://` 的 `uart_open`、
-  非文件的 camera 采集与非回环 `http_open` 一律拒绝（口径见 docs/security.md）。
+  非回环 `http_open` 一律拒绝（口径见 docs/security.md）。
 
 ## 5. drv_common 工具函数
 

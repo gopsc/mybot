@@ -1,7 +1,6 @@
 """Native Qt window over the long-lived ``pymybot serve`` process."""
 from __future__ import annotations
 
-import base64
 import json
 import os
 import queue
@@ -31,7 +30,7 @@ from ..session_log import session_root
 from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
-from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, ImagePreviewDialog, McpConfigDialog,
+from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
                       PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
 from .editor import ScriptEditorPanel
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
@@ -141,7 +140,6 @@ class App(QMainWindow):
         self._lifecycle_workers = []
         self._hardware_calls = set()
         self._hardware_generation = 0
-        self._hardware_items = []
         self._dialogs = set()
         self.font_mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
@@ -314,7 +312,7 @@ class App(QMainWindow):
         self.context_entries = {}
         fields = (
             ("scripts_dir", "脚本根目录", "dir"), ("skills_dir", "技能目录", "dir"),
-            ("module_paths", "模块路径", None), ("camera_src_dir", "图片源目录", "dir"),
+            ("module_paths", "模块路径", None),
             ("mcp_config", "MCP 配置（mcpServers JSON）", "edit"),
         )
         for name, label, mode in fields:
@@ -345,14 +343,6 @@ class App(QMainWindow):
         hw_layout.addWidget(self.hardware_tree)
         self.hardware_note = _label("选择结构后自动读取", secondary=True)
         hw_layout.addWidget(self.hardware_note)
-        camera_row = QHBoxLayout()
-        self.camera_box = QComboBox()
-        self.camera_box.setToolTip("仅显示已在“相机变量”中授权的 Camera")
-        self.capture_button = _button("抓图", self.capture_image)
-        self.capture_button.setToolTip("宿主侧抓图，不调用模型；可信技能也可通过 run_skill capture 抓图")
-        camera_row.addWidget(self.camera_box, 1)
-        camera_row.addWidget(self.capture_button)
-        hw_layout.addLayout(camera_row)
         layout.addWidget(hardware)
 
         guard = QGroupBox("能力与预算")
@@ -362,10 +352,7 @@ class App(QMainWindow):
             "文件、Shell、联网和 MCP 工具默认开启并免审批；提示词更新与宿主抓图仍逐次确认。",
             secondary=True))
         self.read_vars_entry = QLineEdit(",".join(self.cfg.read_vars))
-        self.camera_vars_entry = QLineEdit(",".join(self.cfg.camera_vars))
-        self.camera_vars_entry.editingFinished.connect(self._refresh_camera_options)
         form.addRow("读取变量", self.read_vars_entry)
-        form.addRow("相机变量", self.camera_vars_entry)
         self.timeout_box = _spin(self.cfg.timeout, 3600, fractional=True)
         self.requests_box = _spin(self.cfg.max_requests, 100)
         self.tools_box = _spin(self.cfg.max_tool_calls, 1000)
@@ -405,7 +392,6 @@ class App(QMainWindow):
             python=resolve_python(workspace, self.cfg.python), cwd=workspace,
             robot=self._robot_path(), scripts_root=self._scripts_root(),
             robots_root=self._robots_root(), module_paths=self._module_paths(),
-            camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace),
             timeout=self.cfg.timeout,
             confirm=lambda title, text: self._message(title, text, confirm=True))
         self.editor.dirty_changed.connect(self._editor_dirty)
@@ -469,8 +455,7 @@ class App(QMainWindow):
         workspace = self.cfg.workspace or default_workspace()
         self.editor.set_context(python=resolve_python(workspace, self.cfg.python), cwd=workspace,
                                 robot=self._robot_path(), scripts_root=self._scripts_root(),
-                                robots_root=self._robots_root(), module_paths=self._module_paths(),
-                                camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace))
+                                robots_root=self._robots_root(), module_paths=self._module_paths())
 
     def show_editor(self):
         if self._stopping:
@@ -620,7 +605,6 @@ class App(QMainWindow):
             setattr(self.cfg, name, [item.strip() for item in value.split(os.pathsep) if item.strip()]
                     if name == "module_paths" else value)
         self.cfg.read_vars = self._names(self.read_vars_entry.text())
-        self.cfg.camera_vars = self._names(self.camera_vars_entry.text())
         self.cfg.timeout = self.timeout_box.value()
         self.cfg.max_requests = self.requests_box.value()
         self.cfg.max_tool_calls = self.tools_box.value()
@@ -632,7 +616,6 @@ class App(QMainWindow):
             value = getattr(self.cfg, name)
             entry.setText(os.pathsep.join(value) if name == "module_paths" else value)
         self.read_vars_entry.setText(",".join(self.cfg.read_vars))
-        self.camera_vars_entry.setText(",".join(self.cfg.camera_vars))
         self.timeout_box.setValue(self.cfg.timeout)
         self.requests_box.setValue(self.cfg.max_requests)
         self.tools_box.setValue(self.cfg.max_tool_calls)
@@ -1008,54 +991,6 @@ class App(QMainWindow):
                 status = f"{status} / {state}" if status else str(state)
             self._chat_line(f"⇦ {tool} {status}".rstrip(), "tool" if ok is not False else "toolerr")
 
-    def capture_image(self):
-        client, generation = self.serve, self.generation
-        name = self.camera_box.currentText()
-        if (self._stopping or client is None or not self.agent_available or self.busy
-                or not name):
-            return
-        self._sync_config()
-        if name not in self.cfg.camera_vars:
-            self._notice("Camera 不在相机变量白名单中")
-            return
-        if self._stopping or client is not self.serve or generation != self.generation or self.busy:
-            return
-        params = {**self._agent_params(""), "name": name}
-        try:
-            ident, future = client.start_request("agent.capture", params)
-        except RpcError as exc:
-            self._chat_line(str(exc), "error")
-            return
-        self.turn_id = ident
-        self._set_busy(True)
-        self._background(lambda: future.result(),
-                         lambda value, error: self._capture_done(generation, ident, name, value, error))
-
-    def _capture_done(self, generation, ident, name, result, error):
-        if self._stopping or generation != self.generation or ident != self.turn_id:
-            return
-        self.turn_id = None
-        self._dismiss_approvals()
-        self._set_busy(False)
-        if error is not None:
-            self._chat_line("[已停止]" if isinstance(error, RpcError) and error.code == CANCELLED
-                            else str(error), "system" if isinstance(error, RpcError)
-                            and error.code == CANCELLED else "error")
-            return
-        result = result or {}
-        if not result.get("ok"):
-            self._chat_line(f"抓图失败：{result.get('error') or '未返回图片'}", "error")
-            return
-        try:
-            image = result["image"]
-            data = base64.b64decode(image["data"], validate=True)
-            dialog = ImagePreviewDialog(self, f"Camera · {name}", data, image.get("media_type", ""))
-        except (KeyError, TypeError, ValueError) as exc:
-            self._chat_line(f"抓图结果无效：{exc}", "error")
-            return
-        self._notice(f"已抓取 Camera：{name}")
-        self._exec_dialog(dialog)
-
     def send_task(self):
         if self._stopping:
             return
@@ -1130,10 +1065,9 @@ class App(QMainWindow):
         params = {
             "task": task, "role": self.cfg.role or None,
             "robot": self._robot_path(), "scriptsDir": self._scripts_root(),
-            "cameraSrcDir": _absolute(self.cfg.camera_src_dir, workspace),
             "skillsDir": "" if self.cfg.role else self._skills_root(),
             "mcpConfig": "" if self.cfg.role else self._mcp_root(),
-            "readVars": self.cfg.read_vars, "cameraVars": self.cfg.camera_vars,
+            "readVars": self.cfg.read_vars,
             "vars": self.cfg.vars or None,
             "allowActions": bool(self.cfg.allow_actions),
             "allowHardware": True,
@@ -1333,7 +1267,6 @@ class App(QMainWindow):
         dialog = CommandDialog(
             self, python=resolve_python(workspace, self.cfg.python), cwd=workspace,
             robot=self._robot_path(), module_paths=self._module_paths(),
-            camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace),
             scripts_dir=self._scripts_root(), timeout=self.cfg.timeout,
             confirm=lambda title, text: self._message(title, text, confirm=True))
         self._exec_dialog(dialog)
@@ -1403,17 +1336,6 @@ class App(QMainWindow):
         self._refresh_hardware()
         self.sync_editor()
 
-    def _refresh_camera_options(self):
-        selected = self.camera_box.currentText()
-        allowed = set(self._names(self.camera_vars_entry.text()))
-        names = [str(item.get("name", "")) for item in self._hardware_items
-                 if item.get("type") == "Camera" and item.get("name") in allowed]
-        self.camera_box.clear()
-        self.camera_box.addItems(names)
-        if selected in names:
-            self.camera_box.setCurrentText(selected)
-        self._refresh_status()
-
     def _refresh_hardware(self):
         if self._stopping:
             return
@@ -1421,8 +1343,6 @@ class App(QMainWindow):
         generation = self._hardware_generation
         robot = self._robot_path()
         self.hardware_tree.clear()
-        self._hardware_items = []
-        self._refresh_camera_options()
         self.hardware_note.setText("读取中…")
         if not robot or not Path(robot).is_file():
             self.hardware_note.setText("未选择结构文件")
@@ -1430,8 +1350,7 @@ class App(QMainWindow):
         workspace = self.cfg.workspace or default_workspace()
         python = resolve_python(workspace, self.cfg.python)
         try:
-            args = cli_args("hardware", robot=robot, module_paths=self._module_paths(),
-                            camera_src_dir=_absolute(self.cfg.camera_src_dir, workspace))
+            args = cli_args("hardware", robot=robot, module_paths=self._module_paths())
         except ValueError as exc:
             self.hardware_note.setText(str(exc))
             return
@@ -1461,8 +1380,6 @@ class App(QMainWindow):
                 self.hardware_note.setText(f"读取失败：{message}")
                 return
             items = payload.get("hardware") or []
-            self._hardware_items = items
-            self._refresh_camera_options()
             for item in items:
                 QTreeWidgetItem(self.hardware_tree, [str(item.get("name", "")), str(item.get("type", "")),
                                                     _brief(item.get("metadata"), 80)])
@@ -1526,8 +1443,6 @@ class App(QMainWindow):
         self.status_busy.setText(busy + ("（" + "、".join(flags) + "）" if flags else ""))
         self.stop_button.setEnabled(self.busy or bool(self.pending_task))
         self.abort_button.setEnabled(self.serve is not None)
-        self.capture_button.setEnabled(self.serve is not None and self.agent_available
-                                       and not self.busy and self.camera_box.count() > 0)
         self._update_retry_buttons()
 
     def _set_busy(self, busy):
@@ -1654,10 +1569,8 @@ class SettingsDialog(QDialog):
         self._field(general_form, cfg, "python", "Python 解释器")
         self._field(general_form, cfg, "scripts_dir", "脚本根目录", browse=True)
         self._field(general_form, cfg, "skills_dir", "技能目录", browse=True)
-        self._field(general_form, cfg, "camera_src_dir", "图片源目录", browse=True)
         self._field(general_form, cfg, "module_paths", "模块路径（每行一个）", kind="lines")
         self._field(general_form, cfg, "read_vars", "读取变量（逗号分隔）")
-        self._field(general_form, cfg, "camera_vars", "相机变量（逗号分隔）")
         tabs.addTab(general, "通用")
 
         model = QWidget()
@@ -1789,7 +1702,7 @@ class SettingsDialog(QDialog):
                 values[name] = [line.strip() for line in widget.toPlainText().splitlines() if line.strip()]
             elif name == "vars":
                 values[name] = _parse_bindings(widget.toPlainText())
-            elif name in {"read_vars", "camera_vars"}:
+            elif name == "read_vars":
                 values[name] = App._names(widget.text())
             else:
                 values[name] = widget.text().strip()

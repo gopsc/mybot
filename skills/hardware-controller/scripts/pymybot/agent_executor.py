@@ -24,8 +24,8 @@ from .agent_skill_runner import SkillRunner
 from .agent_workspace import WORKSPACE_TOOLS, Workspace
 from .sandbox import SANDBOX_MODES, describe_backend
 from .errors import BudgetExceeded
-from .hal import HALManager
 from .hardware import Budget, ensure_ok, safe_ident
+from .images import image_header
 from .include import MAX_INCLUDE_BYTES, _Expander, expand_includes
 from .matrix import is_control, parse_matrices, reflex_name
 from .robot import MAX_BINDING_BYTES, Robot
@@ -45,14 +45,13 @@ _TOOLS = {
     "query_sql": ({"sql"}, {"sql"}),
     "run_action_script": ({"script"}, {"script", "vars"}),
     "read_variables": ({"names"}, {"names"}),
-    "capture_image": ({"name"}, {"name"}),
     "list_skills": (set(), set()),
     "read_skill": ({"name"}, {"name", "file"}),
     "create_skill": ({"name", "description", "content"}, {"name", "description", "content"}),
     "run_skill": ({"skill", "action"}, {"skill", "action", "arguments"}),
     **WORKSPACE_TOOLS,
 }
-EXECUTION_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
+EXECUTION_TOOLS = frozenset({"run_action_script", "read_variables"})
 
 
 def _session_vars(values):
@@ -286,7 +285,7 @@ def _image(value):
     data = base64.b64decode(encoded, validate=True)
     if base64.b64encode(data).decode("ascii") != encoded:
         raise SecurityError("Noncanonical base64")
-    fmt, _ = HALManager._image_header(data)
+    fmt, _ = image_header(data)
     media_type = "image/" + fmt
     if value.get("format") != fmt or value.get("mime") != media_type:
         raise SecurityError("Image format/mime mismatch")
@@ -341,8 +340,8 @@ class RobotExecutor:
     through cancellation, then re-raises CancelledError after owner cleanup.
     """
 
-    def __init__(self, robot_path=None, *, module_paths=None, camera_src_root=None,
-                 scripts_dir=None, allow_hardware=False, read_vars=(), camera_vars=(),
+    def __init__(self, robot_path=None, *, module_paths=None,
+                 scripts_dir=None, allow_hardware=False, read_vars=(),
                  stop_event=None, robot_factory=Robot, skills=None, workspace_dir=None, enable_shell=False,
                  vars=None, sandbox="off"):
         if enable_shell and workspace_dir is None:
@@ -362,10 +361,8 @@ class RobotExecutor:
         self._rows = {}
         self._skills = skills if isinstance(skills, SkillsLibrary) else None
         self._module_paths = module_paths
-        self._camera_src_root = camera_src_root
         self._allow_hardware = allow_hardware is True
         self._read_vars = frozenset(read_vars)
-        self._camera_vars = frozenset(camera_vars)
         self._stop = stop_event if stop_event is not None else threading.Event()
         self._factory = robot_factory
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="robot-owner")
@@ -513,7 +510,6 @@ class RobotExecutor:
             # Keep even a partially validated robot available for owner-thread close.
             if self._robot is None:
                 self._robot = self._factory(sql, module_paths=self._module_paths,
-                                            camera_src_root=self._camera_src_root,
                                             stop_event=self._stop, allow_hardware=self._allow_hardware,
                                             vars=self._vars)
             # Construction may already have consumed the whole budget; do not
@@ -659,8 +655,6 @@ class RobotExecutor:
                 safe_ident(item)
             if len(set(names)) != len(names):
                 raise SecurityError("Duplicate variables")
-        elif name == "capture_image":
-            safe_ident(arguments["name"])
         elif name == "read_skill":
             checked_text(arguments["name"])
             if "file" in arguments:
@@ -681,13 +675,8 @@ class RobotExecutor:
             for variable in arguments["names"]:
                 if variable not in self._read_vars or variable not in self._rows:
                     raise PermissionError("Variable is not allowed")
-                if self._rows[variable][0].name in {"Alias", "Vars", "Camera"}:
+                if self._rows[variable][0].name in {"Alias", "Vars"}:
                     raise PermissionError("Variable kind is not readable by this tool")
-        elif name == "capture_image":
-            variable = arguments["name"]
-            if (variable not in self._camera_vars or variable not in self._rows
-                    or self._rows[variable][0].name != "Camera"):
-                raise PermissionError("Camera is not allowed")
 
     def _read(self, names, deadline):
         budget = Budget(self._stop, self._remaining(deadline))

@@ -99,7 +99,6 @@ See [security.md](security.md#system-prompt-ownership) for the trust limits.
 | Option | Meaning |
 | --- | --- |
 | `--module-path DIR` | Replace default module search path; repeatable. Must include a `modules` directory. |
-| `--camera-src-dir DIR` | Allow file-backed Camera sources inside this directory. |
 | `--timeout SECONDS` | Wall-clock budget for the command/action (where applicable). |
 | `--var NAME=VALUE` | Override a structure `Alias`/`Vars` row before activation, and bind a session alias for action scripts; repeatable. |
 | `--var-env NAME=ENVVAR` | Same, but read the value from an environment variable at run time; repeatable, values stay out of argv. |
@@ -208,7 +207,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | --- | --- | --- |
 | `initialize` | — | `protocol`, `version`, `agent`, `status` |
 | `session.status` | — | `state`, `robot`, `busy`, ... |
-| `session.activate` | `robot`, optional `modulePaths`, `cameraSrcDir`, `allowHardware`, `vars` | session state |
+| `session.activate` | `robot`, optional `modulePaths`, `allowHardware`, `vars` | session state |
 | `session.deactivate` | — | cancels work and cleans drivers |
 | `abort` | — | best-effort stop for the active session or Agent executor; returns `state`, `aborted`, `safe_failures`, `destroy_failures` |
 | `session.abort` | — | abort a direct robot session; always ends the session |
@@ -217,7 +216,6 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
 | `agent.ask` | `task`, optional `robot`, optional `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
-| `agent.capture` | `name` plus the `agent.ask` conversation options except `task` | host-side camera receipt without a model request or MT script; requires an attached robot and allowlisted Camera; `image.data` is Base64 and `image.media_type` identifies the decoded image |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |

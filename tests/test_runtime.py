@@ -122,7 +122,6 @@ def test_secret_environment_hidden(state, monkeypatch):
     ("i2c_open", ["ftdi://ftdi:232h/1"]),
     ("spi_open", ["/dev/spidev0.0"]),
     ("uart_open", ["COM3", 115200]),
-    ("camera_capture", [1, {}]),
     ("shell_open", [1000]),
 ])
 def test_physical_hardware_requires_opt_in(state, operation, args):

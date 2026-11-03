@@ -33,18 +33,14 @@ About dialog mark.
   chat) and 帮助 (docs, about). Every entry has a shortcut.
 - **Toolbar** — workspace picker, Agent role selector/create, structure SQL
   selector, refresh, a 管理 menu, new conversation, stop and settings.
-- **Robot context** — scripts root, skills directory, module path, image source
-  directory and MCP configuration.
+- **Robot context** — scripts root, skills directory, module path and MCP
+  configuration.
 - **Hardware tree** — variables, driver type and configured metadata, read from
-  the selected structure without activating devices. The Camera selector lists
-  only variables present in the camera allowlist; **抓图** calls the native Agent
-  `capture_image` path through `agent.capture`, shows the approval dialog when
-  required and opens a local image preview without a model request or MT script.
-  MT-based Camera actions remain available for automated action flows.
-- **Permissions and budgets** — allow hardware, auto-approve actions, read
-  variables, camera variables, timeout/model-request/tool-call/history budgets.
-- **Advanced tool permissions** — workspace file tools, file writes, shell and
-  MCP auto-approval, each separately gated.
+  the selected structure without activating devices. Cameras are no longer
+  declared in the structure; the Agent lists and captures host cameras with the
+  built-in `list_cameras` / `capture_camera` tools.
+- **Capability and budgets** — read variables, timeout, model-request,
+  tool-call and history budgets.
 - **Model summary** — current provider/model/endpoint/key-variable state.
 - **Chat, logs, editor and resources** — streaming transcript, tool receipts,
   diagnostics, a script/structure editor (line numbers, MT/SQL highlighting,
@@ -206,7 +202,7 @@ the GUI executable itself has no console. See
 | --- | --- |
 | “智能体不可用” | Install `.[agent]`; check the interpreter selected in settings. |
 | Window opens but no model | Set `MYBOT_MODEL`/API key or configure them in settings. |
-| Camera fails on Windows | Close other apps using the camera; some devices require running the app as administrator. |
+| Camera tool fails | Install `pymybot[camera]`; close other apps using the device, and on Windows check that the index from `list_cameras` is correct. |
 | “启动中…” forever | Fixed in 0.2.0. On older builds, restart the window. |
 | Missing PySide6 | Install `pymybot[gui]` (source checkout: `pip install -e '.[gui]'`). |
 | No desktop display | Use `pymybot --no-gui` on headless Linux. |

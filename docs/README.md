@@ -18,7 +18,6 @@
 | [Controller security](../skills/hardware-controller/references/security.md) | understand trust boundaries and reporting |
 | [FAQ](faq.md) | troubleshoot installation, hardware and agent issues |
 | [History](history/README.md) | understand the branch consolidation |
-| [Camera migration](history/camera-migration.md) | understand the PyAV/Pillow pipeline change |
 | [Windows faulthandler](history/windows-faulthandler.md) | debug LuaJIT SEH errors on Windows |
 
 Scripting references live under

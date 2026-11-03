@@ -62,8 +62,8 @@ actions or file writes do not cover it.
 - Linux `/dev/spidev*`: install `.[linux]` for `spidev` (it usually builds from
   source, so you may need gcc and kernel headers) and add the user to the `spi`
   group.
-- Camera: install `.[camera]`; on Windows the device index (`0`) must be
-  correct and some cameras need administrator access.
+- Agent camera tools: install `.[camera]`; use `list_cameras` to find the
+  correct index and close other apps using the device when capture fails.
 - Direct controller commands require `--allow-hardware`; the GUI editor run asks
   for confirmation. Trusted agent skills receive hardware access automatically.
 

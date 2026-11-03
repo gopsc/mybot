@@ -58,8 +58,9 @@ MAX_PROMPT = 16 * 1024
 MAX_HISTORY = 4 * 1024 * 1024
 MAX_OUTPUT_TOKENS = 4096
 MAX_CONTEXT_TOKENS = 2 * 1024 * 1024
-IO_TOOLS = frozenset({"run_action_script", "read_variables", "capture_image"})
+IO_TOOLS = frozenset({"run_action_script", "read_variables"})
 SKILL_TOOLS = frozenset({"run_skill"})
+CAMERA_TOOLS = frozenset({"list_cameras", "capture_camera"})
 FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file"})
 WEB_TOOLS = frozenset({"web_fetch", "web_search"})
 MAX_IDENTICAL_CALLS = 3
@@ -432,7 +433,7 @@ def _json_schema_model(name, schema):
 
 
 class AgentSession:
-    def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(), camera_vars=(),
+    def __init__(self, executor, model, config=None, *, confirm=None, read_vars=(),
                  on_event=None, skills=None, workspace=False, enable_shell=False, session_log=None,
                  mcp_servers=(), role=None):
         self.executor = executor
@@ -443,7 +444,6 @@ class AgentSession:
         self.on_event = on_event
         self.session_log: SessionLog | None = session_log
         self.read_vars = tuple(read_vars)
-        self.camera_vars = tuple(camera_vars)
         self.skills = skills
         self.workspace = bool(workspace)
         self.enable_shell = bool(enable_shell)
@@ -489,6 +489,7 @@ class AgentSession:
         self._repeat_count = 0
         self._tool_lock = asyncio.Lock()
         self._pruned_turns = 0
+        self._camera = None
 
     # -- tools -------------------------------------------------------------
     def _build_tools(self):
@@ -541,6 +542,16 @@ class AgentSession:
             """Run a host shell command after approval inside the configured sandbox; cwd is workspace-relative. No background jobs."""
             return await self.invoke_tool("shell", {"command": command, "cwd": cwd})
 
+        async def list_cameras():
+            """List host cameras available to the built-in camera tools."""
+            return await self.invoke_tool("list_cameras", {})
+
+        async def capture_camera(device: str = "0", width: int = 640, height: int = 480,
+                                 quality: int = 90):
+            """Capture one host camera frame as JPEG; device is an index or an id returned by list_cameras."""
+            return _image_blocks(await self.invoke_tool("capture_camera", {
+                "device": device, "width": width, "height": height, "quality": quality}))
+
         async def web_fetch(url: str):
             """Fetch one HTTPS URL after approval; bounded text only, no credentials or private addresses."""
             return await self.invoke_tool("web_fetch", {"url": url})
@@ -558,7 +569,8 @@ class AgentSession:
             return await self.invoke_tool("update_prompt", {
                 "layer": layer, "content": content, "reason": reason})
 
-        functions = [("read_prompt", read_prompt), ("update_prompt", update_prompt)]
+        functions = [("read_prompt", read_prompt), ("update_prompt", update_prompt),
+                     ("list_cameras", list_cameras), ("capture_camera", capture_camera)]
         if self.workspace:
             functions.extend((("list_files", list_files), ("read_file", read_file),
                               ("write_file", write_file), ("edit_file", edit_file)))
@@ -592,6 +604,9 @@ class AgentSession:
             guide.append("Hardware operations are exposed only through trusted skill actions "
                          "(for example run_skill('hardware-controller', 'hardware'|'query'|'run'|'sample')). "
                          "Trusted skills receive the host's hardware grant automatically.")
+        guide.append("Camera tools are built-in host capabilities, not robot hardware: "
+                     "list_cameras lists devices, and capture_camera(device, width, height, quality) "
+                     "returns one JPEG. Use an index or id from list_cameras.")
         guide.append(f"Runtime gates: workspace={'enabled' if self.workspace else 'disabled'}, "
                      f"shell={'enabled' if self.enable_shell else 'disabled'}.")
         if self.enable_shell:
@@ -610,7 +625,7 @@ class AgentSession:
         for name, function in functions:
             add(name, function.__doc__ or name, function,
                 response_format="content_and_artifact"
-                if name in {"run_action_script", "capture_image"} else "content")
+                if name in {"run_action_script", "capture_camera"} else "content")
         for tool in tools:
             _strict_tool(tool)
         return tools, "\n".join(guide)
@@ -653,14 +668,18 @@ class AgentSession:
 
     async def close(self):
         try:
-            if self._mcp is not None:
-                await self._mcp.close()
+            if self._camera is not None:
+                await asyncio.to_thread(self._camera.close)
         finally:
             try:
-                await self.executor.close()
+                if self._mcp is not None:
+                    await self._mcp.close()
             finally:
-                if self.session_log is not None:
-                    self.session_log.close()
+                try:
+                    await self.executor.close()
+                finally:
+                    if self.session_log is not None:
+                        self.session_log.close()
 
     def _check(self):
         if self.deadline is not None and time.monotonic() >= self.deadline:
@@ -871,7 +890,7 @@ class AgentSession:
         if not self.config.auto_stats:
             return
         events = self.events[first_event:]
-        actions = [event for event in events if event["tool"] in IO_TOOLS | SKILL_TOOLS]
+        actions = [event for event in events if event["tool"] in IO_TOOLS | SKILL_TOOLS | CAMERA_TOOLS]
         robot = getattr(self.executor, "robot_path", "") or ""
         if not robot and isinstance(self.context, dict):
             robot = self.context.get("robot", "")
@@ -946,6 +965,8 @@ class AgentSession:
         async with self._tool_lock:
             if name in WEB_TOOLS:
                 result = await self._web_call(name, arguments)
+            elif name in CAMERA_TOOLS:
+                result = await self._camera_call(name, arguments)
             else:
                 result = await self.executor.call(name, arguments, timeout=remaining)
         self.events.append({"tool": name, **{k: result[k] for k in ("ok", "executed", "state")}})
@@ -986,6 +1007,32 @@ class AgentSession:
             return {"ok": False, "executed": False, "state": "completed",
                     "error": f"Web tool failed ({type(exc).__name__})"}
         return {"ok": True, "executed": False, "state": "completed", "data": data}
+
+    def _camera_service(self):
+        if self._camera is None:
+            from .camera import CameraService
+            self._camera = CameraService()
+        return self._camera
+
+    async def _camera_call(self, name, arguments):
+        from .camera import CameraError
+        try:
+            service = self._camera_service()
+            if name == "list_cameras":
+                data = await asyncio.to_thread(service.list_cameras)
+                return {"ok": True, "executed": False, "state": "completed", "data": data}
+            shot = await asyncio.to_thread(
+                service.capture, arguments.get("device", 0), arguments.get("width", 640),
+                arguments.get("height", 480), arguments.get("quality", 90))
+        except CameraError as exc:
+            return {"ok": False, "executed": name == "capture_camera", "state": "completed",
+                    "error": str(exc)}
+        except Exception as exc:
+            return {"ok": False, "executed": name == "capture_camera", "state": "completed",
+                    "error": f"Camera tool failed ({type(exc).__name__})"}
+        detail = {key: value for key, value in shot.items() if key != "data"}
+        return {"ok": True, "executed": True, "state": "completed", "data": detail,
+                "image": {"data": shot["data"], "media_type": shot["media_type"]}}
 
     async def invoke_mcp_tool(self, display, server, name, arguments):
         """Approval-gated external MCP call; results are bounded like receipts."""
@@ -1130,39 +1177,6 @@ class AgentSession:
         return Command(resume=decisions)
 
     # -- turns -------------------------------------------------------------
-    async def capture(self, name):
-        """Run native camera capture without a model request or MT script."""
-        if self._asking:
-            raise AgentError("Concurrent turns on one robot session are not supported")
-        self._asking = True
-        self.deadline = time.monotonic() + self.config.timeout
-        self._turn += 1
-        self._last_call = None
-        self._repeat_count = 0
-        self._tool_calls = 0
-        self._tool_limit = self.config.tool_calls_limit
-        # A host-initiated capture is not part of the previous model turn's intent.
-        self.intent = None
-        try:
-            if hasattr(self.executor, "robot_path") and self.executor.robot_path is None:
-                raise AgentConfigurationError("Camera capture requires an attached robot")
-            self._check()
-            if self.context is None:
-                await self.start()
-            if self.on_event is not None:
-                self.on_event({"type": "tool_call", "tool": "capture_image", "arguments": {"name": name}})
-            result = await self.invoke_tool("capture_image", {"name": name}, emit=False)
-            if self.on_event is not None:
-                self.on_event({"type": "tool_result", "tool": "capture_image",
-                               **{key: result[key] for key in ("ok", "executed", "state")}})
-            return result
-        except BaseException:
-            self.executor.cancel()
-            raise
-        finally:
-            self._asking = False
-            self.deadline = None
-
     async def ask(self, prompt):
         checked_text(prompt, MAX_PROMPT)
         if not prompt.strip():
@@ -1423,10 +1437,9 @@ async def run_cli_agent(args, stop):
             raise AgentConfigurationError(f"Cannot load role: {exc}; no model request was sent") from None
         mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
                       else getattr(args, "mcp_config", None) if role is None else None)
-        if getattr(args, "robot", None) is None and (getattr(args, "read_var", None)
-                                                     or getattr(args, "camera_var", None)):
+        if getattr(args, "robot", None) is None and getattr(args, "read_var", None):
             raise AgentConfigurationError(
-                "--read-var and --camera-var require --robot; no model request was sent")
+                "--read-var requires --robot; no model request was sent")
         config = AgentConfig(model=args.model or os.environ.get("MYBOT_MODEL", ""),
                              base_url=args.base_url or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=args.api_key_env, timeout=args.timeout,
@@ -1463,9 +1476,9 @@ async def run_cli_agent(args, stop):
         except SecurityError as exc:
             raise AgentConfigurationError(
                 f"Cannot load skills configuration: {exc}; no model request was sent") from None
-        executor = RobotExecutor(args.robot, module_paths=args.module_path, camera_src_root=args.camera_src_dir,
+        executor = RobotExecutor(args.robot, module_paths=args.module_path,
                                  scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
-                                 read_vars=args.read_var, camera_vars=args.camera_var, stop_event=stop,
+                                 read_vars=args.read_var, stop_event=stop,
                                  vars=getattr(args, "bindings", None),
                                  skills=skills, workspace_dir=args.workspace_dir, enable_shell=args.enable_shell,
                                  sandbox=config.sandbox_mode)
@@ -1478,7 +1491,7 @@ async def run_cli_agent(args, stop):
 
         renderer = StreamRenderer()
         session = AgentSession(executor, model, config, confirm=confirm,
-                               read_vars=args.read_var, camera_vars=args.camera_var,
+                               read_vars=args.read_var,
                                on_event=renderer, skills=skills, workspace=args.workspace_dir is not None,
                                enable_shell=args.enable_shell, session_log=session_log,
                                mcp_servers=mcp_servers, role=role)

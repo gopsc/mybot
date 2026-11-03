@@ -30,6 +30,5 @@ deleted after merge. See [`../development.md`](../development.md) and
 
 ## Completed migration notes
 
-- [Camera pipeline migration](camera-migration.md) — OpenCV to PyAV/Pillow.
 - [Windows faulthandler](windows-faulthandler.md) — diagnosing LuaJIT SEH
   crashes.

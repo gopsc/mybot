@@ -14,7 +14,7 @@ flowchart LR
     MT["Action script<br/>scripts/*.mt"] --> RUNNER["Action runner"]
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL / buses"]
-    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Camera · Shell"]
+    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Shell"]
 ```
 
 | Layer | File | Responsibility | Trust level |
@@ -56,7 +56,7 @@ native I/O are unrestricted; neither blocking native calls nor uncooperative
 Python loops can be forcibly interrupted. Per-row module/instance isolation is
 not process isolation; imported packages may share state.
 
-The built-in I2C/SPI/UART/TCP/HTTP/Camera/Shell ordinary-table drivers use Python.
+The built-in I2C/SPI/UART/TCP/HTTP/Shell ordinary-table drivers use Python.
 TCP declares only name/host/port; activation validates without connecting, and MT
 explicitly controls connect/close, timeout/num_recv and hexadecimal/UTF-8 I/O.
 Each TCP row opens its own stream; no endpoint-level connection sharing or replay.
@@ -92,7 +92,7 @@ sequenceDiagram
     Robot->>Registry: resolve variables and expressions
     Robot->>Driver: call(data)
     Driver->>HAL: transfer
-    HAL->>Device: I2C/SPI/UART/HTTP/Camera
+    HAL->>Device: I2C/SPI/UART/HTTP
     Device-->>Driver: result
     Driver-->>Robot: result dictionary / table
     Robot-->>CLI: outputs (one JSON envelope)
@@ -127,9 +127,11 @@ Key invariants:
 | `pymybot/expr.py` | Expression parser/evaluator and numeric rendering |
 | `pymybot/runtime.py` | Shared HAL bridge, Lupa/LuaJIT (or standard-Lua) bootstrap and Python↔Lua conversion |
 | `pymybot/native.py` | Compile-only validation, per-row Python modules, Driver context and results |
-| `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Camera/Shell host operations |
+| `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Shell host operations |
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
 | `pymybot/agent.py` | LangGraph agent, model configuration, tool loop |
+| `pymybot/camera.py` | Host camera enumeration and JPEG capture for the Agent tools |
+| `pymybot/images.py` | Bounded image-container validation for receipts and camera output |
 | `pymybot/agent_skill_runner.py` | Trusted `skill.json` parsing, scoped arguments and bounded Skill subprocess |
 | `pymybot/prompts.py` | Manifest-ordered runtime prompt layers, trusted safety hashes, bounded composition, CAS/backups and private storage |
 | `pymybot/roles.py` | Role creation/loading, role-owned prompt/skills/MCP paths and bounded atomic model-history persistence |

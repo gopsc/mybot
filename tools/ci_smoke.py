@@ -36,7 +36,7 @@ def preflight(mode):
         for name in ("langchain", "langgraph", "langchain_openai", "langchain_anthropic",
                      "pymybot.agent", "pytest", "openai", "anthropic",
                      "mcp", "pymybot.mcp_server", "pymybot.mcp_client",
-                     "httpx", "httpx2", "bs4", "pymybot.agent_web"):
+                     "httpx", "httpx2", "bs4", "pymybot.agent_web", "pymybot.camera"):
             importlib.import_module(name)
     print(f"{mode} dependency preflight passed", flush=True)
 

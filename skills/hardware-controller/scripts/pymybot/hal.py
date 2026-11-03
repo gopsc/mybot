@@ -6,19 +6,14 @@ Handles are process-local logical IDs, not operating-system file descriptors.
 """
 from __future__ import annotations
 
-import base64
 import errno
 import importlib
-import io
 import ipaddress
 import math
 import os
-from pathlib import Path
 import re
 import select
 import socket
-import stat
-import struct
 import subprocess
 import sys
 import threading
@@ -27,15 +22,8 @@ from typing import Callable
 import urllib.error
 import urllib.request
 from urllib.parse import parse_qs, urlsplit, urlunsplit
-import zlib
 
 from .process import kill_tree, read_pipe, shell_command
-
-# PyAV's log level and capture are process-global.
-_AV_LOG_LOCK = threading.Lock()
-# DirectShow's video input category; FFmpeg prints video devices as (video) or
-# (none), so the category GUID is the reliable discriminator from audio devices.
-_DSHOW_VIDEO_GUID = "65e8773d-8f56-11d0-a3b9-00a0c9223196"
 
 
 class _Resource:
@@ -71,14 +59,9 @@ _HTTP_OPENER = urllib.request.build_opener(_NoRedirect)
 class HALManager:
     """Shared, reference-counted buses with per-bus transaction locks.
 
-    camera_src_root is a host capability, never taken from Lua options or env.
     cancel_check, when supplied, should raise to cancel sleeps/serial polling.
     """
 
-    MAX_IMAGE_BYTES = 16 * 1024 * 1024
-    MAX_IMAGE_PIXELS = 32 * 1024 * 1024
-    CAMERA_TIMEOUT = 10.0
-    CAMERA_FORMATS = {"win32": "dshow", "linux": "v4l2", "darwin": "avfoundation"}
     UART_MAX_BYTES = 512
     UART_MAX_MS = 60000
     TCP_MAX_BYTES = 512
@@ -97,16 +80,10 @@ class HALManager:
         "tcp_open", "tcp_write", "tcp_read",
         "http_open", "http_request",
         "shell_open", "shell_run",
-        "camera_open", "camera_capture", "close_handle", "sleep_ms", "last_error",
+        "close_handle", "sleep_ms", "last_error",
     }
 
-    def __init__(self, camera_src_root: Path | None = None, *,
-                 cancel_check: Callable[[], None] | None = None):
-        self.camera_src_root = (Path(camera_src_root).resolve(strict=True)
-                                if camera_src_root is not None else None)
-        if self.camera_src_root is not None and not self.camera_src_root.is_dir():
-            raise ValueError("camera_src_root must be a directory")
-        self._camera_root_stat = self.camera_src_root.stat() if self.camera_src_root else None
+    def __init__(self, *, cancel_check: Callable[[], None] | None = None):
         self._cancel_check = cancel_check
         self._lock = threading.RLock()
         self._handles: dict[int, _Resource] = {}
@@ -124,7 +101,7 @@ class HALManager:
         """Dispatch, returning scalars/lists/dicts/None (never device objects).
 
         Open/setup/write/close failures return -1; transfer/read failures None;
-        camera failures and unsupported operations return {result: ERR, message}.
+        request failures and unsupported operations return {result: ERR, message}.
         last_error returns the calling thread's most recent diagnostic string.
         sleep_ms raises cancellation exceptions so cancellation is not swallowed.
         cancel_check is request-scoped (thread-local); owner tags handles opened
@@ -150,7 +127,7 @@ class HALManager:
                 self._errors.message = message
                 if operation == "tcp_write":
                     return {"result": "ERR", "message": message, "sent": 0}
-                if operation in {"camera_capture", "http_request", "shell_run", "tcp_read"}:
+                if operation in {"http_request", "shell_run", "tcp_read"}:
                     return {"result": "ERR", "message": message}
                 if operation in {"i2c_transfer", "spi_transfer", "uart_read"}:
                     return None
@@ -672,8 +649,8 @@ class HALManager:
         base = self._http_base(base)
         timeout_ms = self._integer(timeout_ms, 1, self.HTTP_TIMEOUT_MS)
         with self._lock:
-            # Like camera_open: validation only; HTTP has no persistent connection
-            # to establish, requests happen per http_request call.
+            # Validation only: HTTP has no persistent connection to establish,
+            # requests happen per http_request call.
             return self._register(_Resource("http", None, "urllib", None,
                                             base=base, timeout=timeout_ms))
 
@@ -840,261 +817,6 @@ class HALManager:
             if remaining <= 0:
                 return 0
             time.sleep(min(remaining, .05) if self._active_cancel() else remaining)
-
-    @classmethod
-    def _size(cls, width, height):
-        width, height = cls._integer(width, 1, 8192), cls._integer(height, 1, 8192)
-        if width * height > cls.MAX_IMAGE_PIXELS:
-            raise ValueError("image dimensions exceed pixel ceiling")
-        return width, height
-
-    @classmethod
-    def _camera_device(cls, device):
-        if device is None or device == "":
-            return 0
-        if isinstance(device, str) and re.fullmatch(r"/dev/video[0-9]+", device):
-            if sys.platform != "linux":
-                raise ValueError("/dev/video paths are Linux-only; use a camera index on Windows")
-            return device
-        return cls._integer(device, 0, 255)
-
-    def _camera_open(self, device=0, width=640, height=480):
-        device = self._camera_device(device)
-        width, height = self._size(width, height)
-        with self._lock:
-            # Do not import av or probe devices during robot activation.
-            return self._register(_Resource("camera", None, "av", None,
-                                           device=device, width=width, height=height))
-
-    @classmethod
-    def _image_header(cls, data):
-        """Reject truncated containers, verify PNG CRCs, bound dimensions pre-decode."""
-        if data.startswith(b"\x89PNG\r\n\x1a\n"):
-            pos, size, seen_data = 8, None, False
-            while pos + 12 <= len(data):
-                n = struct.unpack_from(">I", data, pos)[0]
-                kind = data[pos + 4:pos + 8]
-                end = pos + 12 + n
-                if end > len(data):
-                    break
-                chunk = data[pos + 4:pos + 8 + n]
-                if zlib.crc32(chunk) & 0xFFFFFFFF != struct.unpack_from(">I", data, pos + 8 + n)[0]:
-                    raise ValueError("invalid PNG CRC")
-                if size is None:
-                    if kind != b"IHDR" or n != 13:
-                        raise ValueError("invalid PNG header")
-                    size = cls._size(*struct.unpack_from(">II", data, pos + 8))
-                if kind == b"IDAT":
-                    seen_data = True
-                if kind == b"IEND":
-                    if n or end != len(data) or not seen_data:
-                        break
-                    return "png", size
-                pos = end
-            raise ValueError("incomplete PNG image")
-        if data.startswith(b"\xff\xd8"):
-            pos, size, scan = 2, None, False
-            while pos < len(data):
-                if data[pos] != 255:
-                    if scan:
-                        pos += 1
-                        continue
-                    break
-                while pos < len(data) and data[pos] == 255:
-                    pos += 1
-                if pos >= len(data):
-                    break
-                marker = data[pos]
-                pos += 1
-                if scan and (marker == 0 or 0xD0 <= marker <= 0xD7):
-                    continue
-                if marker == 0xD9:
-                    if size and scan and pos == len(data):
-                        return "jpeg", size
-                    break
-                if pos + 2 > len(data):
-                    break
-                n = struct.unpack_from(">H", data, pos)[0]
-                if n < 2 or pos + n > len(data):
-                    break
-                if marker in {0xC0, 0xC1, 0xC2}:
-                    if n < 8:
-                        break
-                    height, width = struct.unpack_from(">HH", data, pos + 3)
-                    size = cls._size(width, height)
-                if marker == 0xDA:
-                    scan = True
-                pos += n
-            raise ValueError("incomplete or unsupported JPEG image")
-        raise ValueError("unsupported image format (expected JPEG or PNG)")
-
-    def _validate_image(self, data):
-        if not 0 < len(data) <= self.MAX_IMAGE_BYTES:
-            raise ValueError("image exceeds byte ceiling or is empty")
-        fmt, size = self._image_header(data)
-        image = importlib.import_module("PIL.Image")
-        try:
-            with image.open(io.BytesIO(data), formats=[fmt.upper()]) as decoded:
-                decoded.load()
-                decoded_size = decoded.size
-        except (OSError, SyntaxError, ValueError) as exc:
-            raise ValueError(f"invalid image data (decode failed: {exc})") from exc
-        if decoded_size != size:
-            raise ValueError("invalid image data (dimension mismatch)")
-        return fmt, size
-
-    def _file_capture(self, src):
-        if self.camera_src_root is None:
-            raise ValueError("simulated camera src requires a host camera_src_root")
-        if not isinstance(src, str) or not src:
-            raise ValueError("camera src must be a nonempty path")
-        if (self.camera_src_root.resolve(strict=True) != self.camera_src_root
-                or not os.path.samestat(self.camera_src_root.stat(), self._camera_root_stat)):
-            raise ValueError("camera source root changed")
-        path = Path(src)
-        if not path.is_absolute():
-            path = self.camera_src_root / path
-        path = path.resolve(strict=True)
-        if not path.is_relative_to(self.camera_src_root):
-            raise ValueError("camera src is outside the allowed root")
-        before = path.stat()
-        if not stat.S_ISREG(before.st_mode):
-            raise ValueError("camera src is not a regular file")
-        if before.st_size > self.MAX_IMAGE_BYTES:
-            raise ValueError("image exceeds byte ceiling")
-        with path.open("rb") as stream:
-            opened = os.fstat(stream.fileno())
-            if not stat.S_ISREG(opened.st_mode) or not os.path.samestat(before, opened):
-                raise ValueError("camera source changed during open")
-            data = stream.read(self.MAX_IMAGE_BYTES + 1)
-            after = os.fstat(stream.fileno())
-        if (path.resolve(strict=True) != path or not os.path.samestat(before, path.stat())
-                or (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns)):
-            raise ValueError("camera source changed during capture")
-        fmt, size = self._validate_image(data)
-        return self._image_result(data, fmt, size, "file", note=f"Simulated image: {path}")
-
-    @staticmethod
-    def _image_result(data, fmt, size, source, **extra):
-        b64 = base64.b64encode(data).decode("ascii")
-        return dict(result="OK", source=source, format=fmt, mime="image/" + fmt,
-                    bytes=len(data), b64=b64, base64=b64, width=size[0], height=size[1], **extra)
-
-    @staticmethod
-    def _dshow_video_devices(av):
-        """Return DirectShow video devices' unique alternative names in index order."""
-        logging = importlib.import_module("av.logging")
-        with _AV_LOG_LOCK:
-            level = logging.get_level()
-            logging.set_level(logging.INFO)
-            try:
-                with logging.Capture(local=False) as logs:
-                    try:
-                        av.open("dummy", format="dshow", options={"list_devices": "true"}).close()
-                    except av.FFmpegError:
-                        pass  # list_devices prints the list, then always fails to open
-            finally:
-                logging.set_level(level)
-        text = "".join(message for _, _, message in logs)
-        return [alt for kind, alt in re.findall(
-            r'^"[^"\n]*" \(([^)\n]*)\)\s*\n\s*Alternative name "([^"\n]+)"', text, re.M)
-            if "video" in kind.lower() or _DSHOW_VIDEO_GUID in alt.lower()]
-
-    def _camera_input(self, av, device):
-        fmt = self.CAMERA_FORMATS.get(sys.platform)
-        if fmt is None:
-            raise ValueError(f"camera capture is not supported on {sys.platform}")
-        if isinstance(device, str):
-            return device, fmt
-        if fmt == "v4l2":
-            return f"/dev/video{device}", fmt
-        if fmt == "avfoundation":
-            return f"{device}:none", fmt
-        names = self._dshow_video_devices(av)
-        if device >= len(names):
-            raise IOError(f"camera unavailable: {device} ({len(names)} video devices found)")
-        return "video=" + names[device], fmt
-
-    def _latest_frame(self, container):
-        """Decode the newest frame, discarding the backlog queued since the last capture.
-
-        FFmpeg devices (dshow especially) queue seconds of frames while idle. A read
-        that has to wait on the camera proves the backlog is drained.
-        """
-        stream = container.streams.video[0]
-        rate = stream.average_rate or stream.guessed_rate
-        live_wait = 0.5 / float(rate) if rate else 0.005
-        deadline = time.monotonic() + self.CAMERA_TIMEOUT
-        packets = container.demux(stream)
-        pending = []
-        while True:
-            started = time.monotonic()
-            packet = next(packets, None)
-            if packet is None or packet.size == 0:
-                raise IOError("camera stream ended")
-            if packet.is_keyframe:
-                pending.clear()
-            pending.append(packet)
-            if time.monotonic() - started >= live_wait or started >= deadline:
-                break
-        # Decode from the last keyframe so inter-frame codecs keep their references.
-        frames = [frame for packet in pending for frame in packet.decode()]
-        if not frames:
-            raise IOError("camera capture failed")
-        return frames[-1]
-
-    def _camera_capture(self, handle, options=None):
-        # Empty Lua tables can arrive as [] or {} depending on host conversion.
-        options = {} if options is None or options == [] else options
-        if not isinstance(options, dict):
-            raise ValueError("camera options must be a table")
-        r = self._get(handle, "camera")
-        with r.lock:
-            self._live(r)
-            if options.get("src"):
-                return self._file_capture(options["src"])
-            if os.environ.get("MYBOT_SIM_CAPTURE_SOCK"):
-                raise ValueError("simulator capture sockets are not supported by this backend; use explicit src")
-            if ("width" in options) != ("height" in options):
-                raise ValueError("width and height must be given together")
-            width, height = self._size(options.get("width", r.state["width"]), options.get("height", r.state["height"]))
-            device = self._camera_device(options.get("path", options.get("device", r.state["device"])))
-            desired = dict(device=device, width=width, height=height)
-            av = importlib.import_module("av")
-            try:
-                if r.device is not None and r.state != desired:
-                    r.device.close()
-                    r.device = None
-                if r.device is None:
-                    file, fmt = self._camera_input(av, device)
-                    # Unlike OpenCV, FFmpeg devices reject sizes the camera does not offer.
-                    device_options = {"video_size": f"{width}x{height}"}
-                    if fmt == "avfoundation":
-                        # avfoundation defaults to 29.97 fps, which most webcams reject.
-                        device_options["framerate"] = "30"
-                    try:
-                        r.device = av.open(file, format=fmt, options=device_options,
-                                           timeout=self.CAMERA_TIMEOUT)
-                    except av.FFmpegError as exc:
-                        raise IOError(f"camera unavailable: {device} ({exc})") from exc
-                    r.state = desired
-                frame = self._latest_frame(r.device)
-                size = self._size(frame.width, frame.height)
-                quality = self._integer(options.get("quality", 90), 1, 100)
-                encoded = io.BytesIO()
-                frame.to_image().save(encoded, "JPEG", quality=quality)
-                data = encoded.getvalue()
-                if len(data) > self.MAX_IMAGE_BYTES:
-                    raise ValueError("image exceeds byte ceiling")
-                fmt, encoded_size = self._image_header(data)
-                if fmt != "jpeg" or size != encoded_size:
-                    raise ValueError("invalid JPEG encoder output")
-                return self._image_result(data, "jpeg", size, "pyav")
-            except Exception:
-                if r.device is not None:
-                    r.device.close()
-                    r.device = None
-                raise
 
     def _close_handle(self, handle):
         with self._lock:

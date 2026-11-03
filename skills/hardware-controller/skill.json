@@ -173,36 +173,6 @@
             "default": 1
           }
         }
-      },
-      "capture": {
-        "effect": "execute",
-        "output": "json",
-        "argv": [
-          "run",
-          "--robot",
-          "{robot}",
-          "--input",
-          "references/assets/scripts/Camera.mt",
-          "--var",
-          "cameraVar={camera}"
-        ],
-        "hardwareFlag": "--allow-hardware",
-        "params": {
-          "robot": {
-            "type": "path",
-            "scope": [
-              "robots",
-              "skill_assets"
-            ],
-            "suffix": ".sql",
-            "required": true
-          },
-          "camera": {
-            "type": "string",
-            "max": 64,
-            "default": "cam"
-          }
-        }
       }
     }
   }

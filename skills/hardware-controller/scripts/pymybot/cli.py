@@ -188,7 +188,6 @@ def parser():
                                  help="skip the entry screen and open the main window immediately")
             command.add_argument("--workspace-dir", metavar="DIR", help="workspace root (default: current directory)")
             command.add_argument("--module-path", action="append", metavar="DIR", help="trusted Lua module root; repeatable")
-            command.add_argument("--camera-src-dir", metavar="DIR", help="local camera image root")
             command.add_argument("--scripts-dir", metavar="DIR", help="trusted .mt script root offered to the agent")
             command.add_argument("--skills-dir", metavar="DIR", help="operator skill directories")
             command.add_argument("--mcp-config", metavar="FILE",
@@ -197,11 +196,10 @@ def parser():
             command.add_argument("--base-url", help="provider endpoint; defaults to MYBOT_BASE_URL")
             command.add_argument("--api-key-env", help="environment variable holding the API key")
             command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
-            command.add_argument("--camera-var", action="append", default=[], metavar="NAME", help="allow image capture from this Camera variable; repeatable")
             command.add_argument("--allow-actions", action="store_true",
-                                 help="preapprove host capture/variable reads; trusted skills need no approval")
+                                 help="preapprove variable reads; trusted skills need no approval")
             command.add_argument("--allow-hardware", action="store_true",
-                                 help="allow host capture/direct hardware; trusted skills always receive hardware access")
+                                 help="allow direct hardware; trusted skills always receive hardware access")
             command.add_argument("--max-requests", type=bounded_int(1, 100), default=8, help="model requests per task (default: 8)")
             command.add_argument("--max-tool-calls", type=bounded_int(1, 1000), default=16, help="tool calls per task (default: 16)")
             command.add_argument("--prompt-file", metavar="FILE",
@@ -227,20 +225,17 @@ def parser():
                                  help="structure SQL file (at most 8 MiB)")
             command.add_argument("--module-path", action="append", metavar="DIR",
                                  help="trusted Lua module root; repeatable")
-            command.add_argument("--camera-src-dir", metavar="DIR", help="explicit local camera image root")
             command.add_argument("--scripts-dir", default=default_scripts_dir(), metavar="DIR",
                                  help="trusted .mt script root; default: packaged assets/scripts, else source scripts")
             command.add_argument("--skills-dir", default=asset_path("skills"), metavar="DIR",
                                  help="operator skill root; default: packaged assets/skills, else source skills")
             command.add_argument("--allow-execution", action="store_true",
-                                 help="permit action scripts, variable reads and camera capture; "
+                                 help="permit action scripts and variable reads; "
                                       "static tools stay available either way")
             command.add_argument("--allow-hardware", action="store_true",
                                  help="permit physical devices; requires --allow-execution")
             command.add_argument("--read-var", type=safe_ident, action="append", default=[], metavar="NAME",
                                  help="allowlist a readable variable; repeatable")
-            command.add_argument("--camera-var", type=safe_ident, action="append", default=[], metavar="NAME",
-                                 help="allow image capture from this declared Camera variable; repeatable")
             command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
                                  help=f"cooperative execution budget, >0 and <={MAX_TIMEOUT} (default: 180)")
             command.add_argument("--var", type=variable, action="append", default=[], metavar="NAME=VALUE",
@@ -278,7 +273,6 @@ def parser():
         command.add_argument("--robot", required=name != "agent", metavar="FILE",
                              help="structure SQL file (optional for agent; at most 8 MiB)")
         command.add_argument("--module-path", action="append", metavar="DIR", help="trusted Lua module root; repeatable")
-        command.add_argument("--camera-src-dir", metavar="DIR", help="explicit local camera image root")
         if name in {"check", "run", "agent"}:
             command.add_argument("--input", required=name == "run", metavar="MT", help="direct action script (agent entry requires --no-agent)")
         if name in {"query", "apply-sql"}:
@@ -311,9 +305,8 @@ def parser():
                                  help="trusted root of operator skill directories (SKILL.md + markdown references);"
                                       " default: packaged assets/skills, else source skills")
             command.add_argument("--read-var", action="append", default=[], metavar="NAME", help="allowlist a readable variable; repeatable")
-            command.add_argument("--camera-var", action="append", default=[], metavar="NAME", help="allow image capture from this declared Camera variable; repeatable")
             command.add_argument("--allow-actions", action="store_true",
-                                 help="preapprove host capture/variable reads; trusted skills need no approval")
+                                 help="preapprove variable reads; trusted skills need no approval")
             command.add_argument("--workspace-dir", metavar="DIR",
                                  help="enable file tools in this existing directory; file contents may be sent to the model")
             command.add_argument("--enable-shell", action="store_true",
@@ -390,7 +383,7 @@ def parse_args(argv=None):
         return args  # Existing subcommands always bypass the model.
     if args.no_agent:
         if (args.task is not None or args.model or args.base_url or args.api_key_env
-                or args.allow_actions or args.read_var or args.camera_var or args.workspace_dir
+                or args.allow_actions or args.read_var or args.workspace_dir
                 or args.enable_shell or args.allow_shell or args.allow_file_writes
                  or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
                  or args.role or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
@@ -419,7 +412,7 @@ def parse_args(argv=None):
         checked_text(args.task, 16 * 1024)
         if not args.task.strip():
             raise UsageError("--task must not be empty")
-    for name in [*args.read_var, *args.camera_var]:
+    for name in args.read_var:
         safe_ident(name)
     args.scripts_dir = args.scripts_dir or default_scripts_dir()
     return args
@@ -439,7 +432,7 @@ def doctor():
         ("PIL", "pillow", "image codecs"),
     ]
     optional = [
-        ("av", "av", "camera capture", "pip install pymybot[camera]"),
+        ("av", "av", "Agent camera", "pip install pymybot[camera]"),
         ("langgraph", "langgraph", "agent mode", "pip install pymybot[agent]"),
         ("mcp", "mcp", "MCP server and agent client", "pip install pymybot[mcp]"),
         ("PySide6.QtWidgets", "PySide6", "GUI", "pip install pymybot[gui]"),
@@ -664,11 +657,10 @@ def execute(args, stop):
                                "(source checkout: pip install -e '.[mcp]')") from exc
         bindings = session_bindings(args)
         return run_server(stop, robot_path=args.robot, scripts_dir=args.scripts_dir,
-                          module_paths=args.module_path, camera_src_root=args.camera_src_dir,
+                          module_paths=args.module_path,
                           vars=bindings, allow_execution=args.allow_execution,
                           allow_hardware=args.allow_hardware, read_vars=args.read_var,
-                          camera_vars=args.camera_var, timeout=args.timeout,
-                          skills_dir=args.skills_dir)
+                          timeout=args.timeout, skills_dir=args.skills_dir)
     bindings = session_bindings(args)
     if args.command == "agent":
         try:
@@ -690,8 +682,7 @@ def execute(args, stop):
         safe_ident(args.name)
         if (args.count - 1) * args.interval_ms / 1000 >= args.timeout:
             raise UsageError("Sample intervals exhaust --timeout; reduce count/interval or increase timeout")
-    robot = Robot(read_file(args.robot), module_paths=args.module_path,
-                  camera_src_root=args.camera_src_dir, stop_event=stop,
+    robot = Robot(read_file(args.robot), module_paths=args.module_path, stop_event=stop,
                   allow_hardware=getattr(args, "allow_hardware", False), vars=bindings)
     robot._validate(robot.tables)
     if args.command == "check":

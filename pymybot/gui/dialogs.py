@@ -128,37 +128,6 @@ class PreviewDialog(QDialog):
         self.status.setText(self.path)
 
 
-class ImagePreviewDialog(QDialog):
-    """Decode one trusted Camera result without enabling external resources."""
-
-    def __init__(self, parent, title, data, media_type=""):
-        super().__init__(parent)
-        apply_theme(self)
-        self.setWindowTitle(title)
-        self.setModal(True)
-        pixmap = QPixmap()
-        if not pixmap.loadFromData(data):
-            raise ValueError("无法解码 Camera 返回的图片")
-        layout = QVBoxLayout(self)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        image = QLabel()
-        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image.setPixmap(pixmap)
-        scroll.setWidget(image)
-        layout.addWidget(scroll, 1)
-        status = _label(f"{pixmap.width()} × {pixmap.height()}" +
-                        (f" · {media_type}" if media_type else ""), secondary=True)
-        layout.addWidget(status)
-        row = QHBoxLayout()
-        row.addWidget(_button("复制图片", lambda: QApplication.clipboard().setPixmap(pixmap)))
-        row.addStretch()
-        row.addWidget(_button("关闭", self.accept))
-        layout.addLayout(row)
-        self.resize(min(1100, max(480, pixmap.width() + 80)),
-                    min(820, max(360, pixmap.height() + 120)))
-
-
 class PromptPanel(QWidget):
     """Lazy operator editor. Only PromptLibrary may write prompt files.
 
@@ -901,7 +870,7 @@ class CommandDialog(QDialog):
         ("apply-sql", "临时应用 SQL"), ("doctor", "环境诊断"), ("sessions", "会话列表"),
     )
 
-    def __init__(self, parent, *, python, cwd, robot="", module_paths=(), camera_src_dir="",
+    def __init__(self, parent, *, python, cwd, robot="", module_paths=(),
                  scripts_dir="", timeout=180, runner=None, confirm=None):
         super().__init__(parent)
         apply_theme(self)
@@ -911,7 +880,6 @@ class CommandDialog(QDialog):
         self.python = python
         self.cwd = cwd
         self.module_paths = tuple(module_paths)
-        self.camera_src_dir = camera_src_dir
         self.scripts_dir = scripts_dir
         self.robot = robot
         self.runner = runner or self._run_cli
@@ -1058,7 +1026,6 @@ class CommandDialog(QDialog):
             "timeout": self.timeout.value(),
             "allow_hardware": self.hardware.isChecked(),
             "module_paths": self.module_paths,
-            "camera_src_dir": self.camera_src_dir,
             "scripts_dir": self.scripts_dir,
         }
         return cli_args(self.name, **kwargs)

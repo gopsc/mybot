@@ -26,8 +26,6 @@ ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "skills" / "hardware-controller" / "references" / "assets"
 SQL = """
 CREATE TABLE Relay(name String); INSERT INTO Relay(name) VALUES('sensor');
-CREATE TABLE Camera(name String); INSERT INTO Camera(name) VALUES('camera');
-INSERT INTO Camera(name) VALUES('other_camera');
 CREATE TABLE Vars(name String,value Number); INSERT INTO Vars(name,value) VALUES('number',1);
 CREATE TABLE Alias(name String,alias String); INSERT INTO Alias(name,alias) VALUES('alias','sensor');
 """
@@ -50,8 +48,11 @@ def setup(tmp_path):
     robot_path.write_text(SQL, encoding="utf-8")
     trace = []
     made = []
-    options = SimpleNamespace(active=None, run=None, read=None, cleanup=None, query=None,
-                              image=HALManager._image_result(png_bytes(), "png", (1, 1), "fake"))
+    options = SimpleNamespace(active=None, run=None, read=None, cleanup=None, query=None)
+    image = {"result": "OK", "source": "fake", "format": "png", "mime": "image/png",
+             "bytes": len(png_bytes()), "b64": base64.b64encode(png_bytes()).decode(),
+             "base64": base64.b64encode(png_bytes()).decode(), "width": 1, "height": 1}
+    options.image = image
 
     class Variable:
         kind = "lua"
@@ -67,8 +68,6 @@ def setup(tmp_path):
             assert all(v.budget is self.budget for v in made[0].registry.values())
             if options.read:
                 return options.read(self)
-            if "camera" in self.name:
-                return options.image
             return {"result": "OK", "value": 7}
 
     class FakeRobot(Robot):
@@ -89,7 +88,7 @@ def setup(tmp_path):
             trace.append(("active", threading.get_ident()))
             self.state = "Active"
             self.registry = Registry()
-            for name in ("sensor", "camera", "other_camera"):
+            for name in ("sensor",):
                 self.registry.add(Variable(name))
             if options.active:
                 options.active(self)
@@ -113,7 +112,7 @@ def setup(tmp_path):
             self.state = "Inactive"
 
     def factory(**kwargs):
-        defaults = dict(scripts_dir=scripts, allow_hardware=False, read_vars=("sensor",), camera_vars=("camera",),
+        defaults = dict(scripts_dir=scripts, allow_hardware=False, read_vars=("sensor",),
                         robot_factory=FakeRobot)
         defaults.update(kwargs)
         return RobotExecutor(robot_path, **defaults)
@@ -144,7 +143,7 @@ def test_static_context_and_single_owner(setup):
         context = await ex.start()
         assert context["robot"] == "dummy"
         assert context["scripts"] == ["action.mt"]
-        assert {v["name"] for v in context["hardware"]} == {"sensor", "camera", "other_camera"}
+        assert {v["name"] for v in context["hardware"]} == {"sensor"}
         for name, args in [("list_hardware", {}), ("list_action_scripts", {}),
                            ("query_sql", {"sql": "SHOW TABLES;"})]:
             result = await ex.call(name, args)
@@ -363,8 +362,6 @@ def test_read_budget_restored_and_activation_once(setup):
     ("read_variables", {"names": ["sensor", "sensor"]}),
     ("read_variables", {"names": ["missing"]}), ("read_variables", {"names": ["bad.name"]}),
     ("read_variables", {"names": ["sensor"], "timeout": 1}),
-    ("capture_image", {"name": "other_camera"}), ("capture_image", {"name": "sensor"}),
-    ("capture_image", {"name": "camera", "src": "secret.png"}),
     ("list_hardware", []), (None, {}),
 ])
 def test_schema_closed_before_activation(setup, name, args):
@@ -379,7 +376,7 @@ def test_schema_closed_before_activation(setup, name, args):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("variable", ["camera", "number", "alias", "missing"])
+@pytest.mark.parametrize("variable", ["number", "alias", "missing"])
 def test_read_kind_and_whitelist_preflight(setup, variable):
     async def scenario():
         ex = setup.factory(read_vars=(variable, "sensor"))
@@ -391,21 +388,8 @@ def test_read_kind_and_whitelist_preflight(setup, variable):
     asyncio.run(scenario())
 
 
-def test_read_not_whitelisted_and_camera_wrong_declaration(setup):
-    async def scenario():
-        ex = setup.factory(read_vars=(), camera_vars=("sensor",))
-        try:
-            rejected(await ex.call("read_variables", {"names": ["sensor"]}))
-            rejected(await ex.call("capture_image", {"name": "sensor"}))
-            assert not any(name == "active" for name, _ in setup.trace)
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
 @pytest.mark.parametrize("name,args", [("run_action_script", {"script": "action.mt"}),
-                                       ("read_variables", {"names": ["sensor"]}),
-                                       ("capture_image", {"name": "camera"})])
+                                       ("read_variables", {"names": ["sensor"]})])
 def test_hardware_gate_is_forwarded_without_disabling_virtual_io(setup, name, args):
     async def scenario():
         ex = setup.factory(allow_hardware=False)
@@ -937,37 +921,6 @@ def test_cleanup_error_sanitized_and_pool_shutdown(setup):
     asyncio.run(scenario())
 
 
-def test_image_binary_field_and_no_duplicate_base64(setup):
-    async def scenario():
-        ex = setup.factory()
-        try:
-            result = await ex.call("capture_image", {"name": "camera"})
-            assert result["ok"] and result["executed"]
-            assert result["image"] == {"data": png_bytes(), "media_type": "image/png"}
-            assert "base64" not in result["data"] and "b64" not in result["data"]
-            assert base64.b64encode(png_bytes()).decode() not in dumps(ex.records)
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("change", [
-    {"b64": "!invalid!", "base64": "!invalid!"}, {"format": "jpeg"}, {"mime": "text/html"},
-    {"b64": "AAAA", "base64": "AAAA"}, {"base64": "mismatch"},
-    {"b64": "A" * (MAX_IMAGE_BASE64 + 4), "base64": "A" * (MAX_IMAGE_BASE64 + 4)},
-])
-def test_invalid_images_fault_after_capture(setup, change):
-    setup.options.image.update(change)
-    async def scenario():
-        ex = setup.factory()
-        try:
-            unknown(await ex.call("capture_image", {"name": "camera"}))
-            assert ex.faulted
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
 def test_action_script_images_are_lifted_to_binary(setup):
     setup.options.run = lambda _: [{"result": "OK", "value": 1}, dict(setup.options.image)]
     async def scenario():
@@ -999,20 +952,6 @@ def test_action_script_image_cap_is_reported_not_dropped(setup):
             assert [item["image_index"] for item in outputs[:MAX_IMAGES]] == list(range(MAX_IMAGES))
             assert all("image_omitted" in item for item in outputs[MAX_IMAGES:])
             assert not any("b64" in item or "base64" in item for item in outputs)
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-def test_multiple_cameras_can_be_allowlisted(setup):
-    async def scenario():
-        ex = setup.factory(camera_vars=("camera", "other_camera"))
-        try:
-            for name in ("camera", "other_camera"):
-                result = await ex.call("capture_image", {"name": name})
-                assert result["ok"] and result["image"] == {"data": png_bytes(), "media_type": "image/png"}
-            rejected(await ex.call("capture_image", {"name": "sensor"}))
-            assert not ex.faulted
         finally:
             await ex.close()
     asyncio.run(scenario())
@@ -1062,29 +1001,6 @@ def test_real_relay_action_and_read(tmp_path):
             assert result["ok"] and result["data"]["outputs"][-1]["slept"] == 1
             result = await ex.call("read_variables", {"names": ["relay0"]})
             assert result["ok"] and result["data"]["relay0"]["delay"] == 0
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-def test_real_camera_file_source_and_jpeg(tmp_path):
-    import io
-    from PIL import Image
-    buffer = io.BytesIO()
-    Image.new("RGB", (3, 2)).save(buffer, "JPEG")
-    encoded = buffer.getvalue()
-    (tmp_path / "image.jpg").write_bytes(encoded)
-    robot_path = tmp_path / "camera.sql"
-    robot_path.write_text("CREATE TABLE Camera(name String,src String); "
-                          "INSERT INTO Camera(name,src) VALUES('cam','image.jpg');", encoding="utf-8")
-    async def scenario():
-        ex = RobotExecutor(robot_path, scripts_dir=tmp_path, camera_src_root=tmp_path,
-                           camera_vars=("cam",), allow_hardware=False)
-        try:
-            result = await ex.call("capture_image", {"name": "cam"})
-            assert result["ok"]
-            assert result["image"] == {"data": encoded, "media_type": "image/jpeg"}
-            assert result["data"]["width"] == 3 and "b64" not in result["data"]
         finally:
             await ex.close()
     asyncio.run(scenario())

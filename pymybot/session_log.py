@@ -1,6 +1,6 @@
 """Append-only conversation transcripts under ``~/.mybot/sessions``.
 
-Images are content-addressed files so repeated captures do not grow the
+Images are content-addressed files so repeated tool images do not grow the
 transcript. Event bodies are bounded before they reach JSONL: one shell receipt
 or file read must not turn a log line into an unbounded blob.
 """

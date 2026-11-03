@@ -6,7 +6,7 @@ local ffi = require("ffi")
 local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
 local bus = dofile(mpath.resolve("lib/bus_contract.lua"))
 local HAL = {
-    backend = "python", backend_name = "pyserial/pyftdi/pyav/urllib",
+    backend = "python", backend_name = "pyserial/pyftdi/urllib",
     platform = { name = "portable", gpio_prefix = false, pwm_sysfs_root = false },
     PWM_SYSFS_ROOT = false, i2c_addr = {}, uart_baud = {}, uart_orig = {}, pwm_state = {},
     UART_READ_MAX_MS = bus.UART_READ_MAX_MS,
@@ -191,12 +191,6 @@ for _, name in ipairs({ "open", "ioctl_i", "ioctl_p", "read", "write", "errno",
     "tcgetattr", "tcsetattr", "cfmakeraw", "cfsetispeed", "cfsetospeed", "tcflush" }) do
     HAL.sys[name] = unsupported("native " .. name)
 end
--- Camera receives Lua closures, not the Python callable or its attributes.
-function HAL.camera_open(device, width, height)
-    return report(bridge("camera_open", device, width, height))
-end
-function HAL.camera_capture(handle, options) return bridge("camera_capture", handle, options) end
-function HAL.camera_close(handle) return report(bridge("close_handle", handle)) end
 -- Reuse pure Lua virtual models; mixed physical/virtual states route by handle.
 -- Legacy proto=virt callers can still inject()/adopt_fd() without modification.
 local function virtual_path(path)

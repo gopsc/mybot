@@ -132,7 +132,7 @@ CLI 的联网工具仍默认关闭：`--web` 打开 HTTPS 抓取，配了 `--sea
   --scripts-dir skills/hardware-controller/references/assets/scripts
 ```
 
-默认只读：`list_hardware`、`query_sql`、`read_action_script` 这些静态工具可以直接用；执行脚本、读变量和抓图要显式加 `--allow-execution`，要碰物理硬件再加 `--allow-hardware`。完整工具表、资源 URI 和客户端配置见 [docs/mcp.md](mcp.md)。
+默认只读：`list_hardware`、`query_sql`、`read_action_script` 这些静态工具可以直接用；执行脚本和读变量要显式加 `--allow-execution`，要碰物理硬件再加 `--allow-hardware`。完整工具表、资源 URI 和客户端配置见 [docs/mcp.md](mcp.md)。
 
 对话默认转录到 `~/.mybot/sessions`，包含工具参数、受限结果和图片；环境变量里的密钥不会被主动读取。转录只用于回看，不能恢复会话。用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，用 `pymybot sessions` 查看，或用 `pymybot sessions --prune --keep 20 --yes` 清理，详见 [docs/cli.md](cli.md#session-transcripts)。
 
@@ -147,7 +147,7 @@ flowchart LR
     MT["动作脚本<br/>scripts/*.mt"] --> RUNNER["Action runner"]
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL"]
-    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Camera · Shell"]
+    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Shell"]
 ```
 
 - **结构 SQL** 说明机器人身上有哪些变量、接在哪条总线、谁引用谁。
@@ -182,13 +182,13 @@ GUI 是一个前端，不重复实现机器人逻辑：窗口只启动一个 `se
 
 - 启动先显示复古风入口界面：SVG 机器人 logo、扫描线、真实的 serve 状态、`进入控制台` 按钮和淡入过渡；`--no-splash` 可以跳过。
 - 左侧是 workspace、脚本/技能/模块/MCP 配置、硬件树、能力与预算，以及模型摘要。
-- 硬件区可直接选择已加入相机白名单的 Camera 并点击 **抓图**：走宿主侧 `agent.capture` 审批与执行链（不是模型工具），不请求模型、不需要 MT 脚本，成功后弹出本地图片预览；MT Camera 动作仍可用于自动化流程。
+- 摄像头不再出现在结构 SQL 或控制器驱动里。Agent 内置 `list_cameras` 和 `capture_camera` 两个基础工具，直接枚举宿主摄像头并把 JPEG 作为图片内容返回模型；运行时需要 `pip install "pymybot[camera]"`。
 - 右侧是对话、日志、编辑器、资源四个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
 - 编辑器页可打开、编辑和保存 `.mt` 动作脚本与 `robots/*.sql` 结构文件，带行号、MT/SQL 高亮和未保存标记；**检查**只做静态校验（结构用 `check --robot`，动作用 `check --robot --input`），不激活硬件。**运行**通过一次性 CLI 子进程执行，默认虚拟硬件，勾选 `允许硬件` 并确认后才会碰真实设备；编辑结构时可在“运行脚本”里选择一个 `.mt`，对当前结构运行。快捷键：`Ctrl+S` 保存、`Ctrl+Shift+S` 另存、`Ctrl+Enter` 运行、`F6` 检查。
 - 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、脚本编辑器（`Ctrl+E`）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
-- 对话支持流式输出、忙碌指示、重试、清空和复制；提示词更新和宿主抓图仍逐次弹窗确认。
+- 对话支持流式输出、忙碌指示、重试、清空和复制；提示词更新仍逐次弹窗确认。
 - **停止对话**只取消当前 Agent 回合；**急停**不带确认弹窗，会发送 `abort`、调用驱动 `safe()` 并释放硬件，是尽力而为的软件停止，不是硬件急停。
-- GUI 不再提供任何权限勾选；文件、Shell、联网和 MCP 工具默认开启并免审批，可信技能也免审批并默认获得硬件权限，只安装你信任的技能。提示词更新和宿主侧抓图仍逐次确认。
+- GUI 不再提供任何权限勾选；文件、Shell、联网、MCP 和摄像头工具默认开启并免审批，可信技能也免审批并默认获得硬件权限，只安装你信任的技能。提示词更新仍逐次确认。
 - 重启、取消和崩溃恢复都有测试覆盖。
 
 详见 [docs/gui.md](gui.md)，里面有设置、资源预览、MCP 编辑器、会话管理和诊断截图。
@@ -200,7 +200,7 @@ SQL 普通表名会选择 `modules/<表名>.py` 或 `.lua`（`Alias` / `Vars` / 
 - 必需方法：`build(data)`、`call(data)`；可选 `read(data)`（缺省回退到 `call`）和 `destroy(data)`。
 - `data` 是结构元数据、动作参数和触发结果组成的字典；返回非空字典。`result` 可以省略，或用 `"OK"` 表示成功、用 `"ERR"` + `message` 报错。
 - `context.call(operation, *args)` 调用已有的 HAL 操作，权限检查、句柄归属和取消检查都还在；`context.check()` 检查协作预算。`check` 只编译 Python 源码，不执行模块、构造器或驱动方法。
-- 内置的 I2C/SPI/UART/TCP/HTTP/Camera/Shell 普通表已经迁到 Python；HAL 总线句柄仍然可以给 Lua 器件驱动用。Python I2C/SPI/UART 会把显式 `proto=virt` 或 `virt-*` 路径的总线打开为纯内存 HAL 句柄，禁止物理访问；既有的 `proto=virt` 搭配 `/dev/...` 路径写法仍保持虚拟语义，不会悄悄回落到真实硬件。Lua 器件驱动继续复用现有 `virtbus` 模型与实例隔离。既有 Daemon chunk 仍只支持 Lua；如果选中 Python 驱动，静态检查会直接拒绝。
+- 内置的 I2C/SPI/UART/TCP/HTTP/Shell 普通表已经迁到 Python；HAL 总线句柄仍然可以给 Lua 器件驱动用。Python I2C/SPI/UART 会把显式 `proto=virt` 或 `virt-*` 路径的总线打开为纯内存 HAL 句柄，禁止物理访问；既有的 `proto=virt` 搭配 `/dev/...` 路径写法仍保持虚拟语义，不会悄悄回落到真实硬件。Lua 器件驱动继续复用现有 `virtbus` 模型与实例隔离。既有 Daemon chunk 仍只支持 Lua；如果选中 Python 驱动，静态检查会直接拒绝。
 
 仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件、模型或凭据。结构 [`skills/hardware-controller/references/assets/robots/uart-loopback.sql`](../skills/hardware-controller/references/assets/robots/uart-loopback.sql)：
 
@@ -272,7 +272,6 @@ TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/refere
 | 非回环 HTTP/TCP | 关闭 | `--allow-hardware` |
 | Shell 驱动 | 关闭 | `--allow-hardware` |
 | Agent 硬件 Skill 动作 | 免审批，默认硬件权限 | 仅限已安装的可信技能；操作员承担执行风险 |
-| Agent 宿主抓图 | 逐次确认 | `--allow-actions` 或弹窗 |
 | Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |
 | Agent Shell | 关闭 | `--enable-shell` + `--allow-shell` |
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
@@ -283,7 +282,7 @@ Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 i
 
 ## 兼容性
 
-| 平台 | UART | I2C/SPI | Camera | GUI |
+| 平台 | UART | I2C/SPI | Agent 摄像头 | GUI |
 | --- | --- | --- | --- | --- |
 | Linux | pyserial | pyftdi MPSSE / `smbus2` / `spidev` | PyAV V4L2 | PySide6 |
 | Windows | pyserial `COMn` | pyftdi MPSSE | PyAV DirectShow | PySide6 |

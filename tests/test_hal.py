@@ -1,20 +1,16 @@
 """Hardware-free tests of portable transports and the original Lua driver ABI."""
 from __future__ import annotations
 
-import base64
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import importlib
-import io
 import json
 from pathlib import Path
 import socket
-import struct
 import sys
 import threading
 import time
 from types import SimpleNamespace
-import zlib
 
 import pytest
 
@@ -116,15 +112,13 @@ CREATE TABLE UART(name String, path String, baud Number);
 INSERT INTO UART(name,path,baud) VALUES('u','loop://',9600);
 CREATE TABLE HTTP(name String, base String);
 INSERT INTO HTTP(name,base) VALUES('h','http://127.0.0.1');
-CREATE TABLE Camera(name String);
-INSERT INTO Camera(name) VALUES('c');
 CREATE TABLE Shell(name String);
 INSERT INTO Shell(name) VALUES('sh');
 '''
     with Robot(sql, allow_hardware=True) as robot:
         assert {variable.kind for variable in robot.registry.values()} == {"python"}
         assert all(variable.runtime._virtual is None for variable in robot.registry.values())
-        assert len(robot.hal._handles) == 6
+        assert len(robot.hal._handles) == 5
         i2c = robot.registry["i"]
         spi = robot.registry["s"]
         assert i2c.runtime.context.call("i2c_transfer", i2c.read()["fd"], 0x40, [0], 2) == [0, 1]
@@ -271,9 +265,6 @@ def test_missing_libraries_fail_lazily(manager, monkeypatch):
             raise ImportError("optional library missing")
         return original(name)
     monkeypatch.setattr(importlib, "import_module", unavailable)
-    h = manager.call("camera_open")
-    assert h >= 0
-    assert manager.call("camera_capture", h, {})["result"] == "ERR"
     assert manager.call("uart_open", "COM3", 9600) == -1
     assert manager.call("i2c_open", I2C_URL) == -1
     assert manager.call("spi_open", SPI_URL) == -1
@@ -381,286 +372,6 @@ def test_real_pyserial_loopback(manager):
     assert manager.call("uart_flush", h) == 0
 
 
-def png_bytes(width=2, height=1):
-    def chunk(kind, data):
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
-    return (b"\x89PNG\r\n\x1a\n"
-            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress((b"\x00" + b"\x00\x80\xff" * width) * height))
-            + chunk(b"IEND", b""))
-
-
-def mock_jpeg():
-    # Container fixture for the fake encoder; actual decoding is tested with real Pillow.
-    return (b"\xff\xd8\xff\xc0\x00\x0b\x08\x00\x01\x00\x02\x01\x01\x11\x00"
-            b"\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00\x12\xff\xd9")
-
-
-# Verbatim FFmpeg 8 dshow list_devices output, including an audio name with parentheses.
-DSHOW_DEVICES = (
-    '"Integrated Webcam_FHD" (video)\n'
-    '  Alternative name "@device_pnp_\\\\?\\usb#vid_3277&pid_0004#cam0\\global"\n'
-    '"Microphone (Intel\u00ae Smart Sound)" (audio)\n'
-    '  Alternative name "@device_cm_{33D9A762}\\wave_{29D8FB9C}"\n'
-    '"USB Camera" (video)\n'
-    '  Alternative name "@device_pnp_\\\\?\\usb#vid_0c45&pid_6366#cam1\\global"\n'
-)
-
-# Some FFmpeg/PyAV builds print video inputs as "(none)" and identify the
-# category only through the DirectShow GUID in the alternative name.
-DSHOW_DEVICES_NONE = (
-    '"Integrated Webcam_FHD" (none)\n'
-    '  Alternative name "@device_pnp_cam0_{65E8773D-8F56-11D0-A3B9-00A0C9223196}"\n'
-    '"Microphone" (audio)\n'
-    '  Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\\wave_x"\n'
-)
-
-
-@pytest.fixture
-def av_fake(monkeypatch):
-    containers = []
-
-    class FFmpegError(Exception):
-        pass
-
-    class Image:
-        def save(self, stream, fmt, quality):
-            assert fmt == "JPEG" and 1 <= quality <= 100
-            if module.encode_fail:
-                raise OSError("encoder failed")
-            stream.write(mock_jpeg())
-
-    class Frame:
-        width, height = 2, 1
-
-        def __init__(self, live):
-            self.live = live
-
-        def to_image(self):
-            assert self.live, "captured a queued backlog frame"
-            return Image()
-
-    class Packet:
-        size, is_keyframe = 100, True
-
-        def __init__(self, live):
-            self.live = live
-
-        def decode(self):
-            return [Frame(self.live)]
-
-    class Container:
-        def __init__(self, file, fmt, options, timeout):
-            self.file, self.format, self.options, self.timeout = file, fmt, options, timeout
-            self.closed = 0
-            self.read_ok = True
-            self.backlog = 3
-            self.streams = SimpleNamespace(video=[SimpleNamespace(average_rate=1000, guessed_rate=None)])
-            containers.append(self)
-
-        def demux(self, stream):
-            assert stream is self.streams.video[0]
-            while self.read_ok:
-                if self.backlog:
-                    self.backlog -= 1
-                    yield Packet(False)
-                else:
-                    time.sleep(.002)  # waiting on the camera: a 1000 fps stream's live frame
-                    yield Packet(True)
-
-        def close(self):
-            self.closed += 1
-
-    def open_(file, format=None, options=None, timeout=None):
-        if options.get("list_devices"):
-            assert module.logging.level == module.logging.INFO and module.logging.capturing
-            module.logging.captured.append((32, "dshow", module.devices))
-            raise FFmpegError("Immediate exit requested")
-        if module.open_fail:
-            raise FFmpegError("I/O error")
-        return Container(file, format, options, timeout)
-
-    class Capture:
-        def __init__(self, local=True):
-            assert local is False
-
-        def __enter__(self):
-            logging.captured, logging.capturing = [], True
-            return logging.captured
-
-        def __exit__(self, *exc):
-            logging.capturing = False
-
-    logging = SimpleNamespace(INFO=32, level=None, capturing=False, captured=[], Capture=Capture)
-    logging.get_level = lambda: logging.level
-    logging.set_level = lambda level: setattr(logging, "level", level)
-    module = SimpleNamespace(open=open_, FFmpegError=FFmpegError, logging=logging,
-                             containers=containers, devices=DSHOW_DEVICES,
-                             open_fail=False, encode_fail=False)
-    monkeypatch.setitem(sys.modules, "av", module)
-    monkeypatch.setitem(sys.modules, "av.logging", logging)
-    return module
-
-
-def test_dshow_video_devices_accept_none_kind_with_video_guid(manager, av_fake):
-    av_fake.devices = DSHOW_DEVICES_NONE
-    assert manager._dshow_video_devices(av_fake) == [
-        "@device_pnp_cam0_{65E8773D-8F56-11D0-A3B9-00A0C9223196}"]
-
-
-def test_camera_lazy_capture_fields_reconfigure_close(manager, av_fake):
-    h = manager.call("camera_open", 0, 640, 480)
-    assert h >= 0 and not av_fake.containers
-    shot = manager.call("camera_capture", h, {})
-    assert shot["result"] == "OK", shot
-    assert shot["format"] == "jpeg" and shot["mime"] == "image/jpeg"
-    assert shot["source"] == "pyav" and shot["b64"] == shot["base64"]
-    assert base64.b64decode(shot["b64"]) == mock_jpeg()
-    assert (shot["width"], shot["height"], shot["bytes"]) == (2, 1, len(mock_jpeg()))
-    assert av_fake.containers[0].options["video_size"] == "640x480"
-    av_fake.containers[0].backlog = 50  # frames the device queued while idle
-    assert manager.call("camera_capture", h, {})["result"] == "OK", manager.call("last_error")
-    assert len(av_fake.containers) == 1 and av_fake.containers[0].backlog == 0
-    assert manager.call("camera_capture", h, {"device": 1})["result"] == "OK"
-    assert len(av_fake.containers) == 2 and av_fake.containers[0].closed == 1
-    assert manager.call("close_handle", h) == 0
-    assert av_fake.containers[1].closed == 1
-    assert manager.call("camera_capture", h, {})["result"] == "ERR"
-
-
-@pytest.mark.parametrize("platform, device, file, fmt", [
-    ("linux", 0, "/dev/video0", "v4l2"),
-    ("linux", "/dev/video2", "/dev/video2", "v4l2"),
-    ("darwin", 1, "1:none", "avfoundation"),
-    ("win32", 0, "video=@device_pnp_\\\\?\\usb#vid_3277&pid_0004#cam0\\global", "dshow"),
-    ("win32", 1, "video=@device_pnp_\\\\?\\usb#vid_0c45&pid_6366#cam1\\global", "dshow"),
-])
-def test_camera_platform_device_inputs(manager, av_fake, monkeypatch, platform, device, file, fmt):
-    monkeypatch.setattr(sys, "platform", platform)
-    h = manager.call("camera_open", device, 320, 240)
-    assert manager.call("camera_capture", h, {})["result"] == "OK", manager.call("last_error")
-    container = av_fake.containers[-1]
-    assert (container.file, container.format) == (file, fmt)
-    assert container.options["video_size"] == "320x240"
-    assert ("framerate" in container.options) == (fmt == "avfoundation")
-    assert av_fake.logging.level is None
-
-
-def test_camera_platform_failures(manager, av_fake, monkeypatch):
-    monkeypatch.setattr(sys, "platform", "win32")
-    h = manager.call("camera_open", 2)
-    response = manager.call("camera_capture", h, {})
-    assert response["result"] == "ERR" and "2 video devices found" in response["message"]
-    monkeypatch.setattr(sys, "platform", "freebsd14")
-    response = manager.call("camera_capture", h, {})
-    assert response["result"] == "ERR" and "not supported on freebsd14" in response["message"]
-    assert not av_fake.containers
-
-
-def test_camera_capture_failures_release_and_retry(manager, av_fake):
-    h = manager.call("camera_open", 0, 640, 480)
-    av_fake.open_fail = True
-    response = manager.call("camera_capture", h, {})
-    assert response["result"] == "ERR" and "camera unavailable" in response["message"]
-    assert not av_fake.containers
-    av_fake.open_fail = False
-    assert manager.call("camera_capture", h, {})["result"] == "OK"
-    av_fake.containers[-1].read_ok = False
-    assert manager.call("camera_capture", h, {})["result"] == "ERR"
-    assert av_fake.containers[-1].closed == 1
-    av_fake.encode_fail = True
-    assert "encoder failed" in manager.call("camera_capture", h, {})["message"]
-    assert len(av_fake.containers) == 2 and av_fake.containers[-1].closed == 1
-
-
-def test_camera_source_sandbox_validation_and_ceiling(tmp_path, av_fake):
-    root = tmp_path / "allowed"
-    root.mkdir()
-    (root / "photo.png").write_bytes(png_bytes())
-    outside = tmp_path / "outside.png"
-    outside.write_bytes(png_bytes())
-    with_manager = HALManager(root)
-    h = with_manager.call("camera_open")
-    try:
-        shot = with_manager.call("camera_capture", h, {"src": "photo.png"})
-        assert shot["result"] == "OK" and shot["mime"] == "image/png"
-        assert not av_fake.containers
-        for src in ["../outside.png", str(outside), "missing.png"]:
-            assert with_manager.call("camera_capture", h, {"src": src})["result"] == "ERR"
-        (root / "bad.png").write_bytes(png_bytes()[:-2])
-        assert with_manager.call("camera_capture", h, {"src": "bad.png"})["result"] == "ERR"
-        (root / "bad.png").write_bytes(b"not an image")
-        assert with_manager.call("camera_capture", h, {"src": "bad.png"})["result"] == "ERR"
-        with_manager.MAX_IMAGE_BYTES = 10
-        assert "ceiling" in with_manager.call("camera_capture", h, {"src": "photo.png"})["message"]
-    finally:
-        with_manager.close()
-    denied = HALManager()
-    try:
-        h = denied.call("camera_open")
-        response = denied.call("camera_capture", h, {"src": str(outside), "src_root": str(tmp_path)})
-        assert response["result"] == "ERR" and "camera_src_root" in response["message"]
-    finally:
-        denied.close()
-
-
-def test_camera_source_symlink_escape(tmp_path, av_fake):
-    root = tmp_path / "root"
-    root.mkdir()
-    outside = tmp_path / "image.png"
-    outside.write_bytes(png_bytes())
-    try:
-        (root / "escape.png").symlink_to(outside)
-    except OSError:
-        pytest.skip("symlinks require privileges on this platform")
-    m = HALManager(root)
-    try:
-        h = m.call("camera_open")
-        assert m.call("camera_capture", h, {"src": "escape.png"})["result"] == "ERR"
-    finally:
-        m.close()
-
-
-def test_camera_validation_and_no_silent_simulator_fallback(manager, av_fake, monkeypatch):
-    assert manager.call("camera_open", "https://untrusted/video", 1, 1) == -1
-    assert manager.call("camera_open", 0, 0, 1) == -1
-    h = manager.call("camera_open")
-    assert manager.call("camera_capture", h, {"width": 10})["result"] == "ERR"
-    monkeypatch.setenv("MYBOT_SIM_CAPTURE_SOCK", "/missing/socket")
-    assert "not supported" in manager.call("camera_capture", h, {})["message"]
-    assert not av_fake.containers
-
-
-def test_real_pillow_image_validation(tmp_path):
-    from PIL import Image
-    m = HALManager(tmp_path)
-    h = m.call("camera_open")
-    try:
-        for extension, fmt in [(".png", "PNG"), (".jpg", "JPEG")]:
-            buffer = io.BytesIO()
-            Image.new("RGB", (12, 8)).save(buffer, fmt)
-            encoded = buffer.getvalue()
-            file = tmp_path / ("image" + extension)
-            file.write_bytes(encoded)
-            shot = m.call("camera_capture", h, {"src": str(file)})
-            assert shot["result"] == "OK", shot
-            assert (shot["width"], shot["height"]) == (12, 8)
-            file.write_bytes(encoded[:-8])
-            assert m.call("camera_capture", h, {"src": str(file)})["result"] == "ERR"
-        # Valid PNG framing and CRCs around a corrupt deflate stream: only a real decode catches it.
-        good = png_bytes(4, 4)
-        pos = good.index(b"IDAT") - 4
-        n = struct.unpack_from(">I", good, pos)[0]
-        garbage = b"IDAT\x78\x9c" + b"\xff" * (n - 2)
-        bad = (good[:pos] + struct.pack(">I", n) + garbage
-               + struct.pack(">I", zlib.crc32(garbage)) + good[pos + 12 + n:])
-        (tmp_path / "corrupt.png").write_bytes(bad)
-        response = m.call("camera_capture", h, {"src": "corrupt.png"})
-        assert response["result"] == "ERR" and "decode failed" in response["message"]
-    finally:
-        m.close()
-
-
 def test_portable_sleep_cancellation_and_unsupported(manager):
     assert manager.call("sleep_ms", 0) == 0
     assert manager.call("sleep_ms", float("nan")) == 0
@@ -702,27 +413,12 @@ def lua_runtime(manager, monkeypatch):
     return lua
 
 
-def test_python_runtime_camera_bridge(manager, av_fake):
-    from pymybot.native import PythonState
-    # av_fake is installed: this opt-in exercises dispatch, never real hardware.
-    state = PythonState([MODULES], manager, threading.Event(), allow_hardware=True)
-    try:
-        state.load(MODULES / "Camera.py")
-        assert state.call("build", {})["result"] == "OK"
-        result = state.call("call", {})
-        assert result["result"] == "OK" and result["b64"]
-        assert state.call("destroy", {})["result"] == "OK"
-    finally:
-        state.close()
-
-
 def test_lua_original_i2c_spi_buffers_and_utf8_bridge(manager, ftdi, monkeypatch):
     lua = lua_runtime(manager, monkeypatch)
     lua.globals()["i2c_url"] = I2C_URL
     lua.globals()["spi_url"] = SPI_URL
     lua.execute('''
         assert(__hal_call == nil)
-        assert(type(__BOT4CJ_HAL.camera_capture) == "function")
         local f = i2c_open(i2c_url)
         assert(i2c_set_addr(f, 0x40))
         assert(i2c_write_reg(f, 0xFF, 0x80) == true)
@@ -872,21 +568,17 @@ def test_lua_hal_speaker_open_is_unsupported(manager, monkeypatch):
     assert not manager._handles
 
 
-def test_python_bus_modules_and_camera(manager, ftdi, serial_fake, av_fake):
+def test_python_bus_modules(manager, ftdi, serial_fake):
     from pymybot.native import PythonState
     for module, data in [("I2C", dict(path=I2C_URL)),
                          ("SPI", dict(path=SPI_URL, spi_mode=0, bits=8, speed=1000000, delay=0)),
-                         ("UART", dict(path="COM9", baud=9600)),
-                         ("Camera", dict(device=0))]:
+                         ("UART", dict(path="COM9", baud=9600))]:
         state = PythonState([MODULES], manager, threading.Event(), allow_hardware=True)
         try:
             state.load(MODULES / (module + ".py"))
             assert state.call("build", data)["result"] == "OK"
             result = state.call("call", {})
             assert result["result"] == "OK"
-            if module == "Camera":
-                assert result["b64"] and result["format"] == "jpeg"
-                assert state.call("read", {})["result"] == "OK"
             assert state.call("destroy", {})["result"] == "OK"
         finally:
             state.close()

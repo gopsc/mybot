@@ -1,6 +1,6 @@
 ---
 name: hardware-controller
-description: Control and program robots through the self-contained pymybot Runtime, Structure SQL, MT actions, Python/Lua drivers, HAL, MCP, and virtual devices. Use for hardware inspection, robot actions, sensor sampling, Camera capture, MCP integration, driver development, and controller troubleshooting.
+description: Control and program robots through the self-contained pymybot Runtime, Structure SQL, MT actions, Python/Lua drivers, HAL, MCP, and virtual devices. Use for hardware inspection, robot actions, sensor sampling, MCP integration, driver development, and controller troubleshooting.
 ---
 
 # Hardware Controller
@@ -41,7 +41,7 @@ python -m pymybot mcp --robot references/assets/robots/relay-test.sql --scripts-
 python skills/hardware-controller/scripts/hardware_controller.py mcp --robot skills/hardware-controller/references/assets/robots/relay-test.sql --scripts-dir skills/hardware-controller/references/assets/scripts
 ```
 
-MCP 默认只读。执行动作、读取变量和抓图需要 `--allow-execution`；物理硬件另需 `--allow-hardware`。Camera 和变量读取继续使用白名单。
+MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物理硬件另需 `--allow-hardware`。变量读取继续使用白名单。
 
 ## Agent 原生 run_skill
 
@@ -72,17 +72,14 @@ run_skill(skill="hardware-controller", action="sample", arguments={
   "robot": {"scope": "robots", "path": "relay-test.sql"},
   "name": "relay0", "count": 1
 })
-run_skill(skill="hardware-controller", action="capture", arguments={
-  "robot": {"scope": "robots", "path": "camwin.sql"}, "camera": "cam"
-})
 ```
 
-允许的 action 为 `doctor`、`scripts`、`hardware`、`query`、`check`、`run`、`sample`、`capture`，定义在 `skill.json`。技能是操作者可信内容，因此 `run_skill` 不弹审批，路径/参数/输出/超时限制已移除，`run`、`sample`、`capture` 直接获得 `--allow-hardware`。模型仍只能选择已声明的 action；entrypoint 和 argv 由技能清单固定。操作员应只安装可信技能，因为运行技能等同于运行宿主代码并可直接操作真实硬件。`capture` 通过 `Camera.mt` 执行；GUI 宿主抓图仍走原生 `agent.capture` 并直接预览图片。
+允许的 action 为 `doctor`、`scripts`、`hardware`、`query`、`check`、`run`、`sample`，定义在 `skill.json`。技能是操作者可信内容，因此 `run_skill` 不弹审批，路径/参数/输出/超时限制已移除，`run` 和 `sample` 直接获得 `--allow-hardware`。模型仍只能选择已声明的 action；entrypoint 和 argv 由技能清单固定。操作员应只安装可信技能，因为运行技能等同于运行宿主代码并可直接操作真实硬件。摄像头不属于控制器：Agent 使用内置的 `list_cameras` / `capture_camera` 工具直接访问宿主设备。
 
 ## 安全与兼容性
 
 - 优先复用 HAL、`context.call()` 和 `context.check()`，不要用临时 I/O 绕过权限、预算、句柄所有权或清理。
-- I2C、SPI、UART、TCP、HTTP、Camera、Shell 的普通表 Driver 使用 Python；保留其他传感器 Lua Driver、共享 Lua 库和 Lua Daemon。
+- I2C、SPI、UART、TCP、HTTP、Shell 的普通表 Driver 使用 Python；保留其他传感器 Lua Driver、共享 Lua 库和 Lua Daemon。
 - Python/Lua Driver 都是可信进程内代码，不是沙箱。静态 `check` 不执行 Python 模块、构造器或生命周期方法。
 - 用户工作区仍可使用自己的 `robots/`、`scripts/`、`modules/`；`pymybot new` 的用户项目布局不变。
 - wheel 和 frozen build 内的 `pymybot/assets/` 布局保持不变。

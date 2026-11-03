@@ -59,7 +59,7 @@ def module_roots(paths=None):
 
 
 class Robot:
-    def __init__(self, sql_text, *, module_paths=None, camera_src_root=None, stop_event=None, allow_hardware=False,
+    def __init__(self, sql_text, *, module_paths=None, stop_event=None, allow_hardware=False,
                  vars=None):
         from .hal import HALManager
         self.tables = load_structure(check_script(sql_text))
@@ -67,9 +67,8 @@ class Robot:
         self.module_paths = module_roots(module_paths)
         self.registry = Registry()
         self.stop_event = stop_event if stop_event is not None else threading.Event()
-        self.camera_src_root = camera_src_root
         self.allow_hardware = allow_hardware
-        self.hal = HALManager(camera_src_root=camera_src_root)
+        self.hal = HALManager()
         self.state = "Loaded"
         self.structure_path = ""
         self.deactivate_grace_ms = 30000
@@ -302,7 +301,7 @@ class Robot:
                 if any(var.kind == "daemon" and not var._done.is_set() for var in self.registry.values()):
                     raise DriverError("Cannot reactivate while a daemon worker is still exiting")
                 from .hal import HALManager
-                self.hal = HALManager(camera_src_root=self.camera_src_root)
+                self.hal = HALManager()
             self.registry = Registry()
             self._metas = {}
             self.state = "Active"

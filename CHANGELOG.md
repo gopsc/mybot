@@ -8,6 +8,12 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Cameras are now Agent built-in tools. `list_cameras` enumerates host devices
+  and `capture_camera` returns a bounded JPEG image block, backed by PyAV/Pillow
+  (`pymybot[camera]`). The controller no longer declares cameras, exposes HAL
+  camera operations, or ships `Camera.py` / `Camera.mt` / camera example
+  structures; CLI, MCP, serve and the GUI no longer expose camera parameters,
+  capture tools or preview controls.
 - The GUI no longer shows permission checkboxes. File, Shell, web and MCP tools
   are enabled whenever their prerequisite exists and their calls run without
   approval; prompt updates and host-side capture still ask per call. The CLI

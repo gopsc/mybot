@@ -7,7 +7,8 @@ Source: This is the authoritative controller testing document; fixtures and test
 | Layer | Location | What it proves |
 | --- | --- | --- |
 | Unit | `tests/test_{sql,dsl}.py` | Parser/typing/error semantics |
-| HAL | `tests/test_hal.py` | Bus framing, URL/gating, camera and shell boundaries |
+| HAL | `tests/test_hal.py` | Bus framing, URL/gating and shell boundaries |
+| Agent camera | `tests/test_camera.py` | Host enumeration, capture, bounds and Agent tools |
 | Virtual devices | `tests/fixtures/virt/*.sql` + `*.mt` | Real driver build/call/destroy paths without hardware |
 | Robot integration | `tests/test_robot.py`, `tests/test_daemon.py` | Activation, inheritance, controllers, sampling |
 | Agent | `tests/test_agent*.py` | Offline model loop, approval, budgets, cleanup |
@@ -28,7 +29,7 @@ agent channel—`ci_smoke.py agent` fails instead. The agent channel installs
 ```sh
 python -m pytest -q
 python -m pytest tests/test_hal.py -q
-python -m pytest -q -k camera
+python -m pytest tests/test_camera.py -q
 python -m pytest --durations=10 -q
 ```
 

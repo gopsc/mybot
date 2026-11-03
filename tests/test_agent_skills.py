@@ -280,7 +280,7 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "Skills are trusted operator content" in instructions
     assert "run_skill executes declared actions without approval" in instructions
     assert "runnable via run_skill" in instructions
-    base_tools = ["read_prompt", "update_prompt"]
+    base_tools = ["read_prompt", "update_prompt", "list_cameras", "capture_camera"]
     assert sorted(tool.name for tool in tools) == sorted(
         base_tools + ["list_skills", "read_skill", "create_skill", "run_skill"])
     assert sorted(tool.name for tool in plain) == sorted(base_tools)

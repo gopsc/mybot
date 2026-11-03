@@ -156,7 +156,7 @@ flowchart LR
     MT["MT action<br/>scripts/*.mt"] --> RUNNER["Action runner"]
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL"]
-    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Camera · Shell"]
+    HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Shell"]
 ```
 
 - **Structure SQL** declares variables, buses, addresses and references.

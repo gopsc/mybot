@@ -33,7 +33,7 @@ def _read_timeout(seconds):
 
 
 TOOLS = {"get_status", "list_hardware", "list_action_scripts", "read_action_script",
-         "query_sql", "run_action_script", "read_variables", "capture_image", "deactivate"}
+         "query_sql", "run_action_script", "read_variables", "deactivate"}
 
 
 def command(robot=None, scripts=None, extra=()):
@@ -100,8 +100,7 @@ def test_read_only_by_default_never_activates(tmp_path):
     async def scenario():
         async with client(tmp_path) as session:
             for tool, args in [("run_action_script", {"script": "relay-test.mt"}),
-                               ("read_variables", {"names": ["relay0"]}),
-                               ("capture_image", {"name": "camera"})]:
+                               ("read_variables", {"names": ["relay0"]})]:
                 result = await session.call_tool(tool, args)
                 assert result.isError
                 receipt = data(result)
@@ -141,7 +140,6 @@ def test_paths_allowlists_and_unknown_tools_are_rejected(tmp_path):
             for path in ("../scripts/relay-test.mt", str(ASSETS / "scripts/relay-test.mt"), "missing.mt"):
                 result = data(await session.call_tool("run_action_script", {"script": path}))
                 assert not result["ok"] and not result["executed"]
-            assert (await session.call_tool("capture_image", {"name": "relay0"})).isError
             assert (await session.call_tool("read_variables", {"names": ["relay0"]})).isError
             assert data(await session.call_tool("get_status", {}))["data"]["state"] == "loaded"
             assert (await session.call_tool("not_a_tool", {})).isError

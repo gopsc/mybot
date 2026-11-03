@@ -151,7 +151,7 @@ class ScriptEditorPanel(QWidget):
     dirty_changed = Signal(bool)
 
     def __init__(self, parent=None, *, python=None, cwd=".", robot="", scripts_root="",
-                 robots_root="", module_paths=(), camera_src_dir="", timeout=180.0,
+                 robots_root="", module_paths=(), timeout=180.0,
                  runner=None, confirm=None, reader=None, writer=None):
         super().__init__(parent)
         self.python = python or sys.executable
@@ -160,7 +160,6 @@ class ScriptEditorPanel(QWidget):
         self.scripts_root = Path(scripts_root).absolute() if str(scripts_root or "").strip() else None
         self.robots_root = Path(robots_root).absolute() if str(robots_root or "").strip() else None
         self.module_paths = tuple(str(path) for path in module_paths if str(path).strip())
-        self.camera_src_dir = str(camera_src_dir or "")
         self.current_path: str | None = None
         self.saved_text = ""
         self._dirty = False
@@ -256,7 +255,7 @@ class ScriptEditorPanel(QWidget):
 
     # -- context -----------------------------------------------------------
     def set_context(self, *, python=None, cwd=None, robot=None, scripts_root=None,
-                    robots_root=None, module_paths=None, camera_src_dir=None, timeout=None):
+                    robots_root=None, module_paths=None, timeout=None):
         if python:
             self.python = python
         if cwd is not None:
@@ -278,8 +277,6 @@ class ScriptEditorPanel(QWidget):
             self.refresh_files()
         if module_paths is not None:
             self.module_paths = tuple(str(path) for path in module_paths if str(path).strip())
-        if camera_src_dir is not None:
-            self.camera_src_dir = str(camera_src_dir or "")
         if timeout is not None:
             self.timeout.setValue(float(timeout))
         self._sync_robot_label()
@@ -550,8 +547,7 @@ class ScriptEditorPanel(QWidget):
         if not self.current_path:
             raise ValueError("请先保存脚本")
         if command == "check" and self._is_structure():
-            return cli_args("check", robot=self.current_path, module_paths=self.module_paths,
-                            camera_src_dir=self.camera_src_dir)
+            return cli_args("check", robot=self.current_path, module_paths=self.module_paths)
         script = self._run_script()
         robot = self._run_structure()
         if not str(script).strip():
@@ -561,7 +557,7 @@ class ScriptEditorPanel(QWidget):
         timeout = self.timeout.value() if command == "run" else None
         return cli_args(command, robot=robot, script=script, timeout=timeout,
                         allow_hardware=command == "run" and self.hardware.isChecked(),
-                        module_paths=self.module_paths, camera_src_dir=self.camera_src_dir)
+                        module_paths=self.module_paths)
 
     def check(self):
         self._start("check")

@@ -39,7 +39,7 @@ from .security import MAX_BODY, dumps
 MAX_LINE = MAX_BODY + 1024 * 1024
 INSTRUCTIONS = (
     "Control only the operator-configured robot and trusted action scripts. "
-    "Static queries do not activate hardware. Execution, reads, capture and teardown can have physical effects. "
+    "Static queries do not activate hardware. Execution, reads and teardown can have physical effects. "
     "An unknown outcome is not a rollback: do not retry it. Check get_status after cancellation or failure. "
     "Only the operator may change launch permissions or restart a faulted process. "
     "Reference resources describe SQL, MT and Lua; they do not grant execution permission."
@@ -78,8 +78,6 @@ def tool_definitions(timeout):
         ("read_variables", "Read allowlisted variables. Activation and reads may write to devices.",
          {"names": {"type": "array", "items": ident, "minItems": 1, "maxItems": MAX_LIST,
                     "uniqueItems": True}, "timeout": seconds}, ["names"]),
-        ("capture_image", "Capture an allowlisted Camera and return MCP image content. May activate hardware.",
-         {"name": ident, "timeout": seconds}, ["name"]),
         ("deactivate", "Release an idle robot; not an emergency stop and never clears a fault.", {}, []),
     ]
     return [types.Tool(
@@ -304,8 +302,8 @@ async def _run(out, stop, *, timeout, allow_execution, **config):
             await executor.close()
 
 
-def run_server(stop, *, robot_path, scripts_dir, module_paths=None, camera_src_root=None,
-               vars=None, allow_execution=False, allow_hardware=False, read_vars=(), camera_vars=(),
+def run_server(stop, *, robot_path, scripts_dir, module_paths=None,
+               vars=None, allow_execution=False, allow_hardware=False, read_vars=(),
                timeout=180, skills_dir=None):
     """Serve MCP on stdout; exits with a stderr diagnostic instead of JSON."""
     if allow_hardware and not allow_execution:
@@ -321,9 +319,9 @@ def run_server(stop, *, robot_path, scripts_dir, module_paths=None, camera_src_r
         with _protocol_output() as out:
             asyncio.run(_run(out, stop, timeout=timeout, allow_execution=allow_execution,
                              robot_path=robot_path, scripts_dir=scripts_dir,
-                             module_paths=module_paths, camera_src_root=camera_src_root,
+                             module_paths=module_paths,
                              vars=vars, allow_hardware=allow_hardware, read_vars=read_vars,
-                             camera_vars=camera_vars, skills=skills))
+                             skills=skills))
     except KeyboardInterrupt:
         # The CLI installs SIGINT/SIGTERM handlers that set stop; a direct or
         # embedded Ctrl+C still reaches this branch after asyncio has cleaned up.

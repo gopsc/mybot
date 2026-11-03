@@ -2,8 +2,6 @@
 
 Robot behaviour is not re-tested here: the window never executes robot code.
 """
-import base64
-import io
 import json
 import os
 import subprocess
@@ -698,7 +696,6 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
         dialog.entries["model"].setText("openai:test")
         dialog.entries["module_paths"].setPlainText("modules\n extra \n")
         dialog.entries["read_vars"].setText("v0,v0,bad name,v1")
-        dialog.entries["camera_vars"].setText("camera0")
         dialog.entries["vars"].setPlainText("user=alice\npass=secret\nbad line")
         dialog.entries["scripts_dir"].setText("scripts")
         dialog.timeout.setValue(12.5)
@@ -712,7 +709,7 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     assert restarted == [True]
     assert app.cfg.model == "openai:test" and app.cfg.module_paths == ["modules", "extra"]
     assert app.timeout_box.value() == 12.5 and app.requests_box.value() == 3 and app.tools_box.value() == 5
-    assert app.read_vars_entry.text() == "v0,v1" and app.camera_vars_entry.text() == "camera0"
+    assert app.read_vars_entry.text() == "v0,v1"
     assert app.cfg.vars == {"user": "alice", "pass": "secret"}
     assert app.context_entries["scripts_dir"].text() == "scripts"
     assert "openai:test" in app.model_label.text()
@@ -774,10 +771,8 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     _, app = ui
     client = attach_client(app)
     app.context_entries["skills_dir"].setText("skills")
-    app.context_entries["camera_src_dir"].setText("images")
     app.context_entries["module_paths"].setText(os.pathsep.join(["modules", "other"]))
     app.read_vars_entry.setText("v0，v1,v0,bad name")
-    app.camera_vars_entry.setText("cam")
     app.timeout_box.setValue(2.5)
     app.requests_box.setValue(2)
     app.tools_box.setValue(4)
@@ -786,47 +781,10 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     app.send_button.click()
     params = client.requests[0][1]
     assert params["skillsDir"] == str(ROOT / "skills")
-    assert params["cameraSrcDir"] == str(ROOT / "images")
     assert params["modulePaths"] == [str(ASSETS / "modules"), str(ROOT / "other")]
-    assert params["readVars"] == ["v0", "v1"] and params["cameraVars"] == ["cam"]
+    assert params["readVars"] == ["v0", "v1"]
     assert params["vars"] == {"user": "alice"}
     assert (params["timeout"], params["maxRequests"], params["maxToolCalls"]) == (2.5, 2, 4)
-
-
-def test_native_camera_capture_uses_allowlist_and_previews_image(ui, monkeypatch, qapp):
-    from PIL import Image
-
-    gui, app = ui
-    client = attach_client(app)
-    app._hardware_items = [
-        {"name": "cam", "type": "Camera"}, {"name": "other", "type": "Camera"},
-        {"name": "timer", "type": "Timer"},
-    ]
-    app.camera_vars_entry.setText("cam")
-    app._refresh_camera_options()
-    assert [app.camera_box.itemText(i) for i in range(app.camera_box.count())] == ["cam"]
-    app.capture_image()
-    assert client.requests[-1][0] == "agent.capture"
-    params = client.requests[-1][1]
-    assert params["name"] == "cam" and params["cameraVars"] == ["cam"]
-    assert "task" not in params and app.busy
-
-    encoded = io.BytesIO()
-    Image.new("RGB", (2, 3), (12, 34, 56)).save(encoded, format="PNG")
-
-    shown = []
-    monkeypatch.setattr(app, "_exec_dialog", lambda dialog: shown.append(dialog) or 0)
-    client.futures[-1].set_result({
-        "ok": True, "executed": True, "state": "completed", "data": {},
-        "image": {"data": base64.b64encode(encoded.getvalue()).decode("ascii"),
-                  "media_type": "image/png"},
-    })
-    assert qt_wait(qapp, lambda: bool(shown))
-    assert not app.busy
-    assert isinstance(shown[0], gui.ImagePreviewDialog)
-    assert shown[0].windowTitle() == "Camera · cam"
-    assert app.status_notice.text() == "已抓取 Camera：cam"
-    shown[0].close()
 
 
 def test_abort_button_targets_the_server_not_the_agent_turn(ui, qapp):

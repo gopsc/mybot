@@ -90,7 +90,6 @@ def cli_args(
     timeout=None,
     allow_hardware=False,
     module_paths=(),
-    camera_src_dir="",
     scripts_dir="",
 ):
     """Build the argv for one controller-mode command.
@@ -111,8 +110,6 @@ def cli_args(
     for path in module_paths:
         if str(path).strip():
             args.append(f"--module-path={path}")
-    if str(camera_src_dir).strip():
-        args.append(f"--camera-src-dir={camera_src_dir}")
     if command in {"check", "run"}:
         if command == "run" and not str(script).strip():
             raise ValueError("run requires an action script")
