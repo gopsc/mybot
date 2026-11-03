@@ -95,7 +95,6 @@ class AgentConfig:
     max_context_tokens: int | None = None
     context_reserve_tokens: int = 2048
     allow_actions: bool = False
-    allow_shell: bool = False
     allow_file_writes: bool = False
     mcp_config: str | None = None
     allow_mcp_tools: bool = False
@@ -774,7 +773,6 @@ class AgentSession:
         return ((name in IO_TOOLS and not self.config.allow_actions)
                 or (name in FILE_WRITE_TOOLS and not self.config.allow_file_writes)
                 or (name in WEB_TOOLS and not self.config.allow_web)
-                or (name == "shell" and not self.config.allow_shell)
                 or name == "install_skill")
 
     async def _approve(self, name, arguments, *, display, public, emit=True, confirm_name=None,
@@ -1408,7 +1406,7 @@ async def run_cli_agent(args, stop):
                              history_bytes=args.max_history_bytes,
                              max_context_tokens=getattr(args, "max_context_tokens", None),
                              context_reserve_tokens=getattr(args, "context_reserve_tokens", 2048),
-                             allow_actions=args.allow_actions, allow_shell=args.allow_shell,
+                             allow_actions=args.allow_actions,
                              allow_file_writes=args.allow_file_writes,
                              mcp_config=mcp_config,
                              allow_mcp_tools=getattr(args, "allow_mcp_tools", False),

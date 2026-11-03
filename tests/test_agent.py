@@ -265,7 +265,6 @@ def test_agent_uses_skills_without_a_robot(tmp_path):
 
 
 @pytest.mark.parametrize("tool,arguments,permission", [
-    ("shell", {"command": "exit 0"}, "allow_shell"),
     ("write_file", {"path": "a.txt", "content": "new"}, "allow_file_writes"),
     ("edit_file", {"path": "a.txt", "old_string": "old", "new_string": "new"}, "allow_file_writes"),
 ])
@@ -279,7 +278,7 @@ def test_workspace_approvals_are_independent(tool, arguments, permission, mode, 
     elif mode == "preapprove":
         flags[permission] = True
     elif mode == "other":
-        flags["allow_file_writes" if permission == "allow_shell" else "allow_shell"] = True
+        flags["allow_actions"] = True
     confirmations = []
 
     async def confirm(name, args):
@@ -836,7 +835,7 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
         pytest.fail("Workspace tools must not activate hardware")
     monkeypatch.setattr(Robot, "active", forbidden_activation)
     monkeypatch.setattr(agent_module, "create_model", lambda _: (FunctionModel(respond, stream_function=stream), None))
-    flags = ["--enable-shell", "--allow-shell"] if shell else []
+    flags = ["--enable-shell"] if shell else []
     code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),
                      "--workspace-dir", str(tmp_path), *flags,
                      "--allow-file-writes", "--task", "write, edit, read and run shell"])

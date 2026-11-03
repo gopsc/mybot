@@ -305,8 +305,6 @@ def parser():
                                  help="enable file tools in this existing directory; file contents may be sent to the model")
             command.add_argument("--enable-shell", action="store_true",
                                  help="enable host shell execution (requires --workspace-dir); uses the --sandbox backend")
-            command.add_argument("--allow-shell", action="store_true",
-                                 help="preapprove shell commands; requires --enable-shell; grants host-user permissions")
             command.add_argument("--allow-file-writes", action="store_true",
                                  help="preapprove workspace file creation/edits; requires --workspace-dir")
             command.add_argument("--max-history-bytes", type=bounded_int(64 * 1024, 64 * 1024 * 1024),
@@ -374,7 +372,7 @@ def parse_args(argv=None):
     if args.no_agent:
         if (args.task is not None or args.model or args.base_url or args.api_key_env
                 or args.allow_actions or args.workspace_dir
-                or args.enable_shell or args.allow_shell or args.allow_file_writes
+                or args.enable_shell or args.allow_file_writes
                  or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
                  or args.role or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
@@ -388,8 +386,6 @@ def parse_args(argv=None):
         raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir or --role")
     if args.role and (args.skills_dir or args.mcp_config):
         raise UsageError("--role owns its skills and MCP configuration; do not combine it with --skills-dir/--mcp-config")
-    if args.allow_shell and not args.enable_shell:
-        raise UsageError("--allow-shell requires --enable-shell")
     if args.allow_web and not args.web:
         raise UsageError("--allow-web requires --web")
     if args.search_endpoint and not args.web:

@@ -593,7 +593,7 @@ class Server:
             "searchEndpoint": params.text("searchEndpoint", cap=4096),
             "mcpConfig": params.text("mcpConfig", cap=4096), "allowMcpTools": params.flag("allowMcpTools"),
             "workspaceDir": params.text("workspaceDir", cap=4096),
-            "enableShell": params.flag("enableShell"), "allowShell": params.flag("allowShell"),
+            "enableShell": params.flag("enableShell"),
             "allowFileWrites": params.flag("allowFileWrites"),
         }
 
@@ -665,8 +665,6 @@ class Server:
                      else Path(key["workspaceDir"]).absolute() if key["workspaceDir"] else None)
         if key["enableShell"] and workspace is None:
             raise AgentConfigurationError("Shell tools require a workspace; no model request was sent")
-        if key["allowShell"] and not key["enableShell"]:
-            raise AgentConfigurationError("allowShell requires enableShell; no model request was sent")
         if key["allowFileWrites"] and workspace is None:
             raise AgentConfigurationError("File writes require a workspace; no model request was sent")
         config = AgentConfig(model=key["model"] or os.environ.get("MYBOT_MODEL", ""),
@@ -676,7 +674,7 @@ class Server:
                              max_context_tokens=key.get("maxContextTokens"),
                              context_reserve_tokens=key.get("contextReserveTokens", 2048),
                              allow_actions=key["allowActions"],
-                             allow_shell=key["allowShell"], allow_file_writes=key["allowFileWrites"],
+                             allow_file_writes=key["allowFileWrites"],
                              mcp_config=mcp_config,
                              allow_mcp_tools=key["allowMcpTools"],
                              prompt_file=key.get("promptFile") or None,

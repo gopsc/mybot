@@ -104,7 +104,7 @@ def test_prompt_approval_is_separate_and_rate_limited(approved):
         return approved
 
     async def scenario():
-        config = AgentConfig(allow_actions=True, allow_file_writes=True, allow_shell=True, auto_stats=False)
+        config = AgentConfig(allow_actions=True, allow_file_writes=True, auto_stats=False)
         session = AgentSession(Executor(), text_model(), config, confirm=confirm)
         try:
             before = session.prompts.read("98")["sha256"]

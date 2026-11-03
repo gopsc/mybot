@@ -89,7 +89,6 @@ class GuiConfig:
     allow_hardware: bool = False
     allow_actions: bool = False
     allow_file_writes: bool = False
-    allow_shell: bool = False
     allow_web: bool = False
     allow_mcp_tools: bool = False
 
@@ -134,7 +133,6 @@ class GuiConfig:
             allow_hardware=bool(self.allow_hardware),
             allow_actions=bool(self.allow_actions),
             allow_file_writes=bool(self.allow_file_writes and (self.enable_file_tools or self.enable_shell)),
-            allow_shell=bool(self.allow_shell and self.enable_shell),
             allow_mcp_tools=bool(self.allow_mcp_tools and (self.mcp_config or self.role)),
         )
 
@@ -145,7 +143,7 @@ class GuiConfig:
         # A one-shot prompt hint, per-launch approvals and variable values are not
         # preferences; variable values may hold credentials, so they never reach disk.
         for key in ("task", "allow_hardware", "allow_actions", "allow_file_writes",
-                    "allow_shell", "allow_mcp_tools", "allow_web", "vars"):
+                    "allow_mcp_tools", "allow_web", "vars"):
             data.pop(key, None)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 

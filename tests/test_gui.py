@@ -101,19 +101,19 @@ def test_config_keeps_tool_preferences_but_drops_grants(tmp_path):
     path = tmp_path / "settings.json"
     cfg = GuiConfig(workspace=str(tmp_path), mcp_config="mcp.json",
                     enable_file_tools=True, enable_shell=True,
-                    allow_file_writes=True, allow_shell=True, allow_mcp_tools=True,
+                    allow_file_writes=True, allow_mcp_tools=True,
                     max_history_bytes=8 * 1024 * 1024,
                     max_context_tokens=32768, context_reserve_tokens=1024)
     cfg.store(path)
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert stored["enable_file_tools"] is True and stored["enable_shell"] is True
-    assert "allow_file_writes" not in stored and "allow_shell" not in stored
+    assert "allow_file_writes" not in stored
     assert "allow_mcp_tools" not in stored
     loaded = GuiConfig.load(path)
     assert loaded.max_history_bytes == 8 * 1024 * 1024
     assert loaded.max_context_tokens == 32768 and loaded.context_reserve_tokens == 1024
     assert loaded.enable_file_tools and loaded.enable_shell
-    assert not loaded.allow_file_writes and not loaded.allow_shell and not loaded.allow_mcp_tools
+    assert not loaded.allow_file_writes and not loaded.allow_mcp_tools
 
 
 def test_config_rejects_hostile_values(tmp_path):
@@ -1136,7 +1136,7 @@ def test_send_enables_all_tools_without_approval(ui):
     assert method == "agent.ask"
     assert params["workspaceDir"] == str(Path(app.cfg.workspace).absolute())
     assert params["allowFileWrites"] is True
-    assert params["enableShell"] is True and params["allowShell"] is True
+    assert params["enableShell"] is True
     assert params["allowMcpTools"] is True
     assert params["enableWeb"] is True and params["allowWeb"] is True
     assert params["allowActions"] is False and params["allowHardware"] is True

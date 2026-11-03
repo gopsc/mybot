@@ -955,7 +955,6 @@ class App(QMainWindow):
             "allowMcpTools": True,
             "workspaceDir": workspace,
             "enableShell": True,
-            "allowShell": True,
             "allowFileWrites": True,
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "maxContextTokens": self.cfg.max_context_tokens,
