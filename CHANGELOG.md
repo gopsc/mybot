@@ -121,6 +121,12 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   now queued and sent once the server is ready, and a successful reset clears
   the visible transcript as well. **清空对话** still only clears the window and
   now says so, since it keeps the model context.
+- `install_skill` reported a rejected skill (for example a directory whose
+  `name` frontmatter did not match it) as an unknown outcome and latched the
+  Agent executor until the conversation restarted. Validation and copy failures
+  are now `not_executed` with the reason, and only the final atomic replace can
+  report an unknown outcome. SKILL.md frontmatter also accepts YAML
+  block-scalar descriptions such as `description: |-`.
 
 ## [0.6.0] – 2026-11-02
 

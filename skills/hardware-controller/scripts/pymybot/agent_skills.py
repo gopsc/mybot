@@ -24,6 +24,7 @@ MAX_DESCRIPTION = 1024
 MAX_LIST = 1000
 MAX_SKILL_BYTES = 64 * 1024 * 1024
 _NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
+_BLOCK_MARKERS = {"|", "|-", "|+", ">", ">-", ">+"}
 
 
 def default_skills_root():
@@ -126,17 +127,40 @@ class SkillsLibrary:
         if not lines or lines[0].strip() != "---":
             raise SecurityError(f"Skill '{expected}': SKILL.md must start with frontmatter")
         fields = {}
+        blocks = {}
+        active = None
         for index, line in enumerate(lines[1:], 1):
             if line.strip() == "---":
                 break
+            if not line.strip():
+                if active is not None:
+                    blocks[active].append("")
+                continue
+            if line.startswith((" ", "\t")):
+                if active is not None:
+                    blocks[active].append(line.strip())
+                continue
+            active = None
             key, separator, value = line.partition(":")
-            if separator and not line.startswith((" ", "\t")):
-                fields.setdefault(key.strip(), value.strip())
+            if not separator:
+                continue
+            key = key.strip()
+            value = value.strip()
+            if value in _BLOCK_MARKERS:
+                active = key
+                blocks.setdefault(key, [])
+                continue
+            fields.setdefault(key, value)
         else:
             raise SecurityError(f"Skill '{expected}': frontmatter is not closed")
+        # The contract keeps name and description on one line, so YAML block
+        # scalars are folded instead of rejected.
+        for key, parts in blocks.items():
+            fields.setdefault(key, " ".join(part for part in parts if part))
         name = fields.get("name", "")
         if name != expected or not _NAME.fullmatch(name):
-            raise SecurityError(f"Skill '{expected}': frontmatter name must match the directory")
+            raise SecurityError(
+                f"Skill '{expected}': frontmatter name '{name}' must match the directory name")
         description = fields.get("description", "")
         if not description or "\n" in description or len(description) > MAX_DESCRIPTION:
             raise SecurityError(f"Skill '{expected}': needs a single-line description"
@@ -172,8 +196,6 @@ class SkillsLibrary:
         staging = self.root / f".{name}.{secrets.token_hex(8)}.tmp"
         try:
             staging.mkdir(mode=0o700)
-            if started is not None:
-                started()
             files = total = 0
             for base, dirs, names in os.walk(source, followlinks=False):
                 base_path = Path(base)
@@ -201,6 +223,11 @@ class SkillsLibrary:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(source_file, target)
                     os.chmod(target, 0o600)
+            # Copying into the staging directory is invisible to the skills root;
+            # the replace is the first mutation a failed install can leave behind,
+            # so report the operation as dispatched only at that point.
+            if started is not None:
+                started()
             os.replace(staging, destination)
             self._scan()
         except BaseException:

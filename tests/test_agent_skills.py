@@ -89,6 +89,65 @@ def test_install_skill_rejects_name_mismatch(tmp_path):
         SkillsLibrary(root).install(source)
 
 
+def test_install_skill_reports_dispatch_only_before_replace(tmp_path, monkeypatch):
+    import pymybot.agent_skills as skills_module
+
+    root = tmp_path / "skills"
+    root.mkdir()
+    source = tmp_path / "workspace" / "relay-guide"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: relay-guide\ndescription: Demo.\n---\n", encoding="utf-8")
+    calls = []
+
+    def fail_copy(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(skills_module.shutil, "copyfile", fail_copy)
+    with pytest.raises(OSError):
+        SkillsLibrary(root).install(source, started=lambda: calls.append(True))
+    assert calls == []
+    assert list(root.iterdir()) == []
+
+
+def test_frontmatter_folds_block_scalar_description(tmp_path):
+    skill_md = ("---\nname: demo-skill\nslug: demo\ndescription: |-\n"
+                "  多引擎搜索与去重。\n  第二条说明。\n---\n\n# Demo\n")
+    library = SkillsLibrary(make_root(tmp_path, skill_md=skill_md))
+    assert library.index()["skills"][0]["description"] == "多引擎搜索与去重。 第二条说明。"
+
+
+def test_executor_reports_install_validation_error_without_faulting(tmp_path):
+    root = tmp_path / "skills"
+    root.mkdir()
+    robot = tmp_path / "robot.sql"
+    robot.write_text(SQL, encoding="utf-8")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    source = tmp_path / "wrong-name"
+    source.mkdir()
+    (source / "SKILL.md").write_text(
+        "---\nname: other-name\ndescription: Demo.\n---\n", encoding="utf-8")
+
+    async def scenario():
+        executor = RobotExecutor(robot, module_paths=[ASSETS / "modules"], scripts_dir=scripts,
+                                 skills=SkillsLibrary(root), workspace_dir=tmp_path)
+        try:
+            failed = await executor.call("install_skill", {"path": "wrong-name"}, timeout=5)
+            faulted = executor.faulted
+            listed = await executor.call("list_skills", {})
+        finally:
+            await executor.close()
+        return failed, faulted, listed
+
+    failed, faulted, listed = asyncio.run(scenario())
+    assert failed["ok"] is False and failed["executed"] is False
+    assert failed["state"] == "not_executed"
+    assert "must match the directory" in failed["error"]["message"]
+    assert faulted is False
+    assert listed["ok"] is True and listed["state"] == "completed"
+
+
 def test_frontmatter_rejects_name_mismatch(tmp_path):
     bad = "---\nname: other-skill\ndescription: x.\n---\n"
     with pytest.raises(SecurityError, match="must match the directory"):
