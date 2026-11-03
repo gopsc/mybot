@@ -6,8 +6,17 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `i2c-address-probe` skill: a read-only host-side I2C address prober with a
+  zero-dependency Python implementation, an `sh` wrapper, `/sys` kernel-binding
+  annotation and a fixed JSON contract.
+
 ### Changed
 
+- The bundled core prompt now routes hardware work through `run_skill`, removes
+  the stale `run_action_script` reference, and describes the shell sandbox and
+  the prompt/skill approval gates as implemented.
 - Roles now own a `workspace/` directory. Selecting a role uses that workspace,
   and `install_skill(path)` copies a complete workspace-authored skill into the
   role's skills root. Role creation copies complete skill directories, including
@@ -30,21 +39,21 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   capture tools or preview controls.
 - The GUI no longer shows permission checkboxes. File, Shell, web and MCP tools
   are enabled whenever their prerequisite exists and their calls run without
-  approval; prompt updates and host-side capture still ask per call. The CLI
+  approval; prompt updates and skill installation still ask per call. The CLI
   keeps its opt-in flags and approval gates.
 - Trusted skills now execute without approval: `run_skill` no longer prompts,
   hardware flags are granted automatically, path/parameter/output/timeout checks
-  are removed, and skill directories are no longer write-protected. The Agent
-  turn timeout and file/shell/MCP/prompt approval gates remain. Installing a
-  skill is equivalent to installing trusted host code with hardware access.
+  are removed, and skill directories are no longer write-protected. Provider and
+  MCP request timeouts and the file-write/MCP/prompt approval gates remain.
+  Installing a skill is equivalent to installing trusted host code with hardware
+  access.
 - The Agent core is now generic. Direct hardware tools (`list_hardware`,
   `list_action_scripts`, `query_sql`, `run_action_script`, `read_variables`,
   `capture_image`) are no longer model tools; all hardware work goes through
   `run_skill("hardware-controller", ...)`. The agent can start without a robot
   and keeps workspace, shell, web, skill and MCP tools. `hardware-controller`
-  adds `scripts`, `query`, `sample` and `capture` actions, and Skill arguments
-  now support bounded strings. Host-side `agent.capture` and the GUI preview
-  still require an attached robot.
+  adds `scripts`, `query` and `sample` actions, and Skill arguments now support
+  bounded strings. The controller keeps no camera surface.
 - The Agent backend now uses LangGraph/LangChain instead of PydanticAI. Tool
   approval uses LangGraph interrupts with an in-memory checkpointer; the
   serve/GUI protocol, receipt shapes and streaming event names are unchanged.
@@ -58,6 +67,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The `pydantic-ai-slim` dependency; install `pymybot[agent]` for
   `langchain`, `langgraph` and the provider integrations.
+
+### Fixed
+
+- `pymybot new` printed follow-up `check`/`run` commands without
+  `--module-path modules`, so they failed with "Driver module not found" in the
+  generated project. The commands now include the module root, with a CLI
+  regression test.
 
 ## [0.6.0] – 2026-11-02
 

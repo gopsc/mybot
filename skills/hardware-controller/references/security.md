@@ -164,7 +164,8 @@ a public issue for an exploitable problem.
 - Run as a dedicated unprivileged user; grant serial/FTDI/`i2c`/`spi` access
   explicitly.
 - Keep the workspace read-only for the agent unless file writes are required.
-- Leave `--enable-shell` and `--allow-shell` off by default.
+- Leave `--enable-shell` off by default; when it is on, prompt protection
+  requires a usable bubblewrap so the shell cannot run unisolated.
 - Disable session transcripts (`MYBOT_SESSION_LOG=0`) when prompts, files or
   tool images must not be kept on disk.
 - Use a private model endpoint or a local model for sensitive data.

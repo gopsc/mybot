@@ -1,7 +1,8 @@
 # 驱动模块（Python / Lua）
 
-Source: 驱动契约与信任边界的权威是 [docs/architecture.md](../../../docs/architecture.md) 与
-[docs/security.md](../../../docs/security.md)；实现见 `pymybot/native.py`、`pymybot/runtime.py`、
+Source: 驱动契约与信任边界的权威是
+[controller architecture](../../hardware-controller/references/architecture.md) 与
+[controller security](../../hardware-controller/references/security.md)；实现见 `pymybot/native.py`、`pymybot/runtime.py`、
 `pymybot/hardware.py` 与 `modules/lib/`，本文件只留写驱动的硬规则与 HAL 接口表。
 
 ## Python 原生入口与 SQL 选择

@@ -28,6 +28,17 @@ Only the default branch is long-lived. Topic branches are short-lived and
 deleted after merge. See [`../development.md`](../development.md) and
 [`../release.md`](../release.md).
 
+## 0.6.0 layout note
+
+0.6.0 moved the controller Runtime to
+`skills/hardware-controller/scripts/pymybot/` so the hardware-controller skill is
+self-contained. The root `pymybot` package still exposes the same `pymybot.*`
+imports by extending its `__path__`, and the wheel bundles the Runtime under the
+package. Controller architecture, CLI, MCP, security and testing documents now
+live in `skills/hardware-controller/references/`; the same-named pages in
+`docs/` are redirect stubs. Older history entries below keep the paths they had
+when written.
+
 ## Completed migration notes
 
 - [Windows faulthandler](windows-faulthandler.md) — diagnosing LuaJIT SEH

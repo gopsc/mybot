@@ -1,4 +1,5 @@
 import json
+import shlex
 
 from pymybot.errors import ScriptError
 from pymybot.robot import Robot
@@ -44,3 +45,18 @@ def test_new_command_returns_json(tmp_path, capsys):
     assert output["ok"] is True and output["command"] == "new"
     assert (tmp_path / "robots" / "desk.sql").is_file()
     assert (tmp_path / "modules" / "Desk.py").is_file()
+
+
+def test_new_printed_commands_run_from_the_generated_root(tmp_path, monkeypatch, capsys):
+    """The scaffold promises runnable follow-up commands; run them as printed."""
+    from pymybot.cli import main
+
+    assert main(["new", "desk", "--dir", str(tmp_path)]) == 0
+    commands = json.loads(capsys.readouterr().out)["commands"]
+
+    monkeypatch.chdir(tmp_path)
+    for command in commands:
+        argv = shlex.split(command)[1:]  # drop the "pymybot" executable name
+        code = main(argv)
+        output = json.loads(capsys.readouterr().out)
+        assert code == 0 and output["ok"] is True, (command, output)

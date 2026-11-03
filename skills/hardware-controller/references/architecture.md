@@ -146,7 +146,7 @@ Key invariants:
 | `pymybot/serve.py` | Long-lived stdio JSON-RPC 2.0 backend |
 | `pymybot/mcp_server.py` | Standard MCP stdio server over the same executor (read-only by default) |
 | `pymybot/mcp_client.py` | Operator `mcpServers` configuration for external agent tools |
-| `pymybot/gui/` | PySide6 front-end: protocol client, settings, approvals, script/structure editor |
+| `pymybot/gui/` | PySide6 front-end: protocol client, settings, approvals, command panel and read-only resource browser |
 | `pymybot/scaffold.py` | `pymybot new` SQL/MT/Python skeleton generator |
 | `pymybot/security.py` | Bounded reads and strict JSON output |
 | `pymybot/paths.py` | Source/frozen asset resolution |

@@ -14,7 +14,7 @@ Source: This is the authoritative controller testing document; fixtures and test
 | Agent | `tests/test_agent*.py` | Offline model loop, approval, budgets, cleanup |
 | MCP | `tests/test_mcp_server.py`, `tests/test_mcp_client.py` | Real stdio MCP clients, permissions, resources, external tool gating |
 | Transcripts | `tests/test_session_log.py` | JSONL bounds, permissions, list/prune safety |
-| Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs, editor check/run |
+| Serve/GUI | `tests/test_serve.py`, `tests/test_gui.py` | JSON-RPC lifecycle, restart races, dialogs, command panel |
 | Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
 | Docs/skill sync | `tests/test_docs_skill_sync.py`, `tools/check_docs_skill_sync.py` | Skill links/paths resolve, references declare and register their authority |
 
@@ -64,11 +64,12 @@ timeout) when the driver supports it.
 
 ## Agent harness evaluation
 
-`tests/test_agent_harness_eval.py` runs offline with `FunctionModel`: it asserts
-intent tool gating, the repeated-call loop guard, prompt/context injection and
-result metadata without a provider, network or hardware. Web and sandbox tests
-use local servers/kernel probing and skip when their optional dependency or
-namespace support is unavailable.
+`tests/test_agent_harness_eval.py` runs offline with the scripted LangChain
+models in `tests/agent_fakes.py`: it asserts intent tool gating, the
+repeated-call loop guard, prompt/context injection and result metadata without a
+provider, network or hardware. Web and sandbox tests use local servers/kernel
+probing and skip when their optional dependency or namespace support is
+unavailable.
 
 ## Adding a regression test
 

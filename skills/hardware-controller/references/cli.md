@@ -215,7 +215,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, optional `robot`, optional `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.ask` | `task`, optional `robot`, optional `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |
@@ -252,9 +252,8 @@ Agent mode is documented in the README. The important flags are:
 | `--role NAME` | Load role-owned prompts, skills, MCP and resumable model history from `~/.mybot/roles/NAME`. |
 | `--workspace-dir DIR` | Enable bounded file tools inside `DIR`. |
 | `--enable-shell` | Enable the shell tool inside the workspace; protected prompts require usable bubblewrap, with no unisolated fallback. |
-| `--allow-actions` | Pre-approve host capture and variable reads; trusted skills need no approval. |
+| `--allow-actions` | Legacy compatibility flag for the executor's action-script and variable-read tools; they are no longer model tools and trusted skills need no approval. |
 | `--allow-file-writes` | Pre-approve file creation/editing. |
-| `--allow-shell` | Pre-approve shell commands (requires `--enable-shell`). |
 | `--max-history-bytes` | Retained conversation history byte cap (64 KiB–64 MiB). |
 | `--timeout` | Per-operation timeout for direct commands and provider/MCP requests; Agent turns have no wall-clock limit. |
 | `--max-context-tokens` | Optional model context-window budget (1024–2 MiB tokens, disabled by default). Prunes old complete turns before every model request; must exceed output plus reserve tokens. |

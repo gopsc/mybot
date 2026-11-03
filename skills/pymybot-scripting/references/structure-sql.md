@@ -1,7 +1,8 @@
 # 结构脚本（.sql）
 
 Source: 本文件是结构 SQL 文法的书面来源（实现 `pymybot/sql.py` 与 `pymybot/robot.py` 的 `_validate`）；
-分层见 [docs/architecture.md](../../../docs/architecture.md)，命令与开关见 [docs/cli.md](../../../docs/cli.md)。
+分层见 [controller architecture](../../hardware-controller/references/architecture.md)，命令与开关见
+[controller CLI](../../hardware-controller/references/cli.md)。
 
 ## 1. 基本文法
 

@@ -44,8 +44,10 @@ About dialog mark.
 
 ## Management console
 
-The GUI exposes the backend surface described in [cli.md](cli.md) and
-[mcp.md](mcp.md); it does not duplicate robot logic.
+The GUI exposes the backend surface described in
+[the CLI and serve guide](../skills/hardware-controller/references/cli.md) and
+[the MCP guide](../skills/hardware-controller/references/mcp.md); it does not
+duplicate robot logic.
 
 | Entry | What it does |
 | --- | --- |
@@ -100,8 +102,10 @@ is not interrupted by new tokens.
 3. Pick the workspace. When a role is selected, its fixed
    `~/.mybot/roles/<name>/workspace` is used instead of the global workspace.
 
-4. Type a task. Tool calls that can move hardware, write files or run shell
-   commands show a confirmation dialog; closing the dialog means deny.
+4. Type a task. Hardware actions run through trusted skills without a
+   confirmation dialog; file writes and shell commands are enabled with the
+   workspace and run without approval. Only prompt updates and `install_skill`
+   ask for a dedicated approval.
 
 ## Agent roles
 
@@ -147,7 +151,8 @@ with the full diff and persistent-change warning. Action/file auto-approval does
 not approve them; closing or cancelling means deny. Prompt contents are not copied
 into ordinary chat/tool-receipt logs. A failed safety check blocks sending while
 leaving the management/restore controls available. CLI equivalents are documented
-in [cli.md](cli.md#runtime-prompts); diagnostics validates bundled defaults without
+in [the CLI prompt guide](../skills/hardware-controller/references/cli.md#runtime-prompts);
+diagnostics validates bundled defaults without
 creating a runtime home.
 
 ## Approval model
@@ -158,7 +163,7 @@ creating a runtime home.
 | Web tools | `web_fetch` is always available; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval. |
 | MCP tools | Every tool exposed by the configured `mcpServers` file runs without approval. |
 | Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only actions declared by a trusted `skill.json` can run. |
-| Prompt updates and host capture | Still ask for dedicated per-call approval; ordinary tool grants do not cover them. |
+| Prompt updates and skill installation | Still ask for dedicated per-call approval; ordinary tool grants do not cover them. Camera capture is a built-in tool and runs without approval. |
 
 The GUI exposes no permission checkboxes. File, Shell, web and MCP capability is
 on whenever its prerequisite exists (workspace, `pymybot[web]`, MCP file); budgets
@@ -212,9 +217,9 @@ the GUI executable itself has no console. See
 | View | Image |
 | --- | --- |
 | Entry screen | ![splash](screenshots/gui-splash.png) |
-| Main window (streaming chat, permissions, hardware) | ![main](screenshots/gui.png) |
+| Main window (streaming chat, tool receipts) | ![main](screenshots/gui.png) |
 | Command panel (`query` example) | ![command](screenshots/gui-command.png) |
-| Settings (model/budgets, permissions) | ![settings](screenshots/gui-settings.png) |
+| Settings (model/budgets, prompts) | ![settings](screenshots/gui-settings.png) |
 | Resource preview (scripts, skills, docs) | ![resources](screenshots/gui-resources.png) |
 | MCP configuration editor | ![mcp](screenshots/gui-mcp.png) |
 | Session manager | ![sessions](screenshots/gui-sessions.png) |

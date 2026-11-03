@@ -70,8 +70,12 @@ A narrow lint gate runs in CI (`ruff` with syntax/undefined-name rules). Full
 `ruff` output is advisory because the repository predates a formatter baseline;
 do not reformat unrelated files in a behaviour PR.
 
-Behaviour changes belong in `docs/` first; the agent-facing files under
-`skills/` then summarise and link instead of restating them. The same lint job
+Behaviour changes belong in the authority that owns the topic first. Controller
+architecture, CLI/serve, MCP, security and testing are authored under
+`skills/hardware-controller/references/`; operator topics (GUI, roles,
+development, release, versioning) stay in `docs/`, and the same-named controller
+pages there are redirect stubs. The agent-facing files under `skills/` then
+summarise and link instead of restating them. The same lint job
 runs [`tools/check_docs_skill_sync.py`](../tools/check_docs_skill_sync.py),
 which fails on dead skill links, missing repository paths, a reference without a
 `Source:` line and references that

@@ -9,11 +9,13 @@ description: Reference for the pymybot three-layer robot scripting stack — SQL
 
 ## 项目定位
 
-- 仓库根 ＝ Python 主线，包名 pymybot。**一切开发以它为准。**
+- 仓库根 `pymybot/` 是 Agent/GUI 主线，控制器 Runtime 在
+  `skills/hardware-controller/scripts/pymybot/`（根包的 `__path__` 把两者合并）。
 - 三层模型：`robots/*.sql` 结构（舞台：声明零件与接线）→ `modules/*.py` 或 `*.lua` 驱动
   （演员：build/call/destroy，可加 safe）→ `scripts/*.mt` 动作（剧本：一行一拍）。
-- 操作者文档 `docs/` 是架构、CLI、安全、测试的权威来源，本技能只写脚本层的硬规则；
-  agent 读不到 docs，因此每个 reference 开头的 `Source:` 行标明了它对应的权威位置。
+- 控制器架构、CLI、安全、测试的权威文档在 `skills/hardware-controller/references/`；
+  `docs/` 下同名页面只是跳转。本技能只写脚本层的硬规则，每个 reference 开头的
+  `Source:` 行标明它对应的权威位置。
 
 ## 按任务先读参考文件
 

@@ -84,11 +84,11 @@ the newly selected role with its own capabilities and context.
 After each complete successful turn, `AgentSession` serializes the full
 LangChain message history to `history.json` with an atomic replacement. The
 next CLI, GUI or JSON-RPC session using that role restores it before the first
-model request. Existing `history_turns` and `history_bytes` limits prune whole
-turns, preserving tool-call/receipt pairs. An optional `max_context_tokens`
-limit also prunes old complete turns before each model request; the current
-turn is never partially rewritten and instead fails explicitly if it alone
-exceeds the remaining input budget.
+model request. The `history_bytes` byte cap prunes whole turns, preserving
+tool-call/receipt pairs; there is no turn-count limit. An optional
+`max_context_tokens` limit also prunes old complete turns before each model
+request; the current turn is never partially rewritten and instead fails
+explicitly if it alone exceeds the remaining input budget.
 
 Failed, cancelled or partially executed turns are not appended. Version 1
 (PydanticAI) history is recognized and ignored so the role starts a fresh

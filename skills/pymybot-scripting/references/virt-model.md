@@ -1,6 +1,7 @@
 # 虚拟器件模型（\*_VIRT）
 
-Source: 夹具要求与测试分层的权威是 [docs/testing.md](../../../docs/testing.md)；本文件只写模型机制与
+Source: 夹具要求与测试分层的权威是
+[controller testing](../../hardware-controller/references/testing.md)；本文件只写模型机制与
 编写约定，实现见 `modules/lib/virtbus.lua` 与 `modules/lib/drv_common.lua` 的 `virt_prepare`。
 
 ## 1. 机制

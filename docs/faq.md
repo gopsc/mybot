@@ -34,12 +34,12 @@ Denied means the operator (or the missing approval channel) rejected the call
 before it ran; do not retry or work around it. `unknown` means the call may
 already have had side effects; inspect the host and the MCP server before
 restarting. External MCP servers run with host-user permissions and are not a
-sandbox. See [mcp.md](mcp.md).
+sandbox. See [the MCP guide](../skills/hardware-controller/references/mcp.md).
 
 ## Can I use pymybot without any API key?
 
 Yes. `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, the
-GUI’s hardware view and the virtual-bus tests need no model. Only the agent
+GUI's command panel and the virtual-bus tests need no model. Only the agent
 needs a provider key.
 
 ## Can the GUI change the system prompt?
@@ -64,8 +64,8 @@ actions or file writes do not cover it.
   group.
 - Agent camera tools: install `.[camera]`; use `list_cameras` to find the
   correct index and close other apps using the device when capture fails.
-- Direct controller commands require `--allow-hardware`; the GUI editor run asks
-  for confirmation. Trusted agent skills receive hardware access automatically.
+- Direct controller commands require `--allow-hardware`; the GUI command panel
+  asks for confirmation. Trusted agent skills receive hardware access automatically.
 
 ## Why did a virtual run write to a device?
 
@@ -100,16 +100,19 @@ prune old transcripts with `pymybot sessions` and
 `pymybot sessions --prune --keep 20 --yes`. Transcripts are not resumable;
 the GUI's **工具 → 会话管理** provides filtering, preview, delete and prune
 controls; see
-[`cli.md`](cli.md#session-transcripts).
+[the CLI and transcript guide](../skills/hardware-controller/references/cli.md#session-transcripts).
 
 ## Should I document a change in `docs/` or in `skills/`?
 
-In `docs/` first. It is the authoritative operator documentation; the files under
-`skills/` are the agent's working reference and may only keep the hard rules it
-gets wrong without help — exact error strings, limits, worked examples — plus a
-link to the docs page that owns the behaviour. The scripting grammars (structure
-SQL, MT actions) are the exception: they have no prose authority outside the
-implementation, so the reference *is* their written source and docs link to it.
+It depends on who owns the topic. Controller architecture, CLI/serve, MCP,
+security and testing are authored under `skills/hardware-controller/references/`;
+the same-named pages in `docs/` are redirect stubs. Operator-facing topics
+(GUI, roles, development, release, versioning, FAQ) are authored in `docs/`.
+The agent cannot read `docs/`, so a skill reference must keep the hard rules it
+needs — exact error strings, limits, worked examples — plus a link to the
+authority that owns the behaviour. The scripting grammars (structure SQL, MT
+actions) have no prose authority outside the implementation, so their reference
+*is* the written source.
 
 Each `references/*.md` declares its authority in a `Source:` line and is
 registered in [`../skills/README.md`](../skills/README.md).

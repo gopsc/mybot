@@ -8,7 +8,8 @@ scripts — with one backend for the GUI, CLI, AI agent and MCP.**
 ![pymybot GUI](screenshots/gui.png)
 
 > The screenshot shows the PySide6 window and the local loopback model: the agent
-> lists hardware, runs a virtual action after approval, and brings the result back.
+> lists hardware, runs a virtual action through a trusted skill, and brings the
+> result back.
 
 ## Why we built it
 
@@ -33,7 +34,7 @@ separate implementation for the desktop, CI and the model.
 
 | Entry | Use it for | Command |
 | --- | --- | --- |
-| GUI | Desktop debugging, demos, per-tool approval | `pymybot` |
+| GUI | Desktop debugging, demos, live tool receipts | `pymybot` |
 | CLI controller | CI/CD, scripts, no model required | `pymybot check / run / sample / ...` |
 | AI agent | Natural-language robot control | `pymybot --no-gui --robot ... --task "..."` |
 | MCP | Claude Desktop, Cursor and other MCP clients | `pymybot mcp --robot ...` |
@@ -41,7 +42,8 @@ separate implementation for the desktop, CI and the model.
 A long-lived `serve` backend exposes the same session over stdio JSON-RPC 2.0 for
 IDEs and custom front-ends. The MCP server is a read-only-by-default protocol
 adapter over the same executor, so tool receipts, fault latching and serialization
-rules do not change with the entry point. See [mcp.md](mcp.md).
+rules do not change with the entry point. See
+[the MCP guide](../skills/hardware-controller/references/mcp.md).
 
 ## What we deliberately did not build
 
@@ -89,8 +91,9 @@ python -m venv .venv
 # GUI (PySide6 / Qt 6; optional for headless CLI use):
 .venv/bin/pip install -e ".[gui]"
 .venv/bin/python -m pymybot
-# The window includes a script/structure editor: open .mt actions or robots/*.sql,
-# run the static check, or run a selected action against the edited structure.
+# The window offers the command panel (check/hardware/scripts/query/run/sample/
+# apply-sql/doctor/sessions) and a read-only resource browser for scripts, drivers,
+# skills and docs. It does not execute an action outside the agent.
 
 # Agent:
 .venv/bin/pip install -e ".[agent,test]"
@@ -114,7 +117,7 @@ arguments, bounded results and images; API keys in environment variables are
 never read into the transcript). Disable with `--no-session-log`,
 `MYBOT_SESSION_LOG=0`, or the GUI settings toggle; list and prune with
 `pymybot sessions [--prune --keep N --yes]`; see
-[the CLI guide](cli.md#session-transcripts).
+[the CLI and transcript guide](../skills/hardware-controller/references/cli.md#session-transcripts).
 
 ## Prompt layers
 
@@ -171,7 +174,8 @@ Static commands never activate hardware. Physical devices, non-loopback HTTP/TCP
 the Shell driver require an explicit opt-in. HAL-backed drivers share the same
 permission, handle-ownership and cancellation checks as Lua. Python drivers are
 still trusted in-process code: imports and direct native I/O are unrestricted, and
-budgets and cancellation are cooperative. See [security.md](security.md).
+budgets and cancellation are cooperative. See
+[the security model](../skills/hardware-controller/references/security.md).
 
 TCP also has a direct MT interface: [robots/tcp.sql](../skills/hardware-controller/assets/robots/tcp.sql) declares only
 `name`, `host` and `port`; [scripts/tcp.mt](../skills/hardware-controller/assets/scripts/tcp.mt) uses `connect`, `close`,
@@ -186,9 +190,11 @@ a board. The driver contract is documented in
 
 ## Documentation
 
-Architecture, CLI, GUI, development, testing, release, versioning and security
-guides live in [`docs/`](README.md). Scripting references live in
-[`skills/pymybot-scripting/`](../skills/pymybot-scripting/SKILL.md).
+Architecture, CLI, MCP, testing and security for the controller are authored in
+[`skills/hardware-controller/references/`](../skills/hardware-controller/references/architecture.md);
+the same-named pages in [`docs/`](README.md) are redirects. GUI, development,
+roles, release and versioning guides live in [`docs/`](README.md). Scripting
+references live in [`skills/pymybot-scripting/`](../skills/pymybot-scripting/SKILL.md).
 
 ## Contributing
 

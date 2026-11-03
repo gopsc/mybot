@@ -25,3 +25,9 @@ Scripting references live under
 They are the written source of truth for the structure SQL and MT grammars;
 [`../skills/README.md`](../skills/README.md) maps every other topic back to the
 document that owns it.
+
+`architecture.md`, `cli.md`, `mcp.md`, `security.md` and `testing.md` in this
+directory are redirect stubs kept for old links. The controller authority
+documents live under
+[`../skills/hardware-controller/references/`](../skills/hardware-controller/references/),
+which is also what the skills and `Source:` lines cite.

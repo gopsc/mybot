@@ -4,7 +4,7 @@
 
 ![pymybot GUI](screenshots/gui.png)
 
-> 截图来自 PySide6 窗口和本地回环模型：Agent 列出硬件，经审批执行虚拟动作，再把结果带回来。
+> 截图来自 PySide6 窗口和本地回环模型：Agent 列出硬件，再通过可信技能执行虚拟动作，把结果带回来。
 
 ## 我们为什么做 pymybot
 
@@ -20,7 +20,7 @@ pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人�
 
 | 入口 | 适合谁 | 命令 |
 | --- | --- | --- |
-| **GUI** | 桌面调试、演示、人工审批每一步 | `pymybot` |
+| **GUI** | 桌面调试、演示、查看逐次回执 | `pymybot` |
 | **CLI 控制器** | CI/CD、脚本、无模型环境 | `pymybot check / run / sample / ...` |
 | **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --task "..."`（可加 `--robot`） |
 | **MCP** | Claude Desktop、Cursor、其他 MCP 客户端 | `pymybot mcp --robot ...` |
@@ -115,7 +115,7 @@ pymybot prompts restore --missing-only       # 只补缺失文件，保留你的
 pymybot prompts restore --all --yes          # 先备份，再恢复全部默认层
 ```
 
-全量恢复不带 `--yes` 时只认终端确认，脚本里调用会直接拒绝，免得误清空。安全层或运行时 manifest 坏了，也用这条命令修。改 97/98/99 会先比对旧哈希，留备份；审计里记前后哈希和修改理由，不写提示词正文。自动 STATS 由宿主生成，只记脱敏后的统计，不含参数和密钥；`--no-prompt-stats`、设置里的开关或 serve 的 `autoStats: false` 都能关。`doctor` 只检查打包的 manifest 和安全哈希，不会创建你的运行目录。完整说明在 [CLI 提示词管理](cli.md#runtime-prompts)。
+全量恢复不带 `--yes` 时只认终端确认，脚本里调用会直接拒绝，免得误清空。安全层或运行时 manifest 坏了，也用这条命令修。改 97/98/99 会先比对旧哈希，留备份；审计里记前后哈希和修改理由，不写提示词正文。自动 STATS 由宿主生成，只记脱敏后的统计，不含参数和密钥；`--no-prompt-stats`、设置里的开关或 serve 的 `autoStats: false` 都能关。`doctor` 只检查打包的 manifest 和安全哈希，不会创建你的运行目录。完整说明在 [CLI 提示词管理](../skills/hardware-controller/references/cli.md#runtime-prompts)。
 
 `--context-bytes` 控制工程上下文预算（0 关闭，默认 4096）。`--intent auto` 会先判断这次请求是查看、控制、编写还是诊断，只开放对应的工具；混合请求取工具并集，识别不出的闲聊保持原样。
 
@@ -132,9 +132,9 @@ CLI 的联网工具仍默认关闭：`--web` 打开 HTTPS 抓取，配了 `--sea
   --scripts-dir skills/hardware-controller/assets/scripts
 ```
 
-默认只读：`list_hardware`、`query_sql`、`read_action_script` 这些静态工具可以直接用；执行脚本和读变量要显式加 `--allow-execution`，要碰物理硬件再加 `--allow-hardware`。完整工具表、资源 URI 和客户端配置见 [docs/mcp.md](mcp.md)。
+默认只读：`list_hardware`、`query_sql`、`read_action_script` 这些静态工具可以直接用；执行脚本和读变量要显式加 `--allow-execution`，要碰物理硬件再加 `--allow-hardware`。完整工具表、资源 URI 和客户端配置见 [MCP 指南](../skills/hardware-controller/references/mcp.md)。
 
-对话默认转录到 `~/.mybot/sessions`，包含工具参数、受限结果和图片；环境变量里的密钥不会被主动读取。转录只用于回看，不能恢复会话。用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，用 `pymybot sessions` 查看，或用 `pymybot sessions --prune --keep 20 --yes` 清理，详见 [docs/cli.md](cli.md#session-transcripts)。
+对话默认转录到 `~/.mybot/sessions`，包含工具参数、受限结果和图片；环境变量里的密钥不会被主动读取。转录只用于回看，不能恢复会话。用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，用 `pymybot sessions` 查看，或用 `pymybot sessions --prune --keep 20 --yes` 清理，详见 [CLI 会话转录](../skills/hardware-controller/references/cli.md#session-transcripts)。
 
 ## 架构
 
@@ -154,7 +154,7 @@ flowchart LR
 - **Python / Lua 驱动** 只负责一个器件的 `build / call`，需要时加 `read / destroy`。
 - **MT 动作** 用矩阵描述“第几行对哪个变量发什么参数”，支持捕获、条件、循环和结构 JSON。
 
-完整分层、线程模型和包结构见 [docs/architecture.md](architecture.md)。
+完整分层、线程模型和包结构见 [架构与 Runtime flow](../skills/hardware-controller/references/architecture.md)。
 
 ## CLI 一览
 
@@ -168,13 +168,13 @@ flowchart LR
 | `run` | 激活、执行一个动作、清理 | 是 |
 | `sample` | 采样一个命名变量 | 是 |
 | `apply-sql` | 对临时会话应用受限 SQL | 是 |
-| `agent` | LangGraph 任务/REPL | 经审批 |
+| `agent` | LangGraph 任务/REPL | 经技能与宿主授权 |
 | `serve` | 长驻 JSON-RPC 服务 | 经请求 |
 | `mcp` | 标准 MCP stdio 服务端 | 经 `--allow-execution` |
 | `doctor` | 环境、依赖、资产诊断 | 否 |
 | `sessions` | 列出或清理 `~/.mybot/sessions` 转录 | 否 |
 
-退出码：`0` 成功，`1` 运行错误，`2` 用法错误，`130` 中断。完整参数、JSON 契约和 `serve` 协议见 [docs/cli.md](cli.md)。
+退出码：`0` 成功，`1` 运行错误，`2` 用法错误，`130` 中断。完整参数、JSON 契约和 `serve` 协议见 [CLI 与 serve 协议](../skills/hardware-controller/references/cli.md)。
 
 ## GUI
 
@@ -272,12 +272,12 @@ TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/assets
 | Shell 驱动 | 关闭 | `--allow-hardware` |
 | Agent 硬件 Skill 动作 | 免审批，默认硬件权限 | 仅限已安装的可信技能；操作员承担执行风险 |
 | Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |
-| Agent Shell | 关闭 | `--enable-shell` + `--allow-shell` |
+| Agent Shell | 关闭 | `--enable-shell`（提示词保护要求可用的 bubblewrap） |
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
 | Agent 外部 MCP 工具 | 逐次确认 | `--allow-mcp-tools`（外部服务不是沙箱） |
 
-**Agent Shell 必须显式启用和审批，并使用可用的 bubblewrap 以只读方式保护运行时和打包提示词目录；不可用或 `--sandbox off` 时拒绝执行，不回退到无隔离 shell。** 通用工作区工具不能读写提示词根目录，须走专用提示词工具。只读挂载保护完整性，不代表宿主文件或提示词内容无法被 shell 读取。
-Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 import 和直接原生 I/O 不受限制，上表的 HAL 权限也管不到这类直接访问。Python 的预算/取消是协作式的：长循环应该调用 `context.check()`；阻塞的原生调用或不合作的 Python 循环没法被硬中断。只运行你审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [docs/security.md](security.md)。
+**Agent Shell 必须显式启用，并使用可用的 bubblewrap 以只读方式保护运行时和打包提示词目录；不可用或 `--sandbox off` 时拒绝执行，不回退到无隔离 shell。** 通用工作区工具不能读写提示词根目录，须走专用提示词工具。只读挂载保护完整性，不代表宿主文件或提示词内容无法被 shell 读取。
+Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 import 和直接原生 I/O 不受限制，上表的 HAL 权限也管不到这类直接访问。Python 的预算/取消是协作式的：长循环应该调用 `context.check()`；阻塞的原生调用或不合作的 Python 循环没法被硬中断。只运行你审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [安全模型](../skills/hardware-controller/references/security.md)。
 
 ## 兼容性
 
@@ -316,14 +316,14 @@ tools/                    打包与 CI 辅助（PyInstaller spec、smoke 脚本�
 | 想了解 | 从这里开始 |
 | --- | --- |
 | 全部文档 | [docs/README.md](README.md) |
-| 架构与数据流 | [docs/architecture.md](architecture.md) |
-| CLI / JSON / serve | [docs/cli.md](cli.md) |
-| MCP 服务端与客户端 | [docs/mcp.md](mcp.md) |
+| 架构与数据流 | [架构与 Runtime flow](../skills/hardware-controller/references/architecture.md) |
+| CLI / JSON / serve | [CLI 与 serve 协议](../skills/hardware-controller/references/cli.md) |
+| MCP 服务端与客户端 | [MCP 指南](../skills/hardware-controller/references/mcp.md) |
 | GUI | [docs/gui.md](gui.md) |
 | 开发与打包 | [docs/development.md](development.md) |
-| 测试与 CI 通道 | [docs/testing.md](testing.md) |
+| 测试与 CI 通道 | [测试与虚拟设备](../skills/hardware-controller/references/testing.md) |
 | 版本与发布 | [docs/release.md](release.md) · [docs/versioning.md](versioning.md) |
-| 安全模型 | [docs/security.md](security.md) · [.github/SECURITY.md](../.github/SECURITY.md) |
+| 安全模型 | [安全模型](../skills/hardware-controller/references/security.md) · [.github/SECURITY.md](../.github/SECURITY.md) |
 | 常见问题 | [docs/faq.md](faq.md) |
 | 分支迁移历史 | [docs/history/README.md](history/README.md) |
 | 路线图 | [docs/roadmap.md](roadmap.md) |

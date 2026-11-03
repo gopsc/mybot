@@ -9,7 +9,7 @@ description: 宿主侧 I2C 总线地址探测技能，提供零第三方依赖�
 
 - 用于：确认某条**宿主 Linux I2C 总线**（`/dev/i2c-N`）上哪些从机地址在应答；核对地址跳线、上拉、供电；判断“结构里声明了器件但 `build` 失败”是接线问题还是驱动问题；给 `modules/` 里的候选驱动缩小范围；排查 USB-I2C（CH341/FTDI/CP2112）。
 - 不用于：识别芯片型号（应答只说明“有东西在线”）；替代 `pymybot hardware`（它只反映结构声明）；扫 `proto='virt'` 虚拟总线（虚拟总线只复述声明，没有发现语义）；写寄存器或配置器件——本技能**只读**。
-- 已有 `i2c-host-scan` 覆盖同一场景，本技能的增补是：`/sys` 内核绑定标注（网格 `UU`、JSON `bound`）、固定 JSON 契约、sh 包装可直接吃设备路径。**同一场景不并行维护两份**：安装前与操作者确认是替换旧技能还是共存。
+- 同类技能 `i2c-host-scan` 覆盖同一场景；若本机已安装，二者只保留一个。本技能的增补是：`/sys` 内核绑定标注（网格 `UU`、JSON `bound`）、固定 JSON 契约、sh 包装可直接吃设备路径。**同一场景不并行维护两份**。
 
 ## 2. 必须先知道的事实
 
@@ -23,10 +23,12 @@ description: 宿主侧 I2C 总线地址探测技能，提供零第三方依赖�
 
 ## 3. 文件清单
 
+下表路径相对**仓库根**；第 5 节的命令缩写假定当前目录是本技能目录。
+
 | 路径 | 作用 |
 | --- | --- |
-| `scripts/i2c_probe.py` | 主实现：Python 3 标准库（`fcntl`/`os`/`glob`），零第三方依赖。`--bus` / `--list-buses` / `--addr` / `--range` / `--repeat` / `--json` / `--no-sysfs` |
-| `scripts/i2c_probe.sh` | sh 包装：首位参数可给 `/dev/i2c-1`、`i2c-1`、`1`；校验解释器与设备节点；其余参数原样转发。`I2C_PROBE_PYTHON` 可指定解释器 |
+| `skills/i2c-address-probe/scripts/i2c_probe.py` | 主实现：Python 3 标准库（`fcntl`/`os`/`glob`），零第三方依赖。`--bus` / `--list-buses` / `--addr` / `--range` / `--repeat` / `--json` / `--no-sysfs` |
+| `skills/i2c-address-probe/scripts/i2c_probe.sh` | sh 包装：首位参数可给 `/dev/i2c-1`、`i2c-1`、`1`；校验解释器与设备节点；其余参数原样转发。`I2C_PROBE_PYTHON` 可指定解释器 |
 | `references/usage.md` | 权限、errno 对照表、0 命中排查顺序、抖动复核、地址→候选驱动流程、与 pymybot 路线的分工 |
 
 ## 4. 工作流

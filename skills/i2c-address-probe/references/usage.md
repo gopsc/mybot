@@ -1,5 +1,9 @@
 # i2c-address-probe 使用与判读
 
+Source: 实现是 `skills/i2c-address-probe/scripts/i2c_probe.py`（i2c-dev ioctl 绑定地址 +
+SMBus read byte），内核语义以 Linux `Documentation/i2c/dev-interface` 与
+`Documentation/i2c/smbus-protocol` 为准；本文件只写权限、输出判读与排查顺序。
+
 ## 1. 权限
 
 `i2c-dev` 以 `O_RDWR` 打开设备节点，**即使只做读探测也需要写权限**。满足任一条件即可：

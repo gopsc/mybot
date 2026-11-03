@@ -15,7 +15,8 @@ release; security and reproducibility work takes precedence.
 
 - [ ] First-run model setup wizard in the GUI (no shared key, no hidden default).
 - [ ] Guided hardware discovery for UART/FTDI devices.
-- [x] Action-script editor with syntax highlighting and dry-run.
+- [x] Action-script editor with syntax highlighting and dry-run (removed in
+  0.6.0; the GUI now offers the command panel and a read-only resource browser).
 - [ ] Sampling charts and a session timeline in the GUI.
 - [x] Bounded conversation transcripts under `~/.mybot/sessions`
   (on by default; `--no-session-log` / `MYBOT_SESSION_LOG=0` disables them).

@@ -85,8 +85,8 @@ def create_robot(root, name, *, force=False):
         created.append(str(path))
 
     commands = [
-        f"pymybot check --robot robots/{slug}.sql --input scripts/{slug}.mt",
-        f"pymybot run --robot robots/{slug}.sql --input scripts/{slug}.mt --timeout 10",
+        f"pymybot check --module-path modules --robot robots/{slug}.sql --input scripts/{slug}.mt",
+        f"pymybot run --module-path modules --robot robots/{slug}.sql --input scripts/{slug}.mt --timeout 10",
     ]
     return {"root": str(root), "robot": f"robots/{slug}.sql", "script": f"scripts/{slug}.mt",
             "driver": f"modules/{table}.py", "created": created, "commands": commands}
