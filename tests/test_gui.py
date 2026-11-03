@@ -395,7 +395,6 @@ def app_factory(monkeypatch, qapp, tmp_path):
     def build(config_path=None, config=None):
         config = config or GuiConfig(workspace=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"))
         with monkeypatch.context() as patch:
-            patch.setattr(gui_app.App, "_refresh_hardware", lambda self: None)
             instance = gui_app.App(config, config_path or tmp_path / "settings.json")
         instance._start_timer.stop()
         instance.show()
@@ -538,7 +537,7 @@ def test_theme_is_readable_without_changing_system_palette(app_factory, qapp, da
             assert palette.color(QPalette.ColorRole.Window).lightnessF() > 0.9
             assert color_contrast(palette.windowText().color(), palette.window().color()) >= 4.5
         for widget in (app.chat, app.log, app.task_box, app.robot_box, app.timeout_box,
-                       app.hardware_tree, dialogs[0].entries["model"], dialogs[1].arguments):
+                       dialogs[0].entries["model"], dialogs[1].arguments):
             for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
                 palette = widget.palette()
                 assert color_contrast(palette.color(group, QPalette.ColorRole.Text),
@@ -689,15 +688,12 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     gui, app = ui
     restarted = []
     monkeypatch.setattr(app, "_restart_server", lambda: restarted.append(True))
-    monkeypatch.setattr(app, "_refresh_hardware", lambda: None)
 
     def save(dialog, test):
         assert isinstance(dialog, gui.SettingsDialog)
         dialog.entries["model"].setText("openai:test")
-        dialog.entries["module_paths"].setPlainText("modules\n extra \n")
         dialog.entries["read_vars"].setText("v0,v0,bad name,v1")
         dialog.entries["vars"].setPlainText("user=alice\npass=secret\nbad line")
-        dialog.entries["scripts_dir"].setText("scripts")
         dialog.timeout.setValue(12.5)
         dialog.requests.setValue(3)
         dialog.tools.setValue(5)
@@ -707,11 +703,10 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     interact(save)
     app.open_settings()
     assert restarted == [True]
-    assert app.cfg.model == "openai:test" and app.cfg.module_paths == ["modules", "extra"]
+    assert app.cfg.model == "openai:test"
     assert app.timeout_box.value() == 12.5 and app.requests_box.value() == 3 and app.tools_box.value() == 5
     assert app.read_vars_entry.text() == "v0,v1"
     assert app.cfg.vars == {"user": "alice", "pass": "secret"}
-    assert app.context_entries["scripts_dir"].text() == "scripts"
     assert "openai:test" in app.model_label.text()
     stored = json.loads((tmp_path / "settings.json").read_text())
     assert stored["session_log"] is False and stored["timeout"] == 12.5
@@ -742,7 +737,6 @@ def test_settings_cancel_does_not_apply(ui, interact, tmp_path, cancel):
 
 def test_settings_failure_notice_after_modal_save(app_factory, interact, monkeypatch, tmp_path):
     gui, app = app_factory(config_path=tmp_path)
-    monkeypatch.setattr(app, "_refresh_hardware", lambda: None)
     interact(lambda dialog, test: test.mouseClick(
         dialog.buttons.button(gui.QDialogButtonBox.StandardButton.Save), gui.Qt.MouseButton.LeftButton))
     app.open_settings()
@@ -771,7 +765,6 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     _, app = ui
     client = attach_client(app)
     app.context_entries["skills_dir"].setText("skills")
-    app.context_entries["module_paths"].setText(os.pathsep.join(["modules", "other"]))
     app.read_vars_entry.setText("v0，v1,v0,bad name")
     app.timeout_box.setValue(2.5)
     app.requests_box.setValue(2)
@@ -781,7 +774,7 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     app.send_button.click()
     params = client.requests[0][1]
     assert params["skillsDir"] == str(ROOT / "skills")
-    assert params["modulePaths"] == [str(ASSETS / "modules"), str(ROOT / "other")]
+    assert "modulePaths" not in params
     assert params["readVars"] == ["v0", "v1"]
     assert params["vars"] == {"user": "alice"}
     assert (params["timeout"], params["maxRequests"], params["maxToolCalls"]) == (2.5, 2, 4)
@@ -1069,7 +1062,6 @@ def test_workspace_sql_and_directory_choosers(ui, monkeypatch, tmp_path):
     gui, app = ui
     robot = tmp_path / "outside.sql"
     robot.write_text("-- structure", encoding="utf-8")
-    monkeypatch.setattr(app, "_refresh_hardware", lambda: None)
     restarted = []
     monkeypatch.setattr(app, "_restart_server", lambda: restarted.append(True))
     monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", lambda *args: str(tmp_path))
@@ -1080,28 +1072,9 @@ def test_workspace_sql_and_directory_choosers(ui, monkeypatch, tmp_path):
     monkeypatch.setattr(gui.QFileDialog, "getOpenFileName", lambda *args: (str(external), "SQL (*.sql)"))
     app.pick_robot()
     assert app.cfg.robot == str(external) and app.robot_box.currentData() == str(external)
-    app._browse_into(app.context_entries["scripts_dir"])
-    assert app.cfg.scripts_dir == str(tmp_path)
     monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", lambda *args: "")
     app.pick_workspace()
     assert app.cfg.robot == str(external) and restarted == [True]
-
-
-def test_hardware_tree_ignores_outdated_results(ui, monkeypatch):
-    _, app = ui
-    callbacks = []
-    monkeypatch.setattr(app, "_background", lambda work, done, **kwargs: callbacks.append(done))
-    app._refresh_hardware()
-    app._refresh_hardware()
-    stale = SimpleNamespace(json={"ok": True, "hardware": [{"name": "stale"}]})
-    current = SimpleNamespace(json={"ok": True, "hardware": [{"name": "v0", "type": "Timer", "metadata": {"x": 1}}]})
-    callbacks[0](stale, None)
-    assert app.hardware_tree.topLevelItemCount() == 0
-    callbacks[1](current, None)
-    assert app.hardware_tree.topLevelItemCount() == 1
-    item = app.hardware_tree.topLevelItem(0)
-    assert [item.text(i) for i in range(3)] == ["v0", "Timer", '{"x": 1}']
-    assert app.hardware_note.text() == "1 个变量（未激活）"
 
 
 def test_missing_display_fails_before_qapplication(ui, monkeypatch):
@@ -1123,7 +1096,6 @@ def test_run_gui_uses_existing_qapplication_and_returns_closed(ui, monkeypatch, 
     gui, _ = ui
     monkeypatch.setenv("MYBOT_GUI_SPLASH", "0")
     monkeypatch.setattr(gui, "config_home", lambda: tmp_path)
-    monkeypatch.setattr(gui.App, "_refresh_hardware", lambda self: None)
 
     def close_window():
         for window in qapp.topLevelWidgets():
@@ -1376,295 +1348,6 @@ def test_command_dialog_builds_argv_and_renders_contract(qapp, tmp_path):
         assert calls and "--name=v0" in calls[0]
     finally:
         dialog.deleteLater()
-
-
-# -- script editor ----------------------------------------------------------
-def test_editor_opens_saves_and_tracks_dirty(qapp, tmp_path, monkeypatch):
-    from pymybot.gui.editor import ScriptEditorPanel
-
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    path = scripts / "demo.mt"
-    path.write_text("@Action\n@\n", encoding="utf-8")
-    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
-                              robot=str(tmp_path / "robot.sql"), scripts_root=str(scripts))
-    try:
-        panel.refresh_files()
-        assert panel.files.count() == 2
-        events = []
-        panel.dirty_changed.connect(events.append)
-
-        assert panel.open_path(str(path))
-        assert panel.current_path == str(path)
-        assert panel.files.currentData() == str(path)
-        assert not panel.dirty and "@Action" in panel.editor.toPlainText()
-        assert events == []
-
-        panel.editor.setPlainText("@Action\nrelay0.test;\n1;\n@\n")
-        assert panel.dirty and events[-1] is True and True in events
-        assert panel.save()
-        assert path.read_text(encoding="utf-8").startswith("@Action\nrelay0")
-        assert not panel.dirty and events[-1] is False
-        assert panel.status.text().startswith("已保存")
-
-        assert panel.new_file()
-        assert panel.current_path is None and not panel.dirty
-        panel.editor.setPlainText("@Action\n@\n")
-        target = scripts / "saved-as.mt"
-        monkeypatch.setattr("pymybot.gui.editor.QFileDialog.getSaveFileName",
-                            lambda *args, **kwargs: (str(target), ""))
-        assert panel.save()
-        assert target.read_text(encoding="utf-8") == "@Action\n@\n"
-        assert panel.current_path == str(target) and not panel.dirty
-    finally:
-        panel.deleteLater()
-
-
-def test_editor_normalizes_crlf_without_dirty_events(qapp, tmp_path):
-    from pymybot.gui.editor import ScriptEditorPanel
-
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    path = scripts / "crlf.mt"
-    path.write_bytes(b"@Action\r\n@\r\n")
-    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
-                              robot=str(tmp_path / "robot.sql"), scripts_root=str(scripts))
-    try:
-        events = []
-        panel.dirty_changed.connect(events.append)
-        assert panel.open_path(str(path))
-        assert panel.editor.toPlainText() == "@Action\n@\n"
-        panel._on_text_changed()  # simulate Qt delivering a deferred notification
-        assert not panel.dirty and events == []
-        assert panel.save()
-        assert path.read_bytes() == b"@Action\n@\n"
-    finally:
-        panel.deleteLater()
-
-
-def test_editor_run_check_and_argv_gates(qapp, tmp_path):
-    from pymybot.gui.editor import ScriptEditorPanel
-
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    path = scripts / "demo.mt"
-    path.write_text("@Action\n@\n", encoding="utf-8")
-    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
-                              robot=str(tmp_path / "robot.sql"), scripts_root=str(scripts))
-    try:
-        assert panel.open_path(str(path))
-        panel.hardware.setChecked(True)
-        check = panel.build_argv("check")
-        assert check[2] == "check" and "--allow-hardware" not in check
-        assert f"--input={path}" in check
-
-        run = panel.build_argv("run")
-        assert run[2] == "run" and "--allow-hardware" in run and "--timeout=180.0" in run
-
-        calls = []
-        panel.runner = lambda argv, cwd: (
-            calls.append(argv) or
-            {"code": 0, "json": {"ok": True, "command": "run", "outputs": [{"result": "OK"}]},
-             "duration_ms": 3})
-        panel.confirm = lambda title, text: False
-        panel.run()
-        assert calls == [] and panel.run_button.isEnabled() and not panel.stop_button.isEnabled()
-
-        panel.confirm = lambda title, text: True
-        panel.hardware.setChecked(False)
-        panel.run()
-        assert qt_wait(qapp, lambda: bool(calls) and not panel.running)
-        assert calls and calls[0][2] == "run" and "--allow-hardware" not in calls[0]
-        assert '"result": "OK"' in panel.output.toPlainText()
-        assert "退出码 0" in panel.status.text()
-
-        panel.runner = lambda argv, cwd: (
-            calls.append(argv) or {"code": 0, "json": {"ok": True}, "duration_ms": 1})
-        panel.editor.setPlainText("@Action\nrelay0.test;\n2;\n@\n")
-        panel.check()
-        assert qt_wait(qapp, lambda: len(calls) == 2 and not panel.running)
-        assert calls[1][2] == "check"
-        assert "relay0.test;\n2;" in path.read_text(encoding="utf-8")
-    finally:
-        panel.deleteLater()
-
-
-def test_editor_reports_bad_files_and_missing_inputs(qapp, tmp_path):
-    from pymybot.gui.editor import ScriptEditorPanel
-
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    bad = scripts / "bad.mt"
-    bad.write_bytes(b"\xff\xfe\x00")
-    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
-                              robot=str(tmp_path / "robot.sql"), scripts_root=str(scripts))
-    try:
-        assert not panel.open_path(str(bad))
-        assert panel.status.text().startswith("无法打开")
-
-        assert panel.new_file()
-        with pytest.raises(ValueError):
-            panel.build_argv("run")
-        panel.editor.setPlainText("@Action\n@\n")
-        panel.current_path = str(tmp_path / "out.mt")
-        panel.writer = lambda path, text: (_ for _ in ()).throw(OSError("disk full"))
-        panel.set_context(robot=str(tmp_path / "robot.sql"))
-        assert not panel.save()
-        assert panel.status.text().startswith("保存失败")
-    finally:
-        panel.deleteLater()
-
-
-def test_editor_tab_tracks_context_and_dirty_marker(ui, tmp_path):
-    gui, app = ui
-    index = app.notebook.indexOf(app.editor)
-    assert index >= 0
-    assert [app.notebook.tabText(i) for i in range(2)] == ["对话", "日志"]
-    assert app.notebook.tabText(index) == "编辑器"
-    assert app.editor.robot == app._robot_path()
-
-    app.show_editor()
-    assert app.notebook.currentWidget() is app.editor
-
-    path = tmp_path / "edit.mt"
-    path.write_text("@Action\n@\n", encoding="utf-8")
-    assert app.editor.open_path(str(path))
-    app.editor.editor.setPlainText("@Action\nrelay0.test;\n1;\n@\n")
-    assert app.notebook.tabText(index) == "编辑器 •"
-    assert app.editor.save()
-    assert app.notebook.tabText(index) == "编辑器"
-
-    other = str(ASSETS / "robots" / "relay-test.sql")
-    app.cfg.robot = other
-    app.sync_editor()
-    assert app.editor.robot == other
-
-
-def test_editor_follows_robot_and_context_changes(ui, tmp_path):
-    _gui, app = ui
-    target = str(ASSETS / "robots" / "time.sql")
-    index = app.robot_box.findData(target)
-    assert index >= 0
-    app.robot_box.setCurrentIndex(index)
-    app.on_robot_changed()
-    assert app.editor.robot == target
-    assert "time.sql" in app.editor.robot_label.text()
-
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    action = scripts / "only.mt"
-    action.write_text("@Action\n@\n", encoding="utf-8")
-    app.context_entries["scripts_dir"].setText(str(scripts))
-    app._sync_config()
-    assert app.editor.scripts_root == scripts.absolute()
-    assert app.editor.robots_root == Path(app._robots_root()).absolute()
-    data = [app.editor.files.itemData(i) for i in range(app.editor.files.count())]
-    assert str(action) in data
-    assert any(item and Path(item).suffix == ".sql" for item in data)
-
-
-def test_editor_edits_structure_sql_and_runs_action(qapp, tmp_path):
-    from pymybot.gui.editor import ScriptEditorPanel
-
-    robots = tmp_path / "robots"
-    robots.mkdir()
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    sql = robots / "board.sql"
-    sql.write_text("CREATE TABLE Time (name String);\n"
-                   "INSERT INTO Time (name) VALUES ('clock');\n", encoding="utf-8")
-    action = scripts / "clock.mt"
-    action.write_text("@Action\nclock.now;\n1;\n@\n", encoding="utf-8")
-
-    panel = ScriptEditorPanel(python=sys.executable, cwd=str(tmp_path),
-                              robot=str(tmp_path / "other.sql"), scripts_root=str(scripts),
-                              robots_root=str(robots))
-    try:
-        panel.refresh_files()
-        labels = {panel.files.itemText(i): panel.files.itemData(i)
-                  for i in range(panel.files.count())}
-        assert labels["结构/board.sql"] == str(sql)
-        assert labels["脚本/clock.mt"] == str(action)
-
-        assert panel.open_path(str(sql))
-        assert "board.sql" in panel.robot_label.text()
-        assert panel.run_script.isEnabled()
-        assert panel.build_argv("check") == ["-m", "pymybot", "check", f"--robot={sql}"]
-
-        panel.editor.setPlainText(sql.read_text(encoding="utf-8") + "\n")
-        assert panel.save() and sql.read_text(encoding="utf-8").endswith("\n\n")
-
-        calls = []
-        panel.runner = lambda argv, cwd: (
-            calls.append(argv) or {"code": 0, "json": {"ok": True}, "duration_ms": 1})
-        panel.run()
-        assert calls == [] and "请选择运行脚本" in panel.status.text()
-
-        index = panel.run_script.findData(str(action))
-        assert index > 0
-        panel.run_script.setCurrentIndex(index)
-        panel.run()
-        assert qt_wait(qapp, lambda: bool(calls) and not panel.running)
-        assert calls[0][:3] == ["-m", "pymybot", "run"]
-        assert f"--robot={sql}" in calls[0] and f"--input={action}" in calls[0]
-    finally:
-        panel.deleteLater()
-
-
-def test_editor_starts_with_the_loaded_structure(app_factory):
-    config = GuiConfig(workspace=str(ROOT), robot="")
-    _gui, app = app_factory(config=config)
-    assert app.cfg.robot and app.editor.robot == app.cfg.robot
-
-
-def test_editor_close_is_blocked_by_unsaved_changes(ui):
-    _gui, app = ui
-    app.editor.editor.setPlainText("@Action\n@\n")
-    assert app.editor.dirty
-    app.editor.maybe_save = lambda: False
-
-    class Event:
-        ignored = False
-        accepted = False
-
-        def ignore(self):
-            self.ignored = True
-
-        def accept(self):
-            self.accepted = True
-
-    event = Event()
-    app.closeEvent(event)
-    assert event.ignored and not event.accepted
-
-
-def test_editor_runs_virtual_script_end_to_end(qapp):
-    from pymybot.gui.editor import ScriptEditorPanel
-
-    panel = ScriptEditorPanel(
-        python=sys.executable, cwd=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"),
-        scripts_root=str(ASSETS / "scripts"), robots_root=str(ASSETS / "robots"), timeout=20)
-    try:
-        assert panel.open_path(str(ASSETS / "scripts" / "relay-test.mt"))
-        panel.hardware.setChecked(False)
-        panel.run()
-        assert qt_wait(qapp, lambda: not panel.running and "退出码" in panel.status.text(),
-                       timeout=30000)
-        assert "退出码 0" in panel.status.text()
-        assert '"result": "OK"' in panel.output.toPlainText()
-
-        assert panel.open_path(str(ASSETS / "robots" / "relay-test.sql"))
-        index = panel.run_script.findData(str(ASSETS / "scripts" / "relay-test.mt"))
-        assert index > 0
-        panel.run_script.setCurrentIndex(index)
-        panel.run()
-        assert qt_wait(qapp, lambda: not panel.running and "退出码" in panel.status.text(),
-                       timeout=30000)
-        assert "退出码 0" in panel.status.text()
-        assert '"result": "OK"' in panel.output.toPlainText()
-    finally:
-        panel.shutdown()
-        panel.deleteLater()
 
 
 # -- entry screen and branding ---------------------------------------------

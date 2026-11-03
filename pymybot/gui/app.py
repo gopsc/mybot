@@ -18,8 +18,8 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog,
     QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTextBrowser, QToolButton, QTreeWidget,
-    QTreeWidgetItem, QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTextBrowser, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from ..agent_skills import default_skills_root
@@ -32,7 +32,6 @@ from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
                       PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
-from .editor import ScriptEditorPanel
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
@@ -138,8 +137,6 @@ class App(QMainWindow):
         self._lifecycle_lock = threading.Lock()
         self._clients = {}
         self._lifecycle_workers = []
-        self._hardware_calls = set()
-        self._hardware_generation = 0
         self._dialogs = set()
         self.font_mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
 
@@ -155,13 +152,8 @@ class App(QMainWindow):
         self._start_timer = QTimer(self)
         self._start_timer.setSingleShot(True)
         self._start_timer.timeout.connect(self._start_server)
-        self._hardware_timer = QTimer(self)
-        self._hardware_timer.setSingleShot(True)
-        self._hardware_timer.timeout.connect(self._refresh_hardware)
         self._load_role_list()
         self._load_robot_list()
-        self._refresh_hardware()
-        self.sync_editor()
         self._start_timer.start(120)
         self.task_box.setPlainText(self.cfg.task.strip())
         self._refresh_status()
@@ -273,7 +265,6 @@ class App(QMainWindow):
 
         tools = bar.addMenu("工具")
         action(tools, "命令面板…", self.open_console, "Ctrl+Shift+P")
-        action(tools, "脚本编辑器", self.show_editor, "Ctrl+E")
         action(tools, "MCP 配置…", self.open_mcp)
         action(tools, "会话管理…", self.open_sessions)
         action(tools, "环境诊断…", self.open_doctor)
@@ -289,7 +280,7 @@ class App(QMainWindow):
 
     def _manage_menu(self):
         menu = QMenu(self)
-        for text, slot in (("命令面板…", self.open_console), ("脚本编辑器", self.show_editor),
+        for text, slot in (("命令面板…", self.open_console),
                            ("MCP 配置…", self.open_mcp),
                            ("会话管理…", self.open_sessions), ("环境诊断…", self.open_doctor),
                            ("资源预览", self.show_resources), ("清空对话", self.clear_chat)):
@@ -311,14 +302,13 @@ class App(QMainWindow):
         form = QFormLayout(robot)
         self.context_entries = {}
         fields = (
-            ("scripts_dir", "脚本根目录", "dir"), ("skills_dir", "技能目录", "dir"),
-            ("module_paths", "模块路径", None),
+            ("skills_dir", "技能目录", "dir"),
             ("mcp_config", "MCP 配置（mcpServers JSON）", "edit"),
         )
         for name, label, mode in fields:
             row = QHBoxLayout()
             value = getattr(self.cfg, name)
-            entry = QLineEdit(os.pathsep.join(value) if name == "module_paths" else value)
+            entry = QLineEdit(value)
             entry.setToolTip(entry.text())
             entry.textChanged.connect(lambda text, e=entry: e.setToolTip(text))
             entry.editingFinished.connect(self._sync_config)
@@ -330,20 +320,6 @@ class App(QMainWindow):
                 row.addWidget(_button("编辑", self.open_mcp))
             form.addRow(label, row)
         layout.addWidget(robot)
-
-        hardware = QGroupBox("硬件")
-        hw_layout = QVBoxLayout(hardware)
-        self.hardware_tree = QTreeWidget()
-        self.hardware_tree.setHeaderLabels(["变量", "驱动", "配置"])
-        self.hardware_tree.setRootIsDecorated(False)
-        self.hardware_tree.setAlternatingRowColors(True)
-        self.hardware_tree.setMinimumHeight(140)
-        self.hardware_tree.setColumnWidth(0, 90)
-        self.hardware_tree.setColumnWidth(1, 80)
-        hw_layout.addWidget(self.hardware_tree)
-        self.hardware_note = _label("选择结构后自动读取", secondary=True)
-        hw_layout.addWidget(self.hardware_note)
-        layout.addWidget(hardware)
 
         guard = QGroupBox("能力与预算")
         form = QFormLayout(guard)
@@ -387,17 +363,8 @@ class App(QMainWindow):
         self.log.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log.setObjectName("eventLog")
         self.resources = ResourcePanel()
-        workspace = self.cfg.workspace or default_workspace()
-        self.editor = ScriptEditorPanel(
-            python=resolve_python(workspace, self.cfg.python), cwd=workspace,
-            robot=self._robot_path(), scripts_root=self._scripts_root(),
-            robots_root=self._robots_root(), module_paths=self._module_paths(),
-            timeout=self.cfg.timeout,
-            confirm=lambda title, text: self._message(title, text, confirm=True))
-        self.editor.dirty_changed.connect(self._editor_dirty)
         self.notebook.addTab(self.chat, "对话")
         self.notebook.addTab(self.log, "日志")
-        self.notebook.addTab(self.editor, "编辑器")
         self.notebook.addTab(self.resources, "资源")
         self.notebook.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.notebook, 1)
@@ -428,8 +395,6 @@ class App(QMainWindow):
     def _on_tab_changed(self, index):
         if self.notebook.widget(index) is self.resources:
             self.show_resources()
-        elif self.notebook.widget(index) is self.editor:
-            self.sync_editor()
 
     def _robots_root(self):
         workspace = Path(self.cfg.workspace or default_workspace()).absolute()
@@ -450,23 +415,6 @@ class App(QMainWindow):
             self.resources.set_roots(*roots)
         self.notebook.setCurrentWidget(self.resources)
         self.resources.ensure_loaded()
-
-    def sync_editor(self):
-        workspace = self.cfg.workspace or default_workspace()
-        self.editor.set_context(python=resolve_python(workspace, self.cfg.python), cwd=workspace,
-                                robot=self._robot_path(), scripts_root=self._scripts_root(),
-                                robots_root=self._robots_root(), module_paths=self._module_paths())
-
-    def show_editor(self):
-        if self._stopping:
-            return
-        self.sync_editor()
-        self.notebook.setCurrentWidget(self.editor)
-
-    def _editor_dirty(self, dirty):
-        index = self.notebook.indexOf(self.editor)
-        if index >= 0:
-            self.notebook.setTabText(index, "编辑器 •" if dirty else "编辑器")
 
     def post(self, callback):
         """Only the Qt timer consumes callbacks; cleanup never depends on it."""
@@ -601,20 +549,16 @@ class App(QMainWindow):
         for name, entry in self.context_entries.items():
             if self.cfg.role and name in {"skills_dir", "mcp_config"}:
                 continue
-            value = entry.text().strip()
-            setattr(self.cfg, name, [item.strip() for item in value.split(os.pathsep) if item.strip()]
-                    if name == "module_paths" else value)
+            setattr(self.cfg, name, entry.text().strip())
         self.cfg.read_vars = self._names(self.read_vars_entry.text())
         self.cfg.timeout = self.timeout_box.value()
         self.cfg.max_requests = self.requests_box.value()
         self.cfg.max_tool_calls = self.tools_box.value()
         self.cfg.history_turns = self.history_box.value()
-        self.sync_editor()
 
     def _sync_controls(self):
         for name, entry in self.context_entries.items():
-            value = getattr(self.cfg, name)
-            entry.setText(os.pathsep.join(value) if name == "module_paths" else value)
+            entry.setText(getattr(self.cfg, name))
         self.read_vars_entry.setText(",".join(self.cfg.read_vars))
         self.timeout_box.setValue(self.cfg.timeout)
         self.requests_box.setValue(self.cfg.max_requests)
@@ -751,8 +695,6 @@ class App(QMainWindow):
 
     def on_robot_changed(self):
         self.cfg.robot = self.robot_box.currentData() or ""
-        self.sync_editor()
-        self._hardware_timer.start(140)
 
     def _robot_path(self):
         return _absolute(self.cfg.robot, self.cfg.workspace or default_workspace())
@@ -1330,62 +1272,8 @@ class App(QMainWindow):
 
     def refresh_context(self):
         self._sync_config()
-        self._hardware_timer.stop()
         self._load_role_list()
         self._load_robot_list()
-        self._refresh_hardware()
-        self.sync_editor()
-
-    def _refresh_hardware(self):
-        if self._stopping:
-            return
-        self._hardware_generation += 1
-        generation = self._hardware_generation
-        robot = self._robot_path()
-        self.hardware_tree.clear()
-        self.hardware_note.setText("读取中…")
-        if not robot or not Path(robot).is_file():
-            self.hardware_note.setText("未选择结构文件")
-            return
-        workspace = self.cfg.workspace or default_workspace()
-        python = resolve_python(workspace, self.cfg.python)
-        try:
-            args = cli_args("hardware", robot=robot, module_paths=self._module_paths())
-        except ValueError as exc:
-            self.hardware_note.setText(str(exc))
-            return
-
-        def work():
-            call = CliCall(python, args, workspace, on_stderr=lambda line: self.post(lambda: self._log(line)))
-            with self._lifecycle_lock:
-                self._hardware_calls.add(call)
-                stopping = self._stopping
-            try:
-                if stopping:
-                    call.kill()
-                return call.wait()
-            finally:
-                with self._lifecycle_lock:
-                    self._hardware_calls.discard(call)
-
-        def done(result, error):
-            if self._stopping or generation != self._hardware_generation:
-                return
-            if error is not None:
-                self.hardware_note.setText(f"读取失败：{error}")
-                return
-            payload = result.json or {}
-            if not payload.get("ok"):
-                message = (payload.get("error") or {}).get("message") or result.stderr.strip() or "未知错误"
-                self.hardware_note.setText(f"读取失败：{message}")
-                return
-            items = payload.get("hardware") or []
-            for item in items:
-                QTreeWidgetItem(self.hardware_tree, [str(item.get("name", "")), str(item.get("type", "")),
-                                                    _brief(item.get("metadata"), 80)])
-            self.hardware_note.setText(f"{len(items)} 个变量（未激活）")
-
-        self._background(work, done, lifecycle=True)
 
     @staticmethod
     def _names(text):
@@ -1411,8 +1299,6 @@ class App(QMainWindow):
         saved = self._save()
         self._refresh_model_label()
         self._load_robot_list()
-        self._refresh_hardware()
-        self.sync_editor()
         if before != (self.cfg.workspace, self.cfg.python, self.cfg.session_log):
             self._restart_server()
         self._notice("设置已保存" if saved else "设置已应用，但配置文件写入失败（见日志）")
@@ -1459,11 +1345,9 @@ class App(QMainWindow):
             if self._stopping:
                 return
             self._stopping = True
-            self.editor.stop()
             clients = [client for client, event in self._clients.items() if event is None]
             if self.serve is not None and self.serve not in self._clients:
                 clients.append(self.serve)
-            calls = list(self._hardware_calls)
         self.generation += 1
         self._restart_pending = False
         self.pending_task = ""
@@ -1473,8 +1357,6 @@ class App(QMainWindow):
         self._pump_timer.stop()
         for dialog in tuple(self._dialogs):
             dialog.reject()
-        for call in calls:
-            call.kill()
         for client in clients:
             self._background(lambda c=client: self._stop_client(c), lifecycle=True)
         self._save()
@@ -1492,9 +1374,6 @@ class App(QMainWindow):
             worker.join(max(0, deadline - time.monotonic()))
 
     def closeEvent(self, event):
-        if not self._stopping and not self.editor.maybe_save():
-            event.ignore()
-            return
         if not self._stopping and self.busy and not self._message(
                 "退出", "本轮仍在执行：退出会取消它，且已派发的动作不会回滚。继续？", confirm=True):
             event.ignore()
@@ -1567,9 +1446,7 @@ class SettingsDialog(QDialog):
         general_form = QFormLayout(general)
         self._field(general_form, cfg, "workspace", "工作区", browse=True)
         self._field(general_form, cfg, "python", "Python 解释器")
-        self._field(general_form, cfg, "scripts_dir", "脚本根目录", browse=True)
         self._field(general_form, cfg, "skills_dir", "技能目录", browse=True)
-        self._field(general_form, cfg, "module_paths", "模块路径（每行一个）", kind="lines")
         self._field(general_form, cfg, "read_vars", "读取变量（逗号分隔）")
         tabs.addTab(general, "通用")
 
@@ -1660,10 +1537,7 @@ class SettingsDialog(QDialog):
     def _field(self, form, cfg, name, label, *, kind="text", browse=False, browse_file=False,
                caption="选择 MCP 配置", file_filter="JSON (*.json)"):
         value = getattr(cfg, name)
-        if kind == "lines" and name == "module_paths":
-            widget = QPlainTextEdit("\n".join(value))
-            widget.setMaximumHeight(85)
-        elif kind == "lines":
+        if kind == "lines":
             widget = QPlainTextEdit("\n".join(f"{key}={text}" for key, text in value.items()))
             widget.setMaximumHeight(85)
         else:
@@ -1698,9 +1572,7 @@ class SettingsDialog(QDialog):
             return
         values = {}
         for name, widget in self.entries.items():
-            if name == "module_paths":
-                values[name] = [line.strip() for line in widget.toPlainText().splitlines() if line.strip()]
-            elif name == "vars":
+            if name == "vars":
                 values[name] = _parse_bindings(widget.toPlainText())
             elif name == "read_vars":
                 values[name] = App._names(widget.text())

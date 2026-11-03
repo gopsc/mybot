@@ -8,6 +8,9 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The GUI left sidebar no longer shows the hardware tree, scripts root or module
+  path, and the script/structure editor tab is removed. Scripts and modules use
+  the packaged/source defaults; the command panel and resource browser remain.
 - Cameras are now Agent built-in tools. `list_cameras` enumerates host devices
   and `capture_camera` returns a bounded JPEG image block, backed by PyAV/Pillow
   (`pymybot[camera]`). The controller no longer declares cameras, exposes HAL

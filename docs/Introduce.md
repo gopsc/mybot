@@ -181,11 +181,10 @@ flowchart LR
 GUI 是一个前端，不重复实现机器人逻辑：窗口只启动一个 `serve` 子进程，所有机器人和模型调用都走同一条链路。
 
 - 启动先显示复古风入口界面：SVG 机器人 logo、扫描线、真实的 serve 状态、`进入控制台` 按钮和淡入过渡；`--no-splash` 可以跳过。
-- 左侧是 workspace、脚本/技能/模块/MCP 配置、硬件树、能力与预算，以及模型摘要。
+- 左侧是 workspace、技能/MCP 配置、能力与预算，以及模型摘要。
 - 摄像头不再出现在结构 SQL 或控制器驱动里。Agent 内置 `list_cameras` 和 `capture_camera` 两个基础工具，直接枚举宿主摄像头并把 JPEG 作为图片内容返回模型；运行时需要 `pip install "pymybot[camera]"`。
-- 右侧是对话、日志、编辑器、资源四个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
-- 编辑器页可打开、编辑和保存 `.mt` 动作脚本与 `robots/*.sql` 结构文件，带行号、MT/SQL 高亮和未保存标记；**检查**只做静态校验（结构用 `check --robot`，动作用 `check --robot --input`），不激活硬件。**运行**通过一次性 CLI 子进程执行，默认虚拟硬件，勾选 `允许硬件` 并确认后才会碰真实设备；编辑结构时可在“运行脚本”里选择一个 `.mt`，对当前结构运行。快捷键：`Ctrl+S` 保存、`Ctrl+Shift+S` 另存、`Ctrl+Enter` 运行、`F6` 检查。
-- 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、脚本编辑器（`Ctrl+E`）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
+- 右侧是对话、日志、资源三个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
+- 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
 - 对话支持流式输出、忙碌指示、重试、清空和复制；提示词更新仍逐次弹窗确认。
 - **停止对话**只取消当前 Agent 回合；**急停**不带确认弹窗，会发送 `abort`、调用驱动 `safe()` 并释放硬件，是尽力而为的软件停止，不是硬件急停。
 - GUI 不再提供任何权限勾选；文件、Shell、联网、MCP 和摄像头工具默认开启并免审批，可信技能也免审批并默认获得硬件权限，只安装你信任的技能。提示词更新仍逐次确认。
