@@ -26,7 +26,7 @@ METADATA_DISTRIBUTIONS = (
 HIDDEN_PACKAGES = (
     "langchain", "langgraph", "langchain_openai", "langchain_anthropic", "langsmith",
     "openai", "anthropic", "httpx2", "httpcore2", "griffelib", "truststore",
-    "jiter", "tiktoken", "lupa", "PIL", "serial", "pyftdi", "av", "mcp", "httpx", "bs4",
+    "jiter", "tiktoken", "lupa", "sqlparse", "PIL", "serial", "pyftdi", "av", "mcp", "httpx", "bs4",
 )
 CONTROLLER_MODULES = (
     "pymybot.actions", "pymybot.agent_executor", "pymybot.agent_skill_runner",
@@ -93,7 +93,7 @@ def hidden_imports():
     """Collect submodules for optional packages available in the build."""
     from PyInstaller.utils.hooks import collect_submodules
     imports = ["PySide6.QtCore", "PySide6.QtGui", "PySide6.QtWidgets", "PySide6.QtSvg",
-               *CONTROLLER_MODULES]
+               "sqlparse", *CONTROLLER_MODULES]
     for package in HIDDEN_PACKAGES:
         options = {}
         if package == "mcp":

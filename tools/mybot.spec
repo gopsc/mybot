@@ -8,6 +8,7 @@ Build:
 The console EXE hides its console when it starts the GUI. The GUI launches
 ``pymybot.exe serve`` with CREATE_NO_WINDOW (see pymybot/gui/protocol.py).
 """
+import shutil
 import sys
 from pathlib import Path
 
@@ -18,9 +19,19 @@ from bundle_assets import asset_datas, hidden_imports, metadata_datas
 datas = list(asset_datas(ROOT)) + metadata_datas()
 hiddenimports = hidden_imports()
 
+# The root package and the hardware-controller Skill both own pymybot modules.
+# Merge them into one staging package so Analysis sees pymybot.cli, the Agent
+# modules and the GUI, instead of only the package that owns entry_cli.py.
+STAGE = ROOT / "build-pyi" / "stage"
+shutil.rmtree(STAGE, ignore_errors=True)
+shutil.copytree(ROOT / "pymybot", STAGE / "pymybot", ignore=shutil.ignore_patterns("__pycache__"))
+for _source in sorted((ROOT / "skills" / "hardware-controller" / "scripts" / "pymybot").glob("*.py")):
+    if _source.name != "__init__.py":
+        shutil.copy2(_source, STAGE / "pymybot" / _source.name)
+
 a = Analysis(
     [str(ROOT / "tools" / "entry_cli.py")],
-    pathex=[str(ROOT)],
+    pathex=[str(STAGE), str(ROOT)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
