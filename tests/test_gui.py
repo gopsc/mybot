@@ -1191,25 +1191,19 @@ def test_sessions_args_builds_safe_commands():
             sessions_args(**kwargs)
 
 
-def test_settings_cover_backend_budgets_and_permissions(ui):
+def test_settings_cover_backend_budgets(ui):
     gui, app = ui
     dialog = gui.SettingsDialog(app, app.cfg, app.cfg.workspace, "")
     try:
         assert dialog.entries["mcp_config"].text() == app.cfg.mcp_config
         assert dialog.history_turns.value() == app.cfg.history_turns
         assert dialog.history_bytes.value() == app.cfg.max_history_bytes // 1024
-        dialog.file_tools.setChecked(True)
-        dialog.shell_tools.setChecked(True)
-        dialog.shell_grant.setChecked(True)
         dialog.history_turns.setValue(9)
         dialog.history_bytes.setValue(4096)
         dialog.max_context_enabled.setChecked(True)
         dialog.max_context_tokens.setValue(32768)
         dialog.context_reserve_tokens.setValue(1024)
         dialog._save()
-        assert dialog.values["enable_file_tools"] is True
-        assert dialog.values["enable_shell"] is True
-        assert dialog.values["allow_shell"] is True
         assert dialog.values["history_turns"] == 9
         assert dialog.values["max_history_bytes"] == 4096 * 1024
         assert dialog.values["max_context_tokens"] == 32768
@@ -1218,17 +1212,11 @@ def test_settings_cover_backend_budgets_and_permissions(ui):
         dialog.close()
 
 
-def test_send_forwards_workspace_shell_file_and_mcp_controls(ui):
+def test_send_enables_all_tools_without_approval(ui):
     gui, app = ui
     client = attach_client(app)
     app.cfg.mcp_config = str(ROOT / "mcp.json")
     app.context_entries["mcp_config"].setText(str(ROOT / "mcp.json"))
-    app._confirm_grant = lambda kind: True
-    app.file_tools_toggle.setChecked(True)
-    app.file_writes_toggle.setChecked(True)
-    app.shell_tools_toggle.setChecked(True)
-    app.shell_grant_toggle.setChecked(True)
-    app.mcp_tools_toggle.setChecked(True)
     app.history_box.setValue(9)
     app.cfg.max_context_tokens = 32768
     app.cfg.context_reserve_tokens = 1024
@@ -1239,6 +1227,8 @@ def test_send_forwards_workspace_shell_file_and_mcp_controls(ui):
     assert params["allowFileWrites"] is True
     assert params["enableShell"] is True and params["allowShell"] is True
     assert params["allowMcpTools"] is True
+    assert params["enableWeb"] is True and params["allowWeb"] is True
+    assert params["allowActions"] is False and params["allowHardware"] is True
     assert params["historyTurns"] == 9
     assert params["maxHistoryBytes"] == app.cfg.max_history_bytes
     assert params["maxContextTokens"] == 32768

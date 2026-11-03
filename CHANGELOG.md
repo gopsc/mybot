@@ -8,6 +8,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The GUI no longer shows permission checkboxes. File, Shell, web and MCP tools
+  are enabled whenever their prerequisite exists and their calls run without
+  approval; prompt updates and host-side capture still ask per call. The CLI
+  keeps its opt-in flags and approval gates.
 - Trusted skills now execute without approval: `run_skill` no longer prompts,
   hardware flags are granted automatically, path/parameter/output/timeout checks
   are removed, and skill directories are no longer write-protected. The Agent

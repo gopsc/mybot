@@ -135,8 +135,6 @@ class App(QMainWindow):
         self.last_task = ""
         self.last_failed = False
         self._resource_roots = None
-        self._confirmed_grants = set()
-        self._in_permission = False
         self._stopping = False
         self._lifecycle_lock = threading.Lock()
         self._clients = {}
@@ -357,11 +355,12 @@ class App(QMainWindow):
         hw_layout.addLayout(camera_row)
         layout.addWidget(hardware)
 
-        guard = QGroupBox("权限与预算（每次启动重新确认）")
+        guard = QGroupBox("能力与预算")
         form = QFormLayout(guard)
         form.addRow(_label(
             "可信技能（run_skill）执行免审批并默认获得硬件权限；只安装你信任的技能。"
-            "宿主抓图仍逐次确认。", secondary=True))
+            "文件、Shell、联网和 MCP 工具默认开启并免审批；提示词更新与宿主抓图仍逐次确认。",
+            secondary=True))
         self.read_vars_entry = QLineEdit(",".join(self.cfg.read_vars))
         self.camera_vars_entry = QLineEdit(",".join(self.cfg.camera_vars))
         self.camera_vars_entry.editingFinished.connect(self._refresh_camera_options)
@@ -376,31 +375,6 @@ class App(QMainWindow):
         form.addRow("工具预算", self.tools_box)
         form.addRow("历史轮数", self.history_box)
         layout.addWidget(guard)
-
-        advanced = QGroupBox("高级工具权限（默认关闭）")
-        advanced_form = QFormLayout(advanced)
-        self.file_tools_toggle = QCheckBox("文件工具（工作区只读）")
-        self.file_tools_toggle.setChecked(bool(self.cfg.enable_file_tools))
-        self.file_writes_toggle = QCheckBox("允许文件写入（逐次确认）")
-        self.file_writes_toggle.setChecked(bool(self.cfg.allow_file_writes))
-        self.shell_tools_toggle = QCheckBox("Shell 工具（沙箱可配置）")
-        self.shell_tools_toggle.setChecked(bool(self.cfg.enable_shell))
-        self.shell_grant_toggle = QCheckBox("自动批准 Shell")
-        self.shell_grant_toggle.setChecked(bool(self.cfg.allow_shell))
-        self.web_tools_toggle = QCheckBox("联网工具（抓取/搜索）")
-        self.web_tools_toggle.setChecked(bool(self.cfg.enable_web))
-        self.web_grant_toggle = QCheckBox("自动批准联网请求")
-        self.web_grant_toggle.setChecked(bool(self.cfg.allow_web))
-        self.mcp_tools_toggle = QCheckBox("自动批准 MCP 工具")
-        self.mcp_tools_toggle.setChecked(bool(self.cfg.allow_mcp_tools))
-        for toggle in (self.file_tools_toggle, self.file_writes_toggle,
-                       self.shell_tools_toggle, self.shell_grant_toggle,
-                       self.web_tools_toggle, self.web_grant_toggle, self.mcp_tools_toggle):
-            toggle.toggled.connect(self.on_permission_toggle)
-            advanced_form.addRow(toggle)
-        advanced_form.addRow(_label(
-            "Shell 使用设置中的沙箱后端；MCP 是宿主用户权限进程；联网请求默认逐次确认。", secondary=True))
-        layout.addWidget(advanced)
 
         model = QGroupBox("模型（在设置中修改）")
         model_layout = QVBoxLayout(model)
@@ -651,13 +625,6 @@ class App(QMainWindow):
         self.cfg.max_requests = self.requests_box.value()
         self.cfg.max_tool_calls = self.tools_box.value()
         self.cfg.history_turns = self.history_box.value()
-        self.cfg.enable_file_tools = self.file_tools_toggle.isChecked()
-        self.cfg.enable_shell = self.shell_tools_toggle.isChecked()
-        self.cfg.allow_file_writes = self.file_writes_toggle.isChecked()
-        self.cfg.allow_shell = self.shell_grant_toggle.isChecked()
-        self.cfg.enable_web = self.web_tools_toggle.isChecked()
-        self.cfg.allow_web = self.web_grant_toggle.isChecked()
-        self.cfg.allow_mcp_tools = self.mcp_tools_toggle.isChecked()
         self.sync_editor()
 
     def _sync_controls(self):
@@ -670,13 +637,6 @@ class App(QMainWindow):
         self.requests_box.setValue(self.cfg.max_requests)
         self.tools_box.setValue(self.cfg.max_tool_calls)
         self.history_box.setValue(self.cfg.history_turns)
-        self.file_tools_toggle.setChecked(bool(self.cfg.enable_file_tools))
-        self.shell_tools_toggle.setChecked(bool(self.cfg.enable_shell))
-        self.file_writes_toggle.setChecked(bool(self.cfg.allow_file_writes))
-        self.shell_grant_toggle.setChecked(bool(self.cfg.allow_shell))
-        self.web_tools_toggle.setChecked(bool(self.cfg.enable_web))
-        self.web_grant_toggle.setChecked(bool(self.cfg.allow_web))
-        self.mcp_tools_toggle.setChecked(bool(self.cfg.allow_mcp_tools))
         self._sync_role_paths()
 
     def _browse_into(self, entry):
@@ -741,7 +701,6 @@ class App(QMainWindow):
             entry.setToolTip(value)
             entry.setEnabled(not role)
             entry.blockSignals(False)
-        self.on_permission_toggle()
 
     def on_role_changed(self):
         self.cfg.role = self.role_box.currentData() or ""
@@ -1135,18 +1094,6 @@ class App(QMainWindow):
         if self._stopping or client is None or not self.agent_available or self.busy:
             return False
         self._sync_config()
-        if self.shell_tools_toggle.isChecked() and not self.file_tools_toggle.isChecked():
-            self._notice("Shell 工具需要先启用文件工具")
-            return False
-        for kind, toggle in (("file_writes", self.file_writes_toggle),
-                             ("shell", self.shell_grant_toggle),
-                             ("web", self.web_grant_toggle),
-                             ("mcp", self.mcp_tools_toggle)):
-            if toggle.isChecked() and kind not in self._confirmed_grants:
-                if not self._confirm_grant(kind):
-                    toggle.setChecked(False)
-                    return False
-                self._confirmed_grants.add(kind)
         if self._stopping or client is not self.serve or generation != self.generation or self.busy:
             return False
         try:
@@ -1180,7 +1127,6 @@ class App(QMainWindow):
 
     def _agent_params(self, task):
         workspace = self.cfg.workspace or default_workspace()
-        use_workspace = self.file_tools_toggle.isChecked() or self.shell_tools_toggle.isChecked()
         params = {
             "task": task, "role": self.cfg.role or None,
             "robot": self._robot_path(), "scriptsDir": self._scripts_root(),
@@ -1191,11 +1137,11 @@ class App(QMainWindow):
             "vars": self.cfg.vars or None,
             "allowActions": bool(self.cfg.allow_actions),
             "allowHardware": True,
-            "allowMcpTools": self.mcp_tools_toggle.isChecked(),
-            "workspaceDir": workspace if use_workspace else "",
-            "enableShell": self.shell_tools_toggle.isChecked(),
-            "allowShell": self.shell_grant_toggle.isChecked(),
-            "allowFileWrites": self.file_writes_toggle.isChecked(),
+            "allowMcpTools": True,
+            "workspaceDir": workspace,
+            "enableShell": True,
+            "allowShell": True,
+            "allowFileWrites": True,
             "historyTurns": self.cfg.history_turns,
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "maxContextTokens": self.cfg.max_context_tokens,
@@ -1205,9 +1151,9 @@ class App(QMainWindow):
             "contextBytes": self.cfg.context_bytes,
             "intent": self.cfg.intent_mode,
             "sandbox": self.cfg.sandbox_mode,
-            "enableWeb": self.cfg.enable_web,
-            "allowWeb": self.cfg.allow_web,
-            "searchEndpoint": self.cfg.search_endpoint if self.cfg.enable_web else "",
+            "enableWeb": True,
+            "allowWeb": True,
+            "searchEndpoint": self.cfg.search_endpoint,
             "timeout": self.cfg.timeout, "maxRequests": self.cfg.max_requests,
             "maxToolCalls": self.cfg.max_tool_calls, "modulePaths": self._module_paths(),
         }
@@ -1412,50 +1358,6 @@ class App(QMainWindow):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(root)))
 
-    def on_permission_toggle(self):
-        if self._in_permission:
-            return
-        self._in_permission = True
-        try:
-            file_tools = self.file_tools_toggle.isChecked()
-            self.file_writes_toggle.setEnabled(file_tools)
-            self.shell_tools_toggle.setEnabled(file_tools)
-            if not file_tools:
-                self.file_writes_toggle.setChecked(False)
-                self.shell_tools_toggle.setChecked(False)
-            shell = self.shell_tools_toggle.isChecked()
-            self.shell_grant_toggle.setEnabled(shell)
-            if not shell:
-                self.shell_grant_toggle.setChecked(False)
-            web = self.web_tools_toggle.isChecked()
-            self.web_grant_toggle.setEnabled(web)
-            if not web:
-                self.web_grant_toggle.setChecked(False)
-            has_mcp = (Path(self._mcp_root()).is_file() if self.cfg.role
-                       else bool(self.context_entries["mcp_config"].text().strip()))
-            self.mcp_tools_toggle.setEnabled(has_mcp)
-            if not has_mcp:
-                self.mcp_tools_toggle.setChecked(False)
-        finally:
-            self._in_permission = False
-        self._refresh_status()
-
-    def _confirm_grant(self, kind):
-        messages = {
-            "file_writes": ("允许文件写入", "模型可以创建或修改工作区文件（含脚本/驱动），仍会逐次弹出审批。"),
-            "shell": ("允许 Shell 自动批准",
-                      "Shell 使用设置中的沙箱后端；工作区牢笼不是 OS 边界。\n"
-                      "只对当前启动授权，关闭窗口即失效。"),
-            "web": ("允许联网自动批准",
-                    "模型可以抓取 HTTPS 页面并查询已配置的 SearXNG；私网/回环地址会被拒绝。\n"
-                    "只对当前启动授权，关闭窗口即失效。"),
-            "mcp": ("允许 MCP 工具自动批准",
-                    "外部 MCP 服务以宿主用户权限运行，不是沙箱；其输出是不可信数据。\n"
-                    "只对当前启动授权，关闭窗口即失效。"),
-        }
-        title, text = messages[kind]
-        return self._message(title, text, confirm=True)
-
     def _ask_tool(self, params):
         tool = str(params.get("tool") or "?")
         try:
@@ -1619,13 +1521,7 @@ class App(QMainWindow):
         self.status_agent.setText(agent)
         flags = []
         if self.agent_available:
-            flags.append("技能默认硬件")
-        if self.file_tools_toggle.isChecked():
-            flags.append("文件")
-        if self.shell_tools_toggle.isChecked():
-            flags.append("Shell")
-        if self.mcp_tools_toggle.isChecked():
-            flags.append("MCP")
+            flags.extend(("技能默认硬件", "工具免审批"))
         busy = "执行中…" if self.busy else "空闲"
         self.status_busy.setText(busy + ("（" + "、".join(flags) + "）" if flags else ""))
         self.stop_button.setEnabled(self.busy or bool(self.pending_task))
@@ -1819,30 +1715,6 @@ class SettingsDialog(QDialog):
         model_form.addRow(_label("密钥只读取环境变量，窗口不保存也不显示它。", secondary=True))
         tabs.addTab(model, "模型与预算")
 
-        permissions = QWidget()
-        permission_form = QFormLayout(permissions)
-        self.file_tools = QCheckBox("启用文件工具（工作区只读）")
-        self.file_writes = QCheckBox("允许文件写入（逐次确认）")
-        self.shell_tools = QCheckBox("启用 Shell 工具（沙箱可配置）")
-        self.shell_grant = QCheckBox("自动批准 Shell")
-        self.web_tools = QCheckBox("启用联网工具（抓取/搜索）")
-        self.web_grant = QCheckBox("自动批准联网请求")
-        self.mcp_grant = QCheckBox("自动批准 MCP 工具")
-        for toggle, value in ((self.file_tools, cfg.enable_file_tools),
-                              (self.file_writes, cfg.allow_file_writes),
-                              (self.shell_tools, cfg.enable_shell),
-                              (self.shell_grant, cfg.allow_shell),
-                              (self.web_tools, cfg.enable_web),
-                              (self.web_grant, cfg.allow_web),
-                              (self.mcp_grant, cfg.allow_mcp_tools)):
-            toggle.setChecked(bool(value))
-            toggle.toggled.connect(self._permissions_changed)
-            permission_form.addRow(toggle)
-        permission_form.addRow(_label(
-            "Shell 使用设置中的沙箱后端（bubblewrap 或工作区牢笼）；MCP 仍是宿主用户权限进程。\n"
-            "自动批准只在本次启动有效；文件写入、Shell 和 MCP 自动批准在首次发送时仍会弹窗确认。", secondary=True))
-        tabs.addTab(permissions, "权限")
-
         advanced = QWidget()
         advanced_form = QFormLayout(advanced)
         self._field(advanced_form, cfg, "mcp_config", "MCP 配置（mcpServers JSON）", browse_file=True)
@@ -1863,7 +1735,7 @@ class SettingsDialog(QDialog):
         tabs.currentChanged.connect(
             lambda _index: self.prompts.ensure_loaded() if tabs.currentWidget() is self.prompts else None)
 
-        layout.addWidget(_label("运行时权限以左侧栏为准；这里保存偏好与预算。", secondary=True))
+        layout.addWidget(_label("工具默认开启并免审批；提示词更新和宿主抓图仍逐次确认。", secondary=True))
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
         self.buttons.button(QDialogButtonBox.StandardButton.Save).setProperty("role", "primary")
@@ -1871,7 +1743,6 @@ class SettingsDialog(QDialog):
         self.buttons.accepted.connect(self._save)
         self.buttons.rejected.connect(self.reject)
         layout.addWidget(self.buttons)
-        self._permissions_changed()
 
     def _field(self, form, cfg, name, label, *, kind="text", browse=False, browse_file=False,
                caption="选择 MCP 配置", file_filter="JSON (*.json)"):
@@ -1909,38 +1780,7 @@ class SettingsDialog(QDialog):
         if chosen:
             widget.setText(chosen)
 
-    def _permissions_changed(self):
-        files = self.file_tools.isChecked()
-        self.file_writes.setEnabled(files)
-        self.shell_tools.setEnabled(files)
-        if not files:
-            self.file_writes.setChecked(False)
-            self.shell_tools.setChecked(False)
-        shell = self.shell_tools.isChecked()
-        self.shell_grant.setEnabled(shell)
-        if not shell:
-            self.shell_grant.setChecked(False)
-        web = self.web_tools.isChecked()
-        self.web_grant.setEnabled(web)
-        if not web:
-            self.web_grant.setChecked(False)
-        entry = self.entries.get("mcp_config")
-        has_mcp = bool(entry is not None and entry.text().strip())
-        self.mcp_grant.setEnabled(has_mcp)
-        if not has_mcp:
-            self.mcp_grant.setChecked(False)
-
     def _save(self):
-        mcp_config = self.entries["mcp_config"].text().strip()
-        if self.file_writes.isChecked() and not self.file_tools.isChecked():
-            self._message("需要文件工具", "允许文件写入前，先启用文件工具。")
-            return
-        if self.mcp_grant.isChecked() and not mcp_config:
-            self._message("需要 MCP 配置", "自动批准 MCP 工具前，先选择 mcpServers JSON 配置文件。")
-            return
-        if self.shell_grant.isChecked() and not self.shell_tools.isChecked():
-            self._message("需要 Shell 工具", "自动批准 Shell 前，先启用 Shell 工具。")
-            return
         if self.prompts.editor.document().isModified() and not self.prompts.save():
             return
         values = {}
@@ -1964,14 +1804,7 @@ class SettingsDialog(QDialog):
                       intent_mode=self.intent_box.currentData(),
                       sandbox_mode=self.sandbox_box.currentData(),
                       session_log=self.session_log.isChecked(),
-                      auto_stats=self.prompts.auto_stats.isChecked(),
-                      enable_file_tools=self.file_tools.isChecked(),
-                      enable_shell=self.shell_tools.isChecked(),
-                      enable_web=self.web_tools.isChecked(),
-                      allow_file_writes=self.file_writes.isChecked(),
-                      allow_shell=self.shell_grant.isChecked(),
-                      allow_web=self.web_grant.isChecked(),
-                      allow_mcp_tools=self.mcp_grant.isChecked())
+                      auto_stats=self.prompts.auto_stats.isChecked())
         self.values = values
         self.accept()
 

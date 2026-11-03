@@ -60,7 +60,7 @@ The GUI exposes the backend surface described in [cli.md](cli.md) and
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 权限 / 高级 / MCP / 提示词: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, tool permissions (files, Shell, web, MCP), MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
+| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, structure paths, model endpoint/key variable, timeout, request/tool/history budgets, project-context budget, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 编辑器 tab | Opens and saves `.mt` actions and `robots/*.sql` structures with line numbers, MT/SQL highlighting and unsaved-change tracking. **检查** runs the CLI static check without activation (`check --robot` for a structure, `check --robot --input` for an action). **运行** executes through the same one-shot CLI child, stays virtual-only unless 允许硬件 is confirmed, shows the JSON receipt and can be stopped; with a structure open, choose an action script to run against that structure. It does not touch the agent's long-lived `serve` session. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
@@ -165,25 +165,17 @@ creating a runtime home.
 
 ## Approval model
 
-| Toggle | Effect |
+| Setting | Effect |
 | --- | --- |
-| 文件工具 | Exposes `list_files`/`read_file`/`write_file`/`edit_file` inside the workspace. Off by default. |
-| 允许文件写入 | Pre-approves file creation/edits; confirmed once per launch. |
-| Shell 工具 | Exposes the shell tool; requires file tools and usable bubblewrap with prompt roots protected read-only. No unisolated fallback; `off` refuses execution. |
-| 自动批准 Shell | Pre-approves shell commands; confirmed once per launch. |
-| 联网工具 | Exposes `web_fetch` and, with a SearXNG endpoint, `web_search`; off by default. |
-| 自动批准联网 | Pre-approves web requests; confirmed once per launch. |
-| 自动批准 MCP 工具 | Pre-approves external MCP calls; requires an MCP file and is confirmed once per launch. |
+| File and Shell tools | Enabled automatically for the selected workspace, including file writes; calls run without approval. Shell still uses the configured sandbox and refuses execution without a usable backend. |
+| Web tools | `web_fetch` is always available; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval. |
+| MCP tools | Every tool exposed by the configured `mcpServers` file runs without approval. |
 | Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only actions declared by a trusted `skill.json` can run. |
+| Prompt updates and host capture | Still ask for dedicated per-call approval; ordinary tool grants do not cover them. |
 
-The 权限 panel no longer has hardware or action auto-approval checkboxes. Trusted
-skills receive hardware access automatically; host-side capture still asks per
-call, and file/Shell/web/MCP/prompt approvals keep their own toggles.
-
-Tool availability preferences (文件工具 / Shell 工具 / 联网工具) and budgets are persisted;
-approval grants (硬件 / 动作 / 写入 / Shell / 联网 / MCP) and the one-shot task are
-**not**. Every launch starts closed, and a restart resets them. The agent still
-asks for each tool call unless the matching auto-approval is on.
+The GUI exposes no permission checkboxes. File, Shell, web and MCP capability is
+on whenever its prerequisite exists (workspace, `pymybot[web]`, MCP file); budgets
+remain configurable and persist.
 
 ## Settings file
 
