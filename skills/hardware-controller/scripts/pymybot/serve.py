@@ -575,8 +575,8 @@ class Server:
     def _agent_key(self, params):
         return {
             "role": params.text("role", cap=64),
-            "robot": params.text("robot", required=True), "modulePaths": params.strings("modulePaths"),
-            "cameraSrcDir": params.text("cameraSrcDir"), "scriptsDir": params.text("scriptsDir", required=True),
+            "robot": params.text("robot"), "modulePaths": params.strings("modulePaths"),
+            "cameraSrcDir": params.text("cameraSrcDir"), "scriptsDir": params.text("scriptsDir"),
             "skillsDir": params.text("skillsDir"), "model": params.text("model", "", cap=1024),
             "baseUrl": params.text("baseUrl", cap=2048), "apiKeyEnv": params.text("apiKeyEnv", cap=256),
             "readVars": params.strings("readVars", ident=True), "cameraVars": params.strings("cameraVars", ident=True),
@@ -731,13 +731,13 @@ class Server:
         executor = None
         session_log = None
         try:
-            session_log = create_session_log(enabled=self.enable_session_log, robot=key["robot"],
+            session_log = create_session_log(enabled=self.enable_session_log, robot=key["robot"] or "",
                                              model=config.model, mode="serve",
                                              role=role.name if role is not None else "")
             skills_dir = role.skills_dir if role is not None else (key["skillsDir"] or default_skills_root())
             skills = SkillsLibrary(skills_dir, required=role is not None or key["skillsDir"] is not None)
-            executor = RobotExecutor(key["robot"], module_paths=key["modulePaths"] or None,
-                                     camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"],
+            executor = RobotExecutor(key["robot"] or None, module_paths=key["modulePaths"] or None,
+                                     camera_src_root=key["cameraSrcDir"], scripts_dir=key["scriptsDir"] or None,
                                      allow_hardware=key["allowHardware"], read_vars=key["readVars"],
                                      camera_vars=key["cameraVars"], vars=key["vars"], skills=skills,
                                      workspace_dir=workspace, enable_shell=key["enableShell"],

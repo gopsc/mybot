@@ -273,7 +273,8 @@ def parser():
             continue
         if name in {"serve", "doctor"}:
             continue
-        command.add_argument("--robot", required=True, metavar="FILE", help="structure SQL file (at most 8 MiB)")
+        command.add_argument("--robot", required=name != "agent", metavar="FILE",
+                             help="structure SQL file (optional for agent; at most 8 MiB)")
         command.add_argument("--module-path", action="append", metavar="DIR", help="trusted Lua module root; repeatable")
         command.add_argument("--camera-src-dir", metavar="DIR", help="explicit local camera image root")
         if name in {"check", "run", "agent"}:

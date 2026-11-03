@@ -29,8 +29,9 @@ MAX_TIMEOUT = 3600
 MAX_ACTIONS = 64
 MAX_PARAMS = 16
 MAX_ARGV = 64
+MAX_STRING = 8192
 _NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
-_PLACEHOLDER = re.compile(r"\{([a-z][a-z0-9_]{0,63})\}\Z")
+_PLACEHOLDER = re.compile(r"\{([a-z][a-z0-9_]{0,63})\}")
 _HARDWARE_FLAG = "--allow-hardware"
 _SAFE_ENV = (
     "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "HOME", "USERPROFILE",
@@ -84,6 +85,16 @@ def _regular_file(path, stop, suffix=None):
     if suffix is not None and resolved.suffix != suffix:
         raise SecurityError(f"Expected a {suffix} file")
     return resolved
+
+
+def _string_value(spec, value, name):
+    if not isinstance(value, str) or "\0" in value:
+        raise SecurityError(f"Argument '{name}' must be text without NUL")
+    size = len(value.encode("utf-8"))
+    low, high = spec.get("min", 0), spec.get("max", MAX_STRING)
+    if not low <= size <= high:
+        raise SecurityError(f"Argument '{name}' must be {low}..{high} bytes")
+    return value
 
 
 def _number(spec, value, name):
@@ -159,11 +170,15 @@ class SkillRunner:
         if not isinstance(params, dict) or len(params) > MAX_PARAMS:
             raise SecurityError("Skill action params must be an object")
         for item in argv:
-            if item == _HARDWARE_FLAG or (item.startswith("--") and item not in {"--robot", "--input", "--timeout"}):
+            if item == _HARDWARE_FLAG or (item.startswith("--") and item not in {
+                    "--robot", "--input", "--timeout", "--sql", "--name", "--count", "--var"}):
                 raise SecurityError("Skill argv contains a reserved option")
-            match = _PLACEHOLDER.fullmatch(item)
-            if "{" in item and (match is None or match.group(1) not in params):
-                raise SecurityError("Skill argv contains an unknown placeholder")
+            for match in _PLACEHOLDER.finditer(item):
+                if match.group(1) not in params:
+                    raise SecurityError("Skill argv contains an unknown placeholder")
+            if item.count("{") != item.count("}") or _PLACEHOLDER.sub("", item).count("{") \
+                    or _PLACEHOLDER.sub("", item).count("}"):
+                raise SecurityError("Skill argv contains an invalid placeholder")
         hardware = spec.get("hardwareFlag")
         if hardware not in (None, _HARDWARE_FLAG) or (hardware and spec["effect"] != "execute"):
             raise SecurityError("Invalid Skill hardware flag")
@@ -193,6 +208,17 @@ class SkillRunner:
                         raise SecurityError("Invalid numeric limit")
                 if ("min" in param and "max" in param and param["min"] > param["max"]):
                     raise SecurityError("Invalid numeric range")
+            elif kind == "string":
+                if set(param) - {"type", "min", "max", "default", "required"}:
+                    raise SecurityError("Invalid string parameter")
+                low, high = param.get("min", 0), param.get("max", MAX_STRING)
+                if (type(low) is not int or type(high) is not int
+                        or not 0 <= low <= high <= MAX_STRING):
+                    raise SecurityError("Invalid string bounds")
+                if "default" in param:
+                    _string_value(param, param["default"], name)
+                if "required" in param and type(param["required"]) is not bool:
+                    raise SecurityError("Invalid required flag")
             else:
                 raise SecurityError("Unsupported Skill parameter type")
         return spec
@@ -224,18 +250,24 @@ class SkillRunner:
                 if param.get("required"):
                     raise SecurityError(f"Missing Skill argument '{name}'")
                 if "default" in param:
-                    values[name] = format(float(param["default"]), ".15g")
+                    values[name] = (param["default"] if param["type"] == "string"
+                                    else format(float(param["default"]), ".15g"))
                 continue
             value = arguments[name]
             if param["type"] == "path":
                 values[name] = self._resolve_path(value, param["scope"], param["suffix"], name, roots)
+            elif param["type"] == "string":
+                values[name] = _string_value(param, value, name)
             else:
                 values[name] = _number(param, value, name)
         return values
 
-    def _argv(self, spec, values, allow_hardware):
-        argv = [values.get(token[1:-1], token) if _PLACEHOLDER.fullmatch(token) else token
-                for token in spec["argv"]]
+    def _argv(self, spec, values, allow_hardware, bindings):
+        argv = [_PLACEHOLDER.sub(lambda match: values[match.group(1)], token)
+                if _PLACEHOLDER.search(token) else token for token in spec["argv"]]
+        if "--robot" in spec["argv"]:
+            for name, value in bindings.items():
+                argv.extend(("--var", f"{name}={value}"))
         if spec.get("hardwareFlag") and allow_hardware:
             argv.append(_HARDWARE_FLAG)
         return argv
@@ -253,15 +285,15 @@ class SkillRunner:
         data = stream.read(cap + 1)
         return data[:cap], len(data) > cap
 
-    def run(self, skill, action, arguments=None, *, allow_hardware=False, deadline=None,
-            check=lambda: None, started=None):
+    def run(self, skill, action, arguments=None, *, allow_hardware=False, bindings=None,
+            deadline=None, check=lambda: None, started=None):
         """Run one manifest action; caller supplies cancellation and deadline checks."""
         directory, entrypoint, actions, packaged = self._manifest(skill)
         spec = self._action(actions, action)
         roots = {**self.roots, "skill": directory,
                  "skill_assets": directory / "references" / "assets"}
         values = self._arguments(spec, arguments, roots)
-        argv = self._argv(spec, values, allow_hardware)
+        argv = self._argv(spec, values, allow_hardware, bindings or {})
         candidate = directory.joinpath(*entrypoint.split("/"))
         if candidate.is_file():
             executable = _regular_file(candidate, directory, ".py")

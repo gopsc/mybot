@@ -1010,7 +1010,8 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
 
     def make_model():
-        responses = iter([[ToolCallPart("run_action_script", {"script": "action.mt"}, "c1")], [TextPart("完成")]])
+        responses = iter([[ToolCallPart("run_skill", {
+            "skill": "hardware-controller", "action": "doctor"}, "c1")], [TextPart("完成")]])
 
         async def respond(messages, info):
             return ModelResponse(parts=next(responses))
@@ -1046,7 +1047,7 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
             while True:
                 message = await asyncio.to_thread(out.lines.get, True, 20)
                 if message.get("method") == "confirm":
-                    assert message["params"]["tool"] == "run_action_script"
+                    assert message["params"]["tool"] == "run_skill"
                     put({"id": message["id"], "result": {"approved": approve}})
                 elif message.get("id") == ident:
                     return message, seen
@@ -1056,7 +1057,7 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
         put({"id": 1, "method": "agent.ask", "params": params})
         reply, seen = await until(1, approve=True)
         assert reply["result"]["output"] == "完成"
-        assert reply["result"]["tool_events"] == [{"tool": "run_action_script", "ok": True,
+        assert reply["result"]["tool_events"] == [{"tool": "run_skill", "ok": True,
                                                    "executed": True, "state": "completed"}]
         assert any(m.get("method") == "agent.event" and m["params"]["event"]["type"] == "tool_call" for m in seen)
 

@@ -15,14 +15,13 @@ import re
 INTENTS = ("chat", "inspect", "control", "author", "diagnose")
 MODES = ("auto", "off", *INTENTS)
 
-READ_TOOLS = frozenset({"list_hardware", "list_action_scripts", "query_sql",
-                        "list_skills", "read_skill", "list_files", "read_file", "read_prompt",
+READ_TOOLS = frozenset({"list_skills", "read_skill", "list_files", "read_file", "read_prompt",
                         "web_fetch", "web_search"})
 TOOLS_BY_INTENT = {
     "chat": READ_TOOLS,
-    "inspect": READ_TOOLS,
-    "control": READ_TOOLS | {"run_action_script", "read_variables", "capture_image", "run_skill"},
-    "author": READ_TOOLS | {"write_file", "edit_file", "update_prompt", "create_skill"},
+    "inspect": READ_TOOLS | {"run_skill"},
+    "control": READ_TOOLS | {"run_skill"},
+    "author": READ_TOOLS | {"write_file", "edit_file", "update_prompt", "create_skill", "run_skill"},
     "diagnose": READ_TOOLS | {"shell", "run_skill"},
 }
 BUDGETS = {"chat": (3, 4), "inspect": (4, 8), "control": (8, 16),

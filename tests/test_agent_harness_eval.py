@@ -57,9 +57,9 @@ def test_loop_guard_blocks_the_fourth_identical_call():
     executor = _Executor()
 
     async def scenario():
-        session = AgentSession(executor, _model(), AgentConfig())
+        session = AgentSession(executor, _model(), AgentConfig(), workspace=True)
         try:
-            results = [await session.dispatch("list_hardware", {}) for _ in range(4)]
+            results = [await session.dispatch("list_files", {}) for _ in range(4)]
             assert [item["ok"] for item in results] == [True, True, True, False]
             assert results[3]["state"] == "not_executed"
             assert "Identical tool call repeated" in results[3]["error"]
@@ -74,12 +74,12 @@ def test_loop_guard_resets_when_the_call_changes():
     executor = _Executor()
 
     async def scenario():
-        session = AgentSession(executor, _model(), AgentConfig())
+        session = AgentSession(executor, _model(), AgentConfig(), workspace=True)
         try:
             for _ in range(3):
-                assert (await session.dispatch("list_hardware", {}))["ok"]
-            assert (await session.dispatch("list_action_scripts", {}))["ok"]
-            assert (await session.dispatch("list_hardware", {}))["ok"]
+                assert (await session.dispatch("list_files", {}))["ok"]
+            assert (await session.dispatch("read_file", {"path": "a.txt"}))["ok"]
+            assert (await session.dispatch("list_files", {}))["ok"]
             assert len(executor.calls) == 5
         finally:
             await session.close()
@@ -91,15 +91,15 @@ def test_intent_matrix_allows_only_the_matching_tool_family():
     executor = _Executor()
 
     async def scenario():
-        session = AgentSession(executor, _model(), AgentConfig(allow_actions=True))
+        session = AgentSession(executor, _model(), AgentConfig(allow_actions=True, allow_file_writes=True), workspace=True)
         try:
-            session.intent = classify_intent("列出硬件", "inspect")
-            denied = await session.dispatch("run_action_script", {"script": "x.mt"})
+            session.intent = classify_intent("列出文件", "inspect")
+            denied = await session.dispatch("write_file", {"path": "a.txt", "content": "x"})
             assert denied["state"] == "not_executed" and "outside the active intent" in denied["error"]
             assert executor.calls == []
-            session.intent = classify_intent("运行自检", "control")
-            allowed = await session.dispatch("run_action_script", {"script": "x.mt"})
-            assert allowed["ok"] and executor.calls[-1][0] == "run_action_script"
+            session.intent = classify_intent("写一个文件", "author")
+            allowed = await session.dispatch("write_file", {"path": "a.txt", "content": "x"})
+            assert allowed["ok"] and executor.calls[-1][0] == "write_file"
         finally:
             await session.close()
 

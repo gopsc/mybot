@@ -95,7 +95,7 @@ class ProjectContext:
         siblings = _relative_names(self.robot.parent, "*.sql", MAX_ROBOT_ENTRIES) if self.robot.parent.is_dir() else []
         if siblings:
             lines.append("Structure files: " + ", ".join(siblings))
-        lines.append("Use list_hardware and query_sql for declarations; never assume names.")
+        lines.append("Use the hardware-controller skill (hardware/query actions) for declarations; never assume names.")
         return lines
 
     def _script_lines(self):

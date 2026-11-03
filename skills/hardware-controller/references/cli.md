@@ -44,7 +44,8 @@ semantics. Typical usage:
 ```sh
 pymybot roles create technician --description "Field technician"
 pymybot roles list
-pymybot agent --role technician --robot skills/hardware-controller/references/assets/robots/relay-test.sql --task "列出硬件"
+pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"
+pymybot agent --robot robots/my.sql --scripts-dir scripts --task "运行自检"
 pymybot roles clear-history technician --yes
 ```
 
@@ -140,10 +141,10 @@ pymybot run --robot skills/hardware-controller/references/assets/robots/qsont.sq
 ```
 
 The declared defaults stay in the tables, so `pymybot hardware`/`query` keep
-showing them rather than injected values. Agent mode passes the same bindings
-into activation and into every `run_action_script` call; operator bindings win
-over model-supplied `vars`. In the GUI, enter them under **设置 → 变量覆盖**;
-they stay in memory for this launch and are never written to `settings.json`.
+showing them rather than injected values. Agent mode forwards operator bindings
+to skill subprocesses as `--var` arguments; they are applied before activation.
+In the GUI, enter them under **设置 → 变量覆盖**; they stay in memory for this
+launch and are never written to `settings.json`.
 
 ## Examples
 
@@ -215,8 +216,8 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `robot`, `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
-| `agent.capture` | `name` plus the `agent.ask` conversation options except `task` | native `capture_image` receipt without a model request or MT script; `image.data` is Base64 and `image.media_type` identifies the decoded image |
+| `agent.ask` | `task`, optional `robot`, optional `scriptsDir`, optional `role`, `vars`, `mcpConfig`, `allowMcpTools`, `historyTurns`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.capture` | `name` plus the `agent.ask` conversation options except `task` | host-side camera receipt without a model request or MT script; requires an attached robot and allowlisted Camera; `image.data` is Base64 and `image.media_type` identifies the decoded image |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |

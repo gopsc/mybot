@@ -47,20 +47,39 @@ MCP 默认只读。执行动作、读取变量和抓图需要 `--allow-execution
 
 当根 Agent 发现本 Skill 标记为 `runnable` 时，可调用：
 
+根 Agent 不再暴露直接的硬件工具，硬件能力全部通过本 Skill 的 action 提供：
+
 ```text
 run_skill(skill="hardware-controller", action="doctor")
+run_skill(skill="hardware-controller", action="scripts")
 run_skill(skill="hardware-controller", action="hardware", arguments={
   "robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"}
 })
+run_skill(skill="hardware-controller", action="query", arguments={
+  "robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"},
+  "sql": "SHOW TABLES;"
+})
 run_skill(skill="hardware-controller", action="check", arguments={
-  "robot": {"scope": "robot", "path": "relay-test.sql"},
+  "robot": {"scope": "robots", "path": "relay-test.sql"},
   "script": {"scope": "scripts", "path": "relay-test.mt"}
+})
+run_skill(skill="hardware-controller", action="run", arguments={
+  "robot": {"scope": "robots", "path": "relay-test.sql"},
+  "script": {"scope": "scripts", "path": "relay-test.mt"},
+  "timeout": 30
+})
+run_skill(skill="hardware-controller", action="sample", arguments={
+  "robot": {"scope": "robots", "path": "relay-test.sql"},
+  "name": "relay0", "count": 1
+})
+run_skill(skill="hardware-controller", action="capture", arguments={
+  "robot": {"scope": "robots", "path": "camwin.sql"}, "camera": "cam"
 })
 ```
 
-允许的 action 仅为 `doctor`、`hardware`、`check`、`run`，定义在 `skill.json`。路径必须使用 `robots`、`scripts` 或 `skill_assets` scope，不能传绝对路径、`..`、命令、argv 或 `--allow-hardware`。
+允许的 action 为 `doctor`、`scripts`、`hardware`、`query`、`check`、`run`、`sample`、`capture`，定义在 `skill.json`。路径必须使用 `robots`、`scripts` 或 `skill_assets` scope，不能传绝对路径、`..`、命令、argv 或 `--allow-hardware`。字符串参数有字节上限；`query` 只接受 `SHOW`/`SELECT`，`sample` 的 `count` 为 1..1000。
 
-`run_skill` 每次执行都要求独立审批，现有动作自动批准不能绕过。只有宿主已授予硬件权限时，`run` 才会追加 `--allow-hardware`；否则仅执行虚拟/软件动作。
+`run_skill` 每次执行都要求独立审批，现有动作自动批准不能绕过。只有宿主已授予硬件权限时，`run`、`sample`、`capture` 才会追加 `--allow-hardware`；否则仅执行虚拟/软件动作。`capture` 通过 `Camera.mt` 执行，返回的 JSON 可能因图片过大被截断；GUI 宿主抓图仍走原生 `agent.capture` 并直接预览图片。
 
 ## 安全与兼容性
 

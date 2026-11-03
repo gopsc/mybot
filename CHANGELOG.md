@@ -8,6 +8,14 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The Agent core is now generic. Direct hardware tools (`list_hardware`,
+  `list_action_scripts`, `query_sql`, `run_action_script`, `read_variables`,
+  `capture_image`) are no longer model tools; all hardware work goes through
+  `run_skill("hardware-controller", ...)`. The agent can start without a robot
+  and keeps workspace, shell, web, skill and MCP tools. `hardware-controller`
+  adds `scripts`, `query`, `sample` and `capture` actions, and Skill arguments
+  now support bounded strings. Host-side `agent.capture` and the GUI preview
+  still require an attached robot.
 - The Agent backend now uses LangGraph/LangChain instead of PydanticAI. Tool
   approval uses LangGraph interrupts with an in-memory checkpointer; the
   serve/GUI protocol, receipt shapes and streaming event names are unchanged.

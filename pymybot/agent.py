@@ -500,33 +500,6 @@ class AgentSession:
                 coroutine=coroutine, name=name, description=description,
                 response_format=response_format))
 
-        async def list_hardware():
-            """List declared robot hardware without activating devices."""
-            return await self.invoke_tool("list_hardware", {})
-
-        async def list_action_scripts():
-            """List existing relative .mt paths in the operator's trusted scripts root."""
-            return await self.invoke_tool("list_action_scripts", {})
-
-        async def query_sql(sql: str):
-            """Read structure tables using SELECT * or SHOW TABLES; never mutate SQL."""
-            return await self.invoke_tool("query_sql", {"sql": sql})
-
-        async def run_action_script(script: str, vars: dict[str, str] | None = None):
-            """Execute an existing relative .mt script after host approval. Images it captures are attached; image_index in the receipt identifies each one. Never retry unknown results."""
-            result = await self.invoke_tool("run_action_script", {
-                "script": script, "vars": vars or {}})
-            return _image_blocks(result)
-
-        async def read_variables(names: list[str]):
-            """Read only operator-allowlisted variables. Activation/reading may write to devices."""
-            return await self.invoke_tool("read_variables", {"names": names})
-
-        async def capture_image(name: str):
-            """Capture the operator-selected camera and attach the image, after host approval."""
-            result = await self.invoke_tool("capture_image", {"name": name})
-            return _image_blocks(result)
-
         async def list_skills():
             """List operator-provided reference skills and their markdown files."""
             return await self.invoke_tool("list_skills", {})
@@ -585,15 +558,7 @@ class AgentSession:
             return await self.invoke_tool("update_prompt", {
                 "layer": layer, "content": content, "reason": reason})
 
-        functions = [
-            ("list_hardware", list_hardware), ("list_action_scripts", list_action_scripts),
-            ("query_sql", query_sql), ("run_action_script", run_action_script),
-            ("read_prompt", read_prompt), ("update_prompt", update_prompt),
-        ]
-        if self.read_vars:
-            functions.append(("read_variables", read_variables))
-        if self.camera_vars:
-            functions.append(("capture_image", capture_image))
+        functions = [("read_prompt", read_prompt), ("update_prompt", update_prompt)]
         if self.workspace:
             functions.extend((("list_files", list_files), ("read_file", read_file),
                               ("write_file", write_file), ("edit_file", edit_file)))
@@ -623,6 +588,10 @@ class AgentSession:
             guide.append("Invoke only skills marked runnable with run_skill(skill, action, arguments). "
                          "Use the actions and scoped paths documented by that skill; never invent entrypoints, "
                          "commands, flags or absolute paths.")
+            guide.append("Hardware operations are exposed only through trusted skill actions "
+                         "(for example run_skill('hardware-controller', 'hardware'|'query'|'run'|'sample')). "
+                         "The skill defines robot/script scopes, and physical devices still require the host "
+                         "hardware grant.")
         guide.append(f"Runtime gates: workspace={'enabled' if self.workspace else 'disabled'}, "
                      f"shell={'enabled' if self.enable_shell else 'disabled'}.")
         if self.enable_shell:
@@ -904,7 +873,7 @@ class AgentSession:
             return
         events = self.events[first_event:]
         actions = [event for event in events if event["tool"] in IO_TOOLS | SKILL_TOOLS]
-        robot = getattr(self.executor, "robot_path", "")
+        robot = getattr(self.executor, "robot_path", "") or ""
         if not robot and isinstance(self.context, dict):
             robot = self.context.get("robot", "")
         stats = {"robot": Path(str(robot)).name,
@@ -1176,6 +1145,8 @@ class AgentSession:
         # A host-initiated capture is not part of the previous model turn's intent.
         self.intent = None
         try:
+            if hasattr(self.executor, "robot_path") and self.executor.robot_path is None:
+                raise AgentConfigurationError("Camera capture requires an attached robot")
             self._check()
             if self.context is None:
                 await self.start()
@@ -1453,6 +1424,10 @@ async def run_cli_agent(args, stop):
             raise AgentConfigurationError(f"Cannot load role: {exc}; no model request was sent") from None
         mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
                       else getattr(args, "mcp_config", None) if role is None else None)
+        if getattr(args, "robot", None) is None and (getattr(args, "read_var", None)
+                                                     or getattr(args, "camera_var", None)):
+            raise AgentConfigurationError(
+                "--read-var and --camera-var require --robot; no model request was sent")
         config = AgentConfig(model=args.model or os.environ.get("MYBOT_MODEL", ""),
                              base_url=args.base_url or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=args.api_key_env, timeout=args.timeout,
@@ -1481,7 +1456,7 @@ async def run_cli_agent(args, stop):
                 f"Cannot load MCP configuration: {exc}; no model request was sent") from None
         model, client = create_model(config)
         session_log = create_session_log(enabled=not getattr(args, "no_session_log", False),
-                                         robot=args.robot, model=config.model, mode="cli",
+                                         robot=args.robot or "", model=config.model, mode="cli",
                                          role=role.name if role is not None else "")
         try:
             skills_dir = role.skills_dir if role is not None else (args.skills_dir or default_skills_root())

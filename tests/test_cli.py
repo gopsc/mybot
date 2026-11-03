@@ -51,6 +51,15 @@ def test_doctor_reports_dependencies_and_assets(capsys):
     assert payload["assets"]["scripts"]["files"] > 0
 
 
+def test_self_contained_skill_entrypoint_reports_healthy():
+    script = ROOT / "skills" / "hardware-controller" / "scripts" / "hardware_controller.py"
+    result = subprocess.run([sys.executable, "-I", str(script), "doctor"], cwd=ROOT,
+                            capture_output=True, text=True, timeout=60)
+    payload = json.loads(result.stdout)
+    assert result.returncode == 0 and payload["healthy"] is True
+    assert payload["assets"]["prompts"]["valid"] is True
+
+
 def test_doctor_reports_standard_lua_fallback(monkeypatch, capsys):
     import pymybot.runtime as runtime
     monkeypatch.setattr(runtime, "LUA_BACKEND", "Lua 5.4")

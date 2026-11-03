@@ -1,5 +1,6 @@
 """Skills library and agent skill tools: shape checks, sandboxed reads, wiring."""
 import asyncio
+import json
 import os
 from pathlib import Path
 import sys
@@ -278,7 +279,7 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "before calling create_skill" in without
     assert "never write skill files with write_file" in instructions
     assert "runnable via run_skill" in instructions
-    base_tools = ["list_hardware", "list_action_scripts", "query_sql", "run_action_script", "read_prompt", "update_prompt"]
+    base_tools = ["read_prompt", "update_prompt"]
     assert sorted(tool.name for tool in tools) == sorted(
         base_tools + ["list_skills", "read_skill", "create_skill", "run_skill"])
     assert sorted(tool.name for tool in plain) == sorted(base_tools)
@@ -395,3 +396,64 @@ def test_create_skill_requires_host_approval(tmp_path):
     assert approved["ok"] is True and approved["executed"] is True
     assert not (root / "denied-skill").exists()
     assert (root / "approved-skill" / "SKILL.md").is_file()
+
+
+def test_skill_runner_string_arguments_are_bounded(tmp_path):
+    from pymybot.agent_skill_runner import SkillRunner
+
+    root = tmp_path / "skills"
+    skill = root / "echo"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: echo\ndescription: Echo text.\n---\n\n# Echo\n", encoding="utf-8")
+    (skill / "skill.json").write_text(json.dumps({
+        "version": 1,
+        "run": {
+            "entrypoint": "run.py",
+            "actions": {
+                "echo": {"effect": "read", "output": "json", "argv": ["{text}"],
+                         "params": {"text": {"type": "string", "max": 8, "required": True}}},
+                "default": {"effect": "read", "output": "json", "argv": ["{text}"],
+                            "params": {"text": {"type": "string", "max": 8, "default": "fallback"}}},
+            },
+        },
+    }), encoding="utf-8")
+    (skill / "run.py").write_text(
+        "import json, sys\nprint(json.dumps({'text': sys.argv[1]}))\n", encoding="utf-8")
+    runner = SkillRunner(SkillsLibrary(root))
+    assert runner.run("echo", "echo", {"text": "hello"})["output"] == {"text": "hello"}
+    assert runner.run("echo", "default", {})["output"] == {"text": "fallback"}
+    with pytest.raises(SecurityError):
+        runner.run("echo", "echo", {"text": "123456789"})
+
+
+def test_robotless_executor_runs_generic_and_skill_tools(tmp_path):
+    skills = SkillsLibrary(ROOT / "skills")
+
+    async def scenario():
+        executor = RobotExecutor(None, skills=skills, workspace_dir=str(tmp_path))
+        try:
+            context = await executor.start()
+            assert "robot" not in context and context["hardware"] == []
+            scripts = await executor.call(
+                "run_skill", {"skill": "hardware-controller", "action": "scripts"}, timeout=60)
+            assert scripts["ok"] and scripts["data"]["output"]["scripts"]
+            hardware = await executor.call("run_skill", {
+                "skill": "hardware-controller", "action": "hardware",
+                "arguments": {"robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"}},
+            }, timeout=60)
+            assert hardware["ok"] and hardware["data"]["output"]["hardware"]
+            query = await executor.call("run_skill", {
+                "skill": "hardware-controller", "action": "query",
+                "arguments": {"robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"},
+                              "sql": "SHOW TABLES;"},
+            }, timeout=60)
+            assert query["ok"] and "SHOW TABLES" in query["data"]["output"]["output"]
+            listing = await executor.call("list_files", {"path": "."}, timeout=10)
+            assert listing["state"] == "completed"
+            blocked = await executor.call("query_sql", {"sql": "SHOW TABLES;"}, timeout=10)
+            assert blocked["state"] == "not_executed"
+        finally:
+            await executor.close()
+
+    asyncio.run(scenario())

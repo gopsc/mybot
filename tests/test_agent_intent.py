@@ -66,7 +66,7 @@ def test_english_intent_classification():
 def test_mixed_request_unions_tool_sets():
     decision = classify_intent("write a script and run it with shell")
     assert decision.name == "author"
-    assert {"write_file", "edit_file", "run_action_script", "shell"} <= decision.tools
+    assert {"write_file", "edit_file", "run_skill", "shell"} <= decision.tools
     assert decision.max_requests == 8 and decision.max_tool_calls == 20
 
 
@@ -79,7 +79,7 @@ def test_no_keywords_stays_unrestricted():
 def test_operator_override_and_off():
     forced = classify_intent("hello", "control")
     assert forced.name == "control" and forced.confidence == 1.0
-    assert forced.allows("run_action_script") and not forced.allows("write_file")
+    assert forced.allows("run_skill") and not forced.allows("write_file")
     disabled = classify_intent("run the robot", "off")
     assert disabled.name == "off" and not disabled.restricted
     assert disabled.allows("shell")
@@ -105,7 +105,7 @@ def test_dispatch_denies_tool_outside_intent():
                                workspace=True, enable_shell=True)
         try:
             session.intent = classify_intent("列出硬件", "inspect")
-            result = await session.dispatch("run_action_script", {"script": "x.mt"})
+            result = await session.dispatch("write_file", {"path": "a.txt", "content": "x"})
             assert result["state"] == "not_executed" and not result["ok"]
             assert "outside the active intent" in result["error"]
             assert executor.calls == []
@@ -134,7 +134,7 @@ def test_agent_result_reports_intent():
     result = asyncio.run(scenario())
     assert result["intent"]["name"] == "inspect"
     assert result["intent"]["restricted"] is True
-    assert "list_hardware" in result["intent"]["allowed_tools"]
+    assert "run_skill" in result["intent"]["allowed_tools"]
 
 
 def test_cli_and_gui_config_expose_intent(tmp_path):

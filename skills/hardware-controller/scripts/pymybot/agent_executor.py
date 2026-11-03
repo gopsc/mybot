@@ -341,8 +341,8 @@ class RobotExecutor:
     through cancellation, then re-raises CancelledError after owner cleanup.
     """
 
-    def __init__(self, robot_path, *, module_paths=None, camera_src_root=None,
-                 scripts_dir, allow_hardware=False, read_vars=(), camera_vars=(),
+    def __init__(self, robot_path=None, *, module_paths=None, camera_src_root=None,
+                 scripts_dir=None, allow_hardware=False, read_vars=(), camera_vars=(),
                  stop_event=None, robot_factory=Robot, skills=None, workspace_dir=None, enable_shell=False,
                  vars=None, sandbox="off"):
         if enable_shell and workspace_dir is None:
@@ -356,8 +356,10 @@ class RobotExecutor:
         self._workspace = None
         self._protected_paths = ()
         self._workspace_lock = threading.Lock()
-        self._robot_path = Path(robot_path).absolute()
-        self._scripts_dir = Path(scripts_dir).absolute()
+        self._robot_path = Path(robot_path).absolute() if robot_path is not None else None
+        self._scripts_dir = Path(scripts_dir).absolute() if scripts_dir is not None else None
+        self._scripts = None
+        self._rows = {}
         self._skills = skills if isinstance(skills, SkillsLibrary) else None
         self._module_paths = module_paths
         self._camera_src_root = camera_src_root
@@ -499,26 +501,27 @@ class RobotExecutor:
         self._check(deadline)
         if self._ready:
             return
-        scripts = _Scripts(self._scripts_dir)
+        scripts = _Scripts(self._scripts_dir) if self._scripts_dir is not None else None
         with self._workspace_lock:
             if self._workspace_dir is not None and self._workspace is None:
                 self._workspace = Workspace(
                     self._workspace_dir, enable_shell=self._enable_shell,
                     sandbox=self._sandbox, protected_paths=self._protected_paths,
                     skills_root=self._skills.root if self._skills is not None else None)
-        sql = _read_stable(self._robot_path, lambda: _no_links(self._robot_path))
-        self._check(deadline)
-        # Keep even a partially validated robot available for owner-thread close.
-        if self._robot is None:
-            self._robot = self._factory(sql, module_paths=self._module_paths,
-                                        camera_src_root=self._camera_src_root,
-                                        stop_event=self._stop, allow_hardware=self._allow_hardware,
-                                        vars=self._vars)
-        # Construction may already have consumed the whole budget; do not
-        # enumerate metadata or validate a robot once the turn has expired.
-        self._check(deadline)
-        self._robot._validate(self._robot.tables)
-        self._rows = self._robot._rows(self._robot.tables)
+        if self._robot_path is not None:
+            sql = _read_stable(self._robot_path, lambda: _no_links(self._robot_path))
+            self._check(deadline)
+            # Keep even a partially validated robot available for owner-thread close.
+            if self._robot is None:
+                self._robot = self._factory(sql, module_paths=self._module_paths,
+                                            camera_src_root=self._camera_src_root,
+                                            stop_event=self._stop, allow_hardware=self._allow_hardware,
+                                            vars=self._vars)
+            # Construction may already have consumed the whole budget; do not
+            # enumerate metadata or validate a robot once the turn has expired.
+            self._check(deadline)
+            self._robot._validate(self._robot.tables)
+            self._rows = self._robot._rows(self._robot.tables)
         self._scripts = scripts
         self._check(deadline)
         self._ready = True
@@ -544,10 +547,12 @@ class RobotExecutor:
                 raise SecurityError("Executor faulted")
             self._load(deadline)
             hardware = self._hardware()
-            scripts = self._scripts.listing(lambda: self._check(deadline))
-            context = {"robot": self._robot_path.stem, "hardware": hardware["hardware"],
-                       "scripts": scripts["scripts"],
+            scripts = (self._scripts.listing(lambda: self._check(deadline))
+                       if self._scripts is not None else {"scripts": [], "truncated": False})
+            context = {"hardware": hardware["hardware"], "scripts": scripts["scripts"],
                        "truncated": hardware["truncated"] or scripts["truncated"]}
+            if self._robot_path is not None:
+                context["robot"] = self._robot_path.stem
             if self._workspace is not None:
                 context["workspace"] = {"root": str(self._workspace.path), "shell_enabled": self._enable_shell,
                                         "shell_sandboxed": False}
@@ -736,12 +741,18 @@ class RobotExecutor:
             if name == "list_hardware":
                 data = self._hardware()
             elif name == "list_action_scripts":
+                if self._scripts is None:
+                    raise SecurityError("Scripts root is not configured")
                 data = self._scripts.listing(lambda: self._check(deadline))
             elif name == "read_action_script":
+                if self._scripts is None:
+                    raise SecurityError("Scripts root is not configured")
                 path = self._scripts.path.joinpath(*_relative(arguments["script"]).split("/"))
                 self._scripts.check(path)
                 data = {"script": arguments["script"], "content": self._scripts.read(path)}
             elif name == "query_sql":
+                if self._robot is None:
+                    raise SecurityError("Robot is not configured")
                 data = {"output": self._robot.query_sql(arguments["sql"])}
             elif name == "list_skills":
                 if self._skills is None or self._skills.root is None:
@@ -761,18 +772,28 @@ class RobotExecutor:
             elif name == "run_skill":
                 if self._skills is None or self._skills.root is None:
                     raise SecurityError("Skills are not configured")
-                roots = {"robots": self._robot_path.parent, "scripts": self._scripts_dir}
+                roots = {}
+                if self._robot_path is not None:
+                    roots["robots"] = self._robot_path.parent
+                if self._scripts_dir is not None:
+                    roots["scripts"] = self._scripts_dir
                 if self._workspace_dir is not None:
                     roots["workspace"] = self._workspace_dir
+                    if "robots" not in roots and (self._workspace_dir / "robots").is_dir():
+                        roots["robots"] = self._workspace_dir / "robots"
+                    if "scripts" not in roots and (self._workspace_dir / "scripts").is_dir():
+                        roots["scripts"] = self._workspace_dir / "scripts"
                 data = SkillRunner(self._skills, roots=roots).run(
                     arguments["skill"], arguments["action"], arguments.get("arguments"),
-                    allow_hardware=self._allow_hardware, deadline=deadline,
+                    allow_hardware=self._allow_hardware, bindings=self._vars, deadline=deadline,
                     check=lambda: self._check(deadline), started=started)
             elif name in WORKSPACE_TOOLS:
                 if self._workspace is None:
                     raise SecurityError("Workspace tools are not configured")
                 data = self._workspace.call(name, arguments, lambda: self._check(deadline), started)
             else:
+                if self._robot is None:
+                    raise SecurityError("Robot is not configured")
                 self._preflight_io(name, arguments)
                 if name == "run_action_script":
                     script, base = self._scripts.prepare(arguments["script"], lambda: self._check(deadline))

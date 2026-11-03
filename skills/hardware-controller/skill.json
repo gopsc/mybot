@@ -7,17 +7,26 @@
       "doctor": {
         "effect": "read",
         "output": "json",
-        "argv": ["doctor"],
+        "argv": [
+          "doctor"
+        ],
         "params": {}
       },
       "hardware": {
         "effect": "read",
         "output": "json",
-        "argv": ["hardware", "--robot", "{robot}"],
+        "argv": [
+          "hardware",
+          "--robot",
+          "{robot}"
+        ],
         "params": {
           "robot": {
             "type": "path",
-            "scope": ["robots", "skill_assets"],
+            "scope": [
+              "robots",
+              "skill_assets"
+            ],
             "suffix": ".sql",
             "required": true
           }
@@ -26,17 +35,29 @@
       "check": {
         "effect": "read",
         "output": "json",
-        "argv": ["check", "--robot", "{robot}", "--input", "{script}"],
+        "argv": [
+          "check",
+          "--robot",
+          "{robot}",
+          "--input",
+          "{script}"
+        ],
         "params": {
           "robot": {
             "type": "path",
-            "scope": ["robots", "skill_assets"],
+            "scope": [
+              "robots",
+              "skill_assets"
+            ],
             "suffix": ".sql",
             "required": true
           },
           "script": {
             "type": "path",
-            "scope": ["scripts", "skill_assets"],
+            "scope": [
+              "scripts",
+              "skill_assets"
+            ],
             "suffix": ".mt",
             "required": true
           }
@@ -45,18 +66,32 @@
       "run": {
         "effect": "execute",
         "output": "json",
-        "argv": ["run", "--robot", "{robot}", "--input", "{script}", "--timeout", "{timeout}"],
+        "argv": [
+          "run",
+          "--robot",
+          "{robot}",
+          "--input",
+          "{script}",
+          "--timeout",
+          "{timeout}"
+        ],
         "hardwareFlag": "--allow-hardware",
         "params": {
           "robot": {
             "type": "path",
-            "scope": ["robots", "skill_assets"],
+            "scope": [
+              "robots",
+              "skill_assets"
+            ],
             "suffix": ".sql",
             "required": true
           },
           "script": {
             "type": "path",
-            "scope": ["scripts", "skill_assets"],
+            "scope": [
+              "scripts",
+              "skill_assets"
+            ],
             "suffix": ".mt",
             "required": true
           },
@@ -65,6 +100,107 @@
             "min": 1,
             "max": 3600,
             "default": 180
+          }
+        }
+      },
+      "scripts": {
+        "effect": "read",
+        "output": "json",
+        "argv": [
+          "scripts"
+        ],
+        "params": {}
+      },
+      "query": {
+        "effect": "read",
+        "output": "json",
+        "argv": [
+          "query",
+          "--robot",
+          "{robot}",
+          "--sql",
+          "{sql}"
+        ],
+        "params": {
+          "robot": {
+            "type": "path",
+            "scope": [
+              "robots",
+              "skill_assets"
+            ],
+            "suffix": ".sql",
+            "required": true
+          },
+          "sql": {
+            "type": "string",
+            "max": 8192,
+            "required": true
+          }
+        }
+      },
+      "sample": {
+        "effect": "execute",
+        "output": "json",
+        "argv": [
+          "sample",
+          "--robot",
+          "{robot}",
+          "--name",
+          "{name}",
+          "--count",
+          "{count}"
+        ],
+        "hardwareFlag": "--allow-hardware",
+        "params": {
+          "robot": {
+            "type": "path",
+            "scope": [
+              "robots",
+              "skill_assets"
+            ],
+            "suffix": ".sql",
+            "required": true
+          },
+          "name": {
+            "type": "string",
+            "max": 64,
+            "required": true
+          },
+          "count": {
+            "type": "number",
+            "min": 1,
+            "max": 1000,
+            "default": 1
+          }
+        }
+      },
+      "capture": {
+        "effect": "execute",
+        "output": "json",
+        "argv": [
+          "run",
+          "--robot",
+          "{robot}",
+          "--input",
+          "references/assets/scripts/Camera.mt",
+          "--var",
+          "cameraVar={camera}"
+        ],
+        "hardwareFlag": "--allow-hardware",
+        "params": {
+          "robot": {
+            "type": "path",
+            "scope": [
+              "robots",
+              "skill_assets"
+            ],
+            "suffix": ".sql",
+            "required": true
+          },
+          "camera": {
+            "type": "string",
+            "max": 64,
+            "default": "cam"
           }
         }
       }

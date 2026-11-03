@@ -22,7 +22,7 @@ pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人�
 | --- | --- | --- |
 | **GUI** | 桌面调试、演示、人工审批每一步 | `pymybot` |
 | **CLI 控制器** | CI/CD、脚本、无模型环境 | `pymybot check / run / sample / ...` |
-| **AI Agent** | 自然语言控制机器人 | `pymybot --no-gui --robot ... --task "..."` |
+| **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --task "..."`（可加 `--robot`） |
 | **MCP** | Claude Desktop、Cursor、其他 MCP 客户端 | `pymybot mcp --robot ...` |
 
 另外还有一个长驻的 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
@@ -182,7 +182,7 @@ GUI 是一个前端，不重复实现机器人逻辑：窗口只启动一个 `se
 
 - 启动先显示复古风入口界面：SVG 机器人 logo、扫描线、真实的 serve 状态、`进入控制台` 按钮和淡入过渡；`--no-splash` 可以跳过。
 - 左侧是 workspace、脚本/技能/模块/MCP 配置、硬件树、权限与预算，以及模型摘要。
-- 硬件区可直接选择已加入相机白名单的 Camera 并点击 **抓图**：走 Agent 原生 `capture_image` 审批与执行链，不请求模型、不需要 MT 脚本，成功后弹出本地图片预览；MT Camera 动作仍可用于自动化流程。
+- 硬件区可直接选择已加入相机白名单的 Camera 并点击 **抓图**：走宿主侧 `agent.capture` 审批与执行链（不是模型工具），不请求模型、不需要 MT 脚本，成功后弹出本地图片预览；MT Camera 动作仍可用于自动化流程。
 - 右侧是对话、日志、编辑器、资源四个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
 - 编辑器页可打开、编辑和保存 `.mt` 动作脚本与 `robots/*.sql` 结构文件，带行号、MT/SQL 高亮和未保存标记；**检查**只做静态校验（结构用 `check --robot`，动作用 `check --robot --input`），不激活硬件。**运行**通过一次性 CLI 子进程执行，默认虚拟硬件，勾选 `允许硬件` 并确认后才会碰真实设备；编辑结构时可在“运行脚本”里选择一个 `.mt`，对当前结构运行。快捷键：`Ctrl+S` 保存、`Ctrl+Shift+S` 另存、`Ctrl+Enter` 运行、`F6` 检查。
 - 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、脚本编辑器（`Ctrl+E`）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
@@ -271,7 +271,8 @@ TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/refere
 | 物理 I2C/SPI/UART | 关闭 | `--allow-hardware` |
 | 非回环 HTTP/TCP | 关闭 | `--allow-hardware` |
 | Shell 驱动 | 关闭 | `--allow-hardware` |
-| Agent 动作/读取/拍照 | 逐次确认 | `--allow-actions` 或弹窗 |
+| Agent 硬件 Skill 动作 | 每次 `run_skill` 单独确认 | 无自动批准；物理硬件另需 `--allow-hardware` |
+| Agent 宿主抓图 | 逐次确认 | `--allow-actions` 或弹窗 |
 | Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |
 | Agent Shell | 关闭 | `--enable-shell` + `--allow-shell` |
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
