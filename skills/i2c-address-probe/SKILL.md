@@ -1,154 +1,105 @@
 ---
 name: i2c-address-probe
-description: 宿主侧 I2C 总线地址探测技能（Linux），提供零第三方依赖的 Python（i2c-dev ioctl 只读读探测）与 sh 包装两套脚本，枚举 /dev/i2c-N 上 0x08~0x77 会应答的从机地址，输出网格或固定字段 JSON，并标注内核已绑定的驱动；带 skill.json，Agent 可用 run_skill 的 list-buses / scan 动作执行。当用户说“扫描 I2C”“i2c scan”“i2cdetect”“写个扫 I2C 的脚本”“看看总线上挂了哪些设备”“扫一下 /dev/i2c-1”“I2C 地址冲突/找不到器件”时使用。
+description: 用 Python 标准库只读发现 I2C 适配器并扫描从机地址：Linux 走 i2c-dev ioctl（零长度 quick-write 探测，ENXIO/EREMOTEIO 归为 NAK，内核已绑定地址报 busy，容器里 /dev 被裁剪时仍从 sysfs 列总线），macOS/Windows 诚实报告无 i2c-dev 并只列 USB-I2C 桥候选，不伪造扫描结果。当用户说「I2C 扫描」「探一下 I2C 地址」「i2cdetect 替代」「这个地址上有没有设备」「扫 0x48」「总线上挂了什么」「probe i2c address」「i2c scan」「address scan」时使用。
 ---
 
-# 宿主侧 I2C 地址探测（sh / Python）
+# I2C 地址探测
 
 ## 1. 适用范围
 
-- 用于：确认某条**宿主 Linux I2C 总线**（`/dev/i2c-N`）上哪些从机地址在应答；核对地址跳线、上拉、供电；判断“结构里声明了器件但 `build` 失败”是接线问题还是驱动问题；给 `modules/` 里的候选驱动缩小范围；排查 USB-I2C（CH341/FTDI/CP2112）。
-- 不用于：识别芯片型号（应答只说明“有东西在线”）；替代 `pymybot hardware`（它只反映结构声明）；扫 `proto='virt'` 虚拟总线（虚拟总线只复述声明，没有发现语义）；写寄存器或配置器件——本技能**只读**。
-- 同类技能 `i2c-host-scan` 覆盖同一场景；若本机已安装，二者只保留一个。本技能的增补是：`/sys` 内核绑定标注（网格 `UU`、JSON `bound`）、固定 JSON 契约、sh 包装可直接吃设备路径。**同一场景不并行维护两份**。
-
-## 2. 必须先知道的事实
-
-- **只读探测**：判据是“`I2C_SLAVE` 绑定地址 + SMBus read byte 读 1 字节成功”，适配器不支持 SMBus 时回落为一次纯 I2C 单字节读。**不写任何数据字节**，也**不用** `i2cdetect` 默认的 quick-write 模式（那个模式会向每个地址写 1 字节，可能改 DAC 输出、触发一次转换、写 EEPROM、吸合继电器）。
-- 只扫 **0x08~0x77**：0x00~0x07 是广播/保留区，0x78~0x7F 是 10 位地址保留区。越界直接退出码 2，不做静默裁剪。
-- **读探测也不是零副作用**：FIFO 型 ADC、状态机型传感器被读一次就会弹出数据或推进状态机。能停机再扫。
-- **NACK 与“总线不通”在读取层不可区分**：Linux 对 NACK 也返回 `EREMOTEIO`。0 命中既可能是没器件，也可能是没上拉/没供电/适配器掉线——用已知地址 `--addr 0x48` 交叉验证。
-- 权限：`i2c-dev` 以 `O_RDWR` 打开，**只读探测也需要写权限**，即 `root` 或 `i2c` 组。
-- 总线必须独占：扫描期间不要跑 pymybot/Daemon 采样，否则结果抖动。
-- wheel/frozen 安装只带 Python 入口（仓库打包规则会跳过 `packaged: "cli"` 的技能），sh 包装只在源码树里。
-- 本技能**带 `skill.json`**，Agent 可用 `run_skill` 的 `list-buses`（只读枚举）和 `scan`（需要总线名）两个动作。可信技能免审批并自动获得硬件权限，因此只安装你审阅过的副本；扫描本身的只读、独占和越界规则不变。
-
-## 3. 文件清单
-
-下表路径相对**仓库根**；第 5 节的命令缩写假定当前目录是本技能目录。
-
-| 路径 | 作用 |
+| 做 | 不做 |
 | --- | --- |
-| `skills/i2c-address-probe/scripts/i2c_probe.py` | 主实现：Python 3 标准库（`fcntl`/`os`/`glob`），零第三方依赖。`--bus` / `--list-buses` / `--addr` / `--range` / `--repeat` / `--json` / `--no-sysfs` |
-| `skills/i2c-address-probe/scripts/i2c_probe.sh` | sh 包装：首位参数可给 `/dev/i2c-1`、`i2c-1`、`1`；校验解释器与设备节点；其余参数原样转发。`I2C_PROBE_PYTHON` 可指定解释器 |
-| `references/usage.md` | 权限、errno 对照表、0 命中排查顺序、抖动复核、地址→候选驱动流程、与 pymybot 路线的分工 |
+| 列出 Linux I2C 适配器（`/dev/i2c-*` + sysfs 回退）、内核已绑定客户端、权限状态 | 读写寄存器、初始化设备、加载内核模块 |
+| 可选：扫描 7 位地址区间，区分 `ack` / `nak` / `busy` / `error` | 在 macOS/Windows 上假装能扫地址 |
+| 扫描到的地址给出**标注为推测**的常见型号提示 | 把地址猜测当成已确认型号上报 |
+| macOS/Windows 列出 USB-I2C 桥候选 | 安装驱动、装 pyserial/smbus2、`sudo` |
+
+分工：只做 I2C 地址层面的事。需要一次看 I2C+UART+SPI 全景，用 `i2c-uart-spi-enum`；需要真正驱动设备、改硬件结构或采样，用 `hardware-controller`。
+
+## 2. 快速开始
+
+脚本：`scripts/i2c_probe.py`，只依赖 Python 3.8+ 标准库，无第三方依赖。
+
+```sh
+python3 scripts/i2c_probe.py --list                      # 被动：适配器 + 已绑定客户端
+python3 scripts/i2c_probe.py --list --json               # 单行 JSON
+python3 scripts/i2c_probe.py --probe                     # 主动：扫描 0x08-0x77
+python3 scripts/i2c_probe.py --probe --i2c-device /dev/i2c-1
+python3 scripts/i2c_probe.py --probe --addresses 0x48,0x68-0x69 --json
+python3 scripts/i2c_probe.py --bridges                   # macOS/Windows 自动开启
+```
+
+## 3. 参数
+
+| 参数 | 含义 |
+| --- | --- |
+| `--list` | 只做被动枚举，不碰总线（默认行为） |
+| `--probe` | 主动扫描，关闭状态下永不上总线 |
+| `--i2c-device NODE` | 只探测指定节点，可重复；默认探测所有可见适配器 |
+| `--addresses SPEC` | `0x08-0x77` 区间或 `0x48,0x68` 列表；带 `0x` 按十六进制，不带按十进制 |
+| `--bridges` | 额外列 USB-I2C 桥候选（macOS/Windows 默认已开） |
+| `--json` | 单行 JSON 到 stdout，告警进 `warnings` |
+
+退出码：`0` 成功；`1` 有请求的动作失败（节点打不开、地址返回 `error:`）；`2` 参数错误。
 
 ## 4. 工作流
 
-1. **找总线**：`sh scripts/i2c_probe.sh --list-buses`（或 `ls /dev/i2c-*`）。不要猜编号。
-2. **静态自检**（不碰硬件）：`python3 -m py_compile scripts/i2c_probe.py`、`sh -n scripts/i2c_probe.sh`。
-3. **单点确认**：`--addr 0x48` 先验一个已知器件；通路通了再全量扫。
-4. **全量扫**：`sh scripts/i2c_probe.sh /dev/i2c-1`（默认 0x08~0x77）。
-5. **读结果**：人看网格；程序只解析 `--json` 的 `count` / `found` / `bound` / `failed` / `exit_code`。
-6. **按地址缩小候选驱动**：读 `modules/<驱动>.py|.lua` 头注释的 address 说明，不要凭记忆写地址表。
-7. **抖动复核**：`--repeat 3`，看 `unstable` 是否为空；非空即物理层问题。
+1. **先被动**：`--list --json`。确认适配器存在、节点可见、权限正常。
+2. **看 `node_present` / `node_visibility`**：`masked` 说明内核 sysfs 有这条总线，但当前进程看不到 `/dev` 节点（容器、沙箱、或 `/dev` 被裁剪）。此时清单来自 sysfs，`--probe` 必须在宿主机执行，不要在沙箱里反复重试。
+3. **看权限**：`readable` 为 `false` 时报告权限问题，让操作者把自己加进 `i2c` 组；**不要**用 root 跑扫描。
+4. **确认用户确实要主动探测后**，才加 `--probe`。先扫小范围（如 `--addresses 0x48`）验证通路，再扫全区间。
+5. **读结果**：`ack` = 该地址有应答；`nak` = 主要现象，不计入 `detail`；`busy` = 该地址已被内核驱动占用，去 `clients` 里查是谁。
+6. **解释型号**：`hints` 里的条目一律标注为推测（`confidence: "speculation"`），必须同时说明依据（地址、`clients` 里的绑定驱动名、用户描述），不能只报型号。
+7. **交接**：需要后续读写时，把总线号、节点、地址交给 `hardware-controller`。
 
-## 5. 用法
-
-```sh
-# 枚举可用总线（只读，不需要硬件权限）
-sh scripts/i2c_probe.sh --list-buses
-
-# 全量扫 /dev/i2c-1（0x08~0x77）
-sh scripts/i2c_probe.sh /dev/i2c-1
-
-# 等价写法：编号 + 范围 + JSON
-python3 scripts/i2c_probe.py --bus 1 --range 0x40-0x4f --json
-
-# 单点确认，重复 3 次看稳定性
-sh scripts/i2c_probe.sh 1 --addr 0x48 --repeat 3
-
-# 跳过 /sys 绑定标注（探测方式不变，少几次 sysfs 读）
-python3 scripts/i2c_probe.py --bus /dev/i2c-1 --no-sysfs
-```
-
-Agent 走 `run_skill` 时等价于下列调用（输出只取脚本的 `--json`）：
-
-```text
-run_skill(skill="i2c-address-probe", action="list-buses")
-run_skill(skill="i2c-address-probe", action="scan", arguments={"bus": "/dev/i2c-1"})
-run_skill(skill="i2c-address-probe", action="scan", arguments={
-  "bus": "1", "range": "0x40-0x4f", "repeat": 3})
-```
-
-`scan` 的 `bus` 可为 `1`、`i2c-1` 或 `/dev/i2c-1`；`range` 默认 `0x08-0x77`，`repeat` 默认 1（1–10）。退出码非 0 时 `run_skill` 回执为失败，不要自动重试。
-
-人读输出：
-
-```text
-bus: /dev/i2c-1   range: 0x08-0x77   probed: 112 x 1
-       0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
-00:                           -- -- -- -- -- -- -- --
-10:   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-20:   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-30:   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-40:   -- -- -- -- -- -- -- -- 1f -- -- -- -- -- -- --
-50:   -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-60:   -- -- -- -- -- -- -- -- UU -- -- -- -- -- -- --
-legend: XX=read value  --=NACK  UU=kernel driver bound  ??=flapping  EE=error  blank=out of range
-found: 1  0x48
-kernel-bound: 0x68=ds1307
-failed: nack=110
-```
-
-`1f` 是 0x48 读回的字节，只作“确实读到了东西”的证据，**不是型号 ID**；`UU` 表示该地址已被内核驱动占用（`EBUSY`），本工具没有探测它。
-
-`--json` 输出（字段固定，自动化只认这个）：
+## 5. 输出解读
 
 ```json
-{"bus": "/dev/i2c-1", "bus_id": 1, "range": "0x08-0x77", "probed": 112, "repeat": 1,
- "count": 1, "found": ["0x48"], "acks": {"0x48": "read:1F"}, "unstable": [],
- "bound": {"0x68": "ds1307"}, "failed": {"nack": 110}, "exit_code": 0}
+{
+  "platform": "linux", "python": "3.11.2", "supported": true, "ok": true,
+  "probes": [{
+    "device": "/dev/i2c-1", "ok": true, "addresses_scanned": 112,
+    "found": ["0x48", "0x68"],
+    "detail": {"0x48": "ack", "0x68": "busy"},
+    "hints": {"0x48": {"guess": "ADS1115/ADS1015 (ADDR=GND), LM75, PCF8591", "confidence": "speculation"}},
+    "reserved": {}
+  }],
+  "clients": [{"bus": 1, "address": "0x68", "name": "rtc", "driver": "rtc-ds1307", "state": null}],
+  "warnings": []
+}
 ```
 
-退出码：
-
-| 码 | 含义 |
+| 字段 | 含义 |
 | --- | --- |
-| `0` | 扫描完成（**0 命中也是 0**） |
-| `1` | 内部错误 |
-| `2` | 参数错误（含越界地址范围） |
-| `3` | 打不开总线：权限、节点不存在、无 `python3` |
-| `4` | 有事务，但全部以非 NACK 错误失败（适配器掉线、`i2c-dev` 异常） |
+| `supported: false` | 平台不提供 i2c-dev（macOS/Windows），不是"总线上没设备" |
+| `probes[].ok: false` | 该节点打不开，`error` 给原因；`ok: false` 的探测不算成功 |
+| `detail` 只含非 `nak` 项 | `nak` 是常态，不占空间；要看全量就扫小区间 |
+| `hints` | 地址 → 常见型号**推测**，不是识别结果 |
+| `reserved` | 落在保留地址却回了 `ack`，通常意味着地址计算或接线有问题 |
+| `bridges[].possible_i2c` | 按 Vendor ID 匹配的桥能力提示，不代表这台设备可用 I2C |
 
-## 6. 判读
+## 6. 硬规则
 
-| 现象 | 优先怀疑 |
+- 默认不碰总线。`--probe` 必须由用户明确要求或确认后才加。
+- 探测方式优先零长度 `I2C_RDWR` quick-write（总线上不出现数据字节）；适配器拒绝时才降级到 1 字节读，降级会写进 `warnings`，要一并告知用户——1 字节读对某些设备有副作用。
+- 扫描结果为空**不要**断言"没有设备"。先看 `warnings`、权限、`node_visibility`，再换总线号重试一次。
+- `busy` 不是故障，是被内核驱动占了；必须去 `clients` 里指明是谁。
+- 不要把 `hints` 当结论。用户问"这是什么芯片"时，先问型号丝印或看 `clients`。
+- 不为跑脚本而 `pip install`、`sudo` 或改 udev/设备树；缺什么就如实说明。
+- 退出码 1 要如实上报失败，不要描述成扫描成功。
+- 全区间输出 112 行，向用户汇报时只摘要 `found` 和异常项。
+
+## 7. 排障
+
+| 现象 | 处理 |
 | --- | --- |
-| `count=0` 且 `failed: nack=112` | 器件没供电、SDA/SCL 接反、缺上拉、地址跳线不对、扫错总线 |
-| `count=0` 且退出码 `4` | 总线本身不通：适配器未加载、`dtoverlay` 未启用、USB-I2C 掉线 |
-| 退出码 `3` | 权限（非 root / 不在 `i2c` 组）或设备路径不存在 |
-| `failed` 里出现 `set_slave_errno_16` | 该地址已被内核驱动绑定（`EBUSY`），不是 NACK；查 `bound` 与 `/sys/bus/i2c/devices/` |
-| 命中但驱动 `build` 失败 | 应答 ≠ 型号正确：地址对了但芯片不是那个，或 ID 寄存器读法不对 |
-| `unstable` 非空 | 接触不良、线太长、上拉偏大，或扫描期间有别的进程在用总线 |
+| `no /dev/i2c-* node` | 驱动未加载（`i2c-dev`、`i2c-i801`、`i2c-bcm2835`）或设备树未启用，由操作者在宿主机处理 |
+| 全是 `masked` | 容器/沙箱裁剪了 `/dev`；到宿主机跑，或加 `--device /dev/i2c-1` |
+| 全部 `nak` | 接线、上拉、供电，或总线号选错；确认 3.3V 与 GND，换 `/dev/i2c-0` 再试 |
+| `error: permission denied` | 加入 `i2c` 组或由操作者配 udev 规则，不要用 root |
+| `busy` | 已被内核驱动绑定，见 `clients`；要直连需先解绑驱动 |
+| `error: Inappropriate ioctl for device` | 参数给错了节点（如 `/dev/null`），不是 I2C 设备 |
+| macOS/Windows 报不支持 | 正常行为：内核无 i2c-dev。看 `bridges`，或改用桥厂商 SDK / 树莓派等 Linux 主机 |
 
-## 7. 硬规则
-
-1. 只读探测。禁止改写成写探测，禁止 `i2cdetect` 默认（quick-write）模式；要用 `i2cdetect` 必须带 `-r`。
-2. 不扫 0x08~0x77 之外的地址；越界报错，不要“帮用户顺手扫一下”。
-3. 不为扫描改 `/dev/i2c-*` 权限、不改 `chmod`、不用 `sudo` 掩盖权限问题；先报告再让操作者决定。
-4. 一次一个实例，不与 pymybot 运行/Daemon 采样并发；扫描前确认总线空闲。
-5. 扫描结果是**诊断证据**，不写回结构脚本、不当配置来源、不据此自动生成驱动。
-6. 自动化只解析 `--json`；网格排版只为给人看，不保证稳定。
-7. `0` 只表示“扫完了”。判读必须结合退出码与 `failed` 计数。
-8. Agent 只能通过 `run_skill` 的 `list-buses` / `scan` 执行；不得改用 shell、`i2cdetect` 或自写脚本绕过只读、越界和独占规则。
-
-## 8. 验证
-
-宿主 shell 可直接运行；Agent 侧通过 `run_skill` 的 `list-buses` / `scan` 执行同一入口：
-
-```sh
-python3 -m py_compile scripts/i2c_probe.py   # 语法
-sh -n scripts/i2c_probe.sh                   # 语法
-python3 scripts/i2c_probe.py --help          # 参数面
-python3 scripts/i2c_probe.py --list-buses    # 只读枚举，无需硬件权限
-python3 scripts/i2c_probe.py --range 0x80-0x90   # 应退出 2
-# 真机（需权限、需独占总线）：
-sh scripts/i2c_probe.sh /dev/i2c-1 --addr 0x48
-sh scripts/i2c_probe.sh /dev/i2c-1 --repeat 3
-```
-
-## 9. 参考资料
-
-- `read_skill("i2c-address-probe", "references/usage.md")` — 权限、errno 对照、0 命中排查顺序、抖动复核、地址→驱动流程。
-- `read_skill("hardware-controller", "references/driver-lua.md")` — 命中地址后查/写驱动时的契约。
-- `read_skill("i2c-scan")` — pymybot HAL 路线（驱动 + 结构 SQL + 动作脚本）与地址族表。
+平台差异、桥能力、容器与权限细节：`references/platform-support.md`。
+保留地址、常见地址表与判读方法：`references/address-map.md`。
