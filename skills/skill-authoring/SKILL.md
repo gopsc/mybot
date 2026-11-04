@@ -123,4 +123,4 @@ python <name>/scripts/scan.py --path assets/sample --json
 
 ## 11. mybot 扩展（非 Anthropic 标准）
 
-需要模型直接执行的技能，可额外提供 `skill.json`（`run.entrypoint` + `run.actions.*.params`）；它由 mybot 转换为 Anthropic tool 的 `input_schema`，不是本规范的必需项。示例见 `skills/hardware-controller/skill.json`，参数必须是 `params`，不要写成 `input_schema`。
+需要模型直接执行的技能，把入口脚本放在 `scripts/` 顶层；宿主会把首个 `.py` 暴露为 `<name>_run` 工具，参数为 `command` 与 `args`，分别对应 CLI 子命令和原始参数列表。命令必须在 `SKILL.md` 中写清楚：每个子命令做什么、什么时候用、参数和输出。不需要 `skill.json`。

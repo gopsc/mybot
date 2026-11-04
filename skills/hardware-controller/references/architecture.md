@@ -132,7 +132,7 @@ Key invariants:
 | `pymybot/agent.py` | LangGraph agent, model configuration, tool loop |
 | `pymybot/camera.py` | Host camera enumeration and JPEG capture for the Agent tools |
 | `pymybot/images.py` | Bounded image-container validation for receipts and camera output |
-| `pymybot/agent_skill_runner.py` | Trusted `skill.json` parsing, scoped arguments and bounded Skill subprocess |
+| `pymybot/agent_skill_runner.py` | Trusted Skill entrypoint resolution (legacy manifest or `scripts/`), scoped arguments and bounded Skill subprocess |
 | `pymybot/prompts.py` | Manifest-ordered runtime prompt layers, trusted safety hashes, bounded composition, CAS/backups and private storage |
 | `pymybot/roles.py` | Role creation/loading, role-owned prompt/skills/MCP paths and bounded atomic model-history persistence |
 | `pymybot/agent_prompt.py` | Operator profile validation and legacy prompt composition compatibility |
@@ -183,10 +183,11 @@ flowchart TB
   External MCP tools stay outside that owner thread and are surfaced by
   LangGraph tools, but approval, result bounding and transcripts use the
   same session rules.
-  `run_skill` executes only actions declared by a trusted Skill `skill.json`:
-  the model supplies a skill/action plus arguments, never an entrypoint or argv.
-  Trusted skills run without approval and receive `--allow-hardware`
-  automatically when the action declares it. The child process runs on the owner
+  `run_skill` executes a trusted Skill entrypoint: a legacy `skill.json` fixes
+  per-action argv, while an Anthropic-style skill forwards a documented CLI
+  subcommand and its arguments to the first top-level `scripts/*.py`. The model
+  never supplies an entrypoint. Trusted skills run without approval and receive
+  `--allow-hardware` automatically. The child process runs on the owner
   thread, so Skill and native controller calls cannot activate hardware
   concurrently.
 - **MCP server mode** is a protocol adapter over `RobotExecutor`: the model is

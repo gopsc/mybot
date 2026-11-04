@@ -40,7 +40,7 @@ CONTROLLER_MODULES = (
 
 
 def skill_script_files(root):
-    """Skill entrypoints ship unless the manifest declares the CLI fallback."""
+    """Skill entrypoints ship unless the controller Runtime is already packaged."""
     skills_dir = Path(root) / "skills"
     for skill_dir in sorted(skills_dir.iterdir()):
         if not skill_dir.is_dir():
@@ -54,6 +54,8 @@ def skill_script_files(root):
             run = document.get("run") if isinstance(document, dict) else None
             if isinstance(run, dict) and run.get("packaged") == "cli":
                 continue
+        elif (skill_dir / "scripts" / "pymybot").is_dir():
+            continue
         scripts_dir = skill_dir / "scripts"
         if scripts_dir.is_dir():
             for source in sorted(scripts_dir.rglob("*.py")):

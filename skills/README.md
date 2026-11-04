@@ -38,7 +38,7 @@ the same-named pages in [`../docs/`](../docs) are redirect stubs for human reade
 | Host-side I2C probing | `i2c-address-probe/scripts/i2c_probe.py` | [`references/address-map.md`](i2c-address-probe/references/address-map.md), [`references/platform-support.md`](i2c-address-probe/references/platform-support.md) |
 | Host-side bus enumeration | `i2c-uart-spi-enum/scripts/bus_enum.py` | [`references/i2c.md`](i2c-uart-spi-enum/references/i2c.md), [`references/uart.md`](i2c-uart-spi-enum/references/uart.md), [`references/spi.md`](i2c-uart-spi-enum/references/spi.md) |
 | Host system metrics | `system-status-report/scripts/sys_status.py` | [`references/platform-notes.md`](system-status-report/references/platform-notes.md) |
-| Executable Skill actions | `hardware-controller/skill.json`, `pymybot/agent_skill_runner.py` | [`hardware-controller/SKILL.md`](hardware-controller/SKILL.md#agent-原生-run_skill) |
+| Executable Skill actions | `hardware-controller/SKILL.md` CLI commands, `pymybot/agent_skill_runner.py` | [`hardware-controller/SKILL.md`](hardware-controller/SKILL.md#2-子命令速查) |
 
 The scripting grammars have no prose authority outside the implementation, so
 the reference *is* the written source of truth for them; docs link here instead

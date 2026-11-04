@@ -166,7 +166,7 @@ creating a runtime home.
 | File and Shell tools | Enabled automatically for the selected workspace, including file writes; calls run without approval. Shell still uses the configured sandbox and refuses execution without a usable backend. |
 | Web tools | `web_fetch` is always available; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval. |
 | MCP tools | Every tool exposed by the configured `mcpServers` file runs without approval. |
-| Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only actions declared by a trusted `skill.json` can run. |
+| Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only the documented CLI of a trusted skill (a legacy `skill.json` action or a top-level `scripts/*.py` command) can run. |
 | Prompt updates and skill installation | Still ask for dedicated per-call approval; ordinary tool grants do not cover them. Camera capture is a built-in tool and runs without approval. |
 
 The GUI exposes no permission checkboxes. File, Shell, web and MCP capability is

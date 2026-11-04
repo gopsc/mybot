@@ -15,7 +15,7 @@ import pymybot.prompts as prompts
 from pymybot.paths import asset_path
 from pymybot.security import SecurityError
 
-CORE_SHA = "c5c62a6863dc913cc618eb889f56db684f24133981218635c6b42358f9c90e51"
+CORE_SHA = "783f683a9ebc4afe7f7e88570db45501e8794b4544108e0a9c26233e3b70e7f5"
 IDS = ["0", "10", "97", "98", "99", "100"]
 
 

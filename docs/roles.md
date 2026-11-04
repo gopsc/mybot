@@ -16,7 +16,7 @@ there is no global default conversation.
 ~/.mybot/roles/<name>/
 ├── role.json          # format version, name and operator description
 ├── prompts/           # complete PromptLibrary
-├── skills/            # complete skill directories (SKILL.md, skill.json, scripts, assets)
+├── skills/            # complete skill directories (SKILL.md plus optional scripts/, references/, assets/)
 ├── workspace/         # role-owned workspace; Agent file tools write here
 ├── mcp.json           # optional mcpServers configuration
 └── history.json       # complete LangChain messages, grouped by turn (format 2)
@@ -24,7 +24,7 @@ there is no global default conversation.
 
 `pymybot roles create` copies the trusted bundled `prompts/` baseline, including
 its manifest and safety hashes, plus complete skill directories with their
-`skill.json`, `scripts/` and `assets/`, so runnable skills stay runnable inside a
+`scripts/`, `references/` and `assets/`, so runnable skills stay runnable inside a
 role. Selecting a role makes the Agent use `~/.mybot/roles/<name>/workspace`
 instead of the global workspace; use `install_skill(path)` to install a skill
 the Agent authored under that workspace. Editing a role does not change the global
@@ -58,13 +58,14 @@ pymybot roles clear-history technician --yes
 # Permanently delete the role directory (prompts, skills, workspace, history)
 pymybot roles delete technician --yes
 
-# Fill missing skill files (manifest/entrypoint) from the bundled skills
+# Fill missing skill files (entrypoint, scripts, assets) from the bundled skills
 pymybot roles repair technician --yes
 # ... or from a known-complete skills root
 pymybot roles repair technician --skills-dir ./skills --yes
 ```
 
-`roles show` reports `runnable` (skills with a `skill.json`) and `incomplete`
+`roles show` reports `runnable` (skills that ship an entrypoint: a legacy
+`skill.json` action or a top-level `scripts/*.py`) and `incomplete`
 (runnable bundled skills whose declared entrypoint is missing). `roles repair`
 copies only **missing** files into skills that already exist in the role; it
 never overwrites a file, prompt, history entry or workspace file, so operator

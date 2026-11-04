@@ -1,6 +1,5 @@
 import asyncio
 import json
-import shutil
 import threading
 from pathlib import Path
 
@@ -226,24 +225,22 @@ def test_corrupt_or_failed_role_history_does_not_reach_model(tmp_path):
 def test_role_info_flags_and_repair_restores_incomplete_skills(tmp_path):
     root = tmp_path / "roles"
     role = create_role("broken", skills_from=ROOT / "skills", root=root)
-    controller = role.skills_dir / "hardware-controller"
-    marker = controller / "SKILL.md"
+    probe = role.skills_dir / "i2c-address-probe"
+    marker = probe / "SKILL.md"
     marker.write_text(marker.read_text(encoding="utf-8") + "\n<!-- operator edit -->\n",
                       encoding="utf-8")
-    (controller / "skill.json").unlink()
-    shutil.rmtree(controller / "scripts")
+    (probe / "scripts").rename(probe / "scripts-missing")
 
     info = load_role("broken", root).info()
-    assert "hardware-controller" not in info["runnable"]
-    assert "hardware-controller" in info["incomplete"]
+    assert "i2c-address-probe" not in info["runnable"]
+    assert "i2c-address-probe" in info["incomplete"]
 
     result = repair_role_skills("broken", source=ROOT / "skills", root=root)
-    assert "hardware-controller" in result["repaired"]
-    assert (controller / "skill.json").is_file()
-    assert (controller / "scripts" / "hardware_controller.py").is_file()
+    assert "i2c-address-probe" in result["repaired"]
+    assert (probe / "scripts" / "i2c_probe.py").is_file()
     assert "<!-- operator edit -->" in marker.read_text(encoding="utf-8")
     fixed = load_role("broken", root).info()
-    assert "hardware-controller" in fixed["runnable"] and not fixed["incomplete"]
+    assert "i2c-address-probe" in fixed["runnable"] and not fixed["incomplete"]
 
 
 def test_create_role_rejects_manifest_without_entrypoint(tmp_path):

@@ -43,10 +43,12 @@ def preflight(mode):
 
 CONTROLLER_ASSETS = Path("skills/hardware-controller/assets")
 CONTROLLER_DIRECTORIES = frozenset({"modules", "robots", "scripts"})
+# Keep in sync with pymybot.agent_skills.CLI_SKILLS.
+CLI_SKILLS = frozenset({"hardware-controller"})
 
 
 def skill_script_files(root):
-    """Skill entrypoints shipped with the wheel; CLI-fallback skills are excluded."""
+    """Skill entrypoints shipped with the wheel; packaged controller Runtime is excluded."""
     skills_dir = Path(root) / "skills"
     for skill_dir in sorted(skills_dir.iterdir()):
         if not skill_dir.is_dir():
@@ -60,6 +62,8 @@ def skill_script_files(root):
             run = document.get("run") if isinstance(document, dict) else None
             if isinstance(run, dict) and run.get("packaged") == "cli":
                 continue
+        elif (skill_dir / "scripts" / "pymybot").is_dir():
+            continue
         scripts_dir = skill_dir / "scripts"
         if scripts_dir.is_dir():
             for source in sorted(scripts_dir.rglob("*.py")):
@@ -215,6 +219,8 @@ def installed_smoke(manifest_path):
                     require((skill_dir / entrypoint).is_file(),
                             f"Packaged skill entrypoint is missing: {skill['name']}/{entrypoint}")
             else:
+                if skill["name"] in CLI_SKILLS:
+                    continue
                 scripts_dir = skill_dir / "scripts"
                 require(scripts_dir.is_dir() and any(scripts_dir.glob("*.py")),
                         f"Anthropic skill {skill['name']} has no scripts/ directory")

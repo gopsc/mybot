@@ -185,7 +185,7 @@ def test_run_skill_executes_without_approval():
 
     executor = FakeExecutor()
     model = scripted_model(
-        [ToolCallPart("hardware_controller_doctor", {})],
+        [ToolCallPart("hardware_controller_run", {"command": "doctor", "args": []})],
         [TextPart("done")])
     confirmations = []
 
@@ -216,11 +216,11 @@ def test_agent_run_skill_end_to_end():
         asset_path("robots") / "relay-test.sql", scripts_dir=asset_path("scripts"),
         skills=SkillsLibrary(asset_path("skills")), allow_hardware=False)
     model = scripted_model(
-        [ToolCallPart("hardware_controller_doctor", {})],
+        [ToolCallPart("hardware_controller_run", {"command": "doctor", "args": []})],
         [TextPart("done")])
 
     async def confirm(name, arguments):
-        return name == "hardware_controller_doctor"
+        return name == "hardware_controller_run"
 
     async def scenario():
         session = AgentSession(executor, model, AgentConfig(intent_mode="diagnose"), confirm=confirm,
@@ -242,12 +242,13 @@ def test_agent_uses_skills_without_a_robot(tmp_path):
 
     skills = SkillsLibrary(asset_path("skills"))
     executor = RobotExecutor(None, skills=skills, workspace_dir=str(tmp_path))
-    model = scripted_model([ToolCallPart("hardware_controller_hardware", {
-        "robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"},
+    model = scripted_model([ToolCallPart("hardware_controller_run", {
+        "command": "hardware",
+        "args": ["--robot", "assets/robots/relay-test.sql"],
     })], [TextPart("done")])
 
     async def confirm(name, arguments):
-        return name == "hardware_controller_hardware"
+        return name == "hardware_controller_run"
 
     async def scenario():
         session = AgentSession(executor, model, confirm=confirm, skills=skills, workspace=True)
@@ -1074,7 +1075,7 @@ def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
 
 
 def test_reference_only_skills_do_not_advertise_run_skill(tmp_path):
-    """A skills root without skill.json must not claim run_skill or hardware access."""
+    """Reference-only skills (no scripts) must not claim run tools or hardware access."""
     from pymybot.agent_skills import SkillsLibrary
 
     skill = tmp_path / "skills" / "notes"
@@ -1091,6 +1092,7 @@ def test_reference_only_skills_do_not_advertise_run_skill(tmp_path):
             assert "run_skill" not in names
             assert not any(name.startswith("notes_") for name in names)
             assert "no skill action tools are available" in session._tool_guide
+            assert "No installed skill ships a runnable script" in session._tool_guide
             assert "Hardware operations are exposed" not in session._tool_guide
         finally:
             await session.close()
@@ -1100,7 +1102,7 @@ def test_reference_only_skills_do_not_advertise_run_skill(tmp_path):
                                skills=runnable)
         try:
             names = {tool.name for tool in session.tools}
-            assert "hardware_controller_doctor" in names
+            assert "hardware_controller_run" in names
             assert "Hardware operations are exposed" in session._tool_guide
         finally:
             await session.close()

@@ -106,4 +106,4 @@ JSON 顶层固定字段：`schema_version`、`generated_at`（UTC，`YYYY-MM-DDT
 
 - 加新指标：在对应 `collect_*` 里追加字段，同步更新本文档字段表，保持「读不到 = `null` + `notes`」。
 - 加新平台：新增 `_memory_<system>()` 之类分支，并在 `references/platform-notes.md` 登记数据源。
-- 该技能只有文档 + 脚本，没有 `skill.json`：要通过 `run_skill` 当作工具动作调用，需要额外声明 `run.entrypoint` 与 `run.actions`，属另一套宿主扩展，不要自行臆造字段。
+- 该技能只有文档 + 脚本，没有 `skill.json`：宿主会把 `scripts/` 顶层首个 Python 脚本暴露为 `<name>_run` 工具，用 `command`/`args` 传入 CLI 参数。

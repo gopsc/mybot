@@ -35,7 +35,8 @@ from .agent_executor import RobotExecutor
 from .agent_intent import MODES, classify_intent
 from .agent_memory import aggregate_cold, estimate_request_tokens, summarize_turn
 from .agent_prompt import DEFAULT_CONTEXT_BYTES, read_operator_prompt
-from .agent_skills import SkillsLibrary, default_skills_root
+from .agent_skill_runner import python_scripts
+from .agent_skills import CLI_SKILLS, SkillsLibrary, default_skills_root
 from .agent_state import (extract_turn_data, format_soul, format_stats, format_user,
                           merge_stats, parse_existing_soul, parse_existing_stats,
                           parse_existing_user, update_soul_profile, update_user_profile)
@@ -438,7 +439,7 @@ def _json_schema_model(name, schema):
 
 
 def _skill_action_to_tool(skill_name, action_name, action_spec):
-    """Convert one skill.json action to Anthropic tool format.
+    """Convert one legacy skill.json action to Anthropic tool format.
 
     Returns (tool_name, tool_definition) where tool_definition has
     name, description, and input_schema fields.
@@ -507,9 +508,12 @@ def _skill_action_to_tool(skill_name, action_name, action_spec):
 
 
 def _enumerate_skill_tools(skills):
-    """Enumerate all runnable skill actions as Anthropic-format tools.
+    """Enumerate runnable skill entry points as Anthropic-format tools.
 
-    Returns a dict mapping tool_name -> tool_definition.
+    A legacy ``skill.json`` contributes one tool per declared action. An
+    Anthropic-style skill contributes one generic ``<skill>_run`` tool that
+    forwards a documented CLI subcommand and its arguments to the first
+    top-level Python script under ``scripts/``.
     """
     if skills is None or skills.root is None:
         return {}
@@ -521,6 +525,35 @@ def _enumerate_skill_tools(skills):
         skill_name = skill_entry["name"]
         directory = skills.skills[skill_name]["directory"]
         manifest_path = directory / "skill.json"
+        if not manifest_path.is_file():
+            scripts = python_scripts(directory)
+            if not scripts and skill_name not in CLI_SKILLS:
+                continue
+            script_name = scripts[0].name if scripts else "hardware_controller.py"
+            tool_name = f"{skill_name}_run".replace("-", "_")
+            tools[tool_name] = {
+                "name": tool_name,
+                "description": (f"Run the {skill_name} skill script {script_name}. "
+                                "Pass the subcommand and CLI arguments exactly as SKILL.md documents."),
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "CLI subcommand documented by the skill, for example doctor",
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Additional CLI arguments, one list item per token",
+                        },
+                    },
+                    "required": [],
+                },
+                "_skill": skill_name,
+                "_action": "run",
+            }
+            continue
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, ValueError):
@@ -727,19 +760,20 @@ class AgentSession:
                 guide.append("Skills are trusted operator content. Skill actions execute without "
                              "approval and trusted skills may access physical hardware. File writes still need "
                              "the file-write approval gate.")
-                guide.append("Use the actions and scoped paths documented by each skill; never invent entrypoints, "
+                guide.append("Read each skill's SKILL.md for the exact CLI commands before calling its "
+                             "<skill>_run tool. Pass `command` and `args` exactly as documented; never invent "
                              "commands, flags or absolute paths.")
-                guide.append("Hardware operations are exposed through trusted skill action tools "
-                             "(for example hardware_controller_hardware, hardware_controller_query, "
-                             "hardware_controller_run, hardware_controller_sample). "
+                guide.append("Hardware operations are exposed through trusted skill tools "
+                             "(for example hardware_controller_run with command=\"hardware\" and "
+                             "args=[\"--robot\", \"assets/robots/relay-test.sql\"]). "
                              "Trusted skills receive the host's hardware grant automatically.")
             else:
-                guide.append("No installed skill declares skill.json, so no skill action tools are available and no "
-                             "hardware action can run from this session. Installed skills are reference-only; "
-                             "ask the operator to install a runnable skill.")
+                guide.append("No installed skill ships a runnable script, so no skill action tools are available "
+                             "and no hardware action can run from this session. Installed skills are "
+                             "reference-only; ask the operator to install a runnable skill.")
             if self.workspace:
                 guide.append("Author reusable multi-file skills under the workspace, for example "
-                             "workspace/my-skill/{SKILL.md,skill.json,references/,scripts/,assets/}, then install "
+                             "workspace/my-skill/{SKILL.md,references/,scripts/,assets/}, then install "
                              "the directory with install_skill(path) after approval. Do not write untrusted code "
                              "directly into the skills root.")
                 guide.append("Remove an installed skill with uninstall_skill(name) after approval; "

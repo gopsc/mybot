@@ -1,9 +1,11 @@
-"""Run one action declared by a trusted ``skill.json`` manifest.
+"""Run one trusted skill script.
 
-Skills are trusted operator-installed code. The model supplies only a skill
-name, an action name and arguments; the manifest still fixes the entrypoint and
-argv shape. Paths, parameter bounds, output size and the skill subprocess budget
-are deliberately unrestricted because the operator opted into trusted skills.
+Skills are trusted operator-installed code. Anthropic-style skills expose their
+entry script under ``scripts/``; a legacy ``skill.json`` manifest, when present,
+still fixes the entrypoint and argv shape. The model supplies a skill name, an
+action name and arguments, never an entrypoint. Paths, parameter bounds, output
+size and the skill subprocess budget are deliberately unrestricted because the
+operator opted into trusted skills.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 
-from .agent_skills import SkillsLibrary
+from .agent_skills import CLI_SKILLS, SkillsLibrary
 from .paths import frozen
 from .process import kill_tree
 from .security import SecurityError
@@ -28,8 +30,37 @@ _SAFE_ENV = (
 )
 
 
+def python_scripts(directory):
+    """Return the top-level runnable Python scripts of one skill directory."""
+    scripts_dir = Path(directory) / "scripts"
+    if not scripts_dir.is_dir() or scripts_dir.is_symlink():
+        return []
+    return sorted(path for path in scripts_dir.iterdir()
+                  if path.suffix == ".py" and path.is_file() and not path.is_symlink())
+
+
+def _generic_actions(stem):
+    """One manifest-free action that forwards a documented CLI invocation."""
+    return {"run": {
+        "description": f"Run {stem} with CLI arguments",
+        "effect": "read",
+        "output": "json",
+        "params": {
+            "command": {
+                "type": "string",
+                "description": "CLI subcommand documented by the skill, for example doctor",
+            },
+            "args": {
+                "type": "array",
+                "description": "Additional CLI arguments, one list item per token",
+            },
+        },
+        "passthrough": True,
+    }}
+
+
 class SkillRunner:
-    """Load one trusted Skill manifest and run its fixed entrypoint."""
+    """Resolve one trusted Skill entrypoint and run it in a bounded subprocess."""
 
     def __init__(self, skills, *, roots=None):
         if not isinstance(skills, SkillsLibrary):
@@ -60,21 +91,12 @@ class SkillRunner:
             if not isinstance(actions, dict) or not actions:
                 raise SecurityError("skill.json must declare actions")
             return directory, entrypoint, actions, run.get("packaged", "source")
-        scripts_dir = directory / "scripts"
-        if scripts_dir.is_dir():
-            py_files = sorted(p for p in scripts_dir.iterdir()
-                             if p.suffix == ".py" and p.is_file() and not p.is_symlink())
-            if py_files:
-                entrypoint = f"scripts/{py_files[0].name}"
-                actions = {"run": {
-                    "description": f"Run {py_files[0].stem}",
-                    "effect": "read",
-                    "output": "json",
-                    "argv": [],
-                    "params": {},
-                    "passthrough": True,
-                }}
-                return directory, entrypoint, actions, "source"
+        scripts = python_scripts(directory)
+        if scripts:
+            return directory, f"scripts/{scripts[0].name}", _generic_actions(scripts[0].stem), "source"
+        if directory.name in CLI_SKILLS:
+            # The packaged controller CLI is the entrypoint; no script ships.
+            return directory, "scripts/hardware_controller.py", _generic_actions("hardware_controller"), "cli"
         raise SecurityError("Skill has neither skill.json nor scripts/ directory")
 
     def _action(self, actions, action):
@@ -109,6 +131,9 @@ class SkillRunner:
                 value = arguments[name]
                 if isinstance(param, dict) and param.get("type") == "path":
                     values[name] = self._resolve_path(value, roots)
+                elif isinstance(param, dict) and param.get("type") == "array":
+                    values[name] = ([str(item) for item in value]
+                                    if isinstance(value, list) else [str(value)])
                 elif isinstance(value, bool):
                     values[name] = "true" if value else "false"
                 elif isinstance(value, (dict, list)):
@@ -131,6 +156,10 @@ class SkillRunner:
     def _argv(self, spec, values, allow_hardware, bindings):
         if spec.get("passthrough"):
             argv = []
+            command = values.pop("command", "")
+            if command:
+                argv.append(str(command))
+            argv.extend(str(item) for item in (values.pop("args", None) or []))
             for name, value in values.items():
                 if value.lower() in ("true", "false"):
                     if value.lower() == "true":

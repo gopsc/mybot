@@ -6,10 +6,12 @@ from setuptools.command.build_py import build_py
 
 
 def _skill_scripts(root):
-    """Skill entrypoints ship with the wheel unless the manifest uses the CLI fallback.
+    """Skill entrypoints ship with the wheel unless the runtime is already packaged.
 
-    The hardware-controller Runtime is packaged as ``pymybot/*.py`` and declares
-    ``packaged: "cli"``, so copying its skill scripts would duplicate it.
+    The hardware-controller Runtime is packaged as ``pymybot/*.py``; its skill
+    declares ``packaged: "cli"`` in legacy manifests, or ships
+    ``scripts/pymybot/`` in the manifest-free layout, so copying its skill
+    scripts would duplicate it.
     """
     skills_dir = root / "skills"
     for skill_dir in sorted(skills_dir.iterdir()):
@@ -24,6 +26,8 @@ def _skill_scripts(root):
             run = document.get("run") if isinstance(document, dict) else None
             if isinstance(run, dict) and run.get("packaged") == "cli":
                 continue
+        elif (skill_dir / "scripts" / "pymybot").is_dir():
+            continue
         scripts_dir = skill_dir / "scripts"
         if scripts_dir.is_dir():
             for source in sorted(scripts_dir.rglob("*.py")):

@@ -139,13 +139,14 @@ of safety policy remains unsupported; editable memory layers do not supersede it
 
 ## Skill execution
 
-`run_skill` executes actions declared by a trusted `skill.json`. The manifest
-fixes the entrypoint and argv; the model chooses only the skill, action and
-arguments. Skills are operator-installed trusted code: `run_skill` is not
-approval-gated, path and parameter checks are removed, stdout/stderr and the
-skill subprocess timeout are unbounded, and hardware flags (`--allow-hardware`)
-are appended automatically for actions that declare them. The Agent turn
-deadline and stop checks still terminate a running skill.
+`run_skill` executes a trusted Skill script. A legacy `skill.json` fixes the
+entrypoint and per-action argv; a manifest-free skill forwards a documented CLI
+subcommand and its arguments to the first top-level `scripts/*.py`. The model
+chooses only the skill, subcommand and arguments. Skills are operator-installed
+trusted code: `run_skill` is not approval-gated, path and parameter checks are
+removed, stdout/stderr and the skill subprocess timeout are unbounded, and
+`--allow-hardware` is appended automatically. The Agent turn deadline and stop
+checks still terminate a running skill.
 
 The child process still runs without a shell, with a minimal environment that
 excludes API keys and best-effort process-tree termination. Skill directories are

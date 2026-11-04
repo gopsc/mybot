@@ -15,7 +15,7 @@ import secrets
 import shutil
 import stat
 
-from .agent_skills import SkillsLibrary, default_skills_root
+from .agent_skills import CLI_SKILLS, SkillsLibrary, default_skills_root
 from .mcp_client import MAX_CONFIG_BYTES, parse_servers
 from .prompts import PromptLibrary
 from .security import SecurityError, checked_text, read_file
@@ -274,27 +274,33 @@ def _bundled_runnable_skills():
     return {item["name"] for item in library.index()["skills"] if item.get("runnable")}
 
 
-def _skill_complete(directory):
-    """True when a runnable skill still carries its declared entrypoint.
+def _skill_complete(directory, *, require_script=False):
+    """True when a runnable skill still carries a usable entrypoint.
 
-    Reference-only skills (no ``skill.json``) are not "incomplete": they are a
-    supported shape. A manifest with a missing entrypoint is the failure mode
-    left behind by roles created before complete skill copies landed.
+    A legacy manifest must name an existing entrypoint (or declare the packaged
+    CLI fallback). An Anthropic-style skill must ship a top-level Python script
+    under ``scripts/``. Reference-only skills have neither and are complete;
+    pass ``require_script=True`` when the caller already knows the skill is
+    expected to be runnable.
     """
     manifest = directory / "skill.json"
-    if not manifest.is_file():
-        return True
-    try:
-        document = json.loads(read_file(manifest, MAX_METADATA))
-    except (OSError, ValueError):
-        return False
-    run = document.get("run") if isinstance(document, dict) else None
-    entrypoint = run.get("entrypoint") if isinstance(run, dict) else None
-    if not isinstance(entrypoint, str) or not entrypoint:
-        return False
-    if run.get("packaged") == "cli":
-        return True
-    return (directory / entrypoint).is_file()
+    if manifest.is_file():
+        try:
+            document = json.loads(read_file(manifest, MAX_METADATA))
+        except (OSError, ValueError):
+            return False
+        run = document.get("run") if isinstance(document, dict) else None
+        entrypoint = run.get("entrypoint") if isinstance(run, dict) else None
+        if not isinstance(entrypoint, str) or not entrypoint:
+            return False
+        if run.get("packaged") == "cli":
+            return True
+        return (directory / entrypoint).is_file()
+    scripts_dir = directory / "scripts"
+    if not scripts_dir.is_dir():
+        return not require_script or directory.name in CLI_SKILLS
+    return any(path.suffix == ".py" and path.is_file() and not path.is_symlink()
+               for path in scripts_dir.iterdir())
 
 
 def _merge_skill_tree(source_root, target_root):
@@ -374,10 +380,11 @@ def create_role(name, *, description="", skills_from=None, mcp_from=None, root=N
         (staging / "workspace").mkdir(mode=0o700)
         if skills_from:
             _copy_skills(skills_from, skills)
-            for manifest in sorted(skills.glob("*/skill.json")):
-                if not _skill_complete(manifest.parent):
+            for skill_dir in sorted(path for path in skills.iterdir()
+                                    if path.is_dir() and not path.name.startswith(".")):
+                if not _skill_complete(skill_dir):
                     raise SecurityError(
-                        f"Skill '{manifest.parent.name}' is missing its declared entrypoint; "
+                        f"Skill '{skill_dir.name}' is missing its entrypoint; "
                         "repair the source skills root or choose a complete one")
         if mcp_from:
             source = Path(mcp_from).expanduser().absolute()
@@ -426,12 +433,11 @@ def repair_role_skills(name, *, source=None, root=None):
         target = role.skills_dir / skill_name
         if not target.is_dir():
             continue
-        if (target / "skill.json").is_file() and _skill_complete(target):
+        if _skill_complete(target, require_script=True):
             skipped.append(skill_name)
             continue
         _merge_skill_tree(entry["directory"], target)
-        (repaired if (target / "skill.json").is_file() and _skill_complete(target)
-         else incomplete).append(skill_name)
+        (repaired if _skill_complete(target, require_script=True) else incomplete).append(skill_name)
     return {
         "name": role.name,
         "source": str(source_root),

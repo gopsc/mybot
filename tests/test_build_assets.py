@@ -21,7 +21,7 @@ def test_asset_plan_covers_all_runtime_roots():
     assert "pymybot/assets/skills" in destinations
     assert "pymybot/gui/assets" in destinations
     assert all(source.is_file() for source in sources)
-    assert any(source.name == "skill.json" and "hardware-controller" in source.parts for source in sources)
+    assert any(source.name == "SKILL.md" and "hardware-controller" in source.parts for source in sources)
 
     suffixes = {source.suffix for source in sources}
     assert {".py", ".lua", ".sql", ".mt", ".md", ".json", ".svg"} <= suffixes
@@ -65,4 +65,4 @@ def test_source_manifest_includes_all_controller_assets():
     assert any(name.startswith("modules/") and name.endswith(".lua") for name in manifest)
     assert any(name.startswith("robots/") and name.endswith(".sql") for name in manifest)
     assert any(name.startswith("scripts/") and name.endswith(".mt") for name in manifest)
-    assert "skills/hardware-controller/skill.json" in manifest
+    assert "skills/hardware-controller/SKILL.md" in manifest

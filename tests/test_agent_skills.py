@@ -358,8 +358,7 @@ def test_make_agent_wires_skills_into_instructions_and_tools(tmp_path):
     assert "runnable:" in instructions
     names = {tool.name for tool in tools}
     assert {"list_skills", "read_skill", "install_skill"} <= names
-    assert "hardware_controller_doctor" in names
-    assert "hardware_controller_hardware" in names
+    assert "hardware_controller_run" in names
     assert "install_skill" not in {tool.name for tool in plain}
 
 
@@ -526,17 +525,20 @@ def test_robotless_executor_runs_generic_and_skill_tools(tmp_path):
             context = await executor.start()
             assert "robot" not in context and context["hardware"] == []
             scripts = await executor.call(
-                "run_skill", {"skill": "hardware-controller", "action": "scripts"}, timeout=60)
+                "run_skill", {"skill": "hardware-controller", "action": "run",
+                              "arguments": {"command": "scripts", "args": []}}, timeout=60)
             assert scripts["ok"] and scripts["data"]["output"]["scripts"]
             hardware = await executor.call("run_skill", {
-                "skill": "hardware-controller", "action": "hardware",
-                "arguments": {"robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"}},
+                "skill": "hardware-controller", "action": "run",
+                "arguments": {"command": "hardware",
+                              "args": ["--robot", "assets/robots/relay-test.sql"]},
             }, timeout=60)
             assert hardware["ok"] and hardware["data"]["output"]["hardware"]
             query = await executor.call("run_skill", {
-                "skill": "hardware-controller", "action": "query",
-                "arguments": {"robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"},
-                              "sql": "SHOW TABLES;"},
+                "skill": "hardware-controller", "action": "run",
+                "arguments": {"command": "query",
+                              "args": ["--robot", "assets/robots/relay-test.sql",
+                                       "--sql", "SHOW TABLES;"]},
             }, timeout=60)
             assert query["ok"] and "SHOW TABLES" in query["data"]["output"]["output"]
             listing = await executor.call("list_files", {"path": "."}, timeout=10)

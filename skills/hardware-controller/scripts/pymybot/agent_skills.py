@@ -23,6 +23,9 @@ MAX_SKILL_FILE = 256 * 1024
 MAX_DESCRIPTION = 1024
 MAX_LIST = 1000
 MAX_SKILL_BYTES = 64 * 1024 * 1024
+# Skills whose entrypoint is the packaged controller CLI itself. They stay
+# runnable without a skill.json and without a shipped scripts/ directory.
+CLI_SKILLS = frozenset({"hardware-controller"})
 _NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
 _BLOCK_MARKERS = {"|", "|-", "|+", ">", ">-", ">+"}
 
@@ -105,8 +108,8 @@ class SkillsLibrary:
                         raise SecurityError("Skill exceeds the file count limit")
             if not files:
                 raise SecurityError(f"Skill '{entry.name}' has no SKILL.md")
-            # Runnable if: (1) has skill.json manifest (legacy format), or
-            # (2) has scripts/ directory with executable Python files (Anthropic format).
+            # Runnable if: (1) has a legacy skill.json manifest, or
+            # (2) has scripts/ with executable Python files (Anthropic format).
             manifest = entry / "skill.json"
             has_manifest = (manifest.is_file() and not manifest.is_symlink()
                            and stat.S_ISREG(manifest.stat().st_mode))
@@ -114,7 +117,7 @@ class SkillsLibrary:
             has_scripts = (scripts_dir.is_dir() and not scripts_dir.is_symlink()
                           and any(f.suffix == ".py" for f in scripts_dir.iterdir()
                                   if f.is_file() and not f.is_symlink()))
-            runnable = has_manifest or has_scripts
+            runnable = has_manifest or has_scripts or entry.name in CLI_SKILLS
             self.skills[entry.name] = {"description": description,
                                        "directory": entry, "files": sorted(files),
                                        "runnable": runnable}

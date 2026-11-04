@@ -46,6 +46,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Agent only advertises `run_skill` and hardware access when at least one
   installed skill declares `skill.json`; otherwise the runtime guide says the
   skills are reference-only instead of naming a tool that was not registered.
+- Removed `skills/hardware-controller/skill.json`. The skill is now a plain
+  Anthropic-style directory (`SKILL.md` plus `scripts/`, `references/`,
+  `assets/`); its `SKILL.md` documents every CLI subcommand and when to use it.
+  The Agent exposes one generic `<skill>_run` tool (`command` + `args`) for
+  manifest-free skills, and `run_skill` forwards those arguments to the first
+  top-level `scripts/*.py`. Legacy `skill.json` skills keep their per-action
+  tools.
 - Wheel and frozen builds now ship skill entrypoints for runnable skills that do
   not use the `packaged: "cli"` fallback, so `run_skill` works outside a source
   checkout.

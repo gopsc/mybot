@@ -126,8 +126,9 @@ def test_executor_runs_hardware_controller_virtual_action():
             result = await executor.call("run_skill", {
                 "skill": "hardware-controller", "action": "run",
                 "arguments": {
-                    "robot": {"scope": "skill_assets", "path": "robots/relay-test.sql"},
-                    "script": {"scope": "skill_assets", "path": "scripts/relay-test.mt"},
+                    "command": "run",
+                    "args": ["--robot", "assets/robots/relay-test.sql",
+                             "--input", "assets/scripts/relay-test.mt"],
                 },
             }, timeout=30)
         finally:
@@ -214,10 +215,12 @@ def test_i2c_skill_lists_buses_without_hardware():
 
 def test_hardware_controller_assets_read_and_list():
     runner = SkillRunner(SkillsLibrary(ROOT / "skills"))
-    listed = runner.run("hardware-controller", "assets_list", {"kind": "robots"})
+    listed = runner.run("hardware-controller", "run",
+                        {"command": "assets", "args": ["list", "--kind", "robots"]})
     assert listed["exit_code"] == 0 and listed["output_error"] is None
     assert "relay-test.sql" in listed["output"]["files"]
-    read = runner.run("hardware-controller", "assets_read",
-                      {"kind": "robots", "path": "relay-test.sql"})
+    read = runner.run("hardware-controller", "run",
+                      {"command": "assets",
+                       "args": ["read", "--kind", "robots", "--path", "relay-test.sql"]})
     assert read["exit_code"] == 0 and read["output_error"] is None
     assert read["output"]["path"] == "relay-test.sql" and "content" in read["output"]
