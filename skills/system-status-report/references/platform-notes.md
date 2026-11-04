@@ -1,6 +1,8 @@
 # 平台数据源与已知限制
 
-按平台记录 `scripts/sys_status.py` 实际读取的来源、精度与不可采集项。字段为 `null` 时，先查本表确认是不是平台本身没有该项。
+Source: `system-status-report/scripts/sys_status.py` (implementation is the authority; no external docs).
+
+按平台记录脚本实际读取的来源、精度与不可采集项。字段为 `null` 时，先查本表确认是不是平台本身没有该项。
 
 ## 通用
 
