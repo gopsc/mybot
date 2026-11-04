@@ -15,8 +15,6 @@ import json
 import re
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
 MAX_STATS_BYTES = 4096
 MAX_USER_BYTES = 8192
 MAX_SOUL_BYTES = 8192
@@ -136,6 +134,7 @@ def update_user_profile(existing: dict[str, Any], messages: list) -> dict[str, A
 
     Returns None if no new information was found.
     """
+    from langchain_core.messages import HumanMessage
     user_texts = []
     for msg in messages:
         if isinstance(msg, HumanMessage) and msg.content:
@@ -211,6 +210,7 @@ def update_soul_profile(existing: dict[str, Any], messages: list, tool_usage: di
 
     Returns None if no new information was found.
     """
+    from langchain_core.messages import AIMessage, ToolMessage
     profile = dict(existing)
     changed = False
 
@@ -265,6 +265,7 @@ def format_soul(profile: dict[str, Any]) -> str:
 
 def extract_turn_data(messages: list, events: list) -> dict[str, Any]:
     """Extract aggregate data from a turn's messages and events."""
+    from langchain_core.messages import AIMessage
     tool_usage: dict[str, int] = {}
     tool_calls = 0
     input_tokens = 0

@@ -85,6 +85,7 @@ def test_parse_existing_user_extracts_json():
 
 
 def test_update_user_profile_extracts_language():
+    pytest.importorskip("langchain_core")
     from langchain_core.messages import HumanMessage
     messages = [HumanMessage(content="你好，请帮我查看硬件")]
     profile = update_user_profile({}, messages)
@@ -94,6 +95,7 @@ def test_update_user_profile_extracts_language():
 
 
 def test_update_user_profile_extracts_topics():
+    pytest.importorskip("langchain_core")
     from langchain_core.messages import HumanMessage
     messages = [HumanMessage(content="请帮我写一个脚本")]
     profile = update_user_profile({}, messages)
@@ -102,6 +104,7 @@ def test_update_user_profile_extracts_topics():
 
 
 def test_update_user_profile_detects_style():
+    pytest.importorskip("langchain_core")
     from langchain_core.messages import HumanMessage
     messages = [HumanMessage(content="hi")]
     profile = update_user_profile({}, messages)
@@ -136,6 +139,7 @@ def test_parse_existing_soul_extracts_json():
 
 
 def test_update_soul_profile_tracks_capabilities():
+    pytest.importorskip("langchain_core")
     from langchain_core.messages import AIMessage
     messages = [AIMessage(content="ok", tool_calls=[{"name": "list_files", "args": {}, "id": "1"}])]
     profile = update_soul_profile({}, messages, {"list_files": 1})
@@ -145,6 +149,7 @@ def test_update_soul_profile_tracks_capabilities():
 
 
 def test_update_soul_profile_counts_responses():
+    pytest.importorskip("langchain_core")
     from langchain_core.messages import AIMessage
     messages = [AIMessage(content="first"), AIMessage(content="second")]
     profile = update_soul_profile({}, messages, {})
@@ -153,6 +158,7 @@ def test_update_soul_profile_counts_responses():
 
 
 def test_update_soul_profile_tracks_tool_results():
+    pytest.importorskip("langchain_core")
     from langchain_core.messages import ToolMessage
     messages = [ToolMessage(content='{"ok": true}', tool_call_id="1"),
                 ToolMessage(content='{"ok": false}', tool_call_id="2", status="error")]
@@ -171,6 +177,7 @@ def test_format_soul_produces_valid_markdown():
 
 
 def test_extract_turn_data_aggregates():
+    pytest.importorskip("langchain_core")
     from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
     messages = [
         HumanMessage(content="hi"),
