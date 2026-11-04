@@ -769,6 +769,21 @@ def test_settings_failure_notice_after_modal_save(app_factory, interact, monkeyp
     assert "已应用" in app.status_notice.text() and "写入失败" in app.status_notice.text()
 
 
+def test_chat_placeholder_hides_while_focused(ui, qapp):
+    _, app = ui
+    app.send_button.setFocus()
+    assert qt_wait(qapp, app.send_button.hasFocus)
+    assert app.task_box.placeholderText() == "与机器人对话…"
+
+    app.task_box.setFocus()
+    assert qt_wait(qapp, app.task_box.hasFocus)
+    assert app.task_box.placeholderText() == ""
+
+    app.send_button.setFocus()
+    assert qt_wait(qapp, app.send_button.hasFocus)
+    assert app.task_box.placeholderText() == "与机器人对话…"
+
+
 @pytest.mark.parametrize("key", ["Key_Return", "Key_Enter"])
 def test_ctrl_enter_sends_with_native_shortcut(ui, qapp, key):
     from PySide6.QtTest import QTest

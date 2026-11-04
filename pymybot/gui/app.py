@@ -106,6 +106,26 @@ class ChatTranscript(QTextBrowser):
         return None
 
 
+class ChatInput(QPlainTextEdit):
+    """Chat composer that hides its placeholder while the field has focus."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._placeholder = ""
+
+    def setPlaceholderText(self, text):
+        self._placeholder = text
+        super().setPlaceholderText("" if self.hasFocus() else text)
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        super().setPlaceholderText("")
+
+    def focusOutEvent(self, event):
+        super().focusOutEvent(event)
+        super().setPlaceholderText(self._placeholder)
+
+
 class App(QMainWindow):
     closed = Signal()
 
@@ -356,7 +376,7 @@ class App(QMainWindow):
         layout.addWidget(self.notebook, 1)
         composer = QHBoxLayout()
         composer.setSpacing(10)
-        self.task_box = QPlainTextEdit()
+        self.task_box = ChatInput()
         self.task_box.setPlaceholderText("与机器人对话…")
         self.task_box.setMinimumHeight(64)
         self.task_box.setMaximumHeight(100)
