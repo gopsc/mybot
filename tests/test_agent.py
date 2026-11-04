@@ -1060,12 +1060,15 @@ def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
     events = [json.loads(line) for line in
               (sessions[0] / "transcript.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [event["type"] for event in events] == [
-        "session_start", "user", "intent", "prompt_version", "assistant", "usage", "prompt_update", "session_end"]
+        "session_start", "user", "intent", "prompt_version", "assistant", "usage",
+        "prompt_update", "prompt_update", "prompt_update", "session_end"]
     assert events[1]["text"] == "hello"
     assert events[2]["name"] == "chat"
     assert events[3]["layers"].keys() == {"0", "10", "97", "98", "99", "100"}
     assert events[4]["text"] == "done"
     assert events[6]["actor"] == "stats"
+    assert events[7]["actor"] == "user-extract"
+    assert events[8]["actor"] == "soul-extract"
     meta = json.loads((sessions[0] / "meta.json").read_text(encoding="utf-8"))
     assert meta["model"] == "openai:test"
 

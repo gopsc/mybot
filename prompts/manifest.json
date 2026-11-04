@@ -20,21 +20,21 @@
       "file": "097_soul.md",
       "editable": "agent",
       "max_bytes": 8192,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "9a25c5e392b93c3e790729650487796c9b301ea63e905d46b4f8f39dc6ed4e8a"
     },
     {
       "id": "98",
       "file": "098_user.md",
       "editable": "agent",
       "max_bytes": 16384,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "a4892760e52eb9964c42cce52a41bb6c2ce7f3d8249d1f8fe8724ba6de6bbd4a"
     },
     {
       "id": "99",
       "file": "099_stats.md",
       "editable": "agent",
       "max_bytes": 4096,
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "sha256": "4ff2b00a29bba3d10595e9f0bfad04e96962aab7dbd4da1a8b6751a601c20ba9"
     },
     {
       "id": "100",

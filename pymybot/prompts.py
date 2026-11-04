@@ -541,7 +541,8 @@ class PromptLibrary:
     def update(self, layer, content, actor="operator", reason="", expected_hash=None):
         metadata = self._layer(layer)
         allowed = {"operator": {"10", "97", "98", "99"},
-                   "agent": {"97", "98", "99"}, "stats": {"99"}}
+                   "agent": {"97", "98", "99"}, "stats": {"99"},
+                   "user-extract": {"98"}, "soul-extract": {"97"}}
         if type(actor) is not str or actor not in allowed or layer not in allowed[actor]:
             raise SecurityError(f"Actor is not permitted to update prompt layer {layer}")
         _text(content, metadata["max_bytes"], "content", no_nul=True)

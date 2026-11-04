@@ -36,6 +36,9 @@ from .agent_intent import MODES, classify_intent
 from .agent_memory import aggregate_cold, estimate_request_tokens, summarize_turn
 from .agent_prompt import DEFAULT_CONTEXT_BYTES, read_operator_prompt
 from .agent_skills import SkillsLibrary, default_skills_root
+from .agent_state import (extract_turn_data, format_soul, format_stats, format_user,
+                          merge_stats, parse_existing_soul, parse_existing_stats,
+                          parse_existing_user, update_soul_profile, update_user_profile)
 from .errors import AgentInterrupted
 from .mcp_client import MCPManager
 from .paths import asset_path
@@ -845,7 +848,7 @@ class AgentSession:
                     self.session_log.write_image(tool, item, turn=self._turn)
 
     # -- prompts and history ----------------------------------------------
-    def _compose_prompt(self, guide=None):
+    def _compose_prompt(self, guide=None, *, emit_event=True):
         if guide is not None:
             self._prompt_guide = guide
         self.project_context = build_project_context(self.executor, budget=self.config.context_bytes)
@@ -861,8 +864,9 @@ class AgentSession:
             raise AgentConfigurationError(f"Cannot compose prompts: {exc}; no model request was sent") from None
         version = {"hash": snapshot.digest, "layers": snapshot.layer_hashes}
         if version != self.prompt_version:
-            self._log("prompt_version", **version)
-            self._emit({"type": "prompt_version", "hash": snapshot.digest[:16]})
+            if emit_event:
+                self._log("prompt_version", **version)
+                self._emit({"type": "prompt_version", "hash": snapshot.digest[:16]})
         self.prompt_snapshot = snapshot
         self.prompt_version = version
         self._prompt_text = snapshot.text
@@ -1047,17 +1051,65 @@ class AgentSession:
         robot = getattr(self.executor, "robot_path", "") or ""
         if not robot and isinstance(self.context, dict):
             robot = self.context.get("robot", "")
-        stats = {"robot": Path(str(robot)).name,
-                 "last_action": actions[-1]["state"] if actions else "not_executed",
-                 "tool_calls": len(events), "elapsed_seconds": round(time.monotonic() - started, 3),
-                 "faulted": bool(getattr(self.executor, "faulted", False))}
+        turn_data = {"robot": Path(str(robot)).name,
+                     "last_action": actions[-1]["state"] if actions else "not_executed",
+                     "tool_calls": len(events), "elapsed_seconds": round(time.monotonic() - started, 3),
+                     "faulted": bool(getattr(self.executor, "faulted", False))}
         try:
-            data = self.prompts.update("99", "# STATS\n\n" + dumps(stats) + "\n", actor="stats",
-                                       reason="Completed turn summary", expected_hash=expected_hash)
+            existing = parse_existing_stats(self.prompts.read("99")["content"])
+            merged = merge_stats(existing, turn_data)
+            content = format_stats(merged)
+            data = self.prompts.update("99", content, actor="stats",
+                                       reason="Cumulative turn statistics", expected_hash=expected_hash)
             self._log("prompt_update", **data, approved=True)
-        except (SecurityError, OSError, UnicodeError) as exc:
+        except (SecurityError, OSError, UnicodeError, PromptWriteError) as exc:
             self._log("prompt_stats_error", error=type(exc).__name__)
             print(f"mybot: prompt STATS update failed ({type(exc).__name__}); continuing", file=sys.stderr)
+
+    def _update_user_layer(self, turn_messages, expected_hash):
+        """Extract user preferences from turn messages and update layer 98."""
+        if not self.config.auto_stats:
+            return
+        try:
+            existing_content = self.prompts.read("98")["content"]
+            existing = parse_existing_user(existing_content)
+            updated = update_user_profile(existing, turn_messages)
+            if updated is None:
+                return
+            content = format_user(updated)
+            data = self.prompts.update("98", content, actor="user-extract",
+                                       reason="Auto-extracted user preferences", expected_hash=expected_hash)
+            self._log("prompt_update", **data, approved=True)
+        except (SecurityError, OSError, UnicodeError, PromptWriteError) as exc:
+            self._log("prompt_user_error", error=type(exc).__name__)
+
+    def _update_soul_layer(self, turn_messages, tool_usage, expected_hash):
+        """Extract agent self-awareness from turn and update layer 97."""
+        if not self.config.auto_stats:
+            return
+        try:
+            existing_content = self.prompts.read("97")["content"]
+            existing = parse_existing_soul(existing_content)
+            updated = update_soul_profile(existing, turn_messages, tool_usage)
+            if updated is None:
+                return
+            content = format_soul(updated)
+            data = self.prompts.update("97", content, actor="soul-extract",
+                                       reason="Auto-extracted agent capabilities", expected_hash=expected_hash)
+            self._log("prompt_update", **data, approved=True)
+        except (SecurityError, OSError, UnicodeError, PromptWriteError) as exc:
+            self._log("prompt_soul_error", error=type(exc).__name__)
+
+    def _update_state_layers(self, started, first_event, turn_messages):
+        """Update STATS, USER and SOUL layers after a turn."""
+        stats_hash = self.prompt_snapshot.layer_hashes.get("99", "")
+        user_hash = self.prompt_snapshot.layer_hashes.get("98", "")
+        soul_hash = self.prompt_snapshot.layer_hashes.get("97", "")
+        self._update_stats(started, first_event, stats_hash)
+        turn_data = extract_turn_data(turn_messages, self.events[first_event:])
+        self._update_user_layer(turn_messages, user_hash)
+        self._update_soul_layer(turn_messages, turn_data.get("tool_usage", {}), soul_hash)
+        self._compose_prompt(emit_event=False)
 
     # -- tool execution ----------------------------------------------------
     def _count_tool_call(self):
@@ -1469,7 +1521,7 @@ class AgentSession:
                      "input_tokens": input_tokens, "output_tokens": output_tokens}
             self._log("assistant", text=output)
             self._log("usage", **usage)
-            self._update_stats(started, first_event, self.prompt_snapshot.layer_hashes["99"])
+            self._update_state_layers(started, first_event, turn_messages)
             self._save_history()
             return {"output": output, "usage": usage, "intent": self.intent.as_dict(),
                     "prompt_version": self.prompt_version,

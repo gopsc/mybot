@@ -226,7 +226,7 @@ def test_restore_missing_only_preserves_changes_and_all_archives(library):
     assert (backup / "097_soul.md").read_text() == "soul change"
     assert (backup / "manifest.json").is_file()
     assert len(json.loads((backup / "metadata.json").read_text())["files"]) == 7
-    assert library.read("97")["content"] == ""
+    assert "# SOUL" in library.read("97")["content"]
 
 
 @pytest.mark.parametrize("bad", [b"not json", b"\xff\x00", pytest.param(b"x" * 40000, id="oversized")])
@@ -250,7 +250,7 @@ def test_update_audits_hashes_and_cas(library):
                       "new_hash": sha(b"private memory"), "backup": result["backup"],
                       "actor": "agent", "reason": "approved learning"}
     backup = Path(result["backup"])
-    assert (backup / "097_soul.md").read_bytes() == b""
+    assert b"# SOUL" in (backup / "097_soul.md").read_bytes()
     metadata = json.loads((backup / "metadata.json").read_text())
     assert metadata["actor"] == "agent" and metadata["reason"] == "approved learning"
     assert metadata["files"]["097_soul.md"] == {"old_hash": before["sha256"], "new_hash": sha(b"private memory")}

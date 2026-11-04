@@ -264,12 +264,15 @@ def test_agent_session_records_text_turn(monkeypatch, tmp_path):
     log = asyncio.run(scenario())
     events = read_events(log.path)
     assert [event["type"] for event in events] == [
-        "session_start", "user", "intent", "prompt_version", "assistant", "usage", "prompt_update", "session_end"]
+        "session_start", "user", "intent", "prompt_version", "assistant", "usage",
+        "prompt_update", "prompt_update", "prompt_update", "session_end"]
     assert events[1]["text"] == "hello" and events[1]["turn"] == 1
     assert events[2]["name"] == "chat"
     assert events[3]["layers"].keys() == {"0", "10", "97", "98", "99", "100"}
     assert events[4]["text"] == "done"
     assert events[6]["actor"] == "stats"
+    assert events[7]["actor"] == "user-extract"
+    assert events[8]["actor"] == "soul-extract"
 
 
 def test_agent_session_records_tool_call_and_image(monkeypatch, tmp_path):

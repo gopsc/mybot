@@ -27,7 +27,7 @@ def test_role_uses_bundled_prompt_baseline_without_touching_global(tmp_path):
     role.prompt_library().update("97", "# SOUL\n\n谨慎、先诊断。", actor="operator")
     global_library = PromptLibrary(home=tmp_path / "global", defaults=role.prompt_library().defaults)
     global_library.ensure_home()
-    assert global_library.read("97")["content"] == ""
+    assert "# SOUL" in global_library.read("97")["content"]
     assert "谨慎、先诊断" in role.prompt_library().read("97")["content"]
 
     info = load_role(role.name, root).info()
