@@ -11,17 +11,24 @@ def _skill_scripts(root):
     The hardware-controller Runtime is packaged as ``pymybot/*.py`` and declares
     ``packaged: "cli"``, so copying its skill scripts would duplicate it.
     """
-    for manifest in sorted((root / "skills").glob("*/skill.json")):
-        try:
-            document = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+    skills_dir = root / "skills"
+    for skill_dir in sorted(skills_dir.iterdir()):
+        if not skill_dir.is_dir():
             continue
-        run = document.get("run") if isinstance(document, dict) else None
-        if isinstance(run, dict) and run.get("packaged") == "cli":
-            continue
-        for source in sorted(manifest.parent.rglob("*.py")):
-            if "__pycache__" not in source.parts:
-                yield source
+        manifest = skill_dir / "skill.json"
+        if manifest.is_file():
+            try:
+                document = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            run = document.get("run") if isinstance(document, dict) else None
+            if isinstance(run, dict) and run.get("packaged") == "cli":
+                continue
+        scripts_dir = skill_dir / "scripts"
+        if scripts_dir.is_dir():
+            for source in sorted(scripts_dir.rglob("*.py")):
+                if "__pycache__" not in source.parts:
+                    yield source
 
 
 class BuildPy(build_py):
