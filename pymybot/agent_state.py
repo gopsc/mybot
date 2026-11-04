@@ -134,6 +134,8 @@ def update_user_profile(existing: dict[str, Any], messages: list) -> dict[str, A
 
     Returns None if no new information was found.
     """
+    if not messages:
+        return None
     from langchain_core.messages import HumanMessage
     user_texts = []
     for msg in messages:
@@ -210,7 +212,6 @@ def update_soul_profile(existing: dict[str, Any], messages: list, tool_usage: di
 
     Returns None if no new information was found.
     """
-    from langchain_core.messages import AIMessage, ToolMessage
     profile = dict(existing)
     changed = False
 
@@ -230,6 +231,8 @@ def update_soul_profile(existing: dict[str, Any], messages: list, tool_usage: di
             profile["primary_tools"] = primary
             changed = True
 
+    if messages:
+        from langchain_core.messages import AIMessage, ToolMessage
     ai_texts = []
     for msg in messages:
         if isinstance(msg, AIMessage) and msg.content:
@@ -265,7 +268,6 @@ def format_soul(profile: dict[str, Any]) -> str:
 
 def extract_turn_data(messages: list, events: list) -> dict[str, Any]:
     """Extract aggregate data from a turn's messages and events."""
-    from langchain_core.messages import AIMessage
     tool_usage: dict[str, int] = {}
     tool_calls = 0
     input_tokens = 0
@@ -273,6 +275,8 @@ def extract_turn_data(messages: list, events: list) -> dict[str, Any]:
     last_action = None
     faulted = False
 
+    if messages:
+        from langchain_core.messages import AIMessage
     for msg in messages:
         if isinstance(msg, AIMessage):
             calls = getattr(msg, "tool_calls", None) or []
