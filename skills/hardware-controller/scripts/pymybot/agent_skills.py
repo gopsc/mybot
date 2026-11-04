@@ -105,9 +105,16 @@ class SkillsLibrary:
                         raise SecurityError("Skill exceeds the file count limit")
             if not files:
                 raise SecurityError(f"Skill '{entry.name}' has no SKILL.md")
+            # Runnable if: (1) has skill.json manifest (legacy format), or
+            # (2) has scripts/ directory with executable Python files (Anthropic format).
             manifest = entry / "skill.json"
-            runnable = (manifest.is_file() and not manifest.is_symlink()
-                        and stat.S_ISREG(manifest.stat().st_mode))
+            has_manifest = (manifest.is_file() and not manifest.is_symlink()
+                           and stat.S_ISREG(manifest.stat().st_mode))
+            scripts_dir = entry / "scripts"
+            has_scripts = (scripts_dir.is_dir() and not scripts_dir.is_symlink()
+                          and any(f.suffix == ".py" for f in scripts_dir.iterdir()
+                                  if f.is_file() and not f.is_symlink()))
+            runnable = has_manifest or has_scripts
             self.skills[entry.name] = {"description": description,
                                        "directory": entry, "files": sorted(files),
                                        "runnable": runnable}
