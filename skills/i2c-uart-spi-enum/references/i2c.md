@@ -1,3 +1,5 @@
+Source: `i2c-uart-spi-enum/scripts/bus_enum.py` I2C 分支与 Linux i2c-dev/sysfs 接口
+
 # I2C 枚举与探测细节
 
 ## 1. 各平台的接口形态

@@ -17,7 +17,7 @@ description: 跨平台（Linux/macOS/Windows）枚举 I2C、UART/串口、SPI �
 
 ## 2. 快速开始
 
-脚本：`scripts/bus_enum.py`，只依赖 Python 3.8+ 标准库；`pyserial` 可选（有则给出 VID/PID 与产品名）。
+脚本：[scripts/bus_enum.py](scripts/bus_enum.py)，只依赖 Python 3.8+ 标准库；`pyserial` 可选（有则给出 VID/PID 与产品名）。
 
 ```sh
 python3 scripts/bus_enum.py --bus all            # 文本摘要

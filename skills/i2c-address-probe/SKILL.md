@@ -18,7 +18,7 @@ description: 用 Python 标准库只读发现 I2C 适配器并扫描从机地址
 
 ## 2. 快速开始
 
-脚本：`scripts/i2c_probe.py`，只依赖 Python 3.8+ 标准库，无第三方依赖。
+脚本：[scripts/i2c_probe.py](scripts/i2c_probe.py)，只依赖 Python 3.8+ 标准库，无第三方依赖。
 
 ```sh
 python3 scripts/i2c_probe.py --list                      # 被动：适配器 + 已绑定客户端

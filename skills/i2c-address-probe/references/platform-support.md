@@ -1,3 +1,5 @@
+Source: `i2c-address-probe/scripts/i2c_probe.py` 平台分支与 Linux i2c-dev/sysfs 接口
+
 # 平台支持与限制
 
 脚本只依赖 Python 标准库，但**操作系统能力差异是硬限制**，不能靠代码抹平。

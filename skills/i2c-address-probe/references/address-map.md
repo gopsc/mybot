@@ -1,3 +1,5 @@
+Source: `i2c-address-probe/scripts/i2c_probe.py` 与 I2C 规范保留地址定义
+
 # 地址空间与判读
 
 ## 7 位地址范围

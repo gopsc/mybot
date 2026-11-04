@@ -1,3 +1,5 @@
+Source: `i2c-uart-spi-enum/scripts/bus_enum.py` UART 分支与 pyserial/系统端口命名
+
 # UART / 串口枚举细节
 
 ## 1. 各平台的端口命名

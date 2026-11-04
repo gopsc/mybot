@@ -1,3 +1,5 @@
+Source: `i2c-uart-spi-enum/scripts/bus_enum.py` SPI 分支与 Linux spidev ioctl
+
 # SPI 枚举与回环自检细节
 
 ## 1. 平台差异

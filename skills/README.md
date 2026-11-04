@@ -11,6 +11,7 @@ the controller Runtime explicitly loads trusted code and assets from
 | [`skill-authoring/`](skill-authoring/SKILL.md) | 技能编写规范: SKILL.md layout, frontmatter, trigger descriptions, references and the approved workspace `install_skill` workflow |
 | [`brave-heart/`](brave-heart/SKILL.md) | 勇气与意志力支持：恐惧场景识别、激励引导、微小第一步与呼吸练习 |
 | [`i2c-address-probe/`](i2c-address-probe/SKILL.md) | 宿主侧 I2C 地址探测（只读），sh/Python 脚本、判读手册，Agent 可经 `run_skill` 的 `list-buses` / `scan` 执行 |
+| [`i2c-uart-spi-enum/`](i2c-uart-spi-enum/SKILL.md) | 跨平台 I2C/UART/SPI 设备枚举（只读），Python 脚本与判读手册，Agent 可经 `run_skill` 执行 |
 
 ## Single source of truth
 
@@ -33,7 +34,8 @@ the same-named pages in [`../docs/`](../docs) are redirect stubs for human reade
 | Controller MCP | `hardware-controller/scripts/pymybot/mcp_server.py` | [`references/mcp.md`](hardware-controller/references/mcp.md) |
 | Controller security | `hardware-controller/scripts/pymybot/` | [`references/security.md`](hardware-controller/references/security.md) |
 | Controller testing | `tests/` | [`references/testing.md`](hardware-controller/references/testing.md) |
-| Host-side I2C probing | `i2c-address-probe/scripts/i2c_probe.py` | [`references/usage.md`](i2c-address-probe/references/usage.md) |
+| Host-side I2C probing | `i2c-address-probe/scripts/i2c_probe.py` | [`references/address-map.md`](i2c-address-probe/references/address-map.md), [`references/platform-support.md`](i2c-address-probe/references/platform-support.md) |
+| Host-side bus enumeration | `i2c-uart-spi-enum/scripts/bus_enum.py` | [`references/i2c.md`](i2c-uart-spi-enum/references/i2c.md), [`references/uart.md`](i2c-uart-spi-enum/references/uart.md), [`references/spi.md`](i2c-uart-spi-enum/references/spi.md) |
 | Executable Skill actions | `hardware-controller/skill.json`, `pymybot/agent_skill_runner.py` | [`hardware-controller/SKILL.md`](hardware-controller/SKILL.md#agent-原生-run_skill) |
 
 The scripting grammars have no prose authority outside the implementation, so
