@@ -77,7 +77,7 @@ class GuiConfig:
     prompt_file: str = ""
     auto_stats: bool = True
     context_bytes: int = 4 * 1024
-    intent_mode: str = "auto"
+    intent_mode: str = "off"
     sandbox_mode: str = "auto"
     enable_web: bool = False
     search_endpoint: str = ""
