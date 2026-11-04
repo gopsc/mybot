@@ -109,6 +109,7 @@ class AgentConfig:
     allow_web: bool = False
     search_endpoint: str = ""
     auto_stats: bool = True
+    protect_prompts: bool = True
     hot_turns: int = 3
     warm_turns: int = 10
 
@@ -573,7 +574,7 @@ class AgentSession:
             raise AgentConfigurationError(
                 f"Cannot load prompt library or prompt file: {exc}; no model request was sent") from None
         protect = getattr(executor, "protect_prompts", None)
-        if protect is not None:
+        if protect is not None and self.config.protect_prompts:
             protect((self.prompts.home, asset_path("prompts")))
         self.project_context = build_project_context(self.executor, budget=self.config.context_bytes)
         self._sandbox_label = (describe_backend(self.config.sandbox_mode)

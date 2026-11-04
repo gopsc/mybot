@@ -1046,6 +1046,7 @@ class App(QMainWindow):
             "contextBytes": self.cfg.context_bytes,
             "intent": self.cfg.intent_mode,
             "sandbox": self.cfg.sandbox_mode,
+            "protectPrompts": self.cfg.protect_prompts,
             "enableWeb": True,
             "allowWeb": True,
             "searchEndpoint": self.cfg.search_endpoint,
@@ -1578,6 +1579,9 @@ class SettingsDialog(QDialog):
         sandbox_index = self.sandbox_box.findData(cfg.sandbox_mode)
         self.sandbox_box.setCurrentIndex(max(0, sandbox_index))
         model_form.addRow("Shell 沙箱", self.sandbox_box)
+        self.protect_prompts = QCheckBox("保护提示词目录（关闭沙箱时需取消勾选）")
+        self.protect_prompts.setChecked(bool(cfg.protect_prompts))
+        model_form.addRow(self.protect_prompts)
         self.session_log = QCheckBox("保存会话转录（~/.mybot/sessions）")
         self.session_log.setChecked(bool(cfg.session_log))
         model_form.addRow(self.session_log)
@@ -1665,6 +1669,7 @@ class SettingsDialog(QDialog):
                                      if self.context_enabled.isChecked() else 0),
                       intent_mode=self.intent_box.currentData(),
                       sandbox_mode=self.sandbox_box.currentData(),
+                      protect_prompts=self.protect_prompts.isChecked(),
                       session_log=self.session_log.isChecked(),
                       auto_stats=self.prompts.auto_stats.isChecked())
         self.values = values

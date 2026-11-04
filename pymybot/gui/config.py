@@ -81,6 +81,7 @@ class GuiConfig:
     context_bytes: int = 4 * 1024
     intent_mode: str = "off"
     sandbox_mode: str = "auto"
+    protect_prompts: bool = True
     enable_web: bool = False
     search_endpoint: str = ""
     session_log: bool = True
@@ -128,6 +129,7 @@ class GuiConfig:
                          else "auto"),
             sandbox_mode=(self.sandbox_mode if self.sandbox_mode in {"auto", "off", "bwrap"}
                           else "auto"),
+            protect_prompts=self.protect_prompts if isinstance(self.protect_prompts, bool) else True,
             enable_web=bool(self.enable_web),
             search_endpoint=_text(self.search_endpoint, 2048),
             allow_web=bool(self.allow_web and self.enable_web),
