@@ -49,6 +49,7 @@ _TOOLS = {
     "read_skill": ({"name"}, {"name", "file"}),
     "run_skill": ({"skill", "action"}, {"skill", "action", "arguments"}),
     "install_skill": ({"path"}, {"path"}),
+    "uninstall_skill": ({"name"}, {"name"}),
     **WORKSPACE_TOOLS,
 }
 EXECUTION_TOOLS = frozenset({"run_action_script", "read_variables"})
@@ -662,6 +663,8 @@ class RobotExecutor:
                 checked_text(arguments["file"])
         elif name == "install_skill":
             checked_text(arguments["path"])
+        elif name == "uninstall_skill":
+            checked_text(arguments["name"])
         elif name == "run_skill":
             checked_text(arguments["skill"], 64)
             checked_text(arguments["action"], 64)
@@ -762,6 +765,12 @@ class RobotExecutor:
                 # SkillsLibrary.install reports the first visible mutation through
                 # started(); a rejected manifest therefore stays not_executed.
                 data = self._skills.install(source, started=started)
+            elif name == "uninstall_skill":
+                if self._skills is None or self._skills.root is None:
+                    raise SecurityError("Skills are not configured")
+                # SkillsLibrary.uninstall reports the first visible mutation through
+                # started(); a rejected approval therefore stays not_executed.
+                data = self._skills.uninstall(arguments["name"], started=started)
             elif name == "run_skill":
                 if self._skills is None or self._skills.root is None:
                     raise SecurityError("Skills are not configured")
@@ -847,7 +856,7 @@ class RobotExecutor:
                 except BaseException:
                     pass  # close will retry cleanup, never the action.
             result = self._failure(exc, executed)
-            if (isinstance(name, str) and (name in WORKSPACE_TOOLS or name in {"run_skill", "install_skill"})
+            if (isinstance(name, str) and (name in WORKSPACE_TOOLS or name in {"run_skill", "install_skill", "uninstall_skill"})
                     and not executed and isinstance(exc, SecurityError)):
                 result["error"]["message"] = str(exc)
         return self._record(name, result)

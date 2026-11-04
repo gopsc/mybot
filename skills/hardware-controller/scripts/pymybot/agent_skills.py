@@ -237,6 +237,37 @@ class SkillsLibrary:
         return {"name": name, "files": sorted(entry["files"]) if entry else [],
                 "runnable": bool(entry and entry["runnable"])}
 
+    def uninstall(self, name, *, started=None):
+        """Remove one installed skill from this skills root."""
+        if self.root is None:
+            raise SecurityError("Skills root does not exist")
+        checked_text(name)
+        if not _NAME.fullmatch(name):
+            raise SecurityError("Skill name must be 1..64 lowercase letters, digits, '.', '_' or '-'")
+        entry = self.skills.get(name)
+        if entry is None:
+            raise SecurityError(f"Unknown skill '{name}'")
+        destination = entry["directory"]
+        if not destination.is_relative_to(self.root):
+            raise SecurityError("Skill directory is outside the skills root")
+        staging = self.root / f".{name}.{secrets.token_hex(8)}.tmp"
+        try:
+            # Move to staging first so a failed delete does not leave a half-removed skill.
+            os.replace(destination, staging)
+            if started is not None:
+                started()
+            shutil.rmtree(staging, ignore_errors=True)
+            self._scan()
+        except BaseException:
+            # Attempt to restore if staging still exists.
+            if staging.exists() and not destination.exists():
+                try:
+                    os.replace(staging, destination)
+                except OSError:
+                    pass
+            raise
+        return {"name": name, "removed": True}
+
     def read(self, name, file):
         checked_text(name)
         entry = self.skills.get(name)

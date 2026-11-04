@@ -59,7 +59,7 @@ MAX_HISTORY = 4 * 1024 * 1024
 MAX_OUTPUT_TOKENS = 4096
 MAX_CONTEXT_TOKENS = 2 * 1024 * 1024
 IO_TOOLS = frozenset({"run_action_script", "read_variables"})
-SKILL_TOOLS = frozenset({"run_skill", "install_skill"})
+SKILL_TOOLS = frozenset({"run_skill", "install_skill", "uninstall_skill"})
 CAMERA_TOOLS = frozenset({"list_cameras", "capture_camera"})
 FILE_WRITE_TOOLS = frozenset({"write_file", "edit_file", "create_directory"})
 WEB_TOOLS = frozenset({"web_fetch", "web_search"})
@@ -607,6 +607,10 @@ class AgentSession:
             """Install one workspace-authored skill directory after host approval; path is workspace-relative."""
             return await self.invoke_tool("install_skill", {"path": path})
 
+        async def uninstall_skill(name: str):
+            """Uninstall one installed skill after host approval; name is the skill directory name."""
+            return await self.invoke_tool("uninstall_skill", {"name": name})
+
         async def list_files(path: str = "."):
             """List one workspace directory, without recursion."""
             return await self.invoke_tool("list_files", {"path": path})
@@ -676,7 +680,7 @@ class AgentSession:
         if self.skills is not None and self.skills.root is not None:
             functions.extend((("list_skills", list_skills), ("read_skill", read_skill)))
             if self.workspace:
-                functions.append(("install_skill", install_skill))
+                functions.extend((("install_skill", install_skill), ("uninstall_skill", uninstall_skill)))
             index = self.skills.index()["skills"] if self.skills.enabled else []
             runnable = [skill["name"] for skill in index if skill.get("runnable")]
             skill_tools = _enumerate_skill_tools(self.skills) if runnable else {}
@@ -725,6 +729,8 @@ class AgentSession:
                              "workspace/my-skill/{SKILL.md,skill.json,references/,scripts/,assets/}, then install "
                              "the directory with install_skill(path) after approval. Do not write untrusted code "
                              "directly into the skills root.")
+                guide.append("Remove an installed skill with uninstall_skill(name) after approval; "
+                             "this deletes the skill directory and all its files.")
         guide.append("Camera tools are built-in host capabilities, not robot hardware: "
                      "list_cameras lists devices, and capture_camera(device, width, height, quality) "
                      "returns one JPEG. Use an index or id from list_cameras.")
@@ -901,7 +907,7 @@ class AgentSession:
         return ((name in IO_TOOLS and not self.config.allow_actions)
                 or (name in FILE_WRITE_TOOLS and not self.config.allow_file_writes)
                 or (name in WEB_TOOLS and not self.config.allow_web)
-                or name == "install_skill")
+                or name in {"install_skill", "uninstall_skill"})
 
     async def _approve(self, name, arguments, *, display, public, emit=True, confirm_name=None,
                        log_tool=None, log_arguments=None):
@@ -1458,6 +1464,8 @@ async def confirm_console(name, arguments, stop):
                    "an OS boundary, and hardware access is not limited by --allow-hardware.")
     elif name == "install_skill":
         warning = "This installs trusted skill code and assets that may influence or execute in later requests."
+    elif name == "uninstall_skill":
+        warning = "This permanently removes an installed skill and its scripts, references and assets."
     elif name in FILE_WRITE_TOOLS:
         warning = "This changes workspace files, potentially including executable scripts or drivers."
     else:

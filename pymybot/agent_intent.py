@@ -23,7 +23,7 @@ TOOLS_BY_INTENT = {
     "control": READ_TOOLS | {"run_skill", "capture_camera", "write_file", "edit_file",
                              "create_directory", "shell"},
     "author": READ_TOOLS | {"write_file", "edit_file", "create_directory", "update_prompt",
-                            "install_skill", "run_skill"},
+                            "install_skill", "uninstall_skill", "run_skill"},
     "diagnose": READ_TOOLS | {"shell", "run_skill", "capture_camera"},
 }
 _RULES = {
