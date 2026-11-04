@@ -47,17 +47,24 @@ CONTROLLER_DIRECTORIES = frozenset({"modules", "robots", "scripts"})
 
 def skill_script_files(root):
     """Skill entrypoints shipped with the wheel; CLI-fallback skills are excluded."""
-    for manifest in sorted((Path(root) / "skills").glob("*/skill.json")):
-        try:
-            document = json.loads(manifest.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+    skills_dir = Path(root) / "skills"
+    for skill_dir in sorted(skills_dir.iterdir()):
+        if not skill_dir.is_dir():
             continue
-        run = document.get("run") if isinstance(document, dict) else None
-        if isinstance(run, dict) and run.get("packaged") == "cli":
-            continue
-        for source in sorted(manifest.parent.rglob("*.py")):
-            if "__pycache__" not in source.parts:
-                yield source
+        manifest = skill_dir / "skill.json"
+        if manifest.is_file():
+            try:
+                document = json.loads(manifest.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            run = document.get("run") if isinstance(document, dict) else None
+            if isinstance(run, dict) and run.get("packaged") == "cli":
+                continue
+        scripts_dir = skill_dir / "scripts"
+        if scripts_dir.is_dir():
+            for source in sorted(scripts_dir.rglob("*.py")):
+                if "__pycache__" not in source.parts:
+                    yield source
 
 
 def asset_manifest(root, *, source_tree=False):

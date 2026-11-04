@@ -42,22 +42,40 @@ class SkillRunner:
         if entry is None:
             raise SecurityError("Skill is not registered")
         directory = entry["directory"].resolve()
-        try:
-            document = json.loads(
-                (directory / "skill.json").read_text(encoding="utf-8"),
-                parse_constant=lambda token: (_ for _ in ()).throw(ValueError(token)))
-        except (OSError, UnicodeDecodeError, ValueError) as exc:
-            raise SecurityError(f"Invalid skill.json: {exc}") from None
-        run = document.get("run") if isinstance(document, dict) else None
-        if not isinstance(run, dict):
-            raise SecurityError("skill.json must declare run")
-        entrypoint = run.get("entrypoint")
-        actions = run.get("actions")
-        if not isinstance(entrypoint, str) or not entrypoint:
-            raise SecurityError("skill.json must declare an entrypoint")
-        if not isinstance(actions, dict) or not actions:
-            raise SecurityError("skill.json must declare actions")
-        return directory, entrypoint, actions, run.get("packaged", "source")
+        manifest_path = directory / "skill.json"
+        if manifest_path.is_file():
+            try:
+                document = json.loads(
+                    manifest_path.read_text(encoding="utf-8"),
+                    parse_constant=lambda token: (_ for _ in ()).throw(ValueError(token)))
+            except (OSError, UnicodeDecodeError, ValueError) as exc:
+                raise SecurityError(f"Invalid skill.json: {exc}") from None
+            run = document.get("run") if isinstance(document, dict) else None
+            if not isinstance(run, dict):
+                raise SecurityError("skill.json must declare run")
+            entrypoint = run.get("entrypoint")
+            actions = run.get("actions")
+            if not isinstance(entrypoint, str) or not entrypoint:
+                raise SecurityError("skill.json must declare an entrypoint")
+            if not isinstance(actions, dict) or not actions:
+                raise SecurityError("skill.json must declare actions")
+            return directory, entrypoint, actions, run.get("packaged", "source")
+        scripts_dir = directory / "scripts"
+        if scripts_dir.is_dir():
+            py_files = sorted(p for p in scripts_dir.iterdir()
+                             if p.suffix == ".py" and p.is_file() and not p.is_symlink())
+            if py_files:
+                entrypoint = f"scripts/{py_files[0].name}"
+                actions = {"run": {
+                    "description": f"Run {py_files[0].stem}",
+                    "effect": "read",
+                    "output": "json",
+                    "argv": [],
+                    "params": {},
+                    "passthrough": True,
+                }}
+                return directory, entrypoint, actions, "source"
+        raise SecurityError("Skill has neither skill.json nor scripts/ directory")
 
     def _action(self, actions, action):
         spec = actions.get(action)
@@ -111,6 +129,15 @@ class SkillRunner:
         return values
 
     def _argv(self, spec, values, allow_hardware, bindings):
+        if spec.get("passthrough"):
+            argv = []
+            for name, value in values.items():
+                if value.lower() in ("true", "false"):
+                    if value.lower() == "true":
+                        argv.append(f"--{name}")
+                else:
+                    argv.extend((f"--{name}", value))
+            return argv
         argv = [_PLACEHOLDER.sub(
             lambda match: values.get(match.group(1), match.group(0)), token)
             for token in spec.get("argv", [])]

@@ -188,20 +188,28 @@ def test_repository_runnable_skills_declare_existing_entrypoints():
     for skill in library.index()["skills"]:
         if not skill["runnable"]:
             continue
-        document = json.loads((ROOT / "skills" / skill["name"] / "skill.json").read_text(encoding="utf-8"))
-        run = document["run"]
-        entrypoint = Path(run["entrypoint"])
-        assert not entrypoint.is_absolute()
-        if run.get("packaged") != "cli":
-            assert (ROOT / "skills" / skill["name"] / entrypoint).is_file(), skill["name"]
+        skill_dir = ROOT / "skills" / skill["name"]
+        manifest = skill_dir / "skill.json"
+        if manifest.is_file():
+            document = json.loads(manifest.read_text(encoding="utf-8"))
+            run = document["run"]
+            entrypoint = Path(run["entrypoint"])
+            assert not entrypoint.is_absolute()
+            if run.get("packaged") != "cli":
+                assert (skill_dir / entrypoint).is_file(), skill["name"]
+        else:
+            scripts_dir = skill_dir / "scripts"
+            assert scripts_dir.is_dir(), f"{skill['name']} has no scripts/ directory"
+            py_files = list(scripts_dir.glob("*.py"))
+            assert py_files, f"{skill['name']} has no Python scripts"
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="i2c-dev is Linux-only")
 def test_i2c_skill_lists_buses_without_hardware():
-    result = SkillRunner(SkillsLibrary(ROOT / "skills")).run("i2c-address-probe", "list-buses", {})
+    result = SkillRunner(SkillsLibrary(ROOT / "skills")).run("i2c-address-probe", "run", {"list": True, "json": True})
 
     assert result["exit_code"] == 0 and result["output_error"] is None
-    assert isinstance(result["output"]["buses"], list)
+    assert isinstance(result["output"]["adapters"], list)
 
 
 def test_hardware_controller_assets_read_and_list():
