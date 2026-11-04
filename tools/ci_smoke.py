@@ -205,12 +205,19 @@ def installed_smoke(manifest_path):
         for name in skill["files"]:
             skills.read(skill["name"], name)
         if skill["runnable"]:
-            document = json.loads((skills.root / skill["name"] / "skill.json").read_text(encoding="utf-8"))
-            spec = document.get("run") if isinstance(document, dict) else None
-            entrypoint = spec.get("entrypoint") if isinstance(spec, dict) else None
-            if isinstance(entrypoint, str) and spec.get("packaged") != "cli":
-                require((skills.root / skill["name"] / entrypoint).is_file(),
-                        f"Packaged skill entrypoint is missing: {skill['name']}/{entrypoint}")
+            skill_dir = skills.root / skill["name"]
+            manifest = skill_dir / "skill.json"
+            if manifest.is_file():
+                document = json.loads(manifest.read_text(encoding="utf-8"))
+                spec = document.get("run") if isinstance(document, dict) else None
+                entrypoint = spec.get("entrypoint") if isinstance(spec, dict) else None
+                if isinstance(entrypoint, str) and spec.get("packaged") != "cli":
+                    require((skill_dir / entrypoint).is_file(),
+                            f"Packaged skill entrypoint is missing: {skill['name']}/{entrypoint}")
+            else:
+                scripts_dir = skill_dir / "scripts"
+                require(scripts_dir.is_dir() and any(scripts_dir.glob("*.py")),
+                        f"Anthropic skill {skill['name']} has no scripts/ directory")
 
     env = smoke_env()
     cli = [sys.executable, "-I", "-m", "pymybot"]
