@@ -1065,7 +1065,7 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
 
     monkeypatch.setattr(agent_module, "create_model", lambda config: (make_model(), FakeClient()))
     from pymybot.roles import create_role
-    params = {"task": "写文件", "robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace),
+    params = {"task": "编写文件", "robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace),
               "workspaceDir": str(workspace), "model": "openai:fake", "role": create_role("test-role").name}
 
     async def scenario():

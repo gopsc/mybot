@@ -152,8 +152,8 @@ def run_turn(tmp_path, *, confirm=None, allow=False, tool_suffix="echo",
 
     async def scenario():
         session = AgentSession(FakeExecutor(), FunctionModel(respond),
-                               AgentConfig(allow_mcp_tools=allow), confirm=confirm,
-                               mcp_servers=servers)
+                               AgentConfig(intent_mode="off", allow_mcp_tools=allow),
+                               confirm=confirm, mcp_servers=servers)
         try:
             result = await session.ask("use the external tool")
             return result, session.events
@@ -211,7 +211,8 @@ def test_large_mcp_results_are_bounded(tmp_path):
         from langchain_core.messages import ToolMessage
 
         session = AgentSession(FakeExecutor(), FunctionModel(respond),
-                               AgentConfig(allow_mcp_tools=True), mcp_servers=servers)
+                               AgentConfig(intent_mode="off", allow_mcp_tools=True),
+                               mcp_servers=servers)
         try:
             await session.ask("blob")
             receipts.extend(message.content for turn in session.turns for message in turn

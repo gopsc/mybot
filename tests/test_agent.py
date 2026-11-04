@@ -286,7 +286,8 @@ def test_workspace_approvals_are_independent(tool, arguments, permission, mode, 
 
     async def scenario():
         model = scripted_model([ToolCallPart(tool, arguments)], [TextPart("done")])
-        session = AgentSession(executor, model, AgentConfig(**flags), workspace=True, enable_shell=True,
+        session = AgentSession(executor, model, AgentConfig(intent_mode="off", **flags),
+                               workspace=True, enable_shell=True,
                                confirm=confirm if mode in {"confirm", "deny"} else None)
         try:
             await session.ask("test")
@@ -365,7 +366,8 @@ def test_multiple_gated_calls_resume_by_interrupt_id():
     ], [TextPart("done")])
 
     async def scenario():
-        session = AgentSession(executor, model, workspace=True, confirm=confirm)
+        session = AgentSession(executor, model, AgentConfig(intent_mode="off"),
+                               workspace=True, confirm=confirm)
         try:
             result = await session.ask("写两个文件")
             assert result["output"] == "done"

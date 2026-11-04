@@ -5,12 +5,20 @@ explicit test policy), private/link-local/reserved addresses rejected, manual
 redirects re-validated on every hop, content-type/size/time limits, and no
 cookies or credentials. HTML extraction uses BeautifulSoup; a configured
 SearXNG endpoint is the only search provider, and it never fabricates results.
+
+DNS rebinding defence: every request connects to a pre-validated IP address,
+not the original hostname.  ``_validate_target`` resolves DNS once and returns
+the safe IP; ``fetch`` and ``search`` then build a pinned URL that replaces
+the hostname with that IP and supply the original hostname via the ``Host``
+header (and ``sni_hostname`` extension for TLS).  This closes the TOCTOU
+window between validation and connection.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import ipaddress
 import socket
+import ssl
 from urllib.parse import urljoin, urlsplit
 
 from . import __version__
@@ -43,6 +51,12 @@ def _httpx():
 
 
 def _validate_target(url, policy):
+    """Validate URL structure and DNS; return the first safe resolved IP.
+
+    The caller MUST connect to the returned IP (via ``_pinned_url``) rather
+    than the original hostname.  A second ``getaddrinfo`` between validation
+    and connect would reopen the DNS-rebinding TOCTOU window.
+    """
     try:
         parts = urlsplit(url)
         port = parts.port
@@ -65,6 +79,7 @@ def _validate_target(url, policy):
         raise WebError("DNS resolution failed") from None
     if not infos:
         raise WebError("DNS resolution returned no address")
+    first_safe = None
     for info in infos:
         address = info[4][0]
         try:
@@ -72,11 +87,38 @@ def _validate_target(url, policy):
         except ValueError:
             raise WebError("URL resolved to an invalid address") from None
         if ip.is_loopback:
-            if policy.allow_loopback:
-                continue
-            raise WebError("URL resolves to a loopback address")
+            if not policy.allow_loopback:
+                raise WebError("URL resolves to a loopback address")
+            first_safe = first_safe or address
+            continue
         if not ip.is_global or ip.is_multicast:
             raise WebError("URL resolves to a private, link-local or reserved address")
+        first_safe = first_safe or address
+    if first_safe is None:
+        raise WebError("DNS resolution returned no connectable address")
+    return first_safe
+
+
+def _pinned_url(parts, resolved_ip):
+    """Build a URL that connects to *resolved_ip* while preserving scheme/port/path."""
+    host = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+    authority = f"{host}:{parts.port}" if parts.port else host
+    path = parts.path or "/"
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{parts.scheme}://{authority}{path}{query}"
+
+
+def _http_ssl_context():
+    """SSL context for IP-pinned HTTPS.
+
+    Hostname checking is disabled because the TLS target is a validated IP,
+    not the original hostname; certificate-chain verification stays enabled.
+    The original hostname is forwarded via the ``sni_hostname`` request
+    extension so the server presents the right certificate.
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    return ctx
 
 
 def _extract(body, content_type, max_chars, charset="utf-8"):
@@ -101,12 +143,18 @@ def fetch(url, *, policy=None):
     policy = policy or WebPolicy()
     httpx = _httpx()
     client = httpx.Client(follow_redirects=False, timeout=policy.timeout, trust_env=False,
+                          verify=_http_ssl_context(),
                           headers={"User-Agent": f"pymybot/{__version__} (agent web tool)"})
     current = str(url or "")
     try:
         for _ in range(MAX_REDIRECTS + 1):
-            _validate_target(current, policy)
-            with client.stream("GET", current) as response:
+            resolved_ip = _validate_target(current, policy)
+            parts = urlsplit(current)
+            pinned = _pinned_url(parts, resolved_ip)
+            per_request = {"headers": {"Host": parts.hostname}}
+            if parts.scheme == "https":
+                per_request["extensions"] = {"sni_hostname": parts.hostname}
+            with client.stream("GET", pinned, **per_request) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:
@@ -166,11 +214,18 @@ def search(query, *, endpoint, policy=None):
                            max_bytes=policy.max_bytes, max_chars=policy.max_chars)
     httpx = _httpx()
     url = base + "/search"
-    _validate_target(url, policy)
+    resolved_ip = _validate_target(url, policy)
+    parts = urlsplit(url)
+    pinned = _pinned_url(parts, resolved_ip)
     client = httpx.Client(follow_redirects=False, timeout=policy.timeout, trust_env=False,
-                          headers={"User-Agent": f"pymybot/{__version__} (agent web tool)"})
+                          verify=_http_ssl_context(),
+                          headers={"Host": parts.hostname,
+                                   "User-Agent": f"pymybot/{__version__} (agent web tool)"})
     try:
-        response = client.get(url, params={"q": query, "format": "json", "safesearch": "1"})
+        per_request = {"params": {"q": query, "format": "json", "safesearch": "1"}}
+        if parts.scheme == "https":
+            per_request["extensions"] = {"sni_hostname": parts.hostname}
+        response = client.get(pinned, **per_request)
     finally:
         client.close()
     if response.status_code >= 400:

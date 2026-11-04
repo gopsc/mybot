@@ -2,10 +2,12 @@
 
 The classifier runs before each model request. Explicit control, authoring,
 diagnosis and inspection requests get a bounded tool allowlist;
-messages with no intent keywords stay unrestricted so ordinary conversation
-and provider-specific tool flows are not narrowed by a guess. When several
-intents match, their tool sets are unioned: a request such as “write a script
-and run it” still reaches both file and hardware tools.
+messages with no intent keywords fall back to the ``chat`` allowlist
+(read-only tools) so that ordinary conversation cannot silently reach
+shell, file-write or hardware tools. When several intents match, their
+tool sets are unioned: a request such as "write a script and run it"
+still reaches both file and hardware tools. The operator can set
+``mode="off"`` to disable routing entirely.
 """
 from __future__ import annotations
 
@@ -92,8 +94,8 @@ def classify_intent(text, mode="auto", *, extra_tools=None):
         if hits:
             scored[intent] = hits
     if not scored:
-        return IntentDecision("chat", 0.4, "no intent keywords; tools stay unrestricted",
-                              restricted=False, extra_tools=extra)
+        return IntentDecision("chat", 0.4, "no intent keywords; restricted to read-only tools",
+                              tools=TOOLS_BY_INTENT["chat"], restricted=True, extra_tools=extra)
     name = next(intent for intent in _PRIORITY if intent in scored)
     tools = frozenset().union(*(TOOLS_BY_INTENT[intent] for intent in scored))
     total = sum(len(hits) for hits in scored.values())

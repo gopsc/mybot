@@ -44,7 +44,8 @@ def test_chinese_intent_classification(text, expected):
     decision = classify_intent(text)
     assert decision.name == expected
     if expected == "chat":
-        assert not decision.restricted
+        assert decision.restricted
+        assert decision.tools == TOOLS_BY_INTENT["chat"]
     else:
         assert decision.restricted and decision.confidence >= 0.55
 
@@ -69,10 +70,12 @@ def test_mixed_request_unions_tool_sets():
     assert {"write_file", "edit_file", "run_skill", "shell"} <= decision.tools
 
 
-def test_no_keywords_stays_unrestricted():
+def test_no_keywords_defaults_to_read_only():
     decision = classify_intent("hello there")
-    assert decision.name == "chat" and not decision.restricted
-    assert decision.allows("shell") and decision.allows("write_file")
+    assert decision.name == "chat" and decision.restricted
+    assert decision.tools == TOOLS_BY_INTENT["chat"]
+    assert decision.allows("read_file") and decision.allows("list_skills")
+    assert not decision.allows("shell") and not decision.allows("write_file")
 
 
 def test_operator_override_and_off():
