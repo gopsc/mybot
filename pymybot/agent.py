@@ -584,6 +584,7 @@ class AgentSession:
         self._tool_lock = asyncio.Lock()
         self._pruned_turns = 0
         self._camera = None
+        self._checkpointer = InMemorySaver()
 
     # -- tools -------------------------------------------------------------
     def _build_tools(self):
@@ -895,6 +896,7 @@ class AgentSession:
     def clear_history(self):
         self.turns = []
         self.events = []
+        self._checkpointer = InMemorySaver()
         if self.role is not None:
             try:
                 write_history(self.role.history_file, [])
@@ -1289,7 +1291,7 @@ class AgentSession:
 
     def _build_graph(self):
         return create_agent(self.model, tools=self.tools, middleware=self._middleware(),
-                            system_prompt=self._prompt_text or "", checkpointer=InMemorySaver(),
+                            system_prompt=self._prompt_text or "", checkpointer=self._checkpointer,
                             name="mybot")
 
     async def _resume(self, interrupts):
