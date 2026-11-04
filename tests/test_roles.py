@@ -82,18 +82,18 @@ def test_role_validation_and_history_clear(tmp_path):
         create_role("../escape", root=root)
 
     write_history(role.history_file, [{"serialized": "turn"}])
-    assert read_history(role.history_file) == [{"serialized": "turn"}]
+    assert read_history(role.history_file) == ([{"serialized": "turn"}], None, [])
     assert clear_role_history("demo", root)["history_turns"] == 0
-    assert read_history(role.history_file) == []
+    assert read_history(role.history_file) == ([], None, [])
 
 
 def test_legacy_pydanticai_history_is_ignored(tmp_path):
     role = create_role("legacy", root=tmp_path / "roles")
     role.history_file.write_text(
         json.dumps({"version": 1, "turns": [[{"kind": "request"}]]}), encoding="utf-8")
-    assert read_history(role.history_file) == []
+    assert read_history(role.history_file) == ([], None, [])
     role.history_file.write_text(
-        json.dumps({"version": 3, "turns": []}), encoding="utf-8")
+        json.dumps({"version": 99, "turns": []}), encoding="utf-8")
     with pytest.raises(SecurityError):
         read_history(role.history_file)
 
@@ -180,7 +180,8 @@ def test_role_history_reopens_and_clears(tmp_path):
             await session.close()
 
     asyncio.run(first_turn())
-    assert len(read_history(role.history_file)) == 1
+    turns, _cold, _warm = read_history(role.history_file)
+    assert len(turns) == 1
     seen = []
 
     async def second_model(messages, info):
@@ -194,7 +195,7 @@ def test_role_history_reopens_and_clears(tmp_path):
             await session.ask("continue")
             assert len(session.turns) == 2
             session.clear_history()
-            assert read_history(role.history_file) == []
+            assert read_history(role.history_file) == ([], None, [])
         finally:
             await session.close()
 

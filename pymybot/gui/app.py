@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 from ..agent_skills import default_skills_root
 from ..paths import asset_path, source_root
 from ..robot import module_roots
-from ..roles import create_role as create_role_profile, list_roles, role_path
+from ..roles import create_role as create_role_profile, list_roles, read_history, role_path
 from ..session_log import session_root
 from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
@@ -155,6 +155,7 @@ class App(QMainWindow):
         self._start_timer.setSingleShot(True)
         self._start_timer.timeout.connect(self._start_server)
         self._load_role_list()
+        self._load_role_history()
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         self._start_timer.start(120)
         self.task_box.setPlainText(self.cfg.task.strip())
@@ -612,6 +613,7 @@ class App(QMainWindow):
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         self._resource_roots = None
         self._save()
+        self._load_role_history()
         self._notice(f"已选择角色：{self.cfg.role}" if self.cfg.role else "请先新建角色再对话")
 
     def new_role(self):
@@ -1037,6 +1039,8 @@ class App(QMainWindow):
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "maxContextTokens": self.cfg.max_context_tokens,
             "contextReserveTokens": self.cfg.context_reserve_tokens,
+            "hotTurns": self.cfg.hot_turns,
+            "warmTurns": self.cfg.warm_turns,
             "promptFile": _absolute(self.cfg.prompt_file, workspace),
             "autoStats": self.cfg.auto_stats,
             "contextBytes": self.cfg.context_bytes,
@@ -1204,6 +1208,58 @@ class App(QMainWindow):
         self._assistant_start = None
         self._assistant_markdown = ""
 
+    def _load_role_history(self):
+        """Populate the chat widget with the selected role's stored conversation."""
+        if not self.cfg.role:
+            return
+        try:
+            path = role_path(self.cfg.role) / "history.json"
+            raw_turns, cold, warm = read_history(path)
+        except Exception:
+            return
+        if not raw_turns and not cold and not warm:
+            return
+        self._clear_transcript()
+        if cold or warm:
+            older = len(warm) if warm else 0
+            if cold and older:
+                self._chat_line(f"[之前有 {older} 轮以上的对话已压缩为摘要]", "system")
+            elif cold:
+                self._chat_line("[之前有较早的对话已压缩为摘要]", "system")
+            elif older:
+                self._chat_line(f"[之前有 {older} 轮对话已压缩为摘要]", "system")
+        for turn in raw_turns:
+            if not isinstance(turn, list):
+                continue
+            for msg in turn:
+                if not isinstance(msg, dict):
+                    continue
+                msg_type = msg.get("type", "")
+                data = msg.get("data") if isinstance(msg.get("data"), dict) else {}
+                content = data.get("content", "")
+                if not isinstance(content, str) or not content:
+                    continue
+                if msg_type == "human":
+                    self._chat_line(f"你：{content}", "user")
+                elif msg_type == "ai":
+                    self._history_assistant(content)
+
+    def _history_assistant(self, content):
+        """Render a stored AI message with markdown formatting."""
+        if not content or self._stopping:
+            return
+        self._flush_markdown()
+        cursor = self.chat.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        if not self.at_line_start:
+            self._insert_text(self.chat, "\n")
+            self.at_line_start = True
+        self._assistant_start = cursor.position()
+        self._assistant_markdown = content
+        self._insert_text(self.chat, content, "assistant")
+        self.at_line_start = content.endswith("\n")
+        self._flush_markdown()
+
     def copy_chat(self):
         text = self.chat.toPlainText().strip()
         if text:
@@ -1306,6 +1362,7 @@ class App(QMainWindow):
     def refresh_context(self):
         self._sync_config()
         self._load_role_list()
+        self._load_role_history()
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
 
     def open_settings(self):

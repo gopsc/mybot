@@ -74,6 +74,8 @@ class GuiConfig:
     max_history_bytes: int = 4 * 1024 * 1024
     max_context_tokens: int | None = None
     context_reserve_tokens: int = 2048
+    hot_turns: int = 3
+    warm_turns: int = 10
     prompt_file: str = ""
     auto_stats: bool = True
     context_bytes: int = 4 * 1024
@@ -115,6 +117,8 @@ class GuiConfig:
                                 and 1024 <= self.max_context_tokens <= 2 * 1024 * 1024 else None),
             context_reserve_tokens=(self.context_reserve_tokens if type(self.context_reserve_tokens) is int
                                     and 0 <= self.context_reserve_tokens <= 64 * 1024 else 2048),
+            hot_turns=self.hot_turns if type(self.hot_turns) is int and 1 <= self.hot_turns <= 50 else 3,
+            warm_turns=self.warm_turns if type(self.warm_turns) is int and 0 <= self.warm_turns <= 200 else 10,
             prompt_file=_text(self.prompt_file),
             auto_stats=self.auto_stats if isinstance(self.auto_stats, bool) else True,
             context_bytes=(self.context_bytes if isinstance(self.context_bytes, int)

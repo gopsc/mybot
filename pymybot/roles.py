@@ -20,7 +20,7 @@ from .mcp_client import MAX_CONFIG_BYTES, parse_servers
 from .prompts import PromptLibrary
 from .security import SecurityError, checked_text, read_file
 
-FORMAT = 2
+FORMAT = 3
 LEGACY_FORMAT = 1
 MAX_ROLE_NAME = 64
 MAX_DESCRIPTION = 1024
@@ -125,30 +125,47 @@ def _write_json(path, document):
 
 
 def read_history(path):
-    """Return raw serialized turns; message validation belongs to AgentSession."""
+    """Return (turns, cold, warm) from the history file.
+
+    v3 files carry tiered data; v2 files are upgraded on the fly with no tiers.
+    v1 (PydanticAI) files cannot be converted and start fresh.
+    """
     path = Path(path)
     if not path.exists():
-        return []
+        return [], None, []
     _regular_file(path)
     try:
         document = json.loads(read_file(path, MAX_HISTORY))
     except (OSError, ValueError) as exc:
         raise SecurityError(f"Cannot load role history: {type(exc).__name__}") from None
-    if (type(document) is not dict or set(document) != {"version", "turns"}
-            or type(document["version"]) is not int or type(document["turns"]) is not list):
+    if type(document) is not dict or "version" not in document or "turns" not in document:
+        raise SecurityError("Invalid or unsupported role history")
+    if type(document["version"]) is not int or type(document["turns"]) is not list:
         raise SecurityError("Invalid or unsupported role history")
     if document["version"] == LEGACY_FORMAT:
-        # PydanticAI-format history cannot be converted losslessly; start fresh.
-        return []
+        return [], None, []
+    if document["version"] == 2:
+        return document["turns"], None, []
     if document["version"] != FORMAT:
         raise SecurityError("Invalid or unsupported role history")
-    return document["turns"]
+    cold = document.get("cold")
+    warm = document.get("warm", [])
+    if cold is not None and not isinstance(cold, str):
+        raise SecurityError("Invalid or unsupported role history")
+    if not isinstance(warm, list) or any(not isinstance(s, str) for s in warm):
+        raise SecurityError("Invalid or unsupported role history")
+    return document["turns"], cold, warm
 
 
-def write_history(path, turns):
+def write_history(path, turns, cold=None, warm=None):
     if not isinstance(turns, list):
         raise SecurityError("Role history turns must be a list")
-    _write_json(Path(path), {"version": FORMAT, "turns": turns})
+    payload = {"version": FORMAT, "turns": turns}
+    if cold is not None:
+        payload["cold"] = cold
+    if warm:
+        payload["warm"] = list(warm)
+    _write_json(Path(path), payload)
 
 
 @dataclass(frozen=True)
@@ -182,7 +199,7 @@ class Role:
 
     def info(self):
         skills = SkillsLibrary(self.skills_dir, required=True).index()["skills"]
-        history = read_history(self.history_file)
+        history, _cold, _warm = read_history(self.history_file)
         bundled = _bundled_runnable_skills()
         runnable, incomplete = [], []
         for item in skills:

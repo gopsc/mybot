@@ -33,7 +33,7 @@ from langgraph.types import Command, interrupt
 from .agent_context import build_project_context
 from .agent_executor import RobotExecutor
 from .agent_intent import MODES, classify_intent
-from .agent_memory import estimate_request_tokens
+from .agent_memory import aggregate_cold, estimate_request_tokens, summarize_turn
 from .agent_prompt import DEFAULT_CONTEXT_BYTES, read_operator_prompt
 from .agent_skills import SkillsLibrary, default_skills_root
 from .errors import AgentInterrupted
@@ -106,6 +106,8 @@ class AgentConfig:
     allow_web: bool = False
     search_endpoint: str = ""
     auto_stats: bool = True
+    hot_turns: int = 3
+    warm_turns: int = 10
 
     def __post_init__(self):
         if type(self.auto_stats) is not bool:
@@ -140,6 +142,10 @@ class AgentConfig:
         object.__setattr__(self, "sandbox_mode", sandbox)
         if self.allow_web and not self.enable_web:
             raise AgentConfigurationError("allow_web requires enable_web")
+        for name, low, high in (("hot_turns", 1, 50), ("warm_turns", 0, 200)):
+            value = getattr(self, name)
+            if type(value) is not int or not low <= value <= high:
+                raise AgentConfigurationError(f"{name} must be in {low}..{high}")
         endpoint = str(self.search_endpoint or "").strip()
         if endpoint:
             if not self.enable_web:
@@ -576,6 +582,8 @@ class AgentSession:
         self.context = None
         self.intent = None
         self.turns = []
+        self._cold_summary: str | None = None
+        self._warm_summaries: list[str] = []
         self._load_history()
         self.events = []
         self._asking = False
@@ -867,17 +875,34 @@ class AgentSession:
         ) > self.config.history_bytes:
             self.turns.pop(0)
 
+    def _transition_tiers(self):
+        """Move excess hot turns to warm, and excess warm summaries to cold."""
+        while len(self.turns) > self.config.hot_turns:
+            oldest = self.turns.pop(0)
+            summary = summarize_turn(oldest, len(self._warm_summaries) + 1)
+            if summary:
+                self._warm_summaries.append(summary)
+        if len(self._warm_summaries) > self.config.warm_turns:
+            excess = len(self._warm_summaries) - self.config.warm_turns
+            dropped = self._warm_summaries[:excess]
+            self._warm_summaries = self._warm_summaries[excess:]
+            aggregate = aggregate_cold(dropped, turn_count=excess)
+            if aggregate:
+                self._cold_summary = aggregate
+
     def _load_history(self):
         if self.role is None:
             return
         try:
-            raw_turns = read_history(self.role.history_file)
+            raw_turns, cold, warm = read_history(self.role.history_file)
             turns = []
             for turn in raw_turns:
                 if not isinstance(turn, list):
                     raise ValueError("history turn is not a list")
                 turns.append(messages_from_dict(turn))
             self.turns = turns
+            self._cold_summary = cold
+            self._warm_summaries = list(warm) if warm else []
             self._prune_history()
         except (SecurityError, OSError, ValueError, TypeError) as exc:
             raise AgentConfigurationError(
@@ -888,7 +913,8 @@ class AgentSession:
             return
         try:
             turns = [messages_to_dict(turn) for turn in self.turns]
-            write_history(self.role.history_file, turns)
+            write_history(self.role.history_file, turns,
+                          cold=self._cold_summary, warm=self._warm_summaries)
         except (SecurityError, OSError, ValueError, TypeError) as exc:
             raise AgentError(
                 f"Role history could not be saved ({type(exc).__name__}); the completed turn was not rolled back") from None
@@ -896,6 +922,8 @@ class AgentSession:
     def clear_history(self):
         self.turns = []
         self.events = []
+        self._cold_summary = None
+        self._warm_summaries = []
         self._checkpointer = InMemorySaver()
         if self.role is not None:
             try:
@@ -1238,8 +1266,20 @@ class AgentSession:
         system = [SystemMessage(self._prompt_text)] if self._prompt_text else []
         return estimate_request_tokens([*system, *messages], self.tools)
 
+    def _build_context_messages(self, prompt):
+        """Assemble tiered context: cold summary, warm summaries, hot turns, current prompt."""
+        messages = []
+        if self._cold_summary:
+            messages.append(SystemMessage(content=self._cold_summary))
+        for summary in self._warm_summaries:
+            messages.append(SystemMessage(content=summary))
+        for turn in self.turns:
+            messages.extend(turn)
+        messages.append(HumanMessage(prompt))
+        return messages
+
     def _trim_messages(self, messages):
-        """Drop oldest complete turns until the request fits; never split a tool pair."""
+        """Drop tiers oldest-first: cold summary, warm summaries, then hot turns."""
         limit = self.config.max_context_tokens
         if limit is None:
             return messages
@@ -1249,21 +1289,58 @@ class AgentSession:
         before = estimated = self._estimate(messages)
         if estimated <= input_limit:
             return messages
-        dropped = 0
+
+        cold_dropped = 0
+        warm_dropped = 0
+        hot_dropped = 0
+
+        def _tier_counts(msgs):
+            cold = 1 if (msgs and isinstance(msgs[0], SystemMessage)
+                         and isinstance(msgs[0].content, str)
+                         and msgs[0].content.startswith("[历史")) else 0
+            warm = 0
+            for item in msgs[cold:]:
+                if isinstance(item, SystemMessage):
+                    warm += 1
+                else:
+                    break
+            human_indices = [i for i, m in enumerate(msgs) if isinstance(m, HumanMessage)]
+            hot = max(0, len(human_indices) - 1)
+            return cold, warm, hot
+
         while estimated > input_limit:
-            starts = [index for index, item in enumerate(messages) if isinstance(item, HumanMessage)]
-            if len(starts) <= 1:
+            cold, warm, hot = _tier_counts(messages)
+            if cold and not cold_dropped:
+                messages = messages[1:]
+                cold_dropped += 1
+            elif warm and warm_dropped < len(self._warm_summaries):
+                messages = messages[:cold] + messages[cold + 1:]
+                warm_dropped += 1
+            elif hot:
+                starts = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+                if len(starts) <= 1:
+                    break
+                messages = messages[starts[1]:]
+                hot_dropped += 1
+            else:
                 break
-            messages = messages[starts[1]:]
-            dropped += 1
             estimated = self._estimate(messages)
-        if dropped:
-            new_drops = max(0, dropped - self._pruned_turns)
+
+        if cold_dropped:
+            self._cold_summary = None
+        if warm_dropped:
+            self._warm_summaries = self._warm_summaries[warm_dropped:]
+        if hot_dropped:
+            new_drops = max(0, hot_dropped - self._pruned_turns)
             if new_drops:
                 del self.turns[:min(new_drops, len(self.turns))]
-                self._log("context_prune", dropped_turns=new_drops, estimated_tokens_before=before,
-                          estimated_tokens_after=estimated, input_token_limit=input_limit)
-            self._pruned_turns = dropped
+            self._pruned_turns = hot_dropped
+
+        if cold_dropped or warm_dropped or hot_dropped:
+            self._log("context_prune", cold_dropped=cold_dropped, warm_dropped=warm_dropped,
+                      hot_dropped=hot_dropped, estimated_tokens_before=before,
+                      estimated_tokens_after=estimated, input_token_limit=input_limit)
+
         if estimated > input_limit:
             raise AgentBudgetExceeded(
                 f"Model request needs approximately {estimated} input tokens, but only {input_limit} remain "
@@ -1342,8 +1419,7 @@ class AgentSession:
                 await self.start()
             self._check()
             snapshot = self._compose_prompt(self._tool_guide)
-            history = [message for turn in self.turns for message in turn]
-            messages = [*history, HumanMessage(prompt)]
+            messages = self._build_context_messages(prompt)
             graph = self._build_graph()
             config = {"configurable": {"thread_id": f"{id(self)}-{self._turn}"},
                       "recursion_limit": 10_000}
@@ -1381,6 +1457,7 @@ class AgentSession:
                     break
             checked_text(output, MAX_TEXT)
             self.turns.append(turn_messages)
+            self._transition_tiers()
             self._prune_history()
             input_tokens = output_tokens = 0
             for message in new_messages:
@@ -1582,7 +1659,9 @@ async def run_cli_agent(args, stop):
                              enable_web=getattr(args, "web", False),
                              allow_web=getattr(args, "allow_web", False),
                              search_endpoint=getattr(args, "search_endpoint", "") or "",
-                             auto_stats=not getattr(args, "no_prompt_stats", False))
+                             auto_stats=not getattr(args, "no_prompt_stats", False),
+                             hot_turns=getattr(args, "hot_turns", 3),
+                             warm_turns=getattr(args, "warm_turns", 10))
         try:
             from .mcp_client import load_servers
             mcp_servers = load_servers(config.mcp_config)

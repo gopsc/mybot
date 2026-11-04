@@ -1428,3 +1428,112 @@ def test_splash_can_be_disabled(monkeypatch):
     assert gui_app._splash_enabled(SimpleNamespace(no_splash=True)) is False
     monkeypatch.setenv("MYBOT_GUI_SPLASH", "0")
     assert gui_app._splash_enabled(SimpleNamespace()) is False
+
+
+def test_load_role_history_populates_chat(ui):
+    from pymybot.roles import role_path, write_history
+
+    _, app = ui
+    role_dir = role_path(app.cfg.role)
+    turns = [
+        [{"type": "human", "data": {"content": "你好"}},
+         {"type": "ai", "data": {"content": "你好！有什么可以帮你的？"}}],
+        [{"type": "human", "data": {"content": "查看硬件"}},
+         {"type": "ai", "data": {"content": "好的，正在列出硬件。"}}],
+    ]
+    write_history(role_dir / "history.json", turns)
+    app._load_role_history()
+    text = app.chat.toPlainText()
+    assert "你：你好" in text
+    assert "你好！有什么可以帮你的？" in text
+    assert "你：查看硬件" in text
+    assert "好的，正在列出硬件。" in text
+
+
+def test_load_role_history_shows_summary_notice(ui):
+    from pymybot.roles import role_path, write_history
+
+    _, app = ui
+    role_dir = role_path(app.cfg.role)
+    turns = [
+        [{"type": "human", "data": {"content": "最近一轮"}},
+         {"type": "ai", "data": {"content": "最近的回复"}}],
+    ]
+    write_history(role_dir / "history.json", turns,
+                  cold="[早期摘要]", warm=["[轮次1]", "[轮次2]"])
+    app._load_role_history()
+    text = app.chat.toPlainText()
+    assert "[之前有 2 轮以上的对话已压缩为摘要]" in text
+    assert "你：最近一轮" in text
+
+
+def test_load_role_history_warm_only_notice(ui):
+    from pymybot.roles import role_path, write_history
+
+    _, app = ui
+    role_dir = role_path(app.cfg.role)
+    write_history(role_dir / "history.json", [], warm=["[轮次1]", "[轮次2]", "[轮次3]"])
+    app._load_role_history()
+    text = app.chat.toPlainText()
+    assert "[之前有 3 轮对话已压缩为摘要]" in text
+
+
+def test_load_role_history_empty_does_not_alter_chat(ui):
+    _, app = ui
+    app._chat_line("[已有内容]", "system")
+    before = app.chat.toPlainText()
+    app._load_role_history()
+    assert app.chat.toPlainText() == before
+
+
+def test_load_role_history_no_role_is_noop(ui):
+    _, app = ui
+    app.cfg.role = ""
+    app._chat_line("[已有内容]", "system")
+    before = app.chat.toPlainText()
+    app._load_role_history()
+    assert app.chat.toPlainText() == before
+
+
+def test_load_role_history_renders_markdown(ui):
+    from pymybot.roles import role_path, write_history
+
+    gui, app = ui
+    role_dir = role_path(app.cfg.role)
+    turns = [
+        [{"type": "human", "data": {"content": "格式测试"}},
+         {"type": "ai", "data": {"content": "**粗体**回复"}}],
+    ]
+    write_history(role_dir / "history.json", turns)
+    app._load_role_history()
+    bold = app.chat.document().find("粗体")
+    assert not bold.isNull()
+    assert bold.charFormat().fontWeight() == gui.QFont.Weight.Bold
+
+
+def test_role_switch_loads_new_history(ui):
+    from pymybot.roles import create_role, delete_role, role_path, write_history
+
+    _, app = ui
+    other = create_role("history-other")
+    try:
+        turns_a = [[{"type": "human", "data": {"content": "角色A"}},
+                     {"type": "ai", "data": {"content": "A的回复"}}]]
+        turns_b = [[{"type": "human", "data": {"content": "角色B"}},
+                     {"type": "ai", "data": {"content": "B的回复"}}]]
+        write_history(role_path(app.cfg.role) / "history.json", turns_a)
+        write_history(role_path("history-other") / "history.json", turns_b)
+
+        app._load_role_history()
+        assert "你：角色A" in app.chat.toPlainText()
+
+        app._load_role_list()
+        idx = app.role_box.findData("history-other")
+        assert idx >= 0
+        app.role_box.setCurrentIndex(idx)
+        app.on_role_changed()
+        text = app.chat.toPlainText()
+        assert "你：角色B" in text
+        assert "角色A" not in text
+    finally:
+        delete_role("history-other")

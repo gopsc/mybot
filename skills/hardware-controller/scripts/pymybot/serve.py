@@ -584,6 +584,8 @@ class Server:
                                               4 * 1024 * 1024),
             "maxContextTokens": params.integer("maxContextTokens", 1024, 2 * 1024 * 1024),
             "contextReserveTokens": params.integer("contextReserveTokens", 0, 64 * 1024, 2048),
+            "hotTurns": params.integer("hotTurns", 1, 50, 3),
+            "warmTurns": params.integer("warmTurns", 0, 200, 10),
             "promptFile": params.text("promptFile", cap=4096),
             "autoStats": params.flag("autoStats", default=True),
             "contextBytes": params.integer("contextBytes", 0, 64 * 1024, 4 * 1024),
@@ -687,7 +689,9 @@ class Server:
                              sandbox_mode=key.get("sandbox") or "auto",
                              enable_web=key.get("enableWeb", False),
                              allow_web=key.get("allowWeb", False),
-                             search_endpoint=key.get("searchEndpoint") or "")
+                             search_endpoint=key.get("searchEndpoint") or "",
+                             hot_turns=key.get("hotTurns", 3),
+                             warm_turns=key.get("warmTurns", 10))
         from .mcp_client import load_servers
         try:
             mcp_servers = load_servers(config.mcp_config)

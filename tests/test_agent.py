@@ -415,7 +415,7 @@ def test_history_keeps_all_turns():
         history_sizes.append(len([p for m in messages for p in m.parts if isinstance(p, UserPromptPart)]))
         return ModelResponse(parts=[TextPart("done")])
     async def scenario():
-        session = AgentSession(executor, FunctionModel(respond), AgentConfig())
+        session = AgentSession(executor, FunctionModel(respond), AgentConfig(hot_turns=10))
         for i in range(4):
             await session.ask(str(i))
         assert len(session.turns) == 4
