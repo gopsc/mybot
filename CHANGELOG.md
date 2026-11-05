@@ -20,6 +20,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   observe the environment before acting, report what is actually visible) and
   `012_skill_store.md` (search the SkillHub store and install skills with the
   operator's approval instead of hand-writing everything).
+- Bundled skillhub-store skill: a cross-platform SkillHub CLI wrapper and
+  installer for searching, installing, verifying and upgrading Agent Skills.
+  Install needs network access and the operator's approval before it writes
+  into a skills directory.
 - The Agent is now a **dual-agent team**: a tool-less **memory agent** plans,
   reflects and owns long-term memory, while a **worker agent** keeps the skill,
   file, shell, web, camera and MCP surface. They exchange a JSON brief/report per
