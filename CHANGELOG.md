@@ -64,6 +64,17 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The bundled core prompt identifies the agent as running on a general-purpose
+  robot device — a host that may expose cameras, buses, serial ports, network
+  access and a shell — instead of a bench-side "robot assistant", matching the
+  skill-owned controller and the built-in camera tools.
+- A runtime prompt manifest recorded by an older bundle no longer blocks every
+  startup after a bundle content upgrade. The trusted-manifest comparison now
+  ignores `sha256` for editable layers (their files are operator/agent state;
+  only layers 0/100 are content-enforced) while still failing closed on
+  layer-id changes, missing layers, safety-layer hashes, editability and byte
+  caps, so the GUI start guard and `compose()` keep working without
+  `prompts restore --all`.
 - The bundled core prompt routes hardware work through the per-skill
   `<skill>_run` tool (for example `hardware_controller_run`) instead of a
   `run_skill` name the model never sees, states that the session loads no robot

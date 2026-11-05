@@ -15,7 +15,7 @@ import pymybot.prompts as prompts
 from pymybot.paths import asset_path
 from pymybot.security import SecurityError
 
-CORE_SHA = "c7b37c3989910368a076f717939f246db283bdf992ec42d45da51ee2b707f035"
+CORE_SHA = "db32f90666a79e846c0562cbe2201e51b30c8d5f053a1eed6b27017ddda71e0c"
 IDS = ["0", "10", "97", "98", "99", "100"]
 
 
@@ -72,6 +72,42 @@ def test_core_routes_skill_creation_through_read_skill(library):
     assert "run_skill" not in text
     assert "run_action_script" not in text
     assert "does not load a robot of its own" in text
+
+
+def test_bundle_content_upgrade_keeps_existing_homes(library):
+    """A role created by an older bundle keeps working after a content upgrade.
+
+    Editable-layer hashes in the runtime manifest record the pristine bundled
+    copy; the files are operator/agent state. Only 0/100 content is enforced.
+    """
+    runtime = library.home / "manifest.json"
+    manifest = json.loads(runtime.read_text(encoding="utf-8"))
+    for layer in manifest["layers"]:
+        if layer["editable"]:
+            layer["sha256"] = "0" * 64
+    runtime.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    assert library.compose().text
+    assert "list_cameras" in library.read("10")["content"]
+
+
+def test_runtime_manifest_tampering_still_fails_closed(library):
+    runtime = library.home / "manifest.json"
+    manifest = json.loads(runtime.read_text(encoding="utf-8"))
+
+    def write(mutate):
+        document = json.loads(json.dumps(manifest))
+        mutate(document)
+        runtime.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        library.compose()
+
+    with pytest.raises(SecurityError, match="differs from the trusted bundle"):
+        write(lambda d: d["layers"].pop())                               # drop a layer
+    with pytest.raises(SecurityError, match="differs from the trusted bundle"):
+        write(lambda d: d["layers"][0].__setitem__("sha256", "0" * 64))  # safety layer
+    with pytest.raises(SecurityError, match="differs from the trusted bundle"):
+        write(lambda d: d["layers"][2].__setitem__("max_bytes", 4096))   # tighten a cap
+    with pytest.raises(SecurityError, match="Invalid prompt layer edit permissions"):
+        write(lambda d: d["layers"][3].__setitem__("editable", False))
 
 
 def test_bootstrap_preserves_existing_and_returns_only_created(tmp_path):
