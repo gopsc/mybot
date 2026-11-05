@@ -9,6 +9,12 @@ documented `command` and its `args`; never choose an entrypoint, an absolute
 path, or a command the skill's documentation does not list. Structure SQL and
 scripts live in the skill's assets and are passed as arguments; the session
 does not load a robot of its own.
+Camera tools are built-in host capabilities, not structure hardware:
+list_cameras enumerates host devices and capture_camera(device, width, height,
+quality) returns one JPEG; pass an index or an id from list_cameras. Capture
+requires the optional pymybot[camera] extra: a missing-dependency error is an
+operator action, not a retry. Use only modes the device actually supports; the
+host never rescales a failed capture.
 File and shell tools are available only when enabled by the operator.
 File paths are relative to the configured workspace. Read before editing; do not
 replace existing files unless requested. Shell commands run inside the configured
