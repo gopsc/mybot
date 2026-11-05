@@ -30,7 +30,7 @@ from ..session_log import session_root
 from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
-from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
+from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, FilesPanel, McpConfigDialog,
                       ModelSetupDialog, PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
 from .protocol import CANCELLED, RpcError, ServeClient, resolve_python
 from .splash import SplashScreen
@@ -134,6 +134,7 @@ class App(QMainWindow):
         self.pending_reset = False
         self._delete_role_name = ""
         self._resource_roots = None
+        self._files_root = None
         self._stopping = False
         self._lifecycle_lock = threading.Lock()
         self._clients = {}
@@ -177,6 +178,14 @@ class App(QMainWindow):
             self.cfg.model_setup_done = True
             self._save()
             return
+        self._run_model_wizard()
+
+    def open_model_wizard(self):
+        """Manual entry from the sidebar; the once-gate never applies here."""
+        if not self._stopping:
+            self._run_model_wizard()
+
+    def _run_model_wizard(self):
         dialog = ModelSetupDialog(self)
         accepted = self._exec_dialog(dialog) == QDialog.DialogCode.Accepted and dialog.values
         self.cfg.model_setup_done = True
@@ -325,6 +334,10 @@ class App(QMainWindow):
         self.workspace_label.setToolTip(text)
         self.workspace_label.setText(QFontMetrics(self.workspace_label.font()).elidedText(
             text, Qt.TextElideMode.ElideMiddle, self.workspace_label.maximumWidth()))
+        if getattr(self, "files", None) is not None:
+            # Every workspace/role change funnels through here, so the file
+            # browser follows without needing a tab switch.
+            self._sync_files_root()
 
     def _build_side(self, side):
         layout = QVBoxLayout(side)
@@ -361,6 +374,7 @@ class App(QMainWindow):
         model_layout = QVBoxLayout(model)
         self.model_label = _label()
         model_layout.addWidget(self.model_label)
+        model_layout.addWidget(_button("配置向导", self.open_model_wizard))
         layout.addWidget(model)
         layout.addStretch()
         self._refresh_model_label()
@@ -381,8 +395,10 @@ class App(QMainWindow):
         self.log.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.log.setObjectName("eventLog")
         self.resources = ResourcePanel()
+        self.files = FilesPanel()
         self.notebook.addTab(self.chat, "对话")
         self.notebook.addTab(self.log, "日志")
+        self.notebook.addTab(self.files, "文件")
         self.notebook.addTab(self.resources, "资源")
         self.notebook.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.notebook, 1)
@@ -400,6 +416,19 @@ class App(QMainWindow):
     def _on_tab_changed(self, index):
         if self.notebook.widget(index) is self.resources:
             self.show_resources()
+        elif self.notebook.widget(index) is self.files:
+            self.show_files()
+
+    def _sync_files_root(self):
+        """Point the file browser at the current workspace/role (no tab switch)."""
+        root = str(Path(self._workspace_root()).absolute())
+        if root != self._files_root:
+            self._files_root = root
+            self.files.set_root(root)
+
+    def show_files(self):
+        self._sync_files_root()
+        self.notebook.setCurrentWidget(self.files)
 
     def _robots_root(self):
         workspace = Path(self._workspace_root()).absolute()

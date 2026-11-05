@@ -11,6 +11,15 @@
 
 ![pymybot GUI](docs/screenshots/gui.png)
 
+<p>
+  <img src="docs/screenshots/gui-files.png" alt="工作区文件管理与代码预览" width="49%">
+  <img src="docs/screenshots/gui-wizard.png" alt="首次运行模型配置向导" width="49%">
+</p>
+
+> 以上截图均由 `python tools/gui_screenshots.py` 从真实运行的窗口与真实
+> serve 后端自动生成（offscreen 显示、一次性演示工作区），无一伪造。
+> 全部视图见 [GUI 指南](docs/gui.md#screenshots)。
+
 
 ## 发起人自白
 

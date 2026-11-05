@@ -7,6 +7,15 @@ scripts — with one backend for the GUI, CLI, AI agent and MCP.**
 
 ![pymybot GUI](screenshots/gui.png)
 
+<p>
+  <img src="screenshots/gui-files.png" alt="Workspace file manager with code preview" width="49%">
+  <img src="screenshots/gui-wizard.png" alt="First-run model setup wizard" width="49%">
+</p>
+
+> Every screenshot is generated from the real window against the real serve
+> backend by `python tools/gui_screenshots.py` (offscreen display, disposable
+> demo workspace). See the [GUI guide](gui.md#screenshots) for all views.
+
 > The screenshot shows the PySide6 window and the local loopback model: the agent
 > lists hardware, runs a virtual action through a trusted skill, and brings the
 > result back.
