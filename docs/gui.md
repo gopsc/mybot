@@ -30,7 +30,8 @@ About dialog mark.
 
 - **Menu bar** — 文件 (workspace, refresh, settings, quit),
   工具 (MCP editor, sessions, diagnostics, resources, session folder, clear/copy
-  chat) and 帮助 (docs, about). Every entry has a shortcut.
+  chat) and 帮助 (docs, about). The 文件 and 帮助 actions have keyboard
+  shortcuts; the remaining management entries are click-only.
 - **Toolbar** — workspace picker, Agent role selector/create, refresh,
   a 管理 menu, new conversation, stop and settings.
 - **Robot context** — skills directory and MCP configuration. The agent lists
@@ -40,7 +41,7 @@ About dialog mark.
 - **Chat, logs and resources** — streaming transcript, tool receipts,
   diagnostics, and a lazy resource browser for scripts, skills and docs.
 - **Status bar** — serve/MCP availability, busy state with an indeterminate
-  progress indicator, active grants and notices.
+  progress indicator, the fixed tool-grant policy labels and notices.
 
 ## Management console
 
@@ -51,7 +52,7 @@ duplicate robot logic.
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, the history byte cap, model context-window and project-context budgets, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
+| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, the history byte cap, model context-window and project-context budgets, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. When a role is selected, its workspace, skills and MCP paths are shown read-only because the backend uses the role-owned paths. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
@@ -61,6 +62,10 @@ duplicate robot logic.
 | 重试 | Re-sends the last task after an error or cancellation, disabled while a turn is running. |
 | 清空 / 复制对话 | Clear the window transcript (after confirmation) or copy it to the clipboard. |
 | 打开会话目录 | Opens `~/.mybot/sessions` in the file manager. |
+
+The command panel, workspace switch, settings and context refresh are idle-only.
+While a turn runs, the window refuses them: a second hardware session or a
+`serve` restart would race the active Agent turn.
 
 Loading is incremental: the resource list and transcripts load on
 demand or in background threads; stale results are discarded by generation
@@ -119,9 +124,10 @@ Prompt settings operate on the selected role. The role name is a saved
 preference, never a permission grant.
 
 Each successful turn updates the role's resumable model history. Switching roles
-preserves both roles' histories. **新对话** clears the selected role's saved
-history, releases hardware and clears the visible window; **清空对话** only clears
-the visible window and keeps the model context. See
+preserves both roles' histories but closes the previous role's Agent
+conversation, releasing its workspace lock and hardware. **新对话** clears the
+selected role's saved history, releases hardware and clears the visible window;
+**清空对话** only clears the visible window and keeps the model context. See
 [roles.md](roles.md) for the format and CLI/JSON-RPC equivalents.
 
 ## Runtime prompt management
@@ -163,7 +169,7 @@ creating a runtime home.
 
 | Setting | Effect |
 | --- | --- |
-| File and Shell tools | Enabled automatically for the selected workspace, including file writes; calls run without approval. Shell still uses the configured sandbox and refuses execution without a usable backend. |
+| File and Shell tools | Enabled automatically for the selected workspace, including file writes; calls run without approval. Shell uses the configured sandbox; with prompt protection enabled (the default) it refuses execution when bubblewrap is unusable or the sandbox is `off`, while disabling prompt protection allows the workspace-jail fallback. |
 | Web tools | `web_fetch` is always available; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval. |
 | MCP tools | Every tool exposed by the configured `mcpServers` file runs without approval. |
 | Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only the documented CLI of a trusted skill (a legacy `skill.json` action or a top-level `scripts/*.py` command) can run. |

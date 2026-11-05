@@ -237,7 +237,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 
 | Method | Parameters | Result |
 | --- | --- | --- |
-| `initialize` | — | `protocol`, `version`, `agent`, `status` |
+| `initialize` | — | `protocol`, `version`, `agent`, `mcp`, `status` |
 | `session.status` | — | `state`, `robot`, `busy`, ... |
 | `session.activate` | `robot`, optional `modulePaths`, `allowHardware`, `vars` | session state |
 | `session.deactivate` | — | cancels work and cleans drivers |
@@ -247,9 +247,10 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `role` (required), optional `robot`, optional `scriptsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.ask` | `task`, `role` (required), optional `robot`, `modulePaths`, `scriptsDir`, `skillsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `allowHardware`, `allowActions`, `allowShell`, `allowFileWrites`, `enableShell`, `enableWeb`, `allowWeb`, `workspaceDir`, `model`, `baseUrl`, `apiKeyEnv`, `timeout`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `hotTurns`, `warmTurns`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `protectPrompts`, `searchEndpoint` | multi-turn result with `intent` metadata and `agent.event` notifications |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested, preferring the named role over the active conversation's role |
-| `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
+| `roles.list` | — | list role-owned resources |
+| `roles.show` | `name` (required) | inspect one role's resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |
 | `roles.clear_history` | `name` | clear an inactive role's resumable history |
 | `cancel` | `id` | cancels a request (`-32800` for the cancelled request) |
@@ -293,8 +294,8 @@ Agent mode is documented in the README. The important flags are:
 | `--prompt-file FILE` | Additional operator-owned UTF-8 profile (max 8 KiB); does not replace runtime USER or the safety prefix/suffix. |
 | `--no-prompt-stats` | Disable automatic host-generated STATS updates (also accepted by `gui`; default false). |
 | `--context-bytes N` | Budget for the generated project inventory (workspace top level, structures, scripts, drivers, skills); 0 disables it (0–64 KiB, default 4096). |
-| `--intent MODE` | `auto` (default), `off`, `chat`, `inspect`, `control`, `author` or `diagnose`. Auto narrows the tool allowlist when the request clearly matches an intent; mixed requests union their tools; messages with no keywords stay unrestricted. |
-| `--sandbox MODE` | `auto` (default), `off` or `bwrap`. Agent prompt protection requires usable bubblewrap: unavailable backends or `off` refuse shell execution. The host is read-only, the workspace is writable with prompt roots re-mounted read-only, the environment is cleared and network/PID/IPC/UTS namespaces are unshared. This protects prompt integrity, not host-file confidentiality. |
+| `--intent MODE` | `auto` (default), `off`, `chat`, `inspect`, `control`, `author` or `diagnose`. Auto narrows the tool allowlist when the request clearly matches an intent; mixed requests union their tools; messages with no keywords fall back to the read-only `chat` allowlist. `off` removes all routing restrictions. |
+| `--sandbox MODE` | `auto` (default), `off` or `bwrap`. With prompt protection enabled (the default), a missing/unusable bubblewrap or `off` refuses shell execution; disabling prompt protection allows the workspace-jail fallback. The bubblewrap profile makes the host read-only, gives the workspace a writable mount, re-mounts prompt roots read-only, clears the environment and unshares network/PID/IPC/UTS namespaces. This protects prompt integrity, not host-file confidentiality. |
 | `--web` | Enable `web_fetch` (HTTPS only) and, with `--search-endpoint`, `web_search`. Requires `pymybot[web]`. Private/link-local/loopback targets, redirects past three hops, non-text content and oversized bodies are refused. |
 | `--allow-web` | Pre-approve web requests for this session (requires `--web`). |
 | `--search-endpoint URL` | SearXNG base URL used by `web_search`; no endpoint means no search tool. |

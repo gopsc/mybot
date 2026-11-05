@@ -30,6 +30,8 @@ hardware_controller_run(command="check", args=[
 
 `command` 是下文的 CLI 子命令，`args` 是该子命令的原始参数，一个列表元素对应一个 token。工具的工作目录是技能目录，因此路径写 `assets/...` 即可；不要传 entrypoint、绝对宿主路径或自行拼接命令。一次调用只执行一个子命令。
 
+Agent 通用工具只开放 `doctor`、`scripts`、`hardware`、`query`、`check`、`run`、`sample`，以及只读的 `assets list` / `assets read`。`apply-sql`、`assets write/delete`、`new`、`prompts`、`roles`、`sessions`、`mcp`、`serve`、`agent` 属于操作员管理面或长驻入口，只能由操作员直接使用 CLI，不能从 Agent 工具调用。
+
 MCP 入口见第 5 节。
 
 ## 2. 子命令速查
@@ -43,13 +45,13 @@ MCP 入口见第 5 节。
 | `check` | 写完或改完 SQL、MT、driver 后，`run` 之前的第一道关卡 | 否 |
 | `run` | `check` 通过，且已用 `proto='virt'` 或 fixtures 验证后，执行一个动作 | 是 |
 | `sample` | 读取某个命名变量的当前值或 Daemon 快照 | 是 |
-| `apply-sql` | 在临时会话中改变量、建表或删表做实验 | 是 |
-| `assets list/read` | 查看或读取内置 robots/modules/scripts 资产 | 否 |
-| `assets write/delete` | 新建、覆盖或删除内置资产脚本 | 否 |
-| `new` | 为用户自己的项目生成 `robots/`、`scripts/`、`modules/` 骨架 | 否 |
-| `mcp` | 把控制器暴露给 MCP 客户端或其他 Agent | 视开关 |
-| `serve` | 给 GUI/IDE 提供长驻 stdio JSON-RPC 后端 | 视请求 |
-| `agent` | 使用内置 LangGraph Agent（需要 `--role`） | 视审批 |
+| `apply-sql` | 在临时会话中改变量、建表或删表做实验（仅操作员 CLI） | 是 |
+| `assets list/read` | 查看或读取内置 robots/modules/scripts 资产（Agent 也可用） | 否 |
+| `assets write/delete` | 新建、覆盖或删除内置资产脚本（仅操作员 CLI） | 否 |
+| `new` | 为用户自己的项目生成 `robots/`、`scripts/`、`modules/` 骨架（仅操作员 CLI） | 否 |
+| `mcp` | 把控制器暴露给 MCP 客户端或其他 Agent（仅操作员 CLI） | 视开关 |
+| `serve` | 给 GUI/IDE 提供长驻 stdio JSON-RPC 后端（仅操作员 CLI） | 视请求 |
+| `agent` | 使用内置 LangGraph Agent（需要 `--role`，仅操作员 CLI） | 视审批 |
 
 所有命令在 stdout 输出**恰好一行 JSON**；诊断写 stderr。退出码非零表示命令失败，但动作已派发后的异常代表“结果未知”，不要自动重试，也不要声称已回滚。
 

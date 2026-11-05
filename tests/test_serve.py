@@ -1066,7 +1066,7 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
     monkeypatch.setattr(agent_module, "create_model", lambda config: (make_model(), FakeClient()))
     from pymybot.roles import create_role
     params = {"task": "编写文件", "robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace),
-              "workspaceDir": str(workspace), "model": "openai:fake", "role": create_role("test-role").name}
+              "model": "openai:fake", "role": create_role("test-role").name}
 
     async def scenario():
         out = Out()
@@ -1167,3 +1167,33 @@ def test_open_agent_wires_workspace_shell_and_file_write_grants(monkeypatch, tmp
 
     with pytest.raises(agent_module.AgentConfigurationError):
         asyncio.run(server.open_agent({**key, "workspaceDir": "", "enableShell": True}))
+
+
+def test_open_agent_rejects_conflicting_role_path_overrides(monkeypatch, tmp_path):
+    """A role owns its paths; do not silently ignore contradictory JSON-RPC values."""
+    pytest.importorskip("langchain")
+    from pymybot import agent as agent_module
+    from pymybot.roles import create_role
+
+    monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "home"))
+    role = create_role("json-role")
+    server = serve.Server(io.StringIO(), threading.Event())
+    base = {
+        "role": role.name, "robot": "", "modulePaths": [], "scriptsDir": "", "skillsDir": "",
+        "mcpConfig": "", "model": "", "baseUrl": "", "apiKeyEnv": "", "workspaceDir": "",
+        "allowActions": False, "allowHardware": False, "allowMcpTools": False,
+        "allowShell": False, "allowFileWrites": False, "enableShell": False,
+        "enableWeb": False, "allowWeb": False, "searchEndpoint": "", "vars": {},
+        "timeout": 10, "maxHistoryBytes": 65536, "maxContextTokens": None,
+        "contextReserveTokens": 2048, "hotTurns": 3, "warmTurns": 10,
+        "promptFile": None, "autoStats": True, "contextBytes": 4096,
+        "intent": "auto", "sandbox": "auto", "protectPrompts": True,
+    }
+    for name in ("workspaceDir", "skillsDir", "mcpConfig"):
+        with pytest.raises(agent_module.AgentConfigurationError):
+            asyncio.run(server.open_agent({**base, name: str(tmp_path / "elsewhere")}))
+    # The role-owned paths themselves remain accepted; without a model the next
+    # expected failure is model configuration, proving the path check passed.
+    with pytest.raises(agent_module.AgentConfigurationError):
+        asyncio.run(server.open_agent({**base, "workspaceDir": str(role.workspace_dir),
+                                       "skillsDir": str(role.skills_dir)}))

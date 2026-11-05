@@ -1178,7 +1178,14 @@ def test_settings_cover_backend_budgets(ui):
     gui, app = ui
     dialog = gui.SettingsDialog(app, app.cfg, app.cfg.workspace, "")
     try:
-        assert dialog.entries["mcp_config"].text() == app.cfg.mcp_config
+        role_root = gui.role_path(app.cfg.role)
+        for name, path in (("workspace", role_root / "workspace"),
+                           ("skills_dir", role_root / "skills"),
+                           ("mcp_config", role_root / "mcp.json")):
+            assert dialog.entries[name].text() == str(path)
+            assert not dialog.entries[name].isEnabled()
+            if name in dialog.field_buttons:
+                assert not dialog.field_buttons[name].isEnabled()
         assert dialog.history_bytes.value() == app.cfg.max_history_bytes // 1024
         dialog.history_bytes.setValue(4096)
         dialog.max_context_enabled.setChecked(True)
@@ -1188,6 +1195,8 @@ def test_settings_cover_backend_budgets(ui):
         assert dialog.values["max_history_bytes"] == 4096 * 1024
         assert dialog.values["max_context_tokens"] == 32768
         assert dialog.values["context_reserve_tokens"] == 1024
+        assert "workspace" not in dialog.values
+        assert "skills_dir" not in dialog.values and "mcp_config" not in dialog.values
     finally:
         dialog.close()
 
@@ -1374,6 +1383,11 @@ def test_command_dialog_builds_argv_and_renders_contract(qapp, tmp_path):
 
         dialog.command.setCurrentIndex(dialog.command.findData("doctor"))
         assert dialog.build_argv() == ["-m", "pymybot", "doctor"]
+        assert not dialog.timeout.isEnabled()
+
+        dialog.command.setCurrentIndex(dialog.command.findData("apply-sql"))
+        dialog.sql.setPlainText("UPDATE T SET x=1;")
+        assert not dialog.timeout.isEnabled()  # apply-sql has no --timeout flag
 
         calls = []
         dialog.command.setCurrentIndex(dialog.command.findData("sample"))
@@ -1399,6 +1413,25 @@ def test_command_dialog_builds_argv_and_renders_contract(qapp, tmp_path):
 
 
 # -- entry screen and branding ---------------------------------------------
+def test_highlighter_keeps_keys_and_comments_distinct(qapp):
+    from PySide6.QtGui import QTextDocument
+
+    from pymybot.gui.highlight import COLORS, CodeHighlighter, JsonHighlighter
+
+    document = QTextDocument('{"key": "value"}')
+    JsonHighlighter(document).rehighlight()
+    spans = [(item.start, item.length, item.format.foreground().color().name())
+             for item in document.firstBlock().layout().formats()]
+    assert (1, 5, COLORS["key"]) in spans
+    assert (8, 7, COLORS["string"]) in spans
+
+    document = QTextDocument('-- "quoted"\nprint("x")')
+    CodeHighlighter(document, "lua").rehighlight()
+    first = [(item.start, item.length, item.format.foreground().color().name())
+             for item in document.firstBlock().layout().formats()]
+    assert first and first[0][2] == COLORS["comment"]
+
+
 def test_logo_renders_from_svg(qapp):
     from pymybot.gui.branding import logo_icon, logo_pixmap
 
@@ -1526,6 +1559,44 @@ def test_load_role_history_renders_markdown(ui):
     bold = app.chat.document().find("粗体")
     assert not bold.isNull()
     assert bold.charFormat().fontWeight() == gui.QFont.Weight.Bold
+
+
+def test_role_switch_releases_previous_conversation_and_clears_old_chat(ui, qapp):
+    from pymybot.roles import create_role, delete_role
+
+    _, app = ui
+    client = attach_client(app)
+    app._chat_line("角色 A 的旧内容", "system")
+    create_role("switch-empty")
+    try:
+        app._load_role_list()
+        index = app.role_box.findData("switch-empty")
+        assert index >= 0
+        app.role_box.setCurrentIndex(index)
+        app.on_role_changed()
+        assert client.requests[-1] == ("agent.reset", {})
+        assert app.chat.toPlainText().strip() == ""
+        assert app.cfg.role == "switch-empty"
+        client.futures[-1].set_result({})
+        qapp.processEvents()
+    finally:
+        delete_role("switch-empty")
+
+
+def test_busy_turn_blocks_conflicting_actions(ui):
+    _, app = ui
+    app._set_busy(True)
+    app.refresh_context()
+    assert "执行中不能刷新" in app.status_notice.text()
+    app.pick_workspace()
+    assert "执行中不能切换工作区" in app.status_notice.text()
+    app.open_console()
+    assert "执行中不能打开命令面板" in app.status_notice.text()
+    app.open_settings()
+    assert "执行中不能修改设置" in app.status_notice.text()
+    assert not app.refresh_button.isEnabled()
+    app._set_busy(False)
+    assert app.refresh_button.isEnabled()
 
 
 def test_role_switch_loads_new_history(ui):

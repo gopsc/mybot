@@ -51,6 +51,20 @@ def test_merge_stats_keeps_recent_errors():
     assert merged["total_errors"] == 1
 
 
+def test_merge_stats_survives_operator_edited_non_numeric_fields():
+    """Prompt layers are editable; malformed counters must not fail a turn."""
+    existing = {"total_turns": "many", "total_errors": None,
+                "tool_usage": {"shell": "oops", "read_file": 2},
+                "recent_errors": "not-a-list"}
+    merged = merge_stats(existing, {"tool_calls": 1, "tool_usage": {"shell": 3},
+                                    "error": "boom", "faulted": True})
+    assert merged["total_turns"] == 1
+    assert merged["total_errors"] == 1
+    assert merged["total_tool_calls"] == 1
+    assert merged["tool_usage"] == {"shell": 3, "read_file": 2}
+    assert len(merged["recent_errors"]) == 1
+
+
 def test_format_stats_produces_valid_markdown():
     stats = {"total_turns": 5, "robot": "test.sql"}
     formatted = format_stats(stats)

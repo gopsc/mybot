@@ -139,7 +139,7 @@ class SkillsLibrary:
         fields = {}
         blocks = {}
         active = None
-        for index, line in enumerate(lines[1:], 1):
+        for line in lines[1:]:
             if line.strip() == "---":
                 break
             if not line.strip():

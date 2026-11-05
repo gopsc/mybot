@@ -1136,3 +1136,16 @@ def test_reference_only_skills_do_not_advertise_run_skill(tmp_path):
             await session.close()
 
     asyncio.run(scenario())
+
+
+def test_malformed_mcp_schema_entries_are_skipped():
+    """External schemas are untrusted; one null property must not abort startup."""
+    from pymybot.agent import _json_schema_model
+
+    model = _json_schema_model("broken", {
+        "properties": {"good": {"type": "string"}, "bad": None},
+        "required": "not-a-list",
+    })
+    assert model().good is None
+    with pytest.raises(Exception):
+        model(good="x", unexpected=1)

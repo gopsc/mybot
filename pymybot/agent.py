@@ -281,6 +281,10 @@ def create_model(config):
     model = ChatOpenAI(model=name, api_key=key, base_url=base, timeout=timeout,
                        max_retries=0, max_tokens=MAX_OUTPUT_TOKENS, stream_usage=True,
                        model_kwargs={"parallel_tool_calls": False},
+                       # An explicit client owns transport settings. Without this,
+                       # langchain-openai installs its own socket-option transport,
+                       # which also disables httpx proxy-environment support.
+                       http_socket_options=(),
                        http_async_client=http)
     return model, ModelClient(base_url=base, provider=provider, resources=(http,))
 
@@ -454,14 +458,16 @@ def _json_schema_model(name, schema):
     from typing import Any
     from pydantic import ConfigDict, create_model
     properties = schema.get("properties") if isinstance(schema, dict) else None
-    required = set(schema.get("required", [])) if isinstance(schema, dict) else set()
+    raw_required = schema.get("required", []) if isinstance(schema, dict) else []
+    required = ({item for item in raw_required if isinstance(item, str)}
+                if isinstance(raw_required, list) else set())
     mapping = {"string": str, "integer": int, "number": float, "boolean": bool,
                "array": list, "object": dict}
     fields = {}
     for field, spec in list((properties or {}).items())[:MAX_MCP_SCHEMA_PROPERTIES]:
-        if not isinstance(field, str) or not field.isidentifier():
+        if not isinstance(field, str) or not field.isidentifier() or not isinstance(spec, dict):
             continue
-        kind = spec.get("type") if isinstance(spec, dict) else None
+        kind = spec.get("type")
         annotation = mapping.get(kind, Any)
         if "default" in spec:
             fields[field] = (annotation, spec["default"])
@@ -773,8 +779,6 @@ class AgentSession:
             skill_tools = _enumerate_skill_tools(self.skills) if runnable else {}
             self._skill_tools = skill_tools
             for tool_name, tool_def in skill_tools.items():
-                skill_name = tool_def["_skill"]
-                action_name = tool_def["_action"]
                 description = tool_def["description"]
                 input_schema = tool_def["input_schema"]
 
@@ -1586,7 +1590,7 @@ class AgentSession:
             if self.context is None:
                 await self.start()
             self._check()
-            snapshot = self._compose_prompt(self._tool_guide)
+            self._compose_prompt(self._tool_guide)
             messages = self._build_context_messages(prompt)
             graph = self._build_graph()
             config = {"configurable": {"thread_id": f"{id(self)}-{self._turn}"},

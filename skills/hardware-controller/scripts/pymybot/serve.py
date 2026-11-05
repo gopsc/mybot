@@ -666,6 +666,20 @@ class Server:
             role = load_role(key["role"]) if key.get("role") else None
         except (OSError, SecurityError) as exc:
             raise AgentConfigurationError(f"Cannot load role: {exc}; no model request was sent") from None
+        if role is not None:
+            # The CLI rejects role + path overrides; the JSON-RPC surface must
+            # not silently ignore a conflicting value either.
+            for name, owned in (("workspaceDir", role.workspace_dir),
+                                ("skillsDir", role.skills_dir),
+                                ("mcpConfig", role.mcp_config)):
+                value = key.get(name)
+                if not value:
+                    continue
+                actual = os.path.normcase(os.path.abspath(os.path.expanduser(str(value))))
+                expected = os.path.normcase(str(Path(owned).absolute()))
+                if actual != expected:
+                    raise AgentConfigurationError(
+                        f"Role '{role.name}' owns {name}; omit it or use the role path")
         mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
                       else key["mcpConfig"] or None if role is None else None)
         workspace = (role.workspace_dir if role is not None

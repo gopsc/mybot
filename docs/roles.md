@@ -73,9 +73,12 @@ edits survive. A new role copies complete skill directories, and creation
 refuses a skill whose manifest declares an entrypoint that was not copied.
 
 A role owns its skills and MCP file, so CLI `--role` cannot be combined with
-`--skills-dir` or `--mcp-config`. The independent `--prompt-file` OPERATOR layer
-may still be added. MCP environment-variable references are resolved at load
-time; keys are never copied into role metadata or command output.
+`--skills-dir` or `--mcp-config`. `serve`'s `agent.ask` applies the same rule:
+`workspaceDir`, `skillsDir` and `mcpConfig` may be omitted or set to the role's
+own path, but conflicting values are rejected instead of silently ignored. The
+independent `--prompt-file` OPERATOR layer may still be added. MCP
+environment-variable references are resolved at load time; keys are never
+copied into role metadata or command output.
 
 ## GUI
 
@@ -90,7 +93,8 @@ without a role the composer refuses to send and asks you to create one.
 
 While a role is selected:
 
-- the Skills and MCP context fields show the role-owned paths;
+- the Skills and MCP context fields show the role-owned paths, and **设置** shows
+  the role-owned workspace/skills/MCP paths read-only;
 - **工具 → MCP 配置** edits the role's `mcp.json`;
 - **设置 → 提示词**, send-time safety validation and prompt-update diffs use the
   role's PromptLibrary;

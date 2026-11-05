@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-from .images import image_header, size, validate_image
+from .images import size, validate_image
 
 TIMEOUT = 10.0
 FORMATS = {"win32": "dshow", "linux": "v4l2", "darwin": "avfoundation"}
