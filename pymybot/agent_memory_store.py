@@ -24,6 +24,8 @@ import secrets
 import statistics
 import threading
 
+from .agent_utils import clip
+
 KINDS = ("fact", "decision", "preference", "gotcha", "summary", "task")
 DEFAULT_MAX_ENTRIES = 4000
 DEFAULT_MAX_ENTRY_BYTES = 4096
@@ -83,11 +85,6 @@ def _normalise(text):
     return _WS.sub(" ", str(text)).strip().casefold()
 
 
-def _clip(text, limit):
-    text = str(text)
-    return text if len(text) <= limit else text[:limit - 1] + "…"
-
-
 @dataclass(frozen=True)
 class MemoryEntry:
     id: str
@@ -124,7 +121,7 @@ class MemoryEntry:
             entry_id = secrets.token_hex(8)
         step = data.get("step") if type(data.get("step")) is int else 0
         return cls(id=entry_id[:32], ts=str(data.get("ts") or _iso(_now())), kind=kind,
-                   text=_clip(text, MAX_TEXT), tags=clean_tags, salience=salience,
+                   text=clip(text, MAX_TEXT), tags=clean_tags, salience=salience,
                    mission=str(data.get("mission") or "")[:64], step=max(0, step))
 
 
@@ -262,12 +259,12 @@ class MemoryStore:
         # oversized blob through silently.
         if len(collapsed.encode("utf-8")) > self.max_entry_bytes:
             raise MemoryStoreError(f"memory text exceeds {self.max_entry_bytes} bytes")
-        clean = _clip(collapsed, MAX_TEXT)
+        clean = clip(collapsed, MAX_TEXT)
         if kind not in KINDS:
             raise MemoryStoreError(f"memory kind must be one of {', '.join(KINDS)}")
         clean_tags = []
         for tag in tags or ():
-            tag = _clip(str(tag).strip(), MAX_TAG)
+            tag = clip(str(tag).strip(), MAX_TAG)
             if tag and tag not in clean_tags:
                 clean_tags.append(tag)
         try:

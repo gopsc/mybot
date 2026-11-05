@@ -13,6 +13,7 @@ import difflib
 import hashlib
 import inspect
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ import sys
 import threading
 import time
 from urllib.parse import urlsplit
+
+logger = logging.getLogger(__name__)
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call
@@ -49,6 +52,7 @@ from .roles import read_history, role_session_lock, write_history
 from .sandbox import SANDBOX_MODES, describe_backend
 from .security import SecurityError, checked_text, dumps
 from .session_log import SessionLog, create_session_log
+from .agent_utils import message_text
 
 MAX_TEXT = 64 * 1024
 MAX_MCP_TEXT = 32 * 1024
@@ -58,6 +62,7 @@ MAX_MCP_TOOLS = 256
 MAX_MCP_DESCRIPTION = 4 * 1024
 MAX_MCP_SCHEMA_PROPERTIES = 256
 MAX_MCP_NODES = 4096
+MAX_RECURSION = 200
 _TERMINAL_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 _TOOL_NAME = re.compile(r"[^A-Za-z0-9_-]")
 
@@ -76,6 +81,13 @@ def _unique_tool_name(raw, taken):
 
 def _display_text(text):
     return _TERMINAL_CONTROLS.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
+
+
+def _receipt(result):
+    """Extract the standard receipt fields from a tool result dict."""
+    return {key: result[key] for key in ("ok", "executed", "state") if key in result}
+
+
 MAX_PROMPT = 16 * 1024
 MAX_HISTORY = 4 * 1024 * 1024
 MAX_OUTPUT_TOKENS = 4096
@@ -308,19 +320,6 @@ def describe_failure(exc, endpoint=None):
         cause = cause.__cause__ or cause.__context__
     detail = f" ({' <- '.join(chain)})" if chain else ""
     return f"{type(exc).__name__}{detail}{where}"
-
-
-def _message_text(message):
-    content = getattr(message, "content", "")
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content or []:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict) and block.get("type") == "text":
-            parts.append(str(block.get("text", "")))
-    return "".join(parts)
 
 
 def _intent_instructions(decision):
@@ -1075,25 +1074,21 @@ class AgentSession:
         if emit and call_event:
             self._emit({"type": "tool_call", "tool": name, "arguments": arguments})
             self._log("tool_call", tool=name, arguments=arguments)
-        self.events.append({"tool": name, **{key: result[key] for key in ("ok", "executed", "state")},
-                            "error": error})
+        self.events.append({"tool": name, **_receipt(result), "error": error})
         self._log("tool_result", tool=name, **result)
         if emit:
-            self._emit({"type": "tool_result", "tool": name,
-                        **{key: result[key] for key in ("ok", "executed", "state")}})
+            self._emit({"type": "tool_result", "tool": name, **_receipt(result)})
         return result
 
     # -- prompt tools ------------------------------------------------------
     def _prompt_receipt(self, name, result, *, emit=True):
-        self.events.append({"tool": name, **{key: result[key] for key in ("ok", "executed", "state")}})
+        self.events.append({"tool": name, **_receipt(result)})
         data = result.get("data", {})
-        self._log("tool_result", tool=name,
-                  **{key: result[key] for key in ("ok", "executed", "state")},
+        self._log("tool_result", tool=name, **_receipt(result),
                   data={key: value for key, value in data.items() if key != "content"},
                   error=result.get("error"))
         if emit:
-            self._emit({"type": "tool_result", "tool": name,
-                        **{key: result[key] for key in ("ok", "executed", "state")}})
+            self._emit({"type": "tool_result", "tool": name, **_receipt(result)})
         return result
 
     async def _prompt_call(self, name, arguments, *, emit=True):
@@ -1177,7 +1172,7 @@ class AgentSession:
             self._log("prompt_update", **data, approved=True)
         except (SecurityError, OSError, UnicodeError, PromptWriteError) as exc:
             self._log("prompt_stats_error", error=type(exc).__name__)
-            print(f"mybot: prompt STATS update failed ({type(exc).__name__}); continuing", file=sys.stderr)
+            logger.warning("prompt STATS update failed (%s); continuing", type(exc).__name__)
 
     def _update_user_layer(self, turn_messages, expected_hash):
         """Extract user preferences from turn messages and update layer 98."""
@@ -1265,12 +1260,11 @@ class AgentSession:
             result = {"ok": False, "executed": False, "state": "not_executed",
                       "error": f"Identical tool call repeated more than {MAX_IDENTICAL_CALLS} times; "
                                "stop and reassess instead of retrying."}
-            self.events.append({"tool": name, **{key: result[key] for key in ("ok", "executed", "state")}})
+            self.events.append({"tool": name, **_receipt(result)})
             self._log("tool_result", tool=name, **result)
             self._log("loop_guard", tool=name, repeats=self._repeat_count)
             if emit:
-                self._emit({"type": "tool_result", "tool": name,
-                            **{key: result[key] for key in ("ok", "executed", "state")}})
+                self._emit({"type": "tool_result", "tool": name, **_receipt(result)})
             return result
         self._check()
         async with self._tool_lock:
@@ -1282,14 +1276,12 @@ class AgentSession:
                 result = await self._skill_action_call(name, arguments)
             else:
                 result = await self.executor.call(name, arguments, timeout=None)
-        self.events.append({"tool": name, **{k: result[k] for k in ("ok", "executed", "state")}})
-        self._log("tool_result", tool=name,
-                  **{key: result[key] for key in ("ok", "executed", "state") if key in result},
+        self.events.append({"tool": name, **_receipt(result)})
+        self._log("tool_result", tool=name, **_receipt(result),
                   data=result.get("data"), error=result.get("error"))
         self._log_images(name, result)
         if emit:
-            self._emit({"type": "tool_result", "tool": name,
-                        **{key: result[key] for key in ("ok", "executed", "state")}})
+            self._emit({"type": "tool_result", "tool": name, **_receipt(result)})
         if result["state"] == "unknown":
             if getattr(self.executor, "interrupted", False):
                 raise AgentInterrupted("Interrupted; already dispatched actions are not rolled back")
@@ -1304,8 +1296,8 @@ class AgentSession:
                 self._refresh_tools()
             except Exception as exc:
                 self._log("skill_refresh_error", error=type(exc).__name__)
-                print(f"mybot: skill tool refresh failed ({type(exc).__name__}); "
-                      "start a new conversation to load it", file=sys.stderr)
+                logger.warning("skill tool refresh failed (%s); start a new conversation to load it",
+                               type(exc).__name__)
         self._check()  # Preserve the receipt, but never request another model after stop.
         return result
 
@@ -1601,7 +1593,7 @@ class AgentSession:
             messages = self._build_context_messages(prompt)
             graph = self._build_graph()
             config = {"configurable": {"thread_id": f"{id(self)}-{self._turn}"},
-                      "recursion_limit": 10_000}
+                      "recursion_limit": MAX_RECURSION}
             inputs = {"messages": messages}
             self._in_graph = True
             try:
@@ -1613,7 +1605,7 @@ class AgentSession:
                         if mode == "messages":
                             chunk, _metadata = data
                             if isinstance(chunk, AIMessageChunk):
-                                text = _message_text(chunk)
+                                text = message_text(chunk)
                                 if text:
                                     self._emit({"type": "text_delta", "text": text})
                         elif mode == "updates" and "__interrupt__" in data:
@@ -1632,7 +1624,7 @@ class AgentSession:
             output = ""
             for message in reversed(new_messages):
                 if isinstance(message, AIMessage):
-                    output = _message_text(message)
+                    output = message_text(message)
                     break
             checked_text(output, MAX_TEXT)
             self.turns.append(turn_messages)

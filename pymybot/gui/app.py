@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import sys
@@ -21,6 +22,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QSpinBox, QSplitter, QTabWidget, QTextBrowser, QToolButton,
     QVBoxLayout, QWidget,
 )
+
+logger = logging.getLogger(__name__)
 
 from ..agent_skills import default_skills_root
 from ..paths import asset_path, source_root
@@ -402,7 +405,7 @@ class App(QMainWindow):
             try:
                 callback()
             except Exception as exc:
-                print(f"pymybot gui: {type(exc).__name__}: {exc}", file=sys.stderr)
+                logger.error("%s: %s", type(exc).__name__, exc)
 
     def _background(self, fn, done=None, *, lifecycle=False):
         def run():
@@ -732,7 +735,7 @@ class App(QMainWindow):
         try:
             client.stop(grace=1)
         except Exception as exc:
-            print(f"pymybot gui: stop failed: {exc}", file=sys.stderr)
+            logger.warning("stop failed: %s", exc)
         finally:
             with self._lifecycle_lock:
                 event.set()
@@ -1376,7 +1379,7 @@ class App(QMainWindow):
             self.cfg.store(self.config_path)
         except OSError as exc:
             reason = f"设置保存失败（{self.config_path}）：{exc}"
-            print(f"pymybot gui: {reason}", file=sys.stderr)
+            logger.error("%s", reason)
             self._log(f"[gui] {reason}\n")
             self._notice("配置写入失败，详见日志")
             return False

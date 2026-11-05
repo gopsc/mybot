@@ -32,6 +32,7 @@ import time
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from .agent_memory_store import MemoryStore, MemoryStoreError
+from .agent_utils import clip, message_text
 from .errors import AgentInterrupted
 from .security import SecurityError, checked_text
 
@@ -110,11 +111,6 @@ def _now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _clip(text, limit):
-    text = str(text)
-    return text if len(text) <= limit else text[:limit - 1] + "…"
-
-
 def _failure_detail(exc):
     """Name a failure without echoing provider bodies (they may contain secrets)."""
     name = type(exc).__name__
@@ -123,23 +119,8 @@ def _failure_detail(exc):
         status = getattr(getattr(exc, "response", None), "status_code", None)
     if status is not None:
         return f"{name} (HTTP {status})"
-    text = _clip(str(exc).strip(), 300)
+    text = clip(str(exc).strip(), 300)
     return f"{name}: {text}" if text else name
-
-
-def _message_text(message):
-    content = getattr(message, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text", "")))
-        return "".join(parts)
-    return str(content or "")
 
 
 def _usage(message):
@@ -175,7 +156,7 @@ def parse_goal(text):
     goal = goal.strip()
     if goal.casefold() in {"", "stop", "none", "null", "无"}:
         return ""
-    return _clip(goal, MAX_GOAL)
+    return clip(goal, MAX_GOAL)
 
 
 def parse_decision(text):
@@ -208,18 +189,18 @@ def parse_decision(text):
         for item in raw[:8]:
             if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
                 memories.append({
-                    "text": _clip(item["text"].strip(), MAX_MEMORY_TEXT),
+                    "text": clip(item["text"].strip(), MAX_MEMORY_TEXT),
                     "kind": item.get("kind") if item.get("kind") in
                     ("fact", "decision", "preference", "gotcha", "summary", "task") else "fact",
                     "tags": [str(tag)[:32] for tag in (item.get("tags") or [])[:8]
                              if isinstance(tag, (str, int))],
                     "salience": item.get("salience", 0.6),
                 })
-    return {"action": action, "brief": _clip(brief, MAX_BRIEF),
-            "summary": _clip(summary, MAX_REPORT),
-            "reasoning": _clip(reasoning, 1000),
+    return {"action": action, "brief": clip(brief, MAX_BRIEF),
+            "summary": clip(summary, MAX_REPORT),
+            "reasoning": clip(reasoning, 1000),
             "memories": memories,
-            "next_goal": _clip(data.get("next_goal") or "", MAX_GOAL) or ""}
+            "next_goal": clip(data.get("next_goal") or "", MAX_GOAL) or ""}
 
 
 @dataclass
@@ -247,7 +228,7 @@ class Mission:
         if not isinstance(data, dict) or not isinstance(data.get("goal"), str):
             raise ValueError("invalid mission")
         mission = cls(id=str(data.get("id") or secrets.token_hex(6))[:32],
-                      goal=_clip(data["goal"], MAX_GOAL),
+                      goal=clip(data["goal"], MAX_GOAL),
                       status=data.get("status") if data.get("status") in MISSION_STATUSES else "pending")
         mission.created = str(data.get("created") or _now())
         mission.updated = str(data.get("updated") or _now())
@@ -365,28 +346,28 @@ class MemoryAgent:
     async def decide(self, *, goal, step, remaining, memories, report, history=()):
         lines = []
         for item in history[-4:]:
-            lines.append(f"- 第{item.get('step', '?')}步 指令: {_clip(item.get('brief', ''), 200)}")
-            lines.append(f"  回报: {_clip(item.get('report', ''), 300)}")
-        prompt = _PLAN.format(goal=_clip(goal, MAX_GOAL), step=step, remaining=remaining,
+            lines.append(f"- 第{item.get('step', '?')}步 指令: {clip(item.get('brief', ''), 200)}")
+            lines.append(f"  回报: {clip(item.get('report', ''), 300)}")
+        prompt = _PLAN.format(goal=clip(goal, MAX_GOAL), step=step, remaining=remaining,
                               memories=MemoryStore.render(memories) or "（无）",
                               history="\n".join(lines) or "（尚无）",
-                              report=_clip(report, MAX_REPORT) or "（尚无回报）")
+                              report=clip(report, MAX_REPORT) or "（尚无回报）")
         message = await asyncio.wait_for(
             self.model.ainvoke([SystemMessage(_SYSTEM), HumanMessage(prompt)]),
             timeout=self.timeout)
-        return parse_decision(_message_text(message)), message
+        return parse_decision(message_text(message)), message
 
     async def propose(self, *, role="", memories=(), last=None):
         last_text = "（尚未运行过任务）"
         if last is not None:
             last_text = f"目标: {last.goal}\n状态: {last.status}\n结论: {last.answer or last.reason}"
-        prompt = _PROPOSE.format(role=_clip(role, 2000) or "（未提供）",
+        prompt = _PROPOSE.format(role=clip(role, 2000) or "（未提供）",
                                  memories=MemoryStore.render(memories) or "（无）",
-                                 last=_clip(last_text, 2000))
+                                 last=clip(last_text, 2000))
         message = await asyncio.wait_for(
             self.model.ainvoke([SystemMessage(_PROPOSE_SYSTEM), HumanMessage(prompt)]),
             timeout=self.timeout)
-        return parse_goal(_message_text(message))
+        return parse_goal(message_text(message))
 
 
 class TeamSession:
@@ -453,7 +434,7 @@ class TeamSession:
             self._on_event(event)
 
     def _speak(self, agent, text):
-        text = _clip(str(text or "").strip(), MAX_BRIEF)
+        text = clip(str(text or "").strip(), MAX_BRIEF)
         if not text:
             return
         self._emit({"type": "team.message", "agent": agent, "text": text})
@@ -571,7 +552,7 @@ class TeamSession:
                 mission.usage["attempts"] += 1
                 self.missions.save(mission)
                 result = await self.worker.ask(brief, intent_mode="off")
-                report = _clip(str(result.get("output") or ""), MAX_REPORT)
+                report = clip(str(result.get("output") or ""), MAX_REPORT)
                 self._speak("worker", report)
                 history.append({"step": step, "brief": brief, "report": report})
                 usage = result.get("usage") or {}
@@ -602,8 +583,8 @@ class TeamSession:
             mission.updated = _now()
             mission.usage["seconds"] = round(time.monotonic() - started, 3)
             if mission.status == "done" and not mission.answer:
-                mission.answer = _clip(answer or report, MAX_REPORT)
-            mission.reason = _clip(reason or mission.reason, 1000)
+                mission.answer = clip(answer or report, MAX_REPORT)
+            mission.reason = clip(reason or mission.reason, 1000)
             self.missions.save(mission)
             self.last_mission = mission
             self._emit({"type": "mission.end", "agent": "system", "mission": mission.id,
@@ -739,7 +720,7 @@ class TeamSession:
             if last is not None and last.status in {"failed", "blocked"}:
                 self._speak("memory",
                             f"上一轮 {last.status}，未提出修复目标："
-                            f"{_clip(last.reason or last.answer or '原因未知', 200)}")
+                            f"{clip(last.reason or last.answer or '原因未知', 200)}")
             return None
         self._speak("memory", f"下一个目标：{goal}")
         self._emit({"type": "team.propose", "agent": "memory", "goal": goal})
