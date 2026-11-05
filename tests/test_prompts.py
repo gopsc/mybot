@@ -609,3 +609,55 @@ def test_bundle_can_be_inspected_but_not_mutated(bundle):
         library.restore(False)
     assert not (bundle / ".prompts.lock").exists()
     assert (bundle / "manifest.json").stat().st_mode == before
+
+
+def test_role_library_loads_numbered_extra_layers(tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", extra_layers=True)
+    library.ensure_home()
+    (library.home / "005_context.md").write_text("CONTEXT-EXTRA\n", encoding="utf-8")
+    (library.home / "011_robot.md").write_text("ROBOT-EXTRA\n", encoding="utf-8")
+    rows = library.list_layers()
+    assert [row["id"] for row in rows] == ["0", "5", "10", "11", "97", "98", "99", "100"]
+    assert rows[1]["external"] is True and rows[1]["editable"] is False
+    assert "ROBOT-EXTRA" in library.read("11")["content"]
+    composed = library.compose()
+    assert composed.text.index("CONTEXT-EXTRA") < composed.text.index("You are the mybot agent")
+    assert (composed.text.index("You are the mybot agent")
+            < composed.text.index("ROBOT-EXTRA") < composed.text.index("# SOUL"))
+    assert composed.text.index("ROBOT-EXTRA") < composed.text.index("Final safety reminder")
+    assert "11" in composed.layer_hashes
+
+
+def test_global_library_ignores_extra_files(tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "global-prompts")
+    library.ensure_home()
+    (library.home / "011_robot.md").write_text("operator draft\n", encoding="utf-8")
+    assert [row["id"] for row in library.list_layers()] == IDS
+    with pytest.raises(SecurityError, match="Use a prompt layer ID"):
+        library.read("11")
+
+
+def test_role_extra_layer_numbers_are_validated(tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", extra_layers=True)
+    library.ensure_home()
+    for name in ("010_extra.md", "100_tail.md", "101_late.md"):
+        path = library.home / name
+        path.write_text("x\n", encoding="utf-8")
+        with pytest.raises(SecurityError, match="reserved layer number"):
+            library.compose()
+        path.unlink()
+    (library.home / "011_a.md").write_text("a\n", encoding="utf-8")
+    (library.home / "011_b.md").write_text("b\n", encoding="utf-8")
+    with pytest.raises(SecurityError, match="share a layer number"):
+        library.compose()
+
+
+def test_role_extra_layers_are_read_only_to_the_agent_and_capped(tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", extra_layers=True)
+    library.ensure_home()
+    (library.home / "011_robot.md").write_text("robot\n", encoding="utf-8")
+    with pytest.raises(SecurityError, match="Use a prompt layer ID"):
+        library.update("11", "changed", actor="agent", reason="test")
+    (library.home / "012_big.md").write_text("x" * (64 * 1024 + 1), encoding="utf-8")
+    with pytest.raises(SecurityError, match="exceeds"):
+        library.read("12")

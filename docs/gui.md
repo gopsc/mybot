@@ -51,7 +51,7 @@ duplicate robot logic.
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, the history byte cap, model context-window and project-context budgets, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
+| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, the history byte cap, model context-window and project-context budgets, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 提示词 tab also lists role-specific extra layers (`NNN_name.md`) read-only beside the six bundled layers. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |

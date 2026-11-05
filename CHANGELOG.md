@@ -8,6 +8,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Role prompt libraries load operator-authored extra layers: any `NNN_name.md`
+  file in `~/.mybot/roles/<name>/prompts` (001–099, reserved numbers rejected)
+  joins the composed prompt in numeric order, so `011_robot.md` sits between
+  core 10 and SOUL 97. Extras are read-only to the agent, capped at 64 KiB each
+  and ignored by the global and bundled prompt homes.
 - The Agent is now a **dual-agent team**: a tool-less **memory agent** plans,
   reflects and owns long-term memory, while a **worker agent** keeps the skill,
   file, shell, web, camera and MCP surface. They exchange a JSON brief/report per

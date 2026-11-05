@@ -142,12 +142,14 @@ class PromptPanel(QWidget):
     A failed safety check must leave the repair controls available.
     """
 
-    def __init__(self, parent=None, *, auto_stats=True, home=None, operator_path=None):
+    def __init__(self, parent=None, *, auto_stats=True, home=None, operator_path=None,
+                 extra_layers=False):
         super().__init__(parent)
         self.library = None
         self.loaded = False
         self.home = home
         self.operator_path = operator_path
+        self.extra_layers = extra_layers is True
         self.layer = None
         self.loaded_hash = None
         self._row = -1
@@ -155,6 +157,7 @@ class PromptPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(_label(
             "0 / 10 / 100 在 GUI 中只读；97（SOUL）/ 98（USER）/ 99（STATS）可编辑。\n"
+            "角色目录里额外的 NNN_名称.md 层按编号排在 10 与 97 之间，对 Agent 只读。\n"
             "0 / 100 安全层必须保持默认校验值。保存层、补齐和恢复立即生效，设置取消不回滚。", secondary=True))
         self.auto_stats = QCheckBox("自动更新 STATS（仅统计数据，不记录 USER 内容）")
         self.auto_stats.setChecked(auto_stats)
@@ -226,7 +229,7 @@ class PromptPanel(QWidget):
     def _get_library(self):
         if self.library is None:
             from ..prompts import PromptLibrary
-            self.library = PromptLibrary(home=self.home)
+            self.library = PromptLibrary(home=self.home, extra_layers=self.extra_layers)
         return self.library
 
     def ensure_loaded(self):

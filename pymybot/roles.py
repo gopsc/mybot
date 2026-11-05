@@ -238,7 +238,7 @@ class Role:
         return self.root / "history.json"
 
     def prompt_library(self):
-        return PromptLibrary(home=self.prompts_dir)
+        return PromptLibrary(home=self.prompts_dir, extra_layers=True)
 
     def info(self):
         skills = SkillsLibrary(self.skills_dir, required=True).index()["skills"]

@@ -36,6 +36,18 @@ or `.`, and cannot start with `.`. Role directories and their prompt, skill,
 MCP and history inputs reject links/junctions. On POSIX, created role content
 uses private directory/file permissions.
 
+## Extra prompt layers
+
+A role's `prompts/` directory may also contain operator-authored layers named
+`NNN_name.md` (three-digit number 001–099, lowercase name). They join the
+composed prompt in numeric order — `011_robot.md` sits between core layer 10
+and SOUL layer 97 — and are read-only to the agent: only 10/97/98/99 keep their
+existing ownership and approval rules. Reserved numbers (0, 10, 97, 98, 99,
+100) and values above 99 are rejected, each extra layer is capped at 64 KiB, and
+the composed prompt stays capped at 128 KiB. The global `~/.mybot/prompts` and
+the bundled defaults keep the fixed six-layer contract; this applies to role
+directories only.
+
 ## CLI
 
 ```sh

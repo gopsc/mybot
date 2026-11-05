@@ -971,7 +971,8 @@ class App(QMainWindow):
             return
         try:
             from ..prompts import PromptLibrary
-            library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None)
+            library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None,
+                                extra_layers=bool(self.cfg.role))
             library.ensure_home()
             library.compose()
         except Exception as exc:
@@ -1310,7 +1311,8 @@ class App(QMainWindow):
                 if not isinstance(diff, str):
                     from difflib import unified_diff
                     from ..prompts import PromptLibrary
-                    library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None)
+                    library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None,
+                                extra_layers=bool(self.cfg.role))
                     library.ensure_home()
                     before = library.read(data["layer"])
                     diff = "".join(unified_diff(
@@ -1567,6 +1569,7 @@ class SettingsDialog(QDialog):
         self.prompts = PromptPanel(
             self, auto_stats=cfg.auto_stats,
             home=role_path(cfg.role) / "prompts" if cfg.role else None,
+            extra_layers=bool(cfg.role),
             operator_path=lambda: _absolute(self.entries["prompt_file"].text(),
                                             self.entries["workspace"].text() or self._workspace))
         tabs.addTab(self.prompts, "提示词")
