@@ -81,12 +81,17 @@ def audit(root):
 
     for path in skill_files:
         relative = path.relative_to(root).as_posix()
+        skill_parts = path.relative_to(skills).parts
         text = path.read_text(encoding="utf-8")
         for target in _links(text):
             if not (path.parent / target).resolve().exists():
                 problems.append(f"{relative}: link target does not exist: {target}")
         for candidate in _candidate_paths(text):
             candidates = [root / candidate]
+            # The agent's cwd is the skill directory, so a reference may also be
+            # written relative to it (`scripts/pymybot/cli.py`, `scripts/requirements.txt`).
+            if len(skill_parts) > 1:
+                candidates.append(skills / skill_parts[0] / candidate)
             if candidate == "pymybot/assets":
                 continue  # Normalised package layout, not a source-tree directory.
             if candidate.startswith("pymybot/assets/"):

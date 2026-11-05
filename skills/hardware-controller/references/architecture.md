@@ -1,6 +1,6 @@
 # Architecture
 
-Source: This is the authoritative controller architecture document; the implementation lives in `skills/hardware-controller/scripts/pymybot/`.
+Source: This is the authoritative controller architecture document; the implementation lives in `scripts/pymybot/`.
 
 pymybot separates *what the robot is* from *how a part is driven* and *what
 should happen over time*.
@@ -130,10 +130,10 @@ Key invariants:
 | `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Shell host operations |
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
 | `pymybot/agent.py` | LangGraph worker agent, model configuration, tool loop |
-| `pymybot/agent_team.py` | memory agent, plan/act/reflect loop, mission persistence, unattended mode |
-| `pymybot/agent_memory_store.py` | long-term memory JSONL store and lexical BM25 retrieval |
-| `pymybot/camera.py` | Host camera enumeration and JPEG capture for the Agent tools |
-| `pymybot/images.py` | Bounded image-container validation for receipts and camera output |
+| `pymybot/agent_team.py` | Memory agent, plan/act/reflect loop, mission persistence and unattended mode |
+| `pymybot/agent_memory_store.py` | Long-term memory JSONL store and lexical BM25 retrieval |
+| `pymybot/camera.py` | Agent host camera enumeration and JPEG capture; cameras are not controller variables |
+| `pymybot/images.py` | Bounded image-container validation for Agent camera output and image results |
 | `pymybot/agent_skill_runner.py` | Trusted Skill entrypoint resolution (legacy manifest or `scripts/`), scoped arguments and bounded Skill subprocess |
 | `pymybot/prompts.py` | Manifest-ordered runtime prompt layers, trusted safety hashes, bounded composition, CAS/backups and private storage |
 | `pymybot/roles.py` | Role creation/loading, role-owned prompt/skills/MCP paths and bounded atomic model-history persistence |
@@ -206,10 +206,10 @@ flowchart TB
 
 ## Asset and path resolution
 
-Controller sources live in `skills/hardware-controller/scripts/pymybot/`; the root
+Controller sources live in `scripts/pymybot/`; the root
 `pymybot` package extends its search path so existing `pymybot.*` imports and the
 Agent/GUI keep working. Default source assets live in
-`skills/hardware-controller/assets/{modules,robots,scripts}`. Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills,prompts}`; module
+`assets/{modules,robots,scripts}`. Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills,prompts}`; module
 assets include both `.py` and `.lua`. Doctor counts both; agent inventory and
 GUI previews include both within their existing budgets, with Python syntax
 highlighting for `.py`. In a source checkout the code falls back to the

@@ -405,8 +405,8 @@ end,
 -- 【内嵌虚拟器件模型】BME688_VIRT —— 2026-09-15 自 modules/lib/virtbus/bme688.lua
 -- 整体迁入（单文件驱动+模型第四十一个 = 全部完成，守护 E2E 走 sensor_daemon
 -- 回退路径）。约定同前四十者：① 生产路径零执行（new() 仅虚拟总线测试调用，
--- 纯闭包零外部依赖（blob 数据引用 modules/lib/bmi270_config.lua 的模式在此
--- 为 3 块 NVM 校准系数直接硬编码进模型）；模块级 M.BUS/常量/协议表全部移入
+-- 纯闭包零外部依赖（不同于引用外部配置 blob 文件的做法，此处
+-- 3 块 NVM 校准系数直接硬编码进模型）；模块级 M.BUS/常量/协议表全部移入
 -- 段内、new() 内 `local M = BME688_VIRT` 绑定使模型体零改动移植）；② 工厂经
 -- 全局表而非文件 return（生产侧 Lua.cj build_lua 以 LUA_MULTRET pcall 加载
 -- 驱动且成功路径无 settop，文件返回值会滞留 Lua 栈）；③ 模型与驱动保持独立

@@ -77,6 +77,10 @@ def asset_datas(root):
     for source in skill_script_files(root):
         relative = source.relative_to(root / "skills")
         datas.append((str(source), str(Path("pymybot/assets/skills") / relative.parent)))
+    # SKILL.md points at scripts/requirements.txt; keep it beside the skill assets.
+    for source in sorted((root / "skills").rglob("requirements.txt")):
+        relative = source.relative_to(root / "skills")
+        datas.append((str(source), str(Path("pymybot/assets/skills") / relative.parent)))
     for source in sorted((root / "pymybot" / "gui" / "assets").glob("*.svg")):
         datas.append((str(source), "pymybot/gui/assets"))
     for extra in ("README.md", "LICENSE", "CHANGELOG.md"):

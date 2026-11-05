@@ -125,7 +125,7 @@ end
 
 -- 写指针后读 n 字节（合并为单次原子事务），返回 1 基字节表 {b0, b1, ...}；
 -- 失败返回 nil。与 i2c_read_multi 同一内核事务，但返回字节表、不受 Lua
--- number 2^53 精度限制——多字节块读（BH1745 颜色 8B / BMI270 六轴 12B 等）
+-- number 2^53 精度限制——多字节块读（BH1745 颜色 8B / 六轴 IMU 12B 等）
 -- 请用此接口。n 钳制 1~16。
 function i2c_read_multi_bytes(fd, reg, n)
 	fd = tonumber(fd)

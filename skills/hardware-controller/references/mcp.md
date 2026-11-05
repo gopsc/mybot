@@ -1,8 +1,8 @@
 # MCP
 
-Source: 本文件是 hardware-controller MCP 服务端与客户端配置的权威文档，实现位于 `skills/hardware-controller/scripts/pymybot/mcp_server.py`。
+Source: 本文件是 hardware-controller MCP 服务端与客户端配置的权威文档，实现位于 `scripts/pymybot/mcp_server.py`。
 
-[MCP（Model Context Protocol）](https://modelcontextprotocol.io) 是模型客户端与工具服务之间的标准协议。本仓库有两个方向：
+MCP（Model Context Protocol）是模型客户端与工具服务之间的标准协议。本仓库有两个方向：
 
 | 方向 | 入口 | 说明 |
 | --- | --- | --- |
@@ -21,8 +21,8 @@ pip install -e ".[agent,mcp]"    # Agent + MCP 客户端
 
 ```sh
 pymybot mcp \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --scripts-dir skills/hardware-controller/assets/scripts
+  --robot assets/robots/relay-test.sql \
+  --scripts-dir assets/scripts
 ```
 
 stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。客户端断开 stdin
@@ -49,7 +49,7 @@ stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。�
 
 `state` 为 `completed`、`not_executed` 或 `unknown`。`unknown` 表示动作可能已经发生，
 **不要重试**；需要操作者先检查机器人。回执同时作为 `structuredContent` 和文本
-`content` 返回，图片以 MCP `image` 内容返回。
+`content` 返回。
 
 ### 资源
 
@@ -82,7 +82,7 @@ Claude Desktop（`claude_desktop_config.json`）或 Cursor（`.cursor/mcp.json`�
       "command": "pymybot",
       "args": [
         "mcp",
-        "--robot", "/abs/path/skills/hardware-controller/assets/robots/relay-test.sql",
+        "--robot", "/abs/path/assets/robots/relay-test.sql",
         "--scripts-dir", "/abs/path/scripts",
         "--allow-execution"
       ]
@@ -105,8 +105,8 @@ Source checkout 中可用 `python -m pymybot` 代替 `pymybot`，并用绝对路
 
 ```sh
 pymybot --no-gui agent \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --scripts-dir skills/hardware-controller/assets/scripts \
+  --robot assets/robots/relay-test.sql \
+  --scripts-dir assets/scripts \
   --model deepseek:deepseek-chat \
   --mcp-config ./mcp.json \
   --task "先用外部检索工具查资料，再列出机器人硬件"

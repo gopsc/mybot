@@ -1,6 +1,6 @@
 # CLI reference
 
-Source: This is the authoritative controller CLI and serve protocol document; the implementation lives in `skills/hardware-controller/scripts/pymybot/{cli,serve}.py`.
+Source: This is the authoritative controller CLI and serve protocol document; the implementation lives in `scripts/pymybot/{cli,serve}.py`.
 
 The CLI is the automation-friendly control surface. It prints exactly one JSON
 object on stdout per invocation; diagnostics and streaming agent output go to
@@ -26,7 +26,7 @@ python -m pymybot doctor
 | `pymybot run --robot SQL --input MT` | Activate, run one action, deactivate | Yes |
 | `pymybot sample --robot SQL --name VAR` | Read a named variable (`--count`, `--interval-ms`) | Yes |
 | `pymybot apply-sql --robot SQL --sql "..."` | Apply restricted SQL to a temporary session | Yes |
-| `pymybot agent ...` | Dual-agent autonomous run (or one seeded mission with `--task`) | Via approved tools |
+| `pymybot agent ...` | LangGraph task/REPL | Via approved tools |
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
 | `pymybot new NAME [--dir DIR] [--force]` | Generate a runnable `robots/`, `scripts/` and `modules/` skeleton | No |
@@ -69,18 +69,15 @@ semantics. Typical usage:
 ```sh
 pymybot roles create technician --description "Field technician"
 pymybot roles list
-pymybot agent --role technician                       # 记忆体自拟目标，自主循环
-pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"  # 只跑这一个任务
+pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"
 pymybot agent --role technician --robot robots/my.sql --scripts-dir scripts --task "运行自检"
 pymybot roles clear-history technician --yes
 pymybot roles delete technician --yes        # permanently remove the role directory
 ```
 
-Autonomous runs require a role: `pymybot agent` without `--role` and
-`serve` `agent.start`/`agent.ask` without `role` fail with a usage/invalid-params
-error. There is no global default conversation, no chat composer and no
-single-agent path: the memory and worker agents talk to each other after the
-operator clicks 启动 or runs the command.
+Agent conversations require a role: `pymybot agent` without `--role` and
+`serve` `agent.ask` without `role` fail with a usage/invalid-params error. There
+is no global default conversation.
 
 Creation copies the bundled prompt baseline. Optional `--skills-dir` and
 `--mcp-config` on `roles create` import those capabilities into the role. Once
@@ -157,21 +154,19 @@ Reference the rows from ordinary structure cells with `$name` (Alias) or
 
 ```sql
 CREATE TABLE Alias (name String, alias String);
-INSERT INTO Alias (name, alias) VALUES ('user', 'COVER_ME');
-INSERT INTO Alias (name, alias) VALUES ('pass', 'COVER_ME');
+INSERT INTO Alias (name, alias) VALUES ('tcp0_host', 'COVER_ME');
 CREATE TABLE Vars (name String, value String);
-INSERT INTO Vars (name, value) VALUES ('device', 1);
--- ... HTTP bus ...
-CREATE TABLE Qsont (name String, HTTP String, user String, pass String, device Number);
-INSERT INTO Qsont (name, HTTP, user, pass, device)
-VALUES ('qs', '$cloud', '$user', '$pass', '$(device)');
+INSERT INTO Vars (name, value) VALUES ('tcp0_port', -1);
+-- ... 设备表用 $tcp0_host / $(tcp0_port) 引用 ...
+CREATE TABLE TCP (name String, host String, port Number);
+INSERT INTO TCP (name, host, port) VALUES ('tcp0', '$tcp0_host', '$(tcp0_port)');
 ```
 
 ```sh
-export QS_USER=iot_01 QS_PASS=pass123
-pymybot run --robot skills/hardware-controller/assets/robots/qsont.sql --input skills/hardware-controller/assets/scripts/qsont.mt \
+export RELAY_HOST=192.0.2.10
+pymybot run --robot assets/robots/famer.sql --input assets/scripts/famer.mt \
   --timeout 30 --allow-hardware \
-  --var-env user=QS_USER --var-env pass=QS_PASS --var device=1
+  --var-env tcp0_host=RELAY_HOST --var tcp0_port=8080
 ```
 
 The declared defaults stay in the tables, so `pymybot hardware`/`query` keep
@@ -188,17 +183,17 @@ python -m pymybot new mybot-arm
 
 # Static validation, no hardware
 python -m pymybot check \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/assets/scripts/relay-test.mt
+  --robot assets/robots/relay-test.sql \
+  --input assets/scripts/relay-test.mt
 
 # Pure-software end-to-end run (Timer + Relay)
 python -m pymybot run \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/assets/scripts/relay-test.mt \
+  --robot assets/robots/relay-test.sql \
+  --input assets/scripts/relay-test.mt \
   --timeout 10
 
 # Query the structure without activating it
-python -m pymybot query --robot skills/hardware-controller/assets/robots/relay-test.sql --sql "SHOW TABLES;"
+python -m pymybot query --robot assets/robots/relay-test.sql --sql "SHOW TABLES;"
 
 # Serve a long-lived session to an IDE
 python -m pymybot serve
@@ -250,10 +245,7 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `role` (required), optional `robot`, optional `scriptsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | runs one mission to completion without starting the loop; `agent.event` notifications carry `agent: memory\|worker\|system` |
-| `agent.start` | `role` (required), optional `task` seed, `maxMissions`, `maxSeconds`, `pauseSeconds`, agent options | starts the self-directed loop and returns its status; `team.message`, `mission.*` and `team.stopped` events follow |
-| `agent.stop` | — | stops the autonomous loop cooperatively |
-| `agent.status` | — | current loop state, active mission and memory statistics |
+| `agent.ask` | `task`, `role` (required), optional `robot`, optional `scriptsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested, preferring the named role over the active conversation's role |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |
@@ -311,9 +303,10 @@ Agent mode is documented in the README. The important flags are:
 
 `web_search` calls `GET <endpoint>/search?format=json&q=...&safesearch=1`, so a
 self-hosted SearXNG must enable the `json` output format. An explicitly
-configured loopback endpoint may use `http://127.0.0.1:PORT` (also `localhost`
-or `::1`); other endpoints must be HTTPS on port 443. `web_fetch` still refuses
-loopback and private targets independently of the configured search endpoint.
+configured loopback endpoint (IP, hostname, or `::1`)
+may use plain HTTP on any port; other endpoints must be HTTPS on port 443.
+`web_fetch` still refuses loopback and private targets independently of the
+configured search endpoint.
 
 A turn blocks the fourth identical tool call with a structured `not_executed`
 receipt instead of replaying a stuck loop; the transcript records `intent` and
