@@ -408,6 +408,9 @@ class Server:
             return {"state": "Inactive", "aborted": False, "agent": False,
                     "safe_failures": [], "destroy_failures": []}
         session = agent["session"]
+        cancel_team = getattr(session, "cancel", None)
+        if callable(cancel_team):
+            cancel_team()
         session.executor.cancel()
         result = await session.executor.abort()
         data = result.get("data") if isinstance(result, dict) else None
@@ -599,6 +602,15 @@ class Server:
             "workspaceDir": params.text("workspaceDir", cap=4096),
             "enableShell": params.flag("enableShell"),
             "allowFileWrites": params.flag("allowFileWrites"),
+            "teamSteps": params.integer("teamSteps", 1, 50, 8),
+            "missionTimeout": params.seconds("missionTimeout", 1800),
+            "missionTokens": params.integer("missionTokens", 1024, 10_000_000, 400_000),
+            "maxRequests": params.integer("maxRequests", 1, 10_000, 64),
+            "maxToolCalls": params.integer("maxToolCalls", 1, 100_000, 128),
+            "turnTimeout": params.integer("turnTimeout", 0, 86400, 0),
+            "modelRetries": params.integer("modelRetries", 0, 10, 0),
+            "fallbackModels": params.strings("fallbackModels"),
+            "requirePlanApproval": params.flag("requirePlanApproval"),
         }
 
     async def m_agent_ask(self, ident, params, cancel):
@@ -621,6 +633,14 @@ class Server:
                 if cancel.is_set():
                     session.executor.cancel()
                 mark = len(session.events)
+                status = getattr(session, "auto_status", None)
+                if callable(status) and status().get("running"):
+                    if status().get("state") in {"idle", "thinking"} \
+                            and callable(getattr(session, "auto_stop", None)):
+                        # One-shot work takes over an idle autonomous loop.
+                        await session.auto_stop()
+                    else:
+                        raise RpcError(BUSY, "An autonomous loop is already running; stop it first")
                 try:
                     result = await session.ask(task)
                 except BaseException as exc:
@@ -639,6 +659,84 @@ class Server:
             finally:
                 if self.agent is None:
                     self.owner = None
+
+    async def m_agent_status(self, ident, params, cancel):
+        if self.agent is None:
+            return {"state": "idle", "running": False, "mission": None, "memory": None}
+        session = self.agent["session"]
+        status = getattr(session, "auto_status", None)
+        return status() if callable(status) else {"state": "single", "running": False}
+
+    async def m_agent_start(self, ident, params, cancel):
+        key = self._agent_key(params)
+        if not key["role"]:
+            raise RpcError(INVALID_PARAMS, "Autonomous missions require a role")
+        self.require_owner("agent")
+        if self.agent_lock.locked():
+            raise RpcError(BUSY, "Another agent turn is running")
+        async with self.agent_lock:
+            self.owner = "agent"
+            try:
+                session = await self._prepare_agent(ident, key)
+                status = getattr(session, "auto_status", None)
+                if callable(status) and status().get("running"):
+                    raise RpcError(BUSY, "An autonomous loop is already running; stop it first")
+                seed = params.text("task", cap=16 * 1024)
+                await session.auto_start(
+                    seed or None,
+                    max_missions=params.integer("maxMissions", 1, 1000, 20),
+                    max_seconds=params.seconds("maxSeconds", 3600),
+                    pause=params.seconds("pauseSeconds", 1))
+                return session.auto_status()
+            except BaseException:
+                await self.close_agent()
+                raise
+            finally:
+                if self.agent is None:
+                    self.owner = None
+
+    async def m_agent_memory(self, ident, params, cancel):
+        if self.agent is None:
+            return {"entries": [], "stats": None}
+        session = self.agent["session"]
+        review = getattr(session, "memory_review", None)
+        if not callable(review):
+            return {"entries": [], "stats": None}
+        return await asyncio.to_thread(
+            review, params.integer("limit", 1, 500, 50),
+            kinds=params.strings("kinds") or None, tags=params.strings("tags") or None)
+
+    async def m_agent_forget_memory(self, ident, params, cancel):
+        if self.agent is None:
+            return {"removed": [], "count": 0}
+        session = self.agent["session"]
+        forget = getattr(session, "forget_memory", None)
+        if not callable(forget):
+            raise RpcError(METHOD_NOT_FOUND, "This agent has no long-term memory store")
+        status = getattr(session, "auto_status", None)
+        if callable(status) and status().get("running"):
+            raise RpcError(BUSY, "Stop the autonomous loop before editing long-term memory")
+        return await asyncio.to_thread(
+            forget, params.strings("ids") or None,
+            kinds=params.strings("kinds") or None, tags=params.strings("tags") or None)
+
+    async def m_agent_missions(self, ident, params, cancel):
+        if self.agent is None:
+            return {"missions": []}
+        session = self.agent["session"]
+        review = getattr(session, "mission_review", None)
+        if not callable(review):
+            return {"missions": []}
+        return await asyncio.to_thread(review, params.integer("limit", 1, 200, 20))
+
+    async def m_agent_stop(self, ident, params, cancel):
+        if self.agent is None:
+            return {"state": "idle", "running": False}
+        session = self.agent["session"]
+        stop = getattr(session, "auto_stop", None)
+        if not callable(stop):
+            return {"state": "single", "running": False}
+        return await stop()
 
     async def _prepare_agent(self, ident, key):
         if self.agent is not None and self.agent_key != key:
@@ -688,6 +786,9 @@ class Server:
             raise AgentConfigurationError("Shell tools require a workspace; no model request was sent")
         if key["allowFileWrites"] and workspace is None:
             raise AgentConfigurationError("File writes require a workspace; no model request was sent")
+        if key["robot"] and not Path(key["robot"]).is_file():
+            raise AgentConfigurationError(
+                f"Robot structure not found: {key['robot']}; no model request was sent")
         config = AgentConfig(model=key["model"] or os.environ.get("MYBOT_MODEL", ""),
                              base_url=key["baseUrl"] or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=key["apiKeyEnv"], timeout=key["timeout"],
@@ -709,7 +810,12 @@ class Server:
                              allow_web=key.get("allowWeb", False),
                              search_endpoint=key.get("searchEndpoint") or "",
                              hot_turns=key.get("hotTurns", 3),
-                             warm_turns=key.get("warmTurns", 10))
+                             warm_turns=key.get("warmTurns", 10),
+                             max_requests=key.get("maxRequests", 64),
+                             max_tool_calls=key.get("maxToolCalls", 128),
+                             turn_timeout=key.get("turnTimeout", 0) or 0,
+                             model_retries=key.get("modelRetries", 0),
+                             fallback_models=tuple(key.get("fallbackModels") or ()))
         from .mcp_client import load_servers
         try:
             mcp_servers = load_servers(config.mcp_config)
@@ -736,10 +842,17 @@ class Server:
                 reply = await self.ask_client("confirm", {"tool": name, "arguments": arguments})
                 return isinstance(reply, dict) and reply.get("approved") is True
 
-            session = AgentSession(executor, model, config, confirm=confirm,
-                                   skills=skills, session_log=session_log,
-                                   workspace=workspace is not None, enable_shell=key["enableShell"],
-                                   mcp_servers=mcp_servers, role=role)
+            worker = AgentSession(executor, model, config, confirm=confirm,
+                                  skills=skills, session_log=session_log,
+                                  workspace=workspace is not None, enable_shell=key["enableShell"],
+                                  mcp_servers=mcp_servers, role=role)
+            from .agent_team import TeamSession
+            session = TeamSession(worker, model, role=role,
+                                  max_steps=key.get("teamSteps", 8),
+                                  max_seconds=key.get("missionTimeout", 1800),
+                                  max_tokens=key.get("missionTokens", 400_000),
+                                  confirm=confirm,
+                                  require_plan_approval=key.get("requirePlanApproval", False))
             return {"session": session, "client": client}
         except BaseException as exc:
             try:

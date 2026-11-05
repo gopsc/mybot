@@ -12,7 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import (QEasingCurve, QEventLoop, QPropertyAnimation, Qt, QTimer,
                             QUrl, Signal)
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics,
-                           QKeySequence, QShortcut, QTextCharFormat, QTextCursor, QTextDocument)
+                           QKeySequence, QTextCharFormat, QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog,
@@ -31,7 +31,7 @@ from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
-                      PromptPanel, ResourcePanel, SessionsDialog)
+                      PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
 from .protocol import CANCELLED, RpcError, ServeClient, resolve_python
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
@@ -106,26 +106,6 @@ class ChatTranscript(QTextBrowser):
         return None
 
 
-class ChatInput(QPlainTextEdit):
-    """Chat composer that hides its placeholder while the field has focus."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._placeholder = ""
-
-    def setPlaceholderText(self, text):
-        self._placeholder = text
-        super().setPlaceholderText("" if self.hasFocus() else text)
-
-    def focusInEvent(self, event):
-        super().focusInEvent(event)
-        super().setPlaceholderText("")
-
-    def focusOutEvent(self, event):
-        super().focusOutEvent(event)
-        super().setPlaceholderText(self._placeholder)
-
-
 class App(QMainWindow):
     closed = Signal()
 
@@ -145,15 +125,14 @@ class App(QMainWindow):
         self.mcp_available = False
         self.busy = False
         self.turn_id = None
+        self.run_id = None
         self.turn_text = 0
         self.at_line_start = True
         self._assistant_start = None
         self._assistant_markdown = ""
-        self.pending_task = ""
+        self.pending_start = False
         self.pending_reset = False
         self._delete_role_name = ""
-        self.last_task = ""
-        self.last_failed = False
         self._resource_roots = None
         self._stopping = False
         self._lifecycle_lock = threading.Lock()
@@ -178,7 +157,6 @@ class App(QMainWindow):
         self._load_role_history()
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         self._start_timer.start(120)
-        self.task_box.setPlainText(self.cfg.task.strip())
         self._refresh_status()
 
     def _build(self):
@@ -223,7 +201,7 @@ class App(QMainWindow):
         toolbar.addWidget(self.manage_button)
         toolbar.addWidget(_button("命令", self.open_console))
         self.new_button = _button("新对话", self.new_conversation)
-        self.stop_button = _button("停止对话", self.stop_turn, role="danger")
+        self.stop_button = _button("停止", self.stop_autonomy, role="danger")
         self.abort_button = _button("急停", self.abort_all, role="danger")
         self.abort_button.setToolTip("停止当前动作并调用驱动的 safe()；不是硬件急停")
         toolbar.addWidget(self.new_button)
@@ -288,6 +266,8 @@ class App(QMainWindow):
         action(tools, "命令面板…", self.open_console, "Ctrl+Shift+P")
         action(tools, "MCP 配置…", self.open_mcp)
         action(tools, "会话管理…", self.open_sessions)
+        action(tools, "长期记忆…", self.open_memory)
+        action(tools, "任务历史…", self.open_missions)
         action(tools, "环境诊断…", self.open_doctor)
         action(tools, "资源预览", self.show_resources)
         tools.addSeparator()
@@ -303,7 +283,9 @@ class App(QMainWindow):
         menu = QMenu(self)
         for text, slot in (("命令面板…", self.open_console),
                            ("MCP 配置…", self.open_mcp),
-                           ("会话管理…", self.open_sessions), ("环境诊断…", self.open_doctor),
+                           ("会话管理…", self.open_sessions),
+                           ("长期记忆…", self.open_memory), ("任务历史…", self.open_missions),
+                           ("环境诊断…", self.open_doctor),
                            ("资源预览", self.show_resources), ("清空对话", self.clear_chat)):
             action = QAction(text, menu)
             action.triggered.connect(lambda _checked=False, fn=slot: fn())
@@ -375,29 +357,16 @@ class App(QMainWindow):
         self.notebook.addTab(self.resources, "资源")
         self.notebook.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.notebook, 1)
-        composer = QHBoxLayout()
-        composer.setSpacing(10)
-        self.task_box = ChatInput()
-        self.task_box.setPlaceholderText("与机器人对话…")
-        self.task_box.setMinimumHeight(64)
-        self.task_box.setMaximumHeight(100)
-        composer.addWidget(self.task_box, 1)
-        buttons = QVBoxLayout()
-        buttons.setSpacing(8)
-        self.send_button = _button("发送", self.send_task, role="primary")
-        buttons.addWidget(self.send_button)
-        self.composer_retry = _button("重试", self.retry_task)
-        self.composer_retry.setEnabled(False)
-        buttons.addWidget(self.composer_retry)
-        buttons.addWidget(_label("Ctrl+Enter", secondary=True))
-        composer.addLayout(buttons)
-        layout.addLayout(composer)
-        self.send_shortcuts = []
-        for key in ("Ctrl+Return", "Ctrl+Enter"):
-            shortcut = QShortcut(QKeySequence(key), self.task_box)
-            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-            shortcut.activated.connect(self.send_task)
-            self.send_shortcuts.append(shortcut)
+        controls = QHBoxLayout()
+        controls.setSpacing(10)
+        self.start_button = _button("启动", self.start_autonomy, role="primary")
+        self.start_button.setToolTip("记忆体自拟目标并持续派活给执行体；人类只观察和停止")
+        self.stop_button.setToolTip("停止当前的自主循环")
+        controls.addWidget(self.start_button)
+        controls.addWidget(self.stop_button)
+        self.run_state = _label("未启动", secondary=True)
+        controls.addWidget(self.run_state, 1)
+        layout.addLayout(controls)
 
     def _on_tab_changed(self, index):
         if self.notebook.widget(index) is self.resources:
@@ -884,18 +853,16 @@ class App(QMainWindow):
             self._chat_line("安装 pymybot[agent] 后重启本窗口；或用 --no-gui 走命令行控制器。", "system")
         elif not self.greeted:
             self.greeted = True
-            self._chat_line("与机器人对话即可：模型会通过可信技能列出硬件、查询结构并执行动作。", "system")
+            self._chat_line("点「启动」开始自主运行：记忆体自拟目标，执行体通过可信技能动手。", "system")
         self._refresh_status()
         if self.pending_reset:
-            # The reset was requested before the server was ready; any task queued
-            # in the meantime belongs to the conversation being discarded.
             self.pending_reset = False
-            self.pending_task = ""
+            self.pending_start = False
             self._request_reset()
             self._refresh_status()
-        elif self.pending_task:
-            task, self.pending_task = self.pending_task, ""
-            self._submit_task(task)
+        elif self.pending_start:
+            self.pending_start = False
+            self._submit_start()
             self._refresh_status()
 
     def _schedule_start(self):
@@ -982,12 +949,32 @@ class App(QMainWindow):
             self._log(f"[gui] 回复失败：{exc}\n")
 
     def _on_agent_event(self, params):
-        if params.get("id") != self.turn_id:
+        if params.get("id") not in {self.turn_id, self.run_id}:
             return
         event = params.get("event") or {}
         kind = event.get("type")
         if kind == "text_delta":
             self._chat_delta(str(event.get("text") or ""))
+        elif kind == "team.message":
+            agent = event.get("agent") or "memory"
+            label = "记忆体" if agent == "memory" else "执行体" if agent == "worker" else "系统"
+            self._chat_line(f"[{label}] {event.get('text') or ''}", agent if agent in PALETTE else "system")
+        elif kind == "mission.start":
+            self._chat_line(f"▶ 任务 {event.get('mission') or ''}：{_brief(event.get('goal'), 120)}", "system")
+        elif kind == "mission.end":
+            usage = event.get("usage") or {}
+            reason = event.get("reason") or ""
+            line = (f"■ 任务结束：{event.get('status')} · 步数 {usage.get('steps', '?')}"
+                    f" · 尝试 {usage.get('attempts', '?')}")
+            if reason:
+                line += f" · {_brief(reason, 160)}"
+            self._chat_line(line, "system")
+        elif kind == "team.propose":
+            self._notice(f"记忆体自拟目标：{_brief(event.get('goal'), 80)}", seconds=4)
+        elif kind == "team.stopped":
+            self.run_id = None
+            self._set_busy(False)
+            self._chat_line(f"自主循环结束：{event.get('state') or ''}".rstrip(), "system")
         elif kind == "prompt_version":
             self._show_prompt_version(event.get("hash"))
         elif kind == "tool_call":
@@ -1005,30 +992,24 @@ class App(QMainWindow):
     def _require_role(self):
         if self.cfg.role:
             return True
-        self._notice("请先新建一个角色再对话")
-        self._chat_line("对话需要角色：点工具栏「新建」创建角色后再发送。", "system")
+        self._notice("请先新建一个角色再启动")
+        self._chat_line("自主运行需要角色：点工具栏「新建」创建角色后再启动。", "system")
         return False
 
-    def send_task(self):
-        if self._stopping:
-            return
-        task = self.task_box.toPlainText().strip()
-        if not task:
-            return
-        if self.busy:
-            self._notice("上一轮还在执行，先点停止或等待完成")
+    def start_autonomy(self):
+        if self._stopping or self.busy:
             return
         if not self._require_role():
             return
         if self.serve is None:
-            self.pending_task = task
+            self.pending_start = True
             self._notice("正在启动 pymybot serve…")
             self._start_server()
             self._refresh_status()
             return
-        self._submit_task(task)
+        self._submit_start()
 
-    def _submit_task(self, task):
+    def _submit_start(self):
         if not self.agent_available:
             self._notice("智能体不可用：缺少 LangGraph/LangChain 依赖")
             return
@@ -1039,50 +1020,90 @@ class App(QMainWindow):
         if not Path(scripts).is_dir():
             self._message("脚本目录不存在", f"脚本根目录不存在：\n{scripts}")
             return
-        if self._send(task) and self.task_box.toPlainText().strip() == task:
-            self.task_box.clear()
-
-    def _send(self, task):
+        robot = self._robot_path()
+        if robot and not Path(robot).is_file():
+            # Older GUI configs may keep a structure path that no longer exists;
+            # the autonomous agent can still use file, skill and web tools.
+            self._notice(f"结构文件不存在，已跳过：{_brief(robot, 80)}", seconds=10)
+            robot = ""
         client, generation = self.serve, self.generation
-        if self._stopping or client is None or not self.agent_available or self.busy:
-            return False
-        self._sync_config()
-        if self._stopping or client is not self.serve or generation != self.generation or self.busy:
-            return False
+        if self._stopping or client is None or self.busy:
+            return
         try:
-            # Revalidate just before dispatch, including when an earlier turn was
-            # valid. Backend validation remains authoritative for any later race.
             from ..prompts import PromptLibrary
             library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None)
             library.ensure_home()
             library.compose()
         except Exception as exc:
-            self._message("发送已阻止：提示词安全校验失败",
+            self._message("启动已阻止：提示词安全校验失败",
                           f"{exc}\n\n0 / 100 安全层必须保持完整。请到「设置 → 提示词」"
-                          "检查，必要时明确确认「恢复全部默认」修复后再发送。")
-            return False
-        params = self._agent_params(task)
+                          "检查，必要时明确确认「恢复全部默认」修复后再启动。")
+            return
         try:
-            ident, future = client.start_request("agent.ask", params)
+            ident, future = client.start_request("agent.start", self._agent_params(robot=robot))
         except RpcError as exc:
             self._chat_line(str(exc), "error")
-            return False
-        self._chat_line(f"你：{task}", "user")
-        self.last_task = task
-        self.last_failed = False
-        self.turn_id = ident
+            return
+        self.run_id = ident
+        self.turn_id = None
         self.turn_text = 0
         self.at_line_start = True
+        self._chat_line("▶ 启动自主运行：记忆体自拟目标，执行体动手；人类不参与。", "system")
         self._set_busy(True)
         self._background(lambda: future.result(),
-                         lambda value, error: self._turn_done(generation, ident, value, error))
-        return True
+                         lambda value, error: self._start_done(generation, ident, value, error))
 
-    def _agent_params(self, task):
+    def _start_done(self, generation, ident, result, error):
+        if self._stopping or generation != self.generation:
+            return
+        if self.run_id != ident:
+            return  # A stop won the race; do not revive the busy state.
+        if error is not None:
+            self.run_id = None
+            self._set_busy(False)
+            self._chat_line(str(error), "error")
+            return
+        state = (result or {}).get("state") or "running"
+        if (result or {}).get("running") is False:
+            self.run_id = None
+            self._set_busy(False)
+            self._chat_line(f"自主循环已结束（{state}）。", "system")
+            return
+        self.run_id = ident
+        self._set_busy(True)
+        self._chat_line(f"自主循环运行中（{state}）。点「停止」结束。", "system")
+
+    def stop_autonomy(self):
+        client = self.serve
+        if client is None:
+            self.pending_start = False
+            self._notice("服务未启动，已取消排队的启动")
+            return
+        if self.run_id is None:
+            return
+        try:
+            _, future = client.start_request("agent.stop", {})
+        except RpcError as exc:
+            self._notice(f"停止失败：{exc}")
+            return
+        self.run_id = None
+        self._notice("已请求停止自主循环…")
+        self._background(lambda: future.result(),
+                         lambda value, error: self._stop_done(value, error))
+
+    def _stop_done(self, result, error):
+        self.run_id = None
+        if error is not None:
+            self._chat_line(str(error), "error")
+        else:
+            self._chat_line("[已停止] 自主循环结束。", "system")
+        self._set_busy(False)
+
+    def _agent_params(self, robot=None):
         workspace = self._workspace_root()
         params = {
-            "task": task, "role": self.cfg.role or None,
-            "robot": self._robot_path(),
+            "role": self.cfg.role or None,
+            "robot": self._robot_path() if robot is None else robot,
             "scriptsDir": self._scripts_root(),
             "skillsDir": "" if self.cfg.role else self._skills_root(),
             "mcpConfig": "" if self.cfg.role else self._mcp_root(),
@@ -1097,6 +1118,12 @@ class App(QMainWindow):
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "maxContextTokens": self.cfg.max_context_tokens,
             "contextReserveTokens": self.cfg.context_reserve_tokens,
+            "maxRequests": self.cfg.max_requests,
+            "maxToolCalls": self.cfg.max_tool_calls,
+            "turnTimeout": self.cfg.turn_timeout,
+            "modelRetries": self.cfg.model_retries,
+            "fallbackModels": self.cfg.fallback_models,
+            "requirePlanApproval": self.cfg.require_plan_approval,
             "timeout": self.cfg.timeout,
             "hotTurns": self.cfg.hot_turns,
             "warmTurns": self.cfg.warm_turns,
@@ -1117,52 +1144,12 @@ class App(QMainWindow):
                 params[key] = value
         return {key: value for key, value in params.items() if value not in ("", [], None)}
 
-    def _turn_done(self, generation, ident, result, error):
-        if self._stopping or generation != self.generation or ident != self.turn_id:
-            return
-        self.turn_id = None
-        self._dismiss_approvals()
-        self._set_busy(False)
-        if error is not None:
-            self.last_failed = True
-            if isinstance(error, RpcError) and error.code == CANCELLED:
-                self._chat_line("[已停止]", "system")
-            else:
-                self._chat_line(str(error), "error")
-                for event in getattr(error, "tool_events", []):
-                    summary = ("prompt:update_prompt [内容已隐藏]"
-                               if event.get("tool") in {"prompt:update_prompt", "update_prompt", "read_prompt"}
-                               else _brief(event, 200))
-                    self._chat_line(f"  {summary}", "system")
-            self._refresh_status()
-            return
-        result = result or {}
-        self._show_prompt_version((result.get("prompt_version") or {}).get("hash"))
-        if self.turn_text == 0 and result.get("output"):
-            self._chat_delta(str(result["output"]))
-        usage = result.get("usage") or {}
-        intent = result.get("intent") or {}
-        if intent.get("name") not in (None, "off"):
-            label = INTENT_LABELS.get(intent["name"], intent["name"])
-            self._notice(f"意图：{label} · 置信度 {float(intent.get('confidence') or 0):.0%}",
-                         seconds=4)
-        self._chat_line(
-            "[完成 · 请求 {requests} · 工具 {tool_calls} · tokens {input_tokens}/{output_tokens}]".format(
-                requests=usage.get("requests", "?"), tool_calls=usage.get("tool_calls", "?"),
-                input_tokens=usage.get("input_tokens", "?"), output_tokens=usage.get("output_tokens", "?")),
-            "system")
-
     def _show_prompt_version(self, digest):
         if isinstance(digest, str) and len(digest) >= 16 and all(c in "0123456789abcdef" for c in digest.lower()):
             self.status_prompt.setText(f"提示词：{digest[:16]}")
 
     def stop_turn(self):
-        self.pending_task = ""
-        if self.busy and self.serve is not None and self.turn_id is not None:
-            self.serve.cancel(self.turn_id)
-            self._dismiss_approvals()
-            self._notice("已请求停止…")
-        self._refresh_status()
+        self.stop_autonomy()
 
     def abort_all(self):
         """Best-effort stop; no confirmation so it remains usable in a hurry."""
@@ -1173,7 +1160,6 @@ class App(QMainWindow):
         if self.turn_id is not None:
             client.cancel(self.turn_id)
         self._dismiss_approvals()
-        self.pending_task = ""
         self._notice("已发送急停请求…")
         generation = self.generation
         try:
@@ -1238,20 +1224,6 @@ class App(QMainWindow):
         self._clear_transcript()
         self._chat_line("[新对话，硬件已释放]", "system")
         self._refresh_status()
-
-    def retry_task(self):
-        if self.busy:
-            self._notice("上一轮还在执行，先停止或等待完成")
-            return
-        task = self.last_task.strip()
-        if not task:
-            return
-        self.task_box.setPlainText(task)
-        self.send_task()
-
-    def _update_retry_buttons(self):
-        enabled = bool(self.last_task) and not self.busy and not self._stopping
-        self.composer_retry.setEnabled(enabled)
 
     def clear_chat(self):
         if not self.chat.toPlainText().strip():
@@ -1349,6 +1321,45 @@ class App(QMainWindow):
         if self._stopping:
             return
         self._exec_dialog(DoctorDialog(self))
+
+    def _open_agent_preview(self, method, title, params=None, transform=None):
+        if self._stopping:
+            return
+        client = self.serve
+        if client is None:
+            self._notice("服务未启动")
+            return
+        generation = self.generation
+
+        def done(value, error):
+            if self._stopping or generation != self.generation:
+                return
+            if error is not None:
+                self._notice(f"{title}读取失败：{error}")
+                return
+            payload = transform(value) if transform else value
+            text = json.dumps(payload, ensure_ascii=False, indent=2)
+            self._exec_dialog(PreviewDialog(self, title, text, language="text"))
+
+        try:
+            _, future = client.start_request(method, params or {})
+        except RpcError as exc:
+            self._notice(f"{title}读取失败：{exc}")
+            return
+        self._background(lambda: future.result(), done)
+
+    def open_memory(self):
+        self._open_agent_preview(
+            "agent.memory", "长期记忆", {"limit": 200},
+            transform=lambda value: {
+                "stats": (value or {}).get("stats"),
+                "entries": (value or {}).get("entries") or [],
+            })
+
+    def open_missions(self):
+        self._open_agent_preview(
+            "agent.missions", "任务历史", {"limit": 100},
+            transform=lambda value: (value or {}).get("missions") or [])
 
     def open_console(self):
         if self._stopping:
@@ -1481,13 +1492,14 @@ class App(QMainWindow):
             flags.extend(("技能默认硬件", "工具免审批"))
         busy = "执行中…" if self.busy else "空闲"
         self.status_busy.setText(busy + ("（" + "、".join(flags) + "）" if flags else ""))
-        self.stop_button.setEnabled(self.busy or bool(self.pending_task))
+        self.start_button.setEnabled(not self.busy and not self._stopping)
+        self.stop_button.setEnabled(self.busy)
         self.abort_button.setEnabled(self.serve is not None)
-        self._update_retry_buttons()
+        self.run_state.setText("运行中" if self.busy else "未启动")
 
     def _set_busy(self, busy):
         self.busy = busy
-        self.send_button.setEnabled(not busy)
+        self.start_button.setEnabled(not busy and not self._stopping)
         self.new_button.setEnabled(not busy)
         self.refresh_button.setEnabled(not busy)
         self.role_box.setEnabled(not busy)
@@ -1505,7 +1517,7 @@ class App(QMainWindow):
                 clients.append(self.serve)
         self.generation += 1
         self._restart_pending = False
-        self.pending_task = ""
+        self.pending_start = False
         self.serve = None
         self._start_timer.stop()
         self._notice_timer.stop()
@@ -1637,6 +1649,23 @@ class SettingsDialog(QDialog):
         context_row.addWidget(self.context_kib)
         context_row.addWidget(_label("KiB"))
         model_form.addRow("工程上下文", context_row)
+        self.max_requests = _spin(cfg.max_requests, 10_000)
+        self.max_tool_calls = _spin(cfg.max_tool_calls, 100_000)
+        self.turn_timeout = _spin(int(cfg.turn_timeout) if cfg.turn_timeout else 1, 86400)
+        self.turn_timeout.setMinimum(0)
+        self.turn_timeout.setValue(int(cfg.turn_timeout or 0))
+        self.model_retries = _spin(cfg.model_retries, 10)
+        self.model_retries.setMinimum(0)
+        self.fallback_models = QLineEdit(",".join(cfg.fallback_models))
+        self.require_plan_approval = QCheckBox("自主任务逐次计划审批")
+        self.require_plan_approval.setChecked(bool(cfg.require_plan_approval))
+        for label, widget in (("单轮请求上限", self.max_requests),
+                              ("单轮工具上限", self.max_tool_calls),
+                              ("单轮墙钟（秒，0 关闭）", self.turn_timeout),
+                              ("模型重试", self.model_retries),
+                              ("备用模型（逗号分隔）", self.fallback_models)):
+            model_form.addRow(label, widget)
+        model_form.addRow(self.require_plan_approval)
         self.intent_box = QComboBox()
         for value, label in INTENT_CHOICES:
             self.intent_box.addItem(label, value)
@@ -1762,6 +1791,13 @@ class SettingsDialog(QDialog):
                       sandbox_mode=self.sandbox_box.currentData(),
                       protect_prompts=self.protect_prompts.isChecked(),
                       session_log=self.session_log.isChecked(),
+                      max_requests=self.max_requests.value(),
+                      max_tool_calls=self.max_tool_calls.value(),
+                      turn_timeout=float(self.turn_timeout.value()),
+                      model_retries=self.model_retries.value(),
+                      fallback_models=[item.strip() for item in
+                                       self.fallback_models.text().split(",") if item.strip()],
+                      require_plan_approval=self.require_plan_approval.isChecked(),
                       auto_stats=self.prompts.auto_stats.isChecked())
         self.values = values
         self.accept()

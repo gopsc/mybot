@@ -191,7 +191,7 @@ def test_doctor_marks_invalid_bundle_unhealthy_without_writes(corruption, tmp_pa
 def test_no_prompt_stats_cli_boolean(entry, disabled):
     arguments = [entry]
     if entry == "agent":
-        arguments += ["--robot", "unused.sql", "--task", "hello", "--role", "test-role"]
+        arguments += ["--task", "hello", "--role", "test-role"]
     if disabled:
         arguments += ["--no-prompt-stats"]
     assert cli.parse_args(arguments).no_prompt_stats is disabled
@@ -222,7 +222,7 @@ def test_serve_autostats_defaults_type_validation_and_conversation_key(monkeypat
             return {"session": Session(), "client": Client()}
 
         monkeypatch.setattr(server, "open_agent", open_agent)
-        params = {"task": "hello", "robot": "unused.sql", "scriptsDir": "unused", "role": "test-role"}
+        params = {"task": "hello", "scriptsDir": "unused", "role": "test-role"}
         try:
             for ident, extra in enumerate(({}, {"autoStats": True}, {"autoStats": False},
                                            {"autoStats": False}, {}), 1):
@@ -272,7 +272,7 @@ def test_serve_propagates_auto_stats_into_real_agent_config(auto_stats, monkeypa
         monkeypatch.setattr(server, "open_agent", opening)
         try:
             with pytest.raises(StopBeforeModel):
-                await server.m_agent_ask(1, serve.Params({"task": "hello", "robot": "unused.sql",
+                await server.m_agent_ask(1, serve.Params({"task": "hello",
                                                         "scriptsDir": "unused", "autoStats": auto_stats,
                                                         "role": role.name}),
                                          threading.Event())

@@ -26,7 +26,7 @@ python -m pymybot doctor
 | `pymybot run --robot SQL --input MT` | Activate, run one action, deactivate | Yes |
 | `pymybot sample --robot SQL --name VAR` | Read a named variable (`--count`, `--interval-ms`) | Yes |
 | `pymybot apply-sql --robot SQL --sql "..."` | Apply restricted SQL to a temporary session | Yes |
-| `pymybot agent ...` | LangGraph task/REPL | Via approved tools |
+| `pymybot agent ...` | Dual-agent autonomous run (or one seeded mission with `--task`) | Via approved tools |
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
 | `pymybot new NAME [--dir DIR] [--force]` | Generate a runnable `robots/`, `scripts/` and `modules/` skeleton | No |
@@ -69,15 +69,18 @@ semantics. Typical usage:
 ```sh
 pymybot roles create technician --description "Field technician"
 pymybot roles list
-pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"
+pymybot agent --role technician                       # 记忆体自拟目标，自主循环
+pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"  # 只跑这一个任务
 pymybot agent --role technician --robot robots/my.sql --scripts-dir scripts --task "运行自检"
 pymybot roles clear-history technician --yes
 pymybot roles delete technician --yes        # permanently remove the role directory
 ```
 
-Agent conversations require a role: `pymybot agent` without `--role` and
-`serve` `agent.ask` without `role` fail with a usage/invalid-params error. There
-is no global default conversation.
+Autonomous runs require a role: `pymybot agent` without `--role` and
+`serve` `agent.start`/`agent.ask` without `role` fail with a usage/invalid-params
+error. There is no global default conversation, no chat composer and no
+single-agent path: the memory and worker agents talk to each other after the
+operator clicks 启动 or runs the command.
 
 Creation copies the bundled prompt baseline. Optional `--skills-dir` and
 `--mcp-config` on `roles create` import those capabilities into the role. Once
@@ -247,7 +250,13 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `role` (required), optional `robot`, `modulePaths`, `scriptsDir`, `skillsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `allowHardware`, `allowActions`, `allowShell`, `allowFileWrites`, `enableShell`, `enableWeb`, `allowWeb`, `workspaceDir`, `model`, `baseUrl`, `apiKeyEnv`, `timeout`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `hotTurns`, `warmTurns`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `protectPrompts`, `searchEndpoint` | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.ask` | `task`, `role` (required), optional `robot`, `modulePaths`, `scriptsDir`, `skillsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `allowHardware`, `allowActions`, `allowShell`, `allowFileWrites`, `enableShell`, `enableWeb`, `allowWeb`, `workspaceDir`, `model`, `baseUrl`, `apiKeyEnv`, `timeout`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `hotTurns`, `warmTurns`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `protectPrompts`, `searchEndpoint` | runs one memory/worker mission to completion without starting the loop; `agent.event` notifications carry `agent: memory\|worker\|system` |
+| `agent.start` | `role` (required), optional `task` seed, `maxMissions`, `maxSeconds`, `pauseSeconds`, `maxRequests`, `maxToolCalls`, `turnTimeout`, `modelRetries`, `fallbackModels`, `requirePlanApproval`, agent options | starts the self-directed loop and returns its status; `team.message`, `mission.*`, `plan.*` and `team.stopped` events follow |
+| `agent.stop` | — | stops the autonomous loop cooperatively and clears the worker stop latch |
+| `agent.status` | — | current loop state, active mission and memory statistics |
+| `agent.memory` | optional `limit`, `kinds`, `tags` | long-term memory entries and statistics |
+| `agent.memory.forget` | `ids` or `kinds`/`tags` | remove matching long-term memories; rejected while the loop runs |
+| `agent.missions` | optional `limit` | persisted mission history |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested, preferring the named role over the active conversation's role |
 | `roles.list` | — | list role-owned resources |
 | `roles.show` | `name` (required) | inspect one role's resources |
@@ -292,6 +301,12 @@ Agent mode is documented in the README. The important flags are:
 | `--max-context-tokens` | Optional model context-window budget (1024–2 MiB tokens, disabled by default). Prunes old complete turns before every model request; must exceed output plus reserve tokens. |
 | `--context-reserve-tokens` | Safety reserve within the context window (0–65536, default 2048), in addition to the 4096-token output budget. |
 | `--prompt-file FILE` | Additional operator-owned UTF-8 profile (max 8 KiB); does not replace runtime USER or the safety prefix/suffix. |
+| `--max-requests` | Maximum provider requests in one worker turn (1–10000, default 64). |
+| `--max-tool-calls` | Maximum tool calls in one worker turn (1–100000, default 128). |
+| `--turn-timeout` | Optional wall-clock budget for one worker turn; 0 disables it (default 0). |
+| `--model-retries` | Optional provider retries for transient model failures (0–10, default 0; dispatched tool outcomes are never retried). |
+| `--fallback-model` | Optional `provider:model` fallback tried after the primary model fails; repeatable. |
+| `--require-plan-approval` | Ask the operator to approve each autonomous mission plan before the worker acts. |
 | `--no-prompt-stats` | Disable automatic host-generated STATS updates (also accepted by `gui`; default false). |
 | `--context-bytes N` | Budget for the generated project inventory (workspace top level, structures, scripts, drivers, skills); 0 disables it (0–64 KiB, default 4096). |
 | `--intent MODE` | `auto` (default), `off`, `chat`, `inspect`, `control`, `author` or `diagnose`. Auto narrows the tool allowlist when the request clearly matches an intent; mixed requests union their tools; messages with no keywords fall back to the read-only `chat` allowlist. `off` removes all routing restrictions. |

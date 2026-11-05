@@ -77,6 +77,12 @@ class GuiConfig:
     hot_turns: int = 3
     warm_turns: int = 10
     prompt_file: str = ""
+    max_requests: int = 64
+    max_tool_calls: int = 128
+    turn_timeout: float = 0.0
+    model_retries: int = 0
+    fallback_models: list[str] = field(default_factory=list)
+    require_plan_approval: bool = False
     auto_stats: bool = True
     context_bytes: int = 4 * 1024
     intent_mode: str = "off"
@@ -121,6 +127,17 @@ class GuiConfig:
             hot_turns=self.hot_turns if type(self.hot_turns) is int and 1 <= self.hot_turns <= 50 else 3,
             warm_turns=self.warm_turns if type(self.warm_turns) is int and 0 <= self.warm_turns <= 200 else 10,
             prompt_file=_text(self.prompt_file),
+            max_requests=(self.max_requests if type(self.max_requests) is int
+                          and 1 <= self.max_requests <= 10_000 else 64),
+            max_tool_calls=(self.max_tool_calls if type(self.max_tool_calls) is int
+                            and 1 <= self.max_tool_calls <= 100_000 else 128),
+            turn_timeout=(float(self.turn_timeout) if isinstance(self.turn_timeout, (int, float))
+                          and not isinstance(self.turn_timeout, bool)
+                          and 0 <= self.turn_timeout <= 86400 else 0.0),
+            model_retries=(self.model_retries if type(self.model_retries) is int
+                           and 0 <= self.model_retries <= 10 else 0),
+            fallback_models=_paths(self.fallback_models),
+            require_plan_approval=bool(self.require_plan_approval),
             auto_stats=self.auto_stats if isinstance(self.auto_stats, bool) else True,
             context_bytes=(self.context_bytes if isinstance(self.context_bytes, int)
                            and 0 <= self.context_bytes <= 64 * 1024 else 4 * 1024),

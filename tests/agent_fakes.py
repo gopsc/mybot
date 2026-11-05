@@ -244,3 +244,46 @@ class TestModel(FunctionModel):
 
 def text_model(text="done"):
     return TestModel(custom_output_text=text)
+
+
+
+def _prompt_text(messages):
+    return " ".join(str(part.content) for message in messages
+                    for part in getattr(message, "parts", ())
+                    if hasattr(part, "content"))
+
+
+def _between(text, start, end):
+    index = text.find(start)
+    if index < 0:
+        return ""
+    index += len(start)
+    stop = text.find(end, index)
+    return (text[index:] if stop < 0 else text[index:stop]).strip()
+
+
+def team_model(worker_model):
+    """Wrap a scripted worker model so it also answers the memory protocol.
+
+    The dual-agent team makes one memory call before the worker runs and one
+    after; tests that only script worker turns still exercise the same worker
+    behaviour through this adapter.
+    """
+    async def respond(messages, info):
+        text = _prompt_text(messages)
+        if "自拟下一个任务目标" in text:
+            return ModelResponse(parts=[TextPart('{"goal":""}')])
+        if "任务目标：" in text and "长期记忆" in text:
+            goal = _between(text, "任务目标：", "\n\n第")
+            report = _between(text, "执行体最近一次回报：", "\n\n请输出")
+            if report.startswith("（尚无回报）"):
+                payload = {"action": "continue", "brief": goal or "执行任务"}
+            else:
+                payload = {"action": "done", "summary": report or "完成"}
+            return ModelResponse(parts=[TextPart(json.dumps(payload, ensure_ascii=False))])
+        value = worker_model.respond(messages, info)
+        if inspect.isawaitable(value):
+            value = await value
+        return value
+
+    return FunctionModel(respond)
