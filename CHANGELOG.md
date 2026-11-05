@@ -8,6 +8,35 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The Agent is now a **dual-agent team**: a tool-less **memory agent** plans,
+  reflects and owns long-term memory, while a **worker agent** keeps the skill,
+  file, shell, web, camera and MCP surface. They exchange a JSON brief/report per
+  step inside a bounded plan → act → reflect loop (`pymybot/agent_team.py`).
+- Long-term memory store (`pymybot/agent_memory_store.py`): one append-only
+  JSONL file per role, retrieved with BM25 over ASCII words plus CJK bigrams —
+  no vector database, no embedding service, no network. Entries carry kind,
+  tags and salience, deduplicate on write and are capped by count and bytes.
+- Mission persistence: every step, decision, usage counter and final answer is
+  written to `~/.mybot/roles/<role>/missions/<id>.json`, so an interrupted run
+  can be inspected or resumed.
+- Autonomous start: the GUI is now a two-voice transcript with 启动 and 停止
+  buttons and no chat composer; `pymybot agent --role NAME` and serve
+  `agent.start` run the same loop. When the queue is empty the memory agent
+  proposes the next goal from the role description and long-term memory, and the
+  loop stops itself when there is nothing worth doing. Per-run caps
+  (`maxMissions`, `maxSeconds`, pause) and per-mission caps still apply.
+- `agent.stop` / `agent.status` expose the loop, and `agent.event` follows with
+  `agent: memory|worker|system` so both voices render separately.
+- A GUI start now skips a configured structure file that no longer exists (old
+  configurations kept a stale path) and reports it, so file/skill/web missions
+  can still run; the agent's start error names the executor failure type.
+- Mission failures are now visible: `mission.end` carries `usage.attempts` and a
+  sanitized `reason`, the worker voice reports the failure, and a memory-agent
+  proposal error is reported as such instead of “no further goal”. After a
+  failure the memory agent is prompted to propose a repair goal.
+- `pymybot agent --task` remains as a one-seed escape hatch: it runs exactly one
+  mission instead of the self-directed loop.
+
 - `pymybot assets list/read/write/delete` manages the bundled `robots` (`.sql`),
   `modules` (`.py`/`.lua`) and `scripts` (`.mt`) asset files in place, with
   traversal/symlink/suffix guards, `--force` to overwrite and `--yes` to delete.
@@ -35,6 +64,16 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `pymybot agent` and serve `agent.ask` now run the dual-agent team by default;
+  each call is a multi-step mission rather than a single tool loop. The
+  `agent.ask` response gains `agents`, `status`, `mission` and `steps`, and
+  events gain an `agent` field (`memory` / `worker` / `system`).
+- The memory agent overrides intent routing for autonomous briefs, so a short
+  instruction cannot accidentally narrow the worker to read-only tools.
+- The human-facing single-agent conversation is gone: there is no chat
+  composer, no CLI REPL and no `--single`/`single: true` compatibility path.
+  Humans only start and stop the dual-agent loop. A one-off `agent.ask` still
+  runs a single team mission for external clients.
 - The `pymybot-scripting` skill is merged into `hardware-controller`: its six
   scripting-grammar references (`structure-sql`, `action-mt`, `driver-lua`,
   `virt-model`, `daemon`, `workflow-errors`) and the three-layer hard rules now

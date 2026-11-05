@@ -17,7 +17,7 @@ pytest.importorskip("langchain")
 
 from agent_fakes import models
 from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, UserPromptPart
-from agent_fakes import DeltaToolCall, FunctionModel
+from agent_fakes import DeltaToolCall, FunctionModel, team_model
 
 import pymybot.agent as agent_module
 from pymybot.agent import (AgentConfig, AgentSession, AgentBudgetExceeded, AgentInterrupted,
@@ -627,7 +627,7 @@ def install_cli_fakes(monkeypatch, executor, model, client):
         executor.stop_event = stop_event
         return executor
     monkeypatch.setattr(agent_module, "RobotExecutor", factory)
-    monkeypatch.setattr(agent_module, "create_model", lambda _: (model, client))
+    monkeypatch.setattr(agent_module, "create_model", lambda _: (team_model(model), client))
 
 
 @pytest.mark.parametrize("primary_failure", [False, True])
@@ -654,7 +654,7 @@ def test_cli_cleanup_failures_preserve_receipts_and_primary_error(monkeypatch, c
         executor.call = unknown_call
     model = scripted_model([ToolCallPart("list_skills", {})], [TextPart("done")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=close_client))
-    code = cli.main(["--no-gui", "--robot", "unused.sql", "--task", "list skills", "--role", "test-role"])
+    code = cli.main(["--no-gui", "--task", "list skills", "--role", "test-role"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert code == 1 and not payload["ok"] and closed == ["executor", "client"]
@@ -665,40 +665,6 @@ def test_cli_cleanup_failures_preserve_receipts_and_primary_error(monkeypatch, c
     assert payload["cleanup_errors"] == expected[cleanup_failure]
     if primary_failure:
         assert "outcome is unknown" in payload["error"]["message"]
-
-def test_interactive_cli_confirms_and_emits_only_final_json(monkeypatch, capsys, tmp_path):
-    from pymybot import cli
-    executor = FakeExecutor()
-    closed = []
-
-    async def close_client():
-        closed.append(True)
-
-    model = scripted_model([ToolCallPart("install_skill", {"path": "cli-created"})],
-        [TextPart("已完成")])
-    install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=close_client))
-    monkeypatch.setattr(sys, "stdin", FakeTTY("创建技能\ny\n/exit\n"))
-    code = cli.main(["--no-gui", "--robot", "unused.sql", "--role", "test-role"])
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert code == 0 and len(captured.out.splitlines()) == 1
-    assert payload["turns"] == 1 and payload["output"] == "已完成"
-    assert "Approve install_skill" in captured.err and "已完成" in captured.err
-    assert len(executor.calls) == 1 and executor.closed and closed == [True]
-
-def test_interactive_cli_streams_to_stderr_and_does_not_reprint(monkeypatch, capsys):
-    from pymybot import cli
-    executor = FakeExecutor()
-    model = scripted_model([ToolCallPart("list_skills", {})], [TextPart("AAAA BBBB")])
-    install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=lambda: asyncio.sleep(0)))
-    monkeypatch.setattr(sys, "stdin", FakeTTY("list\n/exit\n"))
-    code = cli.main(["--no-gui", "--robot", "unused.sql", "--role", "test-role"])
-    captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert code == 0 and len(captured.out.splitlines()) == 1
-    assert payload["turns"] == 1 and payload["output"] == "AAAA BBBB"
-    assert "→ list_skills(" in captured.err and "⇦ list_skills completed" in captured.err
-    assert captured.err.count("AAAA BBBB") == 1
 
 @contextmanager
 def fake_openai(respond):
@@ -779,7 +745,14 @@ def test_cli_real_sdk_model_loop_with_generic_tools(tmp_path, monkeypatch, capsy
         assert body["model"] == "test" and body["parallel_tool_calls"] is False
         roles = [m["role"] for m in body["messages"]]
         assert roles[0] == "system" and roles.count("system") == 1
-        if count == 1:
+        if "记忆体" in body["messages"][0]["content"]:
+            prompt = "\n".join(m.get("content") or "" for m in body["messages"] if m["role"] == "user")
+            if "（尚无回报）" in prompt:
+                return completion({"role": "assistant", "content": json.dumps(
+                    {"action": "continue", "brief": "list files"}, ensure_ascii=False)})
+            return completion({"role": "assistant", "content": json.dumps(
+                {"action": "done", "summary": "文件已列出"}, ensure_ascii=False)})
+        if count == 2:
             return completion({"role": "assistant", "content": None, "tool_calls": [
                 {"id": "files-1", "type": "function", "function": {
                     "name": "list_files", "arguments": "{}"}}]}, tool=True)
@@ -792,7 +765,7 @@ def test_cli_real_sdk_model_loop_with_generic_tools(tmp_path, monkeypatch, capsy
                          "--base-url", url, "--role", "test-role"])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    assert code == 0 and payload["output"] == "文件已列出" and len(requests) == 2
+    assert code == 0 and payload["output"] == "文件已列出" and len(requests) == 4
     assert payload["tool_events"][-1]["state"] == "completed"
     assert payload["tool_events"][-1]["tool"] == "list_files"
 
@@ -810,14 +783,31 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
         def log_message(self, *args):
             pass
         def do_POST(self):
-            self.rfile.read(int(self.headers["Content-Length"]))
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             ports.append(self.client_address[1])
-            message = ({"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function",
-                        "function": {"name": "list_hardware", "arguments": "{}"}}]}
-                       if len(ports) == 1 else {"role": "assistant", "content": "done"})
-            raw = sse_body(completion(message, tool=len(ports) == 1)[1])
+            if "记忆体" in (body["messages"][0].get("content") or ""):
+                prompt = "\n".join(m.get("content") or "" for m in body["messages"] if m["role"] == "user")
+                if "（尚无回报）" in prompt:
+                    message = {"role": "assistant", "content": json.dumps(
+                        {"action": "continue", "brief": "列出硬件"}, ensure_ascii=False)}
+                else:
+                    message = {"role": "assistant", "content": json.dumps(
+                        {"action": "done", "summary": "done"}, ensure_ascii=False)}
+                payload = completion(message)[1]
+            else:
+                tool = len(ports) == 2
+                message = ({"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function",
+                            "function": {"name": "list_hardware", "arguments": "{}"}}]}
+                           if tool else {"role": "assistant", "content": "done"})
+                payload = completion(message, tool=tool)[1]
+            if body.get("stream"):
+                raw = sse_body(payload)
+                content_type = "text/event-stream"
+            else:
+                raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                content_type = "application/json"
             self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
@@ -832,7 +822,7 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
         server.server_close()
         thread.join(timeout=5)
     assert code == 0 and json.loads(capsys.readouterr().out)["output"] == "done"
-    assert len(ports) == 2 and ports[0] != ports[1]
+    assert len(ports) == 4 and len(set(ports)) == len(ports)
 
 
 def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
@@ -875,7 +865,8 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
     def forbidden_activation(*args, **kwargs):
         pytest.fail("Workspace tools must not activate hardware")
     monkeypatch.setattr(Robot, "active", forbidden_activation)
-    monkeypatch.setattr(agent_module, "create_model", lambda _: (FunctionModel(respond, stream_function=stream), None))
+    monkeypatch.setattr(agent_module, "create_model",
+                        lambda _: (team_model(FunctionModel(respond, stream_function=stream)), None))
     flags = ["--enable-shell", "--allow-shell"] if shell else []
     code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),
                      "--role", "test-role", *flags,
@@ -1080,7 +1071,7 @@ def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
     model = scripted_model([TextPart("done")])
     install_cli_fakes(monkeypatch, executor, model, SimpleNamespace(close=lambda: asyncio.sleep(0)))
 
-    code = cli.main(["--no-gui", "--robot", "unused.sql", "--model", "openai:test", "--task", "hello",
+    code = cli.main(["--no-gui", "--model", "openai:test", "--task", "hello",
                      "--role", "test-role"])
     captured = capsys.readouterr()
     assert code == 0 and "session log:" in captured.err
@@ -1092,7 +1083,7 @@ def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
         "session_start", "user", "intent", "prompt_version", "assistant", "usage",
         "prompt_update", "prompt_update", "prompt_update", "session_end"]
     assert events[1]["text"] == "hello"
-    assert events[2]["name"] == "chat"
+    assert events[2]["name"] == "off"
     assert events[3]["layers"].keys() == {"0", "10", "97", "98", "99", "100"}
     assert events[4]["text"] == "done"
     assert events[6]["actor"] == "stats"
@@ -1149,3 +1140,15 @@ def test_malformed_mcp_schema_entries_are_skipped():
     assert model().good is None
     with pytest.raises(Exception):
         model(good="x", unexpected=1)
+
+
+def test_start_reports_the_executor_failure_type():
+    class FailingExecutor(FakeExecutor):
+        async def start(self, *, deadline=None):
+            return {"ok": False, "error": {"type": "FileNotFoundError", "message": "hidden"},
+                    "state": "not_executed"}
+
+    session = AgentSession(FailingExecutor(), None)
+    with pytest.raises(AgentConfigurationError) as caught:
+        asyncio.run(session.start())
+    assert "FileNotFoundError" in str(caught.value)

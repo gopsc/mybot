@@ -476,7 +476,8 @@ def test_role_selector_binds_agent_params_and_reset(app_factory, monkeypatch, tm
     assert app.role_box.currentData() == "tech"
     assert app.context_entries["skills_dir"].text() == str(role.skills_dir)
     assert not app.context_entries["skills_dir"].isEnabled()
-    params = app._agent_params("hello")
+    params = app._agent_params()
+    assert "task" not in params
     assert params["role"] == "tech"
     assert params["workspaceDir"] == str(role.workspace_dir)
     assert "skillsDir" not in params and "mcpConfig" not in params
@@ -486,13 +487,12 @@ def test_role_selector_binds_agent_params_and_reset(app_factory, monkeypatch, tm
     assert client.requests[-1] == ("agent.reset", {"clearHistory": True, "role": "tech"})
 
 
-def test_conversation_requires_a_role(app_factory):
+def test_autonomy_requires_a_role(app_factory):
     _, app = app_factory(config=GuiConfig(workspace=str(ROOT)))
     client = attach_client(app)
-    app.task_box.setPlainText("列出硬件")
-    app.send_button.click()
+    app.start_button.click()
     assert client.requests == []
-    assert "对话需要角色" in app.chat.toPlainText()
+    assert "自主运行需要角色" in app.chat.toPlainText()
 
 
 def test_delete_role_closes_the_conversation_and_removes_the_directory(ui, qapp, monkeypatch):
@@ -528,7 +528,7 @@ def test_new_role_falls_back_to_default_skills(app_factory, monkeypatch, tmp_pat
 def test_window_builds_with_robot_context(ui):
     gui, app = ui
     assert isinstance(app, gui.QMainWindow)
-    assert app.send_button.isEnabled() and not app.stop_button.isEnabled()
+    assert app.start_button.isEnabled() and not app.stop_button.isEnabled()
     assert "未启动" in app.status_state.text()
     assert [app.notebook.tabText(i) for i in range(2)] == ["对话", "日志"]
 
@@ -568,7 +568,7 @@ def test_theme_is_readable_without_changing_system_palette(app_factory, qapp, da
             palette = widget.palette()
             assert palette.color(QPalette.ColorRole.Window).lightnessF() > 0.9
             assert color_contrast(palette.windowText().color(), palette.window().color()) >= 4.5
-        for widget in (app.chat, app.log, app.task_box,
+        for widget in (app.chat, app.log,
                        dialogs[0].entries["model"], dialogs[1].arguments):
             for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
                 palette = widget.palette()
@@ -578,16 +578,13 @@ def test_theme_is_readable_without_changing_system_palette(app_factory, qapp, da
                                       palette.color(group, QPalette.ColorRole.Highlight)) >= 4.5
         for color in gui.PALETTE.values():
             assert color_contrast(QColor(color), app.chat.palette().base().color()) >= 4.5
-        assert app.task_box.palette().placeholderText().color().alpha() == 255
-        assert color_contrast(app.task_box.palette().placeholderText().color(),
-                              app.task_box.palette().base().color()) >= 4.5
         for label in app.findChildren(gui.QLabel):
             assert color_contrast(label.palette().windowText().color(), QColor("#f3f5f8")) >= 4.5
         for enabled in (True, False):
-            app.send_button.setEnabled(enabled)
+            app.start_button.setEnabled(enabled)
             app.stop_button.setEnabled(enabled)
             qapp.processEvents()
-            for button in (app.send_button, app.stop_button):
+            for button in (app.start_button, app.stop_button):
                 palette = button.palette()
                 assert color_contrast(palette.buttonText().color(), palette.button().color()) >= 4.5
         assert dialogs[1].deny_button.isDefault()
@@ -769,36 +766,13 @@ def test_settings_failure_notice_after_modal_save(app_factory, interact, monkeyp
     assert "已应用" in app.status_notice.text() and "写入失败" in app.status_notice.text()
 
 
-def test_chat_placeholder_hides_while_focused(ui, qapp):
+def test_start_sends_agent_start_without_a_task(ui):
     _, app = ui
-    app.send_button.setFocus()
-    assert qt_wait(qapp, app.send_button.hasFocus)
-    assert app.task_box.placeholderText() == "与机器人对话…"
-
-    app.task_box.setFocus()
-    assert qt_wait(qapp, app.task_box.hasFocus)
-    assert app.task_box.placeholderText() == ""
-
-    app.send_button.setFocus()
-    assert qt_wait(qapp, app.send_button.hasFocus)
-    assert app.task_box.placeholderText() == "与机器人对话…"
-
-
-@pytest.mark.parametrize("key", ["Key_Return", "Key_Enter"])
-def test_ctrl_enter_sends_with_native_shortcut(ui, qapp, key):
-    from PySide6.QtTest import QTest
-
-    gui, app = ui
     client = attach_client(app)
-    app.task_box.setPlainText("列出硬件")
-    app.task_box.setFocus()
-    assert qt_wait(qapp, app.task_box.hasFocus)
-    QTest.keyClick(app.task_box, getattr(gui.Qt.Key, key), gui.Qt.KeyboardModifier.ControlModifier)
-    assert len(client.requests) == 1 and client.requests[0][0] == "agent.ask"
-    assert client.requests[0][1]["task"] == "列出硬件"
-    assert client.requests[0][1]["allowHardware"] is True
-    assert app.task_box.toPlainText() == ""
-    assert not app.send_button.isEnabled() and not app.new_button.isEnabled()
+    app.start_button.click()
+    assert len(client.requests) == 1 and client.requests[0][0] == "agent.start"
+    assert "task" not in client.requests[0][1]
+    assert not app.start_button.isEnabled() and not app.new_button.isEnabled()
     assert app.stop_button.isEnabled()
 
 
@@ -807,8 +781,7 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     client = attach_client(app)
     app.context_entries["skills_dir"].setText("skills")
     app.cfg.vars = {"user": "alice"}
-    app.task_box.setPlainText("hello")
-    app.send_button.click()
+    app.start_button.click()
     params = client.requests[0][1]
     assert params["role"] == "test-role"
     assert "skillsDir" not in params and "mcpConfig" not in params
@@ -823,54 +796,49 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
 def test_abort_button_targets_the_server_not_the_agent_turn(ui, qapp):
     _, app = ui
     client = attach_client(app)
-    app.task_box.setPlainText("hello")
-    app.send_button.click()
+    app.start_button.click()
     app.abort_button.click()
 
     assert client.requests[-1] == ("abort", {})
-    assert client.cancelled == [1]
     client.futures[-1].set_result({"state": "Aborted", "safe_failures": []})
     assert qt_wait(qapp, lambda: "急停完成" in app.status_notice.text())
 
 
-def test_composer_sends_without_a_server_and_remembers_the_task(ui, monkeypatch):
+def test_start_without_a_server_queues_start(ui, monkeypatch):
     _, app = ui
     started = []
     monkeypatch.setattr(app, "_start_server", lambda: started.append(True))
-    app.task_box.setPlainText("列出硬件")
-    app.send_task()
-    assert app.pending_task == "列出硬件" and started == [True]
-    assert app.stop_button.isEnabled()
-    app.stop_button.click()
-    assert app.pending_task == "" and not app.stop_button.isEnabled()
+    app.start_autonomy()
+    assert app.pending_start is True and started == [True]
+    app.stop_autonomy()
+    assert app.pending_start is False
 
 
 @pytest.mark.parametrize("cancel", [False, True])
-def test_startup_sends_only_the_queued_task_and_preserves_new_draft(ui, monkeypatch, cancel):
+def test_startup_sends_only_the_queued_start(ui, monkeypatch, cancel):
     _, app = ui
     monkeypatch.setattr(app, "_start_server", lambda: None)
-    app.task_box.setPlainText("queued task")
-    app.send_task()
-    app.task_box.setPlainText("unsent draft")
+    app.start_autonomy()
+    assert app.pending_start is True
     if cancel:
-        app.stop_button.click()
+        app.stop_autonomy()
     client = FakeClient()
     app._server_started(app.generation, (client, {"agent": True, "protocol": 1}), None)
-    assert app.task_box.toPlainText() == "unsent draft"
-    assert app.pending_task == ""
+    assert app.pending_start is False
     assert len(client.requests) == (0 if cancel else 1)
     if not cancel:
-        assert client.requests[0][1]["task"] == "queued task"
+        assert client.requests[0][0] == "agent.start"
+        assert "task" not in client.requests[0][1]
 
 
 def test_stop_and_reset_native_buttons(ui, qapp):
     _, app = ui
     client = attach_client(app)
-    app.task_box.setPlainText("hello")
-    app.send_button.click()
+    app.start_button.click()
     app.stop_button.click()
-    assert client.cancelled == [1]
-    client.futures[0].set_exception(RpcError("cancelled", code=gui_protocol.CANCELLED))
+    assert [entry[0] for entry in client.requests] == ["agent.start", "agent.stop"]
+    client.futures[0].set_result({"state": "running"})
+    client.futures[1].set_result({"state": "stopped", "running": False})
     assert qt_wait(qapp, lambda: not app.busy)
     assert "[已停止]" in app.chat.toPlainText()
     app.new_button.click()
@@ -884,36 +852,35 @@ def test_stop_and_reset_native_buttons(ui, qapp):
 def test_new_conversation_queues_reset_until_server_is_ready(ui, qapp, monkeypatch):
     _, app = ui
     monkeypatch.setattr(app, "_start_server", lambda: None)
-    app._chat_line("你：旧问题", "user")
-    app.pending_task = "queued task"
+    app._chat_line("旧问题", "user")
+    app.pending_start = True
     app.new_button.click()
     assert app.pending_reset is True
     client = FakeClient()
     app._server_started(app.generation, (client, {"agent": True, "protocol": 1}), None)
-    assert app.pending_reset is False and app.pending_task == ""
+    assert app.pending_reset is False and app.pending_start is False
     assert client.requests[-1] == ("agent.reset", {"clearHistory": True, "role": "test-role"})
     client.futures[-1].set_result({})
     assert qt_wait(qapp, lambda: "新对话，硬件已释放" in app.chat.toPlainText())
     assert "旧问题" not in app.chat.toPlainText()
-    assert "queued task" not in app.chat.toPlainText()
 
 
 def test_stale_generations_and_reused_turn_ids_are_ignored(ui):
     _, app = ui
     attach_client(app)
     app.generation = 5
-    app.turn_id = 1
+    app.run_id = 1
     app._set_busy(True)
     app._on_notify(4, "agent.event", {"id": 1, "event": {"type": "text_delta", "text": "stale"}})
     app._on_request(4, "s1", "confirm", {})
-    app._turn_done(4, 1, {"output": "stale"}, None)
+    app._start_done(4, 1, {"state": "running"}, None)
     app._on_reset(4, None)
     app._on_serve_exit(4, 1)
-    assert app.busy and app.turn_id == 1 and app.chat.toPlainText() == ""
+    assert app.busy and app.run_id == 1 and app.chat.toPlainText() == ""
     app._on_notify(5, "agent.event", {"id": 1, "event": {"type": "text_delta", "text": "current"}})
-    app._turn_done(5, 1, {"output": "not duplicated", "usage": {"requests": 2}}, None)
-    assert app.chat.toPlainText().startswith("current\n[完成 · 请求 2")
-    assert "not duplicated" not in app.chat.toPlainText() and not app.busy
+    app._start_done(5, 1, {"state": "running"}, None)
+    assert app.chat.toPlainText().startswith("current\n")
+    assert "自主循环运行中" in app.chat.toPlainText() and app.busy
 
 
 def test_callbacks_are_marshaled_to_qt_thread(ui, qapp):
@@ -1201,16 +1168,17 @@ def test_settings_cover_backend_budgets(ui):
         dialog.close()
 
 
-def test_send_enables_all_tools_without_approval(ui):
+def test_start_enables_all_tools_without_approval(ui):
     gui, app = ui
     client = attach_client(app)
     app.cfg.mcp_config = str(ROOT / "mcp.json")
     app.context_entries["mcp_config"].setText(str(ROOT / "mcp.json"))
     app.cfg.max_context_tokens = 32768
     app.cfg.context_reserve_tokens = 1024
-    assert app._send("列出硬件")
+    app.start_button.click()
     method, params = client.requests[-1]
-    assert method == "agent.ask"
+    assert method == "agent.start"
+    assert "task" not in params
     assert params["workspaceDir"] == app._workspace_root()
     assert params["allowFileWrites"] is True
     assert params["enableShell"] is True
@@ -1220,17 +1188,6 @@ def test_send_enables_all_tools_without_approval(ui):
     assert params["maxHistoryBytes"] == app.cfg.max_history_bytes
     assert params["maxContextTokens"] == 32768
     assert params["contextReserveTokens"] == 1024
-
-
-def test_retry_resends_the_last_task(ui):
-    gui, app = ui
-    client = attach_client(app)
-    app.last_task = "列出硬件"
-    app._refresh_status()
-    assert app.composer_retry.isEnabled()
-    app.retry_task()
-    assert client.requests[-1][0] == "agent.ask"
-    assert client.requests[-1][1]["task"] == "列出硬件"
 
 
 def test_clear_chat_requires_confirmation(ui, interact):
@@ -1625,3 +1582,13 @@ def test_role_switch_loads_new_history(ui):
         assert "角色A" not in text
     finally:
         delete_role("history-other")
+
+
+def test_start_skips_a_missing_structure_file(ui):
+    _, app = ui
+    client = attach_client(app)
+    app.cfg.robot = "/nonexistent/robot.sql"
+    app.start_button.click()
+    assert client.requests[-1][0] == "agent.start"
+    assert "robot" not in client.requests[-1][1]
+    assert "结构文件不存在" in app.status_notice.text()

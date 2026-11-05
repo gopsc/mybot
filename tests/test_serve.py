@@ -466,6 +466,7 @@ class LifecycleHarness:
         self.robots = []
         self.agents = []
         self.params = {"robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace), "task": "test",
+                       "single": True,
                        "role": "test-role"}
         from pymybot.roles import create_role, load_role, role_path
         # Tests that restore the real open_agent need a loadable role on disk.
@@ -1038,7 +1039,7 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
     pytest.importorskip("langchain")
     from agent_fakes import models
     from agent_fakes import ModelResponse, TextPart, ToolCallPart
-    from agent_fakes import DeltaToolCall, FunctionModel
+    from agent_fakes import DeltaToolCall, FunctionModel, team_model
     import pymybot.agent as agent_module
 
     monkeypatch.setattr(models, "ALLOW_MODEL_REQUESTS", False)
@@ -1063,7 +1064,8 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
         async def close(self):
             pass
 
-    monkeypatch.setattr(agent_module, "create_model", lambda config: (make_model(), FakeClient()))
+    monkeypatch.setattr(agent_module, "create_model",
+                        lambda config: (team_model(make_model()), FakeClient()))
     from pymybot.roles import create_role
     params = {"task": "编写文件", "robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace),
               "model": "openai:fake", "role": create_role("test-role").name}
@@ -1145,7 +1147,7 @@ def test_open_agent_wires_workspace_shell_and_file_write_grants(monkeypatch, tmp
 
     server = serve.Server(io.StringIO(), threading.Event())
     key = {
-        "robot": "r.sql", "modulePaths": [], "scriptsDir": "scripts",
+        "robot": "", "modulePaths": [], "scriptsDir": "scripts",
         "skillsDir": "", "model": "", "baseUrl": "", "apiKeyEnv": "",
         "allowActions": False, "allowHardware": False, "vars": {},
         "timeout": 10,
@@ -1197,3 +1199,135 @@ def test_open_agent_rejects_conflicting_role_path_overrides(monkeypatch, tmp_pat
     with pytest.raises(agent_module.AgentConfigurationError):
         asyncio.run(server.open_agent({**base, "workspaceDir": str(role.workspace_dir),
                                        "skillsDir": str(role.skills_dir)}))
+
+
+def test_serve_dual_agent_reports_both_voices(tmp_path, monkeypatch):
+    """agent.ask is the memory/worker team by default and tags both voices."""
+    from pymybot import agent as agent_module
+    from pymybot.roles import create_role, load_role, role_path
+    from agent_fakes import FunctionModel, ModelResponse, TextPart
+
+    role = load_role("dual-role") if role_path("dual-role").exists() else create_role("dual-role")
+    decisions = iter([
+        {"action": "continue", "brief": "执行自检", "reasoning": "先验证"},
+        {"action": "done", "summary": "自检完成",
+         "memories": [{"text": "relay0 自检通过", "kind": "fact"}]},
+    ])
+
+    def respond(messages, info):
+        text = " ".join(str(part.content) for message in messages
+                        for part in getattr(message, "parts", ()) if hasattr(part, "content"))
+        if "长期记忆" in text:
+            return ModelResponse(parts=[TextPart(json.dumps(next(decisions), ensure_ascii=False))])
+        return ModelResponse(parts=[TextPart("执行体回报")])
+
+    class FakeClient:
+        async def close(self):
+            pass
+
+    robot = tmp_path / "robot.sql"
+    robot.write_text("CREATE TABLE dummy(name String);", encoding="utf-8")
+    monkeypatch.setattr(agent_module, "create_model",
+                        lambda config: (FunctionModel(respond), FakeClient()))
+    params = {"task": "检查继电器", "robot": str(robot), "role": role.name, "model": "openai:fake"}
+
+    async def scenario():
+        out = Out()
+        server = serve.Server(out, threading.Event())
+        lines = asyncio.Queue()
+        task = asyncio.create_task(server.serve(lines))
+
+        def put(message):
+            lines.put_nowait(json.dumps({"jsonrpc": "2.0", **message}))
+
+        async def until(ident):
+            seen = []
+            while True:
+                message = await asyncio.to_thread(out.lines.get, True, 20)
+                if message.get("id") == ident:
+                    return message, seen
+                seen.append(message)
+
+        try:
+            put({"id": 1, "method": "agent.ask", "params": params})
+            reply, seen = await until(1)
+            assert reply["result"]["output"] == "自检完成"
+            assert reply["result"]["agents"] == ["memory", "worker"]
+            voices = {message["params"]["event"].get("agent")
+                      for message in seen
+                      if message.get("method") == "agent.event"
+                      and message["params"]["event"].get("type") == "team.message"}
+            assert {"memory", "worker"} <= voices
+            assert (role.root / "memory" / "entries.jsonl").is_file()
+        finally:
+            lines.put_nowait(None)
+            await asyncio.wait_for(task, 30)
+
+    asyncio.run(scenario())
+
+
+def test_serve_start_runs_the_autonomous_loop(tmp_path, monkeypatch):
+    """agent.start begins the self-directed dialogue with no human task."""
+    from pymybot import agent as agent_module
+    from pymybot.roles import create_role, load_role, role_path
+    from agent_fakes import FunctionModel, ModelResponse, TextPart
+
+    role = load_role("auto-role") if role_path("auto-role").exists() else create_role("auto-role")
+    script = iter([
+        {"goal": "巡检继电器"},
+        {"action": "continue", "brief": "执行巡检"},
+        {"action": "done", "summary": "巡检完成"},
+        {"goal": ""},
+    ])
+
+    def respond(messages, info):
+        text = " ".join(str(part.content) for message in messages
+                        for part in getattr(message, "parts", ()) if hasattr(part, "content"))
+        if "自拟下一个任务目标" in text or "长期记忆" in text:
+            return ModelResponse(parts=[TextPart(json.dumps(next(script), ensure_ascii=False))])
+        return ModelResponse(parts=[TextPart("执行体回报")])
+
+    class FakeClient:
+        async def close(self):
+            pass
+
+    robot = tmp_path / "robot.sql"
+    robot.write_text("CREATE TABLE dummy(name String);", encoding="utf-8")
+    monkeypatch.setattr(agent_module, "create_model",
+                        lambda config: (FunctionModel(respond), FakeClient()))
+    params = {"robot": str(robot), "role": role.name, "model": "openai:fake",
+              "maxMissions": 2, "pauseSeconds": 0.01}
+
+    async def scenario():
+        out = Out()
+        server = serve.Server(out, threading.Event())
+        lines = asyncio.Queue()
+        task = asyncio.create_task(server.serve(lines))
+
+        def put(message):
+            lines.put_nowait(json.dumps({"jsonrpc": "2.0", **message}))
+
+        async def until_stopped(ident):
+            seen = []
+            while True:
+                message = await asyncio.to_thread(out.lines.get, True, 20)
+                if message.get("id") == ident and "result" in message:
+                    assert message["result"]["running"] is True
+                seen.append(message)
+                event = message.get("params", {}).get("event") or {}
+                if (message.get("method") == "agent.event" and message["params"]["id"] == ident
+                        and event.get("type") == "team.stopped"):
+                    return seen
+
+        try:
+            put({"id": 1, "method": "agent.start", "params": params})
+            seen = await until_stopped(1)
+            kinds = [m["params"]["event"]["type"] for m in seen
+                     if m.get("method") == "agent.event" and m["params"]["id"] == 1]
+            assert "mission.start" in kinds and "mission.end" in kinds
+            assert server.agent["session"].auto_status()["running"] is False
+        finally:
+            lines.put_nowait(None)
+            await asyncio.wait_for(task, 30)
+
+    asyncio.run(scenario())

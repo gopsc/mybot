@@ -129,7 +129,9 @@ Key invariants:
 | `pymybot/native.py` | Compile-only validation, per-row Python modules, Driver context and results |
 | `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Shell host operations |
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
-| `pymybot/agent.py` | LangGraph agent, model configuration, tool loop |
+| `pymybot/agent.py` | LangGraph worker agent, model configuration, tool loop |
+| `pymybot/agent_team.py` | memory agent, plan/act/reflect loop, mission persistence, unattended mode |
+| `pymybot/agent_memory_store.py` | long-term memory JSONL store and lexical BM25 retrieval |
 | `pymybot/camera.py` | Host camera enumeration and JPEG capture for the Agent tools |
 | `pymybot/images.py` | Bounded image-container validation for receipts and camera output |
 | `pymybot/agent_skill_runner.py` | Trusted Skill entrypoint resolution (legacy manifest or `scripts/`), scoped arguments and bounded Skill subprocess |
@@ -174,9 +176,16 @@ flowchart TB
 
 - **GUI** never executes robot logic itself; it drives one `serve` child process
   and marshals all callbacks onto the Qt GUI thread.
-- **Agent modes** execute tools through `RobotExecutor`, which runs hardware
-  work on a dedicated owner thread. Host-gated tools ask for approval through a
-  callback; trusted skill actions execute without approval.
+- **Agent modes** run a dual-agent team by default: a tool-less **memory agent**
+  plans and reflects, and a **worker agent** owns the tool surface and talks to
+  `RobotExecutor`, which runs hardware work on a dedicated owner thread.
+  There is no single-agent conversation path. The team starts from the GUI
+  「启动」 button (`agent.start`) or `pymybot agent --role NAME`, proposes its own
+  goals when the queue is empty, and runs until stopped or its per-mission and
+  per-run caps are reached. `agent.ask` executes one mission for external
+  clients without starting the loop.
+  Host-gated tools ask for approval through a callback; trusted skill actions
+  execute without approval.
   The selected role under `~/.mybot/roles` supplies the session's PromptLibrary,
   Skills, MCP configuration and resumable model history, and is required for
   agent conversations; it does not change hardware ownership or approval boundaries.
