@@ -31,8 +31,8 @@ from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
-                      PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
-from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python
+                      PromptPanel, ResourcePanel, SessionsDialog)
+from .protocol import CANCELLED, RpcError, ServeClient, resolve_python
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
 
@@ -213,7 +213,8 @@ class App(QMainWindow):
         toolbar.addWidget(self.create_role_button)
         self.delete_role_button = _button("删除", self.delete_role)
         toolbar.addWidget(self.delete_role_button)
-        toolbar.addWidget(_button("刷新", self.refresh_context))
+        self.refresh_button = _button("刷新", self.refresh_context)
+        toolbar.addWidget(self.refresh_button)
         toolbar.addStretch(1)
         self.manage_button = QToolButton()
         self.manage_button.setText("管理")
@@ -574,6 +575,9 @@ class App(QMainWindow):
         self.model_label.setText(f"模型：{model or '未设置（需 MYBOT_MODEL）'}\n端点：{endpoint}\n密钥变量：{key_env}")
 
     def pick_workspace(self):
+        if self.busy:
+            self._notice("执行中不能切换工作区；先停止当前这一轮")
+            return
         if self.cfg.role:
             self._notice(f"当前角色使用固定工作区：{self._workspace_root()}", seconds=8)
             return
@@ -627,7 +631,15 @@ class App(QMainWindow):
             entry.blockSignals(False)
 
     def on_role_changed(self):
+        previous = self.cfg.role
         self.cfg.role = self.role_box.currentData() or ""
+        if self.cfg.role != previous:
+            # The serve child keeps the previous role's conversation (and its
+            # workspace lock and hardware) until something asks it to close.
+            # Switching roles is the operator leaving that conversation, so
+            # release it before the next turn can claim another role.
+            self._release_conversation()
+            self._clear_transcript()
         self.delete_role_button.setEnabled(bool(self.cfg.role))
         self._sync_role_paths()
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
@@ -635,6 +647,30 @@ class App(QMainWindow):
         self._save()
         self._load_role_history()
         self._notice(f"已选择角色：{self.cfg.role}" if self.cfg.role else "请先新建角色再对话")
+
+    def _release_conversation(self):
+        """Close the active Agent conversation without clearing saved history."""
+        client = self.serve
+        if client is None or self._stopping:
+            return
+        generation = self.generation
+        try:
+            _, future = client.start_request("agent.reset", {})
+        except RpcError as exc:
+            self._log(f"[gui] 关闭上一角色的会话失败：{exc}\n")
+            return
+        self._background(lambda: future.result(),
+                         lambda _value, error: self._conversation_released(generation, error))
+
+    def _conversation_released(self, generation, error):
+        if generation != self.generation or self._stopping:
+            return
+        if error is not None:
+            self._log(f"[gui] 关闭上一角色的会话失败：{error}\n")
+            self._notice("上一角色的会话未能关闭；发送前会再次尝试")
+            self._refresh_status()
+        else:
+            self._refresh_status()
 
     def new_role(self):
         if self._stopping or self.busy:
@@ -1162,7 +1198,7 @@ class App(QMainWindow):
             failures = len(result.get("safe_failures") or [])
             suffix = f"（{failures} 个 safe() 失败）" if failures else ""
             self._notice("急停完成，硬件会话已释放" + suffix, seconds=12)
-        self.refresh_context()
+        self._refresh_status()
 
     def new_conversation(self):
         if self._stopping:
@@ -1317,6 +1353,9 @@ class App(QMainWindow):
     def open_console(self):
         if self._stopping:
             return
+        if self.busy:
+            self._notice("执行中不能打开命令面板：第二次硬件会话会与当前轮冲突")
+            return
         self._sync_config()
         workspace = self._workspace_root()
         dialog = CommandDialog(
@@ -1384,13 +1423,23 @@ class App(QMainWindow):
         return approved
 
     def refresh_context(self):
+        if self.busy:
+            self._notice("执行中不能刷新上下文；先停止当前这一轮")
+            return
+        previous = self.cfg.role
         self._sync_config()
         self._load_role_list()
+        if self.cfg.role != previous:
+            self._release_conversation()
+            self._clear_transcript()
         self._load_role_history()
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
 
     def open_settings(self):
         if self._stopping:
+            return
+        if self.busy:
+            self._notice("执行中不能修改设置；先停止当前这一轮")
             return
         self._sync_config()
         dialog = SettingsDialog(self, self.cfg, self._workspace_root(), str(self.config_path))
@@ -1440,6 +1489,7 @@ class App(QMainWindow):
         self.busy = busy
         self.send_button.setEnabled(not busy)
         self.new_button.setEnabled(not busy)
+        self.refresh_button.setEnabled(not busy)
         self.role_box.setEnabled(not busy)
         self.create_role_button.setEnabled(not busy)
         self.busy_progress.setVisible(busy)
@@ -1542,6 +1592,7 @@ class SettingsDialog(QDialog):
         self.resize(760, 760)
         self.values = None
         self.entries = {}
+        self.field_buttons = {}
         self._workspace = workspace
         self._role = cfg.role
         layout = QVBoxLayout(self)
@@ -1553,10 +1604,6 @@ class SettingsDialog(QDialog):
         self._field(general_form, cfg, "workspace", "工作区", browse=True)
         self._field(general_form, cfg, "python", "Python 解释器")
         self._field(general_form, cfg, "skills_dir", "技能目录", browse=True)
-        if self._role:
-            workspace_entry = self.entries["workspace"]
-            workspace_entry.setText(str(role_path(self._role) / "workspace"))
-            workspace_entry.setEnabled(False)
         tabs.addTab(general, "通用")
 
         model = QWidget()
@@ -1621,6 +1668,7 @@ class SettingsDialog(QDialog):
         self._field(advanced_form, cfg, "vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）", kind="lines")
         advanced_form.addRow(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
         tabs.addTab(advanced, "高级 / MCP")
+        self._bind_role_paths()
 
         self.prompts = PromptPanel(
             self, auto_stats=cfg.auto_stats,
@@ -1652,16 +1700,36 @@ class SettingsDialog(QDialog):
         if browse:
             row = QHBoxLayout()
             row.addWidget(widget)
-            row.addWidget(_button("…", lambda checked=False, w=widget: self._browse(w)))
+            button = _button("…", lambda checked=False, w=widget: self._browse(w))
+            self.field_buttons[name] = button
+            row.addWidget(button)
             form.addRow(label, row)
         elif browse_file:
             row = QHBoxLayout()
             row.addWidget(widget)
-            row.addWidget(_button("…", lambda checked=False, w=widget: self._browse_file(
-                w, caption, file_filter)))
+            button = _button("…", lambda checked=False, w=widget: self._browse_file(
+                w, caption, file_filter))
+            self.field_buttons[name] = button
+            row.addWidget(button)
             form.addRow(label, row)
         else:
             form.addRow(label, widget)
+
+    def _bind_role_paths(self):
+        """Show role-owned paths read-only; the backend ignores global overrides."""
+        if not self._role:
+            return
+        root = role_path(self._role)
+        values = {"workspace": root / "workspace", "skills_dir": root / "skills",
+                  "mcp_config": root / "mcp.json"}
+        for name, path in values.items():
+            entry = self.entries[name]
+            entry.setText(str(path))
+            entry.setToolTip(str(path))
+            entry.setEnabled(False)
+            button = self.field_buttons.get(name)
+            if button is not None:
+                button.setEnabled(False)
 
     def _browse(self, widget):
         chosen = QFileDialog.getExistingDirectory(self, "选择目录", self._workspace)
@@ -1678,7 +1746,7 @@ class SettingsDialog(QDialog):
             return
         values = {}
         for name, widget in self.entries.items():
-            if name == "workspace" and self._role:
+            if self._role and name in {"workspace", "skills_dir", "mcp_config"}:
                 continue
             if name == "vars":
                 values[name] = _parse_bindings(widget.toPlainText())

@@ -33,6 +33,11 @@ TOPIC_KEYWORDS = {
 }
 
 
+def _count(value, default=0):
+    """Accept only non-negative integers from operator-editable prompt state."""
+    return value if type(value) is int and value >= 0 else default
+
+
 def parse_existing_stats(content: str) -> dict[str, Any]:
     """Parse existing STATS layer content, returning empty dict on failure."""
     if not content or not content.strip():
@@ -54,10 +59,10 @@ def merge_stats(existing: dict[str, Any], turn_data: dict[str, Any]) -> dict[str
 
     stats["last_seen"] = now
     stats.setdefault("first_seen", now)
-    stats["total_turns"] = stats.get("total_turns", 0) + 1
-    stats["total_tool_calls"] = stats.get("total_tool_calls", 0) + turn_data.get("tool_calls", 0)
-    stats["total_input_tokens"] = stats.get("total_input_tokens", 0) + turn_data.get("input_tokens", 0)
-    stats["total_output_tokens"] = stats.get("total_output_tokens", 0) + turn_data.get("output_tokens", 0)
+    stats["total_turns"] = _count(stats.get("total_turns")) + 1
+    stats["total_tool_calls"] = _count(stats.get("total_tool_calls")) + _count(turn_data.get("tool_calls"))
+    stats["total_input_tokens"] = _count(stats.get("total_input_tokens")) + _count(turn_data.get("input_tokens"))
+    stats["total_output_tokens"] = _count(stats.get("total_output_tokens")) + _count(turn_data.get("output_tokens"))
 
     if turn_data.get("robot"):
         stats["robot"] = turn_data["robot"]
@@ -74,15 +79,17 @@ def merge_stats(existing: dict[str, Any], turn_data: dict[str, Any]) -> dict[str
         if not isinstance(existing_tools, dict):
             existing_tools = {}
         for tool, count in tool_counts.items():
-            existing_tools[tool] = existing_tools.get(tool, 0) + count
+            existing_tools[str(tool)] = _count(existing_tools.get(tool)) + _count(count)
         stats["tool_usage"] = dict(Counter(existing_tools).most_common(20))
 
     if turn_data.get("error"):
         errors = stats.get("recent_errors", [])
+        if not isinstance(errors, list):
+            errors = []
         errors.append({"time": now, "error": turn_data["error"]})
         stats["recent_errors"] = errors[-5:]
 
-    stats["total_errors"] = stats.get("total_errors", 0) + (1 if turn_data.get("faulted") else 0)
+    stats["total_errors"] = _count(stats.get("total_errors")) + (1 if turn_data.get("faulted") else 0)
 
     return stats
 
@@ -154,7 +161,7 @@ def update_user_profile(existing: dict[str, Any], messages: list) -> dict[str, A
         langs = profile.get("languages", {})
         if not isinstance(langs, dict):
             langs = {}
-        langs[lang] = langs.get(lang, 0) + len(user_texts)
+        langs[lang] = _count(langs.get(lang)) + len(user_texts)
         profile["languages"] = langs
         primary = max(langs, key=langs.get)
         if profile.get("primary_language") != primary:
@@ -167,7 +174,7 @@ def update_user_profile(existing: dict[str, Any], messages: list) -> dict[str, A
         if not isinstance(existing_topics, dict):
             existing_topics = {}
         for topic in topics:
-            existing_topics[topic] = existing_topics.get(topic, 0) + 1
+            existing_topics[topic] = _count(existing_topics.get(topic)) + 1
         profile["topics"] = dict(Counter(existing_topics).most_common(10))
         changed = True
 
@@ -182,7 +189,7 @@ def update_user_profile(existing: dict[str, Any], messages: list) -> dict[str, A
         profile["communication_style"] = style
         changed = True
 
-    profile["total_messages"] = profile.get("total_messages", 0) + len(user_texts)
+    profile["total_messages"] = _count(profile.get("total_messages")) + len(user_texts)
     profile["last_active"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     return profile if changed or not existing else None
@@ -212,6 +219,7 @@ def update_soul_profile(existing: dict[str, Any], messages: list, tool_usage: di
 
     Returns None if no new information was found.
     """
+    messages = messages or []
     profile = dict(existing)
     changed = False
 
@@ -239,13 +247,13 @@ def update_soul_profile(existing: dict[str, Any], messages: list, tool_usage: di
             ai_texts.append(str(msg.content))
 
     if ai_texts:
-        profile["total_responses"] = profile.get("total_responses", 0) + len(ai_texts)
+        profile["total_responses"] = _count(profile.get("total_responses")) + len(ai_texts)
 
         tool_calls_count = sum(
             1 for msg in messages
             if isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None)
         )
-        profile["total_tool_assists"] = profile.get("total_tool_assists", 0) + tool_calls_count
+        profile["total_tool_assists"] = _count(profile.get("total_tool_assists")) + tool_calls_count
 
         changed = True
 
@@ -254,8 +262,8 @@ def update_soul_profile(existing: dict[str, Any], messages: list, tool_usage: di
         successes = sum(1 for msg in tool_results
                        if getattr(msg, "status", "") != "error"
                        and '"ok": false' not in str(getattr(msg, "content", "")))
-        profile["total_tool_results"] = profile.get("total_tool_results", 0) + len(tool_results)
-        profile["total_tool_successes"] = profile.get("total_tool_successes", 0) + successes
+        profile["total_tool_results"] = _count(profile.get("total_tool_results")) + len(tool_results)
+        profile["total_tool_successes"] = _count(profile.get("total_tool_successes")) + successes
         changed = True
 
     return profile if changed or not existing else None
@@ -274,6 +282,7 @@ def extract_turn_data(messages: list, events: list) -> dict[str, Any]:
     output_tokens = 0
     last_action = None
     faulted = False
+    messages = messages or []
 
     if messages:
         from langchain_core.messages import AIMessage

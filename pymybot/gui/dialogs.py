@@ -10,12 +10,12 @@ import tempfile
 
 from PySide6.QtCore import (QEasingCurve, QFileSystemWatcher, QPropertyAnimation, QRunnable,
                             QThreadPool, QTimer, QUrl, Signal)
-from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QFormLayout, QGraphicsOpacityEffect, QGroupBox, QHBoxLayout,
     QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QProgressBar,
-    QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem,
+    QPushButton, QSpinBox, QSplitter, QStackedWidget, QTableWidget, QTableWidgetItem,
     QTextBrowser, QTextEdit, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
@@ -1014,7 +1014,7 @@ class CommandDialog(QDialog):
         self.variable.setEnabled(command == "sample")
         self.count.setEnabled(command == "sample")
         self.interval.setEnabled(command == "sample")
-        self.timeout.setEnabled(command in {"run", "sample", "apply-sql"})
+        self.timeout.setEnabled(command in {"run", "sample"})
         self.hardware.setEnabled(command in {"run", "sample", "apply-sql"})
         if not self.hardware.isEnabled():
             self.hardware.setChecked(False)

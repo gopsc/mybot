@@ -145,7 +145,7 @@ pymybot --no-gui agent \
 
 ### `serve` 与 GUI
 
-`agent.ask` 新增三个可选参数：
+`agent.ask` 新增两个可选参数（其余 agent 参数见 [cli.md](cli.md)）：
 
 | 参数 | 类型 | 说明 |
 | --- | --- | --- |

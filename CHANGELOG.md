@@ -137,6 +137,27 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Switching roles in the GUI now closes the previous role's Agent conversation
+  before loading the new transcript, releasing its `.agent.lock` and hardware.
+  The toolbar refresh action is disabled during a turn so an F5/refresh cannot
+  rewrite the visible stream from stale role history.
+- The settings dialog shows a selected role's workspace, skills and MCP paths
+  read-only instead of blank editable fields that the backend ignored.
+- The command panel no longer enables its timeout field for `apply-sql`, which
+  has no `--timeout` flag.
+- JSON/SQL/MT previews use one alternation per language, so quoted text inside
+  comments and JSON keys keep their intended colours instead of being repainted
+  by a later rule.
+- OpenAI-compatible providers keep httpx proxy-environment support; the explicit
+  async client is no longer replaced by langchain-openai's socket-option transport.
+- Malformed external MCP tool schemas (null property entries, non-list
+  `required`) are ignored field-by-field instead of failing the whole
+  conversation at startup.
+- Corrected docs that claimed unknown-intent messages stay unrestricted,
+  `roles.show` takes an optional name, `agent.ask` omits several supported
+  parameters, MCP's `agent.ask` note says three parameters while listing two,
+  and the GUI shell fallback/shortcut descriptions.
+
 - Frozen builds merge the root `pymybot` package and the hardware-controller
   Skill sources into one staging package before PyInstaller analysis, so
   `pymybot.cli`, the Agent modules and the GUI are present in the bundle

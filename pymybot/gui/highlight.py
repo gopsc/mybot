@@ -3,6 +3,10 @@
 Qt ships no general syntax engine; QSyntaxHighlighter is the intended extension
 point. The rules here are deliberately shallow: they colour keys, strings,
 numbers and keywords without parsing, and never modify the document.
+
+Each language uses one alternation so a match is coloured exactly once. Applying
+separate rules in sequence would let a later string/comment rule repaint part of
+an earlier match (for example a quoted value inside a comment).
 """
 from __future__ import annotations
 
@@ -31,60 +35,73 @@ LANGUAGES = {
 }
 
 
-def _format(color, *, bold=False, mono=False):
+def _format(color, *, bold=False):
     fmt = QTextCharFormat()
     fmt.setForeground(QColor(color))
     if bold:
         fmt.setFontWeight(QFont.Weight.DemiBold)
-    if mono:
-        fmt.setFontFixedPitch(True)
     return fmt
 
 
-class JsonHighlighter(QSyntaxHighlighter):
+def _rule(patterns, formats):
+    """Compile one alternation and map each capture group to its format."""
+    regex = QRegularExpression("|".join(f"({pattern})" for pattern in patterns))
+    return regex, tuple(formats)
+
+
+class _AlternationHighlighter(QSyntaxHighlighter):
+    def __init__(self, document):
+        super().__init__(document)
+        self._rule = None
+
+    def _set_rule(self, patterns, formats):
+        self._rule = _rule(patterns, formats)
+        self.rehighlight()
+
+    def highlightBlock(self, text):
+        if self._rule is None:
+            return
+        regex, formats = self._rule
+        iterator = regex.globalMatch(text)
+        while iterator.hasNext():
+            match = iterator.next()
+            for index, fmt in enumerate(formats, 1):
+                if match.capturedLength(index):
+                    self.setFormat(match.capturedStart(index), match.capturedLength(index), fmt)
+                    break
+
+
+class JsonHighlighter(_AlternationHighlighter):
     """JSON keys, strings, numbers and literals."""
 
     def __init__(self, document):
         super().__init__(document)
-        self._rules = [
-            (QRegularExpression(r'"(?:[^"\\]|\\.)*"(?=\s*:)'), _format(COLORS["key"], bold=True)),
-            (QRegularExpression(r'"(?:[^"\\]|\\.)*"'), _format(COLORS["string"])),
-            (QRegularExpression(r"\b-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?\b"),
-             _format(COLORS["number"])),
-            (QRegularExpression(r"\b(?:true|false|null)\b"), _format(COLORS["keyword"], bold=True)),
-        ]
-
-    def highlightBlock(self, text):
-        for pattern, fmt in self._rules:
-            iterator = pattern.globalMatch(text)
-            while iterator.hasNext():
-                match = iterator.next()
-                self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
+        string = r'"(?:[^"\\]|\\.)*"'
+        self._set_rule(
+            [f'{string}(?=\\s*:)', string,
+             r"\b-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?\b",
+             r"\b(?:true|false|null)\b"],
+            [_format(COLORS["key"], bold=True), _format(COLORS["string"]),
+             _format(COLORS["number"]), _format(COLORS["keyword"], bold=True)],
+        )
 
 
-class CodeHighlighter(QSyntaxHighlighter):
+class CodeHighlighter(_AlternationHighlighter):
     """Shallow keyword/comment/string colouring for MT, Lua and SQL previews."""
 
     def __init__(self, document, language="mt"):
         super().__init__(document)
-        self._rules = []
         self.set_language(language)
 
     def set_language(self, language):
         words = "|".join(LANGUAGES.get(language, LANGUAGES["mt"]))
         case = "" if language == "python" else "(?i)"
         comment = r"#[^\n]*" if language == "python" else r"--[^\n]*|#[^\n]*"
-        self._rules = [
-            (QRegularExpression(comment), _format(COLORS["comment"])),
-            (QRegularExpression(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\''), _format(COLORS["string"])),
-            (QRegularExpression(rf"{case}\b(?:{words})\b"), _format(COLORS["keyword"], bold=True)),
-            (QRegularExpression(r"\b\d+(?:\.\d+)?\b"), _format(COLORS["number"])),
-        ]
-        self.rehighlight()
-
-    def highlightBlock(self, text):
-        for pattern, fmt in self._rules:
-            iterator = pattern.globalMatch(text)
-            while iterator.hasNext():
-                match = iterator.next()
-                self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
+        self._set_rule(
+            [comment,
+             r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'',
+             rf"{case}\b(?:{words})\b",
+             r"\b\d+(?:\.\d+)?\b"],
+            [_format(COLORS["comment"]), _format(COLORS["string"]),
+             _format(COLORS["keyword"], bold=True), _format(COLORS["number"])],
+        )
