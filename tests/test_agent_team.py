@@ -3,7 +3,6 @@ import asyncio
 import json
 import os
 import threading
-import time
 
 import pytest
 
@@ -165,11 +164,7 @@ def test_auto_loop_proposes_its_own_first_goal(tmp_path):
 
     async def scenario():
         await team.auto_start(max_missions=1, pause=0)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            if not team.auto_status()["running"]:
-                break
-            await asyncio.sleep(0.02)
+        await team._auto_task
         status = team.auto_status()
         await team.close()
         return status
@@ -283,11 +278,7 @@ def test_team_auto_loop_drains_queue_and_stops_at_cap(tmp_path):
 
     async def scenario():
         await team.auto_start("任务一", "任务二", max_missions=1, pause=0)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            if not team.auto_status()["running"]:
-                break
-            await asyncio.sleep(0.02)
+        await team._auto_task
         status = team.auto_status()
         await team.close()
         return status
@@ -339,6 +330,7 @@ def test_team_drives_a_real_agent_session(tmp_path):
 def test_cli_runs_the_team_by_default(tmp_path, monkeypatch, capsys):
     """`pymybot agent` must run the dual-agent team with no single-agent path."""
     import pymybot.agent as agent_module
+    import pymybot.agent_cli as agent_cli_module
     from pymybot import cli
     from pymybot.roles import create_role
 
@@ -381,6 +373,8 @@ def test_cli_runs_the_team_by_default(tmp_path, monkeypatch, capsys):
     role = create_role("team-role")
     monkeypatch.setattr(agent_module, "RobotExecutor", Executor)
     monkeypatch.setattr(agent_module, "create_model", lambda config: (FunctionModel(respond), Client()))
+    monkeypatch.setattr(agent_cli_module, "RobotExecutor", Executor)
+    monkeypatch.setattr(agent_cli_module, "create_model", lambda config: (FunctionModel(respond), Client()))
 
     code = cli.main(["--no-gui", "--role", role.name, "--task", "检查继电器"])
     payload = json.loads(capsys.readouterr().out)
@@ -419,11 +413,7 @@ def test_proposal_failure_is_not_reported_as_no_goal(tmp_path):
 
     async def scenario():
         await team.auto_start(max_missions=1, pause=0)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            if not team.auto_status()["running"]:
-                break
-            await asyncio.sleep(0.02)
+        await team._auto_task
         status = team.auto_status()
         await team.close()
         return status

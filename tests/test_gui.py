@@ -259,7 +259,7 @@ def test_no_gui_keeps_the_terminal_agent(monkeypatch, capsys, tmp_path):
         called.append(args)
         return {"mode": "agent", "output": "offline", "tool_events": []}
 
-    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
+    monkeypatch.setitem(sys.modules, "pymybot.agent_cli", SimpleNamespace(run_cli_agent=run_cli_agent))
     code = cli.main(["--no-gui", "--robot", str(robot), "--task", "hi", "--role", "test-role",
                      "--model", "openai:test"])
     payload = json.loads(capsys.readouterr().out)

@@ -812,7 +812,7 @@ def execute(args, stop):
     bindings = session_bindings(args)
     if args.command == "agent":
         try:
-            from .agent import run_cli_agent
+            from .agent_cli import run_cli_agent
         except ModuleNotFoundError as exc:
             raise RuntimeError(f"Agent dependencies unavailable ({exc}); install pymybot[agent] "
                                "(source checkout: pip install -e '.[agent]'), "

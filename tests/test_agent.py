@@ -20,8 +20,10 @@ from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, U
 from agent_fakes import DeltaToolCall, FunctionModel, team_model
 
 import pymybot.agent as agent_module
+import pymybot.agent_cli as agent_cli_module
 from pymybot.agent import (AgentConfig, AgentSession, AgentBudgetExceeded, AgentInterrupted,
-                           AgentConfigurationError, confirm_console, create_model)
+                           AgentConfigurationError, create_model)
+from pymybot.agent_cli import confirm_console
 from pymybot.paths import asset_path
 
 
@@ -153,7 +155,7 @@ def test_streaming_is_opt_in_and_non_streamed_models_still_work():
 
 def test_stream_renderer_neutralizes_controls_in_text_and_tool_labels():
     buffer = io.StringIO()
-    renderer = agent_module.StreamRenderer(stream=buffer)
+    renderer = agent_cli_module.StreamRenderer(stream=buffer)
     renderer({"type": "text_delta", "text": "a\x1b[2Jb\x07c\x9bd\nnext\tok"})
     renderer({"type": "tool_call", "tool": "evil\x1b]0;pwn\x07", "arguments": {"x": 1}})
     renderer({"type": "tool_result", "tool": "evil\x1b]0;pwn\x07",
@@ -167,7 +169,7 @@ def test_stream_renderer_neutralizes_controls_in_text_and_tool_labels():
 
 def test_stream_renderer_neutralizes_and_truncates_tool_arguments():
     buffer = io.StringIO()
-    renderer = agent_module.StreamRenderer(stream=buffer)
+    renderer = agent_cli_module.StreamRenderer(stream=buffer)
     renderer({"type": "text_delta", "text": "部分回复"})
     renderer({"type": "tool_call", "tool": "run_action_script",
               "arguments": {"script": "a\x1b[2Jb.mt"}})
@@ -628,6 +630,8 @@ def install_cli_fakes(monkeypatch, executor, model, client):
         return executor
     monkeypatch.setattr(agent_module, "RobotExecutor", factory)
     monkeypatch.setattr(agent_module, "create_model", lambda _: (team_model(model), client))
+    monkeypatch.setattr(agent_cli_module, "RobotExecutor", factory)
+    monkeypatch.setattr(agent_cli_module, "create_model", lambda _: (team_model(model), client))
 
 
 @pytest.mark.parametrize("primary_failure", [False, True])
@@ -866,6 +870,8 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
         pytest.fail("Workspace tools must not activate hardware")
     monkeypatch.setattr(Robot, "active", forbidden_activation)
     monkeypatch.setattr(agent_module, "create_model",
+                        lambda _: (team_model(FunctionModel(respond, stream_function=stream)), None))
+    monkeypatch.setattr(agent_cli_module, "create_model",
                         lambda _: (team_model(FunctionModel(respond, stream_function=stream)), None))
     flags = ["--enable-shell", "--allow-shell"] if shell else []
     code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),

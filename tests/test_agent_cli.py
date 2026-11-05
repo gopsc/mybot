@@ -30,7 +30,7 @@ def invoke(capsys, *args):
 def no_agent_import(monkeypatch):
     original = builtins.__import__
     def guarded(name, *args, **kwargs):
-        if name == "agent" or name.startswith(("langchain", "langgraph", "openai", "anthropic", "httpx2")):
+        if name == "agent" or name == "agent_cli" or name.startswith(("langchain", "langgraph", "openai", "anthropic", "httpx2")):
             raise ModuleNotFoundError("blocked optional dependency", name="langgraph")
         return original(name, *args, **kwargs)
     monkeypatch.setattr(builtins, "__import__", guarded)
@@ -83,7 +83,7 @@ def test_agent_accepts_session_bindings(files, capsys, monkeypatch):
     async def run_cli_agent(args, stop):
         called.append(args)
         return {"mode": "agent", "output": "offline mock", "tool_events": []}
-    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
+    monkeypatch.setitem(sys.modules, "pymybot.agent_cli", SimpleNamespace(run_cli_agent=run_cli_agent))
     monkeypatch.setenv("PYMYBOT_TEST_PASS", "from-env")
     code, _, _ = invoke(capsys, "--robot", files[0], "--task", "t", "--role", "test-role",
                         "--var", "user=alice", "--var-env", "pass=PYMYBOT_TEST_PASS")
@@ -97,7 +97,7 @@ def test_agent_accepts_context_token_budget(files, capsys, monkeypatch):
         called.append(args)
         return {"mode": "agent", "output": "offline mock", "tool_events": []}
 
-    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
+    monkeypatch.setitem(sys.modules, "pymybot.agent_cli", SimpleNamespace(run_cli_agent=run_cli_agent))
     code, _, _ = invoke(capsys, "--robot", files[0], "--task", "t", "--role", "test-role",
                         "--max-context-tokens", "32768", "--context-reserve-tokens", "1024")
     assert code == 0
@@ -115,7 +115,7 @@ def test_default_and_explicit_agent_routing(files, capsys, monkeypatch, prefix):
     async def run_cli_agent(args, stop):
         called.append(args)
         return {"mode": "agent", "output": "offline mock", "tool_events": []}
-    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
+    monkeypatch.setitem(sys.modules, "pymybot.agent_cli", SimpleNamespace(run_cli_agent=run_cli_agent))
     code, result, _ = invoke(capsys, *prefix, "--robot", files[0], "--task", "列出硬件",
                              "--role", "test-role", "--model", "openai:test")
     assert code == 0 and result["mode"] == "agent" and result["output"] == "offline mock"
@@ -156,7 +156,7 @@ def test_role_workspace_enables_shell_and_file_writes(files):
 def test_agent_interrupt_has_exit_130(files, capsys, monkeypatch):
     async def run_cli_agent(args, stop):
         raise KeyboardInterrupt
-    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
+    monkeypatch.setitem(sys.modules, "pymybot.agent_cli", SimpleNamespace(run_cli_agent=run_cli_agent))
     code, result, _ = invoke(capsys, "--robot", files[0], "--task", "wait", "--role", "test-role")
     assert code == 130 and result["ok"] is False
 
