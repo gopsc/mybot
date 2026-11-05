@@ -31,7 +31,7 @@ from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
-                      PromptPanel, ResourcePanel, SessionsDialog)
+                      PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
 from .protocol import CANCELLED, RpcError, ServeClient, resolve_python
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
@@ -266,6 +266,8 @@ class App(QMainWindow):
         action(tools, "命令面板…", self.open_console, "Ctrl+Shift+P")
         action(tools, "MCP 配置…", self.open_mcp)
         action(tools, "会话管理…", self.open_sessions)
+        action(tools, "长期记忆…", self.open_memory)
+        action(tools, "任务历史…", self.open_missions)
         action(tools, "环境诊断…", self.open_doctor)
         action(tools, "资源预览", self.show_resources)
         tools.addSeparator()
@@ -281,7 +283,9 @@ class App(QMainWindow):
         menu = QMenu(self)
         for text, slot in (("命令面板…", self.open_console),
                            ("MCP 配置…", self.open_mcp),
-                           ("会话管理…", self.open_sessions), ("环境诊断…", self.open_doctor),
+                           ("会话管理…", self.open_sessions),
+                           ("长期记忆…", self.open_memory), ("任务历史…", self.open_missions),
+                           ("环境诊断…", self.open_doctor),
                            ("资源预览", self.show_resources), ("清空对话", self.clear_chat)):
             action = QAction(text, menu)
             action.triggered.connect(lambda _checked=False, fn=slot: fn())
@@ -1114,6 +1118,12 @@ class App(QMainWindow):
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "maxContextTokens": self.cfg.max_context_tokens,
             "contextReserveTokens": self.cfg.context_reserve_tokens,
+            "maxRequests": self.cfg.max_requests,
+            "maxToolCalls": self.cfg.max_tool_calls,
+            "turnTimeout": self.cfg.turn_timeout,
+            "modelRetries": self.cfg.model_retries,
+            "fallbackModels": self.cfg.fallback_models,
+            "requirePlanApproval": self.cfg.require_plan_approval,
             "timeout": self.cfg.timeout,
             "hotTurns": self.cfg.hot_turns,
             "warmTurns": self.cfg.warm_turns,
@@ -1311,6 +1321,45 @@ class App(QMainWindow):
         if self._stopping:
             return
         self._exec_dialog(DoctorDialog(self))
+
+    def _open_agent_preview(self, method, title, params=None, transform=None):
+        if self._stopping:
+            return
+        client = self.serve
+        if client is None:
+            self._notice("服务未启动")
+            return
+        generation = self.generation
+
+        def done(value, error):
+            if self._stopping or generation != self.generation:
+                return
+            if error is not None:
+                self._notice(f"{title}读取失败：{error}")
+                return
+            payload = transform(value) if transform else value
+            text = json.dumps(payload, ensure_ascii=False, indent=2)
+            self._exec_dialog(PreviewDialog(self, title, text, language="text"))
+
+        try:
+            _, future = client.start_request(method, params or {})
+        except RpcError as exc:
+            self._notice(f"{title}读取失败：{exc}")
+            return
+        self._background(lambda: future.result(), done)
+
+    def open_memory(self):
+        self._open_agent_preview(
+            "agent.memory", "长期记忆", {"limit": 200},
+            transform=lambda value: {
+                "stats": (value or {}).get("stats"),
+                "entries": (value or {}).get("entries") or [],
+            })
+
+    def open_missions(self):
+        self._open_agent_preview(
+            "agent.missions", "任务历史", {"limit": 100},
+            transform=lambda value: (value or {}).get("missions") or [])
 
     def open_console(self):
         if self._stopping:
@@ -1600,6 +1649,23 @@ class SettingsDialog(QDialog):
         context_row.addWidget(self.context_kib)
         context_row.addWidget(_label("KiB"))
         model_form.addRow("工程上下文", context_row)
+        self.max_requests = _spin(cfg.max_requests, 10_000)
+        self.max_tool_calls = _spin(cfg.max_tool_calls, 100_000)
+        self.turn_timeout = _spin(int(cfg.turn_timeout) if cfg.turn_timeout else 1, 86400)
+        self.turn_timeout.setMinimum(0)
+        self.turn_timeout.setValue(int(cfg.turn_timeout or 0))
+        self.model_retries = _spin(cfg.model_retries, 10)
+        self.model_retries.setMinimum(0)
+        self.fallback_models = QLineEdit(",".join(cfg.fallback_models))
+        self.require_plan_approval = QCheckBox("自主任务逐次计划审批")
+        self.require_plan_approval.setChecked(bool(cfg.require_plan_approval))
+        for label, widget in (("单轮请求上限", self.max_requests),
+                              ("单轮工具上限", self.max_tool_calls),
+                              ("单轮墙钟（秒，0 关闭）", self.turn_timeout),
+                              ("模型重试", self.model_retries),
+                              ("备用模型（逗号分隔）", self.fallback_models)):
+            model_form.addRow(label, widget)
+        model_form.addRow(self.require_plan_approval)
         self.intent_box = QComboBox()
         for value, label in INTENT_CHOICES:
             self.intent_box.addItem(label, value)
@@ -1725,6 +1791,13 @@ class SettingsDialog(QDialog):
                       sandbox_mode=self.sandbox_box.currentData(),
                       protect_prompts=self.protect_prompts.isChecked(),
                       session_log=self.session_log.isChecked(),
+                      max_requests=self.max_requests.value(),
+                      max_tool_calls=self.max_tool_calls.value(),
+                      turn_timeout=float(self.turn_timeout.value()),
+                      model_retries=self.model_retries.value(),
+                      fallback_models=[item.strip() for item in
+                                       self.fallback_models.text().split(",") if item.strip()],
+                      require_plan_approval=self.require_plan_approval.isChecked(),
                       auto_stats=self.prompts.auto_stats.isChecked())
         self.values = values
         self.accept()

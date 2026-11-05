@@ -1129,6 +1129,17 @@ def test_reference_only_skills_do_not_advertise_run_skill(tmp_path):
     asyncio.run(scenario())
 
 
+def test_agent_turn_budgets_and_wall_clock_fail_closed():
+    session = AgentSession(FakeExecutor(), None,
+                           AgentConfig(max_requests=1, max_tool_calls=1, turn_timeout=1))
+    session._tool_calls = 1
+    with pytest.raises(AgentBudgetExceeded):
+        session._count_tool_call()
+    session._deadline = time.monotonic() - 1
+    with pytest.raises(AgentBudgetExceeded):
+        session._check()
+
+
 def test_malformed_mcp_schema_entries_are_skipped():
     """External schemas are untrusted; one null property must not abort startup."""
     from pymybot.agent import _json_schema_model
@@ -1140,6 +1151,20 @@ def test_malformed_mcp_schema_entries_are_skipped():
     assert model().good is None
     with pytest.raises(Exception):
         model(good="x", unexpected=1)
+
+
+def test_model_fallback_chain_is_a_bindable_chat_model(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "offline-fake-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "offline-fake-key")
+    config = AgentConfig(model="openai:test", fallback_models=("deepseek:test",))
+    model, client = create_model(config)
+    try:
+        assert model._llm_type == "pymybot-fallback"
+        assert len(client.resources) == 2
+        from langchain.agents import create_agent
+        assert create_agent(model, tools=[]) is not None
+    finally:
+        asyncio.run(client.close())
 
 
 def test_start_reports_the_executor_failure_type():

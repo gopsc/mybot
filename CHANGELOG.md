@@ -36,6 +36,23 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   failure the memory agent is prompted to propose a repair goal.
 - `pymybot agent --task` remains as a one-seed escape hatch: it runs exactly one
   mission instead of the self-directed loop.
+- Durable mission execution: `paused` missions resume from the next step;
+  `running` missions recovered after a process restart become `failed`/unknown
+  when an action may have been dispatched, and are never replayed. Mission files
+  now include a lease owner/deadline, in-flight marker, approval state and trace
+  id; `claim_next` gives the autonomous loop an atomic durable queue.
+- Planner output uses Pydantic structured output first, repairs one schema
+  failure, then falls back to the documented JSON parser. Provider/transport
+  failures are not silently converted into extra model calls.
+- Per-turn budgets for model requests, tool calls and optional wall-clock time;
+  optional provider retries and a BaseChatModel-compatible fallback chain.
+- Optional plan approval for autonomous missions (`--require-plan-approval` /
+  GUI checkbox): a denied plan blocks the mission before the worker receives any
+  instruction.
+- Operator memory review/forget surfaces (`agent.memory`,
+  `agent.memory.forget`, `agent.missions`) and GUI 长期记忆/任务历史 previews.
+- Optional OpenTelemetry spans (`agent.mission`, `agent.model_call`,
+  `agent.tool`) and deterministic trajectory scoring in `tools/agent_eval.py`.
 
 - `pymybot assets list/read/write/delete` manages the bundled `robots` (`.sql`),
   `modules` (`.py`/`.lua`) and `scripts` (`.mt`) asset files in place, with

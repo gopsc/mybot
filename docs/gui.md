@@ -52,10 +52,11 @@ duplicate robot logic.
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, the history byte cap, model context-window and project-context budgets, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. When a role is selected, its workspace, skills and MCP paths are shown read-only because the backend uses the role-owned paths. |
+| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, history/context budgets, per-turn request/tool/wall-clock limits, provider retries and fallback models, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. When a role is selected, its workspace, skills and MCP paths are shown read-only because the backend uses the role-owned paths. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
+| 工具 → 长期记忆 / 任务历史 | Reads the active role's long-term memory and persisted missions over `agent.memory` / `agent.missions` and shows them in a read-only preview. |
 | 工具 → 环境诊断 | Renders `pymybot doctor`: interpreter, assets and optional dependencies, colour-coded by status, with copy-JSON. |
 | 资源 tab | Structures (`*.sql`), Python/Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
 | 启动 | Starts the dual-agent autonomous loop (`agent.start`). There is no chat input: the memory agent proposes goals, the worker acts. |

@@ -605,6 +605,12 @@ class Server:
             "teamSteps": params.integer("teamSteps", 1, 50, 8),
             "missionTimeout": params.seconds("missionTimeout", 1800),
             "missionTokens": params.integer("missionTokens", 1024, 10_000_000, 400_000),
+            "maxRequests": params.integer("maxRequests", 1, 10_000, 64),
+            "maxToolCalls": params.integer("maxToolCalls", 1, 100_000, 128),
+            "turnTimeout": params.integer("turnTimeout", 0, 86400, 0),
+            "modelRetries": params.integer("modelRetries", 0, 10, 0),
+            "fallbackModels": params.strings("fallbackModels"),
+            "requirePlanApproval": params.flag("requirePlanApproval"),
         }
 
     async def m_agent_ask(self, ident, params, cancel):
@@ -689,6 +695,40 @@ class Server:
                 if self.agent is None:
                     self.owner = None
 
+    async def m_agent_memory(self, ident, params, cancel):
+        if self.agent is None:
+            return {"entries": [], "stats": None}
+        session = self.agent["session"]
+        review = getattr(session, "memory_review", None)
+        if not callable(review):
+            return {"entries": [], "stats": None}
+        return await asyncio.to_thread(
+            review, params.integer("limit", 1, 500, 50),
+            kinds=params.strings("kinds") or None, tags=params.strings("tags") or None)
+
+    async def m_agent_forget_memory(self, ident, params, cancel):
+        if self.agent is None:
+            return {"removed": [], "count": 0}
+        session = self.agent["session"]
+        forget = getattr(session, "forget_memory", None)
+        if not callable(forget):
+            raise RpcError(METHOD_NOT_FOUND, "This agent has no long-term memory store")
+        status = getattr(session, "auto_status", None)
+        if callable(status) and status().get("running"):
+            raise RpcError(BUSY, "Stop the autonomous loop before editing long-term memory")
+        return await asyncio.to_thread(
+            forget, params.strings("ids") or None,
+            kinds=params.strings("kinds") or None, tags=params.strings("tags") or None)
+
+    async def m_agent_missions(self, ident, params, cancel):
+        if self.agent is None:
+            return {"missions": []}
+        session = self.agent["session"]
+        review = getattr(session, "mission_review", None)
+        if not callable(review):
+            return {"missions": []}
+        return await asyncio.to_thread(review, params.integer("limit", 1, 200, 20))
+
     async def m_agent_stop(self, ident, params, cancel):
         if self.agent is None:
             return {"state": "idle", "running": False}
@@ -770,7 +810,12 @@ class Server:
                              allow_web=key.get("allowWeb", False),
                              search_endpoint=key.get("searchEndpoint") or "",
                              hot_turns=key.get("hotTurns", 3),
-                             warm_turns=key.get("warmTurns", 10))
+                             warm_turns=key.get("warmTurns", 10),
+                             max_requests=key.get("maxRequests", 64),
+                             max_tool_calls=key.get("maxToolCalls", 128),
+                             turn_timeout=key.get("turnTimeout", 0) or 0,
+                             model_retries=key.get("modelRetries", 0),
+                             fallback_models=tuple(key.get("fallbackModels") or ()))
         from .mcp_client import load_servers
         try:
             mcp_servers = load_servers(config.mcp_config)
@@ -805,7 +850,9 @@ class Server:
             session = TeamSession(worker, model, role=role,
                                   max_steps=key.get("teamSteps", 8),
                                   max_seconds=key.get("missionTimeout", 1800),
-                                  max_tokens=key.get("missionTokens", 400_000))
+                                  max_tokens=key.get("missionTokens", 400_000),
+                                  confirm=confirm,
+                                  require_plan_approval=key.get("requirePlanApproval", False))
             return {"session": session, "client": client}
         except BaseException as exc:
             try:

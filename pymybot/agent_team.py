@@ -30,8 +30,11 @@ import threading
 import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import ValidationError
 
+from .agent_contracts import GoalProposal, PlanDecision
 from .agent_memory_store import MemoryStore, MemoryStoreError
+from .agent_telemetry import current_trace_id, span
 from .errors import AgentInterrupted
 from .security import SecurityError, checked_text
 
@@ -235,12 +238,22 @@ class Mission:
     answer: str = ""
     reason: str = ""
     next_goal: str = ""
+    # Durable execution state: a persisted in-flight marker prevents replaying
+    # a step whose hardware outcome is unknown after a process restart.
+    in_flight: bool = False
+    approved: bool | None = None
+    lease_owner: str = ""
+    lease_until: float = 0.0
+    trace_id: str = ""
 
     def as_dict(self):
         return {"version": MISSION_FORMAT, "id": self.id, "goal": self.goal,
                 "status": self.status, "created": self.created, "updated": self.updated,
                 "steps": self.steps[-50:], "usage": self.usage, "answer": self.answer,
-                "reason": self.reason, "next_goal": self.next_goal}
+                "reason": self.reason, "next_goal": self.next_goal,
+                "in_flight": self.in_flight, "approved": self.approved,
+                "lease_owner": self.lease_owner, "lease_until": self.lease_until,
+                "trace_id": self.trace_id}
 
     @classmethod
     def from_dict(cls, data):
@@ -263,6 +276,15 @@ class Mission:
         mission.answer = str(data.get("answer") or "")[:MAX_REPORT]
         mission.reason = str(data.get("reason") or "")[:1000]
         mission.next_goal = str(data.get("next_goal") or "")[:MAX_GOAL]
+        mission.in_flight = bool(data.get("in_flight"))
+        approved = data.get("approved")
+        mission.approved = approved if isinstance(approved, bool) else None
+        mission.lease_owner = str(data.get("lease_owner") or "")[:64]
+        try:
+            mission.lease_until = float(data.get("lease_until") or 0.0)
+        except (TypeError, ValueError):
+            mission.lease_until = 0.0
+        mission.trace_id = str(data.get("trace_id") or "")[:32]
         return mission
 
 
@@ -272,7 +294,7 @@ class MissionStore:
     def __init__(self, root, *, limit=MAX_MISSIONS):
         self.root = Path(root)
         self.limit = int(limit)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         if self.root.exists() and self.root.is_symlink():
             raise SecurityError("Mission root must not be a symbolic link")
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -354,13 +376,138 @@ class MissionStore:
                 return mission
         return None
 
+    def recover(self):
+        """Classify work interrupted by a process restart, without replaying it.
+
+        A mission marked ``running`` while ``in_flight`` may already have
+        dispatched hardware actions. It becomes ``failed`` so an operator must
+        inspect the robot; a mission that died between steps is safely resumable.
+        """
+        changed = []
+        for mission in self.list(limit=self.limit):
+            if mission.status != "running":
+                continue
+            mission.in_flight = bool(mission.in_flight)
+            if mission.in_flight:
+                mission.status = "failed"
+                mission.reason = "process restarted after dispatch; outcome unknown"
+                mission.answer = ""
+            else:
+                mission.status = "paused"
+                mission.reason = "process restarted before the next step"
+            mission.updated = _now()
+            mission.lease_owner = ""
+            mission.lease_until = 0.0
+            self.save(mission)
+            changed.append(mission.as_dict())
+        return changed
+
+    def next_resumable(self):
+        for mission in reversed(self.list(limit=self.limit)):
+            if mission.status == "paused" and not mission.in_flight:
+                return mission
+        return None
+
+    def claim_next(self, owner, *, lease_seconds=3600):
+        """Atomically claim the oldest pending/resumable mission for one worker.
+
+        The process is single-role and single-owner today, but the lease fields
+        make the queue durable and ready for a future multi-process worker.
+        """
+        owner = str(owner or "worker")[:64]
+        with self._lock:
+            for mission in reversed(self.list(limit=self.limit)):
+                if mission.status not in {"pending", "paused"} or mission.in_flight:
+                    continue
+                if mission.status == "paused" and mission.lease_until > time.time():
+                    continue
+                mission.status = "running"
+                mission.lease_owner = owner
+                mission.lease_until = time.time() + max(1.0, float(lease_seconds))
+                mission.updated = _now()
+                self.save(mission)
+                return mission
+        return None
+
+    def release(self, mission, *, status=None, reason=""):
+        mission.lease_owner = ""
+        mission.lease_until = 0.0
+        if status:
+            mission.status = status
+            mission.reason = _clip(reason or mission.reason, 1000)
+        mission.updated = _now()
+        self.save(mission)
+        return mission
+
 
 class MemoryAgent:
-    """Planning/reflection half: one model call per decision, no tools."""
+    """Planning/reflection half: one model call per decision, no tools.
 
-    def __init__(self, model, *, timeout=60.0):
+    Provider-native structured output is attempted first. If the model or the
+    installed integration cannot produce a validated object, the same prompt is
+    retried once with the schema error, then the documented free-text JSON
+    parser is used. A malformed response never becomes a tool call.
+    """
+
+    def __init__(self, model, *, timeout=60.0, structured=True):
         self.model = model
         self.timeout = float(timeout)
+        self.structured = structured
+        self._plan_runnable = self._make_runnable(PlanDecision)
+        self._goal_runnable = self._make_runnable(GoalProposal)
+
+    def _make_runnable(self, schema):
+        factory = getattr(self.model, "with_structured_output", None)
+        # Scripted/test models inherit the mixin but do not have a provider
+        # model name; attempting schema binding there corrupts their tool list.
+        if not callable(factory) or not self.structured or not hasattr(self.model, "model_name"):
+            return None
+        try:
+            return factory(schema, include_raw=True)
+        except TypeError:
+            try:
+                return factory(schema)
+            except Exception:
+                return None
+        except Exception:
+            return None
+
+    async def _invoke(self, messages, runnable, parser):
+        """Try schema-constrained output, repair once, then fall back to text."""
+        if runnable is not None:
+            current = list(messages)
+            for attempt in range(2):
+                try:
+                    result = await asyncio.wait_for(runnable.ainvoke(current), timeout=self.timeout)
+                except asyncio.TimeoutError:
+                    raise
+                except (ValueError, ValidationError, NameError) as exc:
+                    # A 200 response with an unparsable/unsupported structured
+                    # payload is a parser failure and gets one repair attempt.
+                    # NameError covers LangChain integrations that fail to
+                    # resolve their own annotations on newer Python versions.
+                    error = type(exc).__name__
+                except Exception:
+                    # Provider/transport failures are not parser failures. Do
+                    # not turn them into hidden extra model requests; the
+                    # configured provider retry setting owns that policy.
+                    raise
+                else:
+                    raw = result.get("raw") if isinstance(result, dict) else None
+                    parsed = result.get("parsed") if isinstance(result, dict) else result
+                    error = result.get("parsing_error") if isinstance(result, dict) else None
+                    if parsed is not None and not error:
+                        data = parsed.model_dump() if hasattr(parsed, "model_dump") else parsed
+                        return parser(json.dumps(data, ensure_ascii=False)), raw
+                    error = error or "schema validation failed"
+                if attempt == 0:
+                    current = [*messages, HumanMessage(
+                        "The previous answer failed schema validation: "
+                        f"{_clip(str(error), 300)}. Return only one JSON object matching the schema.")]
+            # Structured output is unusable; one plain call remains the fallback.
+        message = await asyncio.wait_for(
+            self.model.ainvoke(list(messages)), timeout=self.timeout)
+        return parser(_message_text(message)), message
 
     async def decide(self, *, goal, step, remaining, memories, report, history=()):
         lines = []
@@ -371,10 +518,9 @@ class MemoryAgent:
                               memories=MemoryStore.render(memories) or "（无）",
                               history="\n".join(lines) or "（尚无）",
                               report=_clip(report, MAX_REPORT) or "（尚无回报）")
-        message = await asyncio.wait_for(
-            self.model.ainvoke([SystemMessage(_SYSTEM), HumanMessage(prompt)]),
-            timeout=self.timeout)
-        return parse_decision(_message_text(message)), message
+        decision, message = await self._invoke(
+            [SystemMessage(_SYSTEM), HumanMessage(prompt)], self._plan_runnable, parse_decision)
+        return decision, message
 
     async def propose(self, *, role="", memories=(), last=None):
         last_text = "（尚未运行过任务）"
@@ -383,10 +529,9 @@ class MemoryAgent:
         prompt = _PROPOSE.format(role=_clip(role, 2000) or "（未提供）",
                                  memories=MemoryStore.render(memories) or "（无）",
                                  last=_clip(last_text, 2000))
-        message = await asyncio.wait_for(
-            self.model.ainvoke([SystemMessage(_PROPOSE_SYSTEM), HumanMessage(prompt)]),
-            timeout=self.timeout)
-        return parse_goal(_message_text(message))
+        goal, message = await self._invoke(
+            [SystemMessage(_PROPOSE_SYSTEM), HumanMessage(prompt)], self._goal_runnable, parse_goal)
+        return goal, message
 
 
 class TeamSession:
@@ -396,7 +541,7 @@ class TeamSession:
 
     def __init__(self, worker, model, *, role=None, memory_store=None, mission_store=None,
                  on_event=None, max_steps=8, max_seconds=1800.0, max_tokens=400_000,
-                 tick=0.0):
+                 tick=0.0, confirm=None, require_plan_approval=False, structured=True):
         self.worker = worker
         self.model = model
         self.role = role if role is not None else getattr(worker, "role", None)
@@ -407,7 +552,9 @@ class TeamSession:
             root = roles_root().parent
         self.store = memory_store or MemoryStore(root / "memory")
         self.missions = mission_store or MissionStore(root / "missions")
-        self.memory = MemoryAgent(model)
+        self.memory = MemoryAgent(model, structured=structured)
+        self.confirm = confirm
+        self.require_plan_approval = bool(require_plan_approval)
         self.max_steps = max(1, int(max_steps))
         self.max_seconds = max(1.0, float(max_seconds))
         self.max_tokens = max(1024, int(max_tokens))
@@ -450,6 +597,9 @@ class TeamSession:
 
     def _emit(self, event):
         if self._on_event is not None:
+            trace_id = current_trace_id()
+            if trace_id:
+                event = {**event, "trace_id": trace_id}
             self._on_event(event)
 
     def _speak(self, agent, text):
@@ -488,6 +638,9 @@ class TeamSession:
 
     def _reset_stop(self):
         self._stop = threading.Event()
+        reset = getattr(self.worker.executor, "reset_stop", None)
+        if callable(reset):
+            reset()
 
     # -- public entry ------------------------------------------------------
     async def ask(self, goal):
@@ -510,6 +663,18 @@ class TeamSession:
             self._speak("memory", f"召回 {len(memories)} 条长期记忆")
         return memories
 
+    def memory_review(self, limit=50, *, kinds=None, tags=None):
+        return {"entries": self.store.review(limit, kinds=kinds, tags=tags),
+                "stats": self.store.stats()}
+
+    def forget_memory(self, ids=None, *, kinds=None, tags=None):
+        removed = self.store.forget(ids, kinds=kinds, tags=tags)
+        self._emit({"type": "memory.forget", "agent": "system", "count": len(removed)})
+        return {"removed": removed, "count": len(removed)}
+
+    def mission_review(self, limit=20):
+        return {"missions": [item.as_dict() for item in self.missions.list(limit=limit)]}
+
     async def submit(self, goal):
         """Queue a mission for the unattended loop."""
         checked_text(goal, MAX_GOAL)
@@ -517,105 +682,150 @@ class TeamSession:
         self._emit({"type": "mission.queued", "agent": "system", "mission": mission.id})
         return mission.as_dict()
 
-    async def run_mission(self, mission):
+    async def _approve_plan(self, mission, source):
+        """Approve one mission goal before the worker can dispatch anything."""
+        if not self.require_plan_approval or mission.approved is True:
+            return True
+        self._emit({"type": "plan.request", "agent": "system", "mission": mission.id,
+                    "goal": mission.goal, "source": source})
+        reply = await self.confirm("plan:approve", {
+            "mission": mission.id, "goal": mission.goal, "source": source}) if self.confirm else False
+        approved = (isinstance(reply, dict) and reply.get("approved") is True) or reply is True
+        self._emit({"type": "plan.result", "agent": "system", "mission": mission.id,
+                    "approved": bool(approved)})
+        return bool(approved)
+
+    async def run_mission(self, mission, *, source="operator"):
         with self._lock:
             if self._running is not None:
                 raise RuntimeError("Another mission is running in this role")
             self._running = mission
+        if mission.in_flight:
+            mission.status = "failed"
+            mission.reason = "in-flight step has an unknown outcome; inspect before retrying"
+            mission.updated = _now()
+            self.missions.save(mission)
+            with self._lock:
+                self._running = None
+            return {"output": "", "status": mission.status, "mission": mission.id,
+                    "steps": mission.usage["steps"], "usage": dict(mission.usage),
+                    "reason": mission.reason, "next_goal": mission.next_goal,
+                    "intent": None, "agents": ["memory", "worker"]}
         mission.status = "running"
+        mission.lease_owner = mission.lease_owner or "team"
+        mission.lease_until = time.time() + max(1.0, self.max_seconds)
+        mission.trace_id = current_trace_id() or mission.trace_id
         mission.updated = _now()
         self.missions.save(mission)
         self._emit({"type": "mission.start", "agent": "system", "mission": mission.id,
-                    "goal": mission.goal})
+                    "goal": mission.goal, "resumed": mission.usage["steps"] > 0,
+                    "trace_id": mission.trace_id or None})
         started = time.monotonic()
-        report = ""
-        memories = []
-        history = []
-        answer = ""
+        start_step = mission.usage["steps"] + 1
+        report = _clip(str((mission.steps[-1] or {}).get("report") or ""), MAX_REPORT) if mission.steps else ""
+        history = [{"step": item.get("step"), "brief": item.get("brief"), "report": item.get("report")}
+                   for item in mission.steps[-4:] if isinstance(item, dict)]
+        answer = mission.answer
         reason = ""
-        try:
-            memories = self._recall(mission.goal)
-            for step in range(1, self.max_steps + 1):
-                self._check()
-                elapsed = time.monotonic() - started
-                if elapsed > self.max_seconds:
-                    mission.status, reason = "paused", "mission time budget exhausted"
-                    break
-                if mission.usage["input_tokens"] + mission.usage["output_tokens"] > self.max_tokens:
-                    mission.status, reason = "paused", "mission token budget exhausted"
-                    break
-                decision, message = await self._decide(mission, step, memories, report, history)
-                input_tokens, output_tokens = _usage(message)
-                mission.usage["input_tokens"] += input_tokens
-                mission.usage["output_tokens"] += output_tokens
-                action = decision["action"]
-                self._remember(decision["memories"], mission, step)
-                if action == "blocked":
-                    mission.status, reason = "blocked", decision["reasoning"] or "memory agent blocked"
-                    answer = decision["summary"] or reason
-                    self._speak("memory", f"受阻：{answer}")
-                    break
-                if action == "done":
-                    mission.status = "done"
-                    answer = decision["summary"] or report
-                    mission.next_goal = decision["next_goal"]
-                    self._speak("memory", answer)
-                    break
-                brief = decision["brief"] or mission.goal
-                self._speak("memory", brief)
-                self._emit({"type": "team.step", "agent": "system", "step": step,
-                            "remaining": self.max_steps - step})
-                self._check()
-                # A worker failure is not retried: the project treats a
-                # dispatched-action exception as an unknown outcome.
-                mission.usage["attempts"] += 1
+        with span("agent.mission", mission_id=mission.id, goal=_clip(mission.goal, 200),
+                  resumed=start_step > 1, source=source):
+            try:
+                approved = await self._approve_plan(mission, source)
+                mission.approved = bool(approved)
                 self.missions.save(mission)
-                result = await self.worker.ask(brief, intent_mode="off")
-                report = _clip(str(result.get("output") or ""), MAX_REPORT)
-                self._speak("worker", report)
-                history.append({"step": step, "brief": brief, "report": report})
-                usage = result.get("usage") or {}
-                mission.usage["input_tokens"] += int(usage.get("input_tokens") or 0)
-                mission.usage["output_tokens"] += int(usage.get("output_tokens") or 0)
-                mission.steps.append({"step": step, "brief": brief, "report": report,
-                                      "action": action})
-                mission.usage["steps"] += 1
+                if not approved:
+                    mission.status, reason = "blocked", "operator denied the mission plan"
+                    answer = reason
+                    self._speak("memory", reason)
+                else:
+                    memories = self._recall(mission.goal)
+                    for step in range(start_step, self.max_steps + 1):
+                        self._check()
+                        elapsed = time.monotonic() - started
+                        if elapsed > self.max_seconds:
+                            mission.status, reason = "paused", "mission time budget exhausted"
+                            break
+                        if mission.usage["input_tokens"] + mission.usage["output_tokens"] > self.max_tokens:
+                            mission.status, reason = "paused", "mission token budget exhausted"
+                            break
+                        decision, message = await self._decide(mission, step, memories, report, history)
+                        input_tokens, output_tokens = _usage(message)
+                        mission.usage["input_tokens"] += input_tokens
+                        mission.usage["output_tokens"] += output_tokens
+                        action = decision["action"]
+                        self._remember(decision["memories"], mission, step)
+                        if action == "blocked":
+                            mission.status, reason = "blocked", decision["reasoning"] or "memory agent blocked"
+                            answer = decision["summary"] or reason
+                            self._speak("memory", f"受阻：{answer}")
+                            break
+                        if action == "done":
+                            mission.status = "done"
+                            answer = decision["summary"] or report
+                            mission.next_goal = decision["next_goal"]
+                            self._speak("memory", answer)
+                            break
+                        brief = decision["brief"] or mission.goal
+                        self._speak("memory", brief)
+                        self._emit({"type": "team.step", "agent": "system", "step": step,
+                                    "remaining": self.max_steps - step})
+                        self._check()
+                        # Persist before dispatch: a crash after this point is
+                        # reported as an unknown outcome and never replayed.
+                        mission.usage["attempts"] += 1
+                        mission.in_flight = True
+                        self.missions.save(mission)
+                        result = await self.worker.ask(brief, intent_mode="off")
+                        mission.in_flight = False
+                        report = _clip(str(result.get("output") or ""), MAX_REPORT)
+                        self._speak("worker", report)
+                        history.append({"step": step, "brief": brief, "report": report})
+                        usage = result.get("usage") or {}
+                        mission.usage["input_tokens"] += int(usage.get("input_tokens") or 0)
+                        mission.usage["output_tokens"] += int(usage.get("output_tokens") or 0)
+                        mission.steps.append({"step": step, "brief": brief, "report": report,
+                                              "action": action, "completed": True})
+                        mission.usage["steps"] += 1
+                        mission.updated = _now()
+                        self.missions.save(mission)
+                    else:
+                        mission.status, reason = "paused", f"step budget exhausted ({self.max_steps})"
+                    if mission.status == "running":
+                        mission.status = "done"
+            except AgentInterrupted:
+                mission.status, reason = "cancelled", "stopped by operator"
+                raise
+            except asyncio.CancelledError:
+                mission.status, reason = "cancelled", "cancelled"
+                raise
+            except BaseException as exc:
+                mission.status, reason = "failed", _failure_detail(exc)
+                self._speak("worker", f"执行体未能完成任务：{reason}")
+                self._emit({"type": "mission.error", "agent": "system", "mission": mission.id,
+                            "reason": reason})
+                raise
+            finally:
                 mission.updated = _now()
+                mission.usage["seconds"] = round(time.monotonic() - started, 3)
+                mission.lease_owner = ""
+                mission.lease_until = 0.0
+                if mission.status == "done" and not mission.answer:
+                    mission.answer = _clip(answer or report, MAX_REPORT)
+                mission.reason = _clip(reason or mission.reason, 1000)
                 self.missions.save(mission)
-            else:
-                mission.status, reason = "paused", f"step budget exhausted ({self.max_steps})"
-            if mission.status == "running":
-                mission.status = "done"
-        except AgentInterrupted:
-            mission.status, reason = "cancelled", "stopped by operator"
-            raise
-        except asyncio.CancelledError:
-            mission.status, reason = "cancelled", "cancelled"
-            raise
-        except BaseException as exc:
-            mission.status, reason = "failed", _failure_detail(exc)
-            self._speak("worker", f"执行体未能完成任务：{reason}")
-            self._emit({"type": "mission.error", "agent": "system", "mission": mission.id,
-                        "reason": reason})
-            raise
-        finally:
-            mission.updated = _now()
-            mission.usage["seconds"] = round(time.monotonic() - started, 3)
-            if mission.status == "done" and not mission.answer:
-                mission.answer = _clip(answer or report, MAX_REPORT)
-            mission.reason = _clip(reason or mission.reason, 1000)
-            self.missions.save(mission)
-            self.last_mission = mission
-            self._emit({"type": "mission.end", "agent": "system", "mission": mission.id,
-                        "status": mission.status, "usage": mission.usage,
-                        "answer": mission.answer, "reason": mission.reason})
-            with self._lock:
-                self._running = None
+                self.last_mission = mission
+                self._emit({"type": "mission.end", "agent": "system", "mission": mission.id,
+                            "status": mission.status, "usage": mission.usage,
+                            "answer": mission.answer, "reason": mission.reason,
+                            "trace_id": mission.trace_id or None})
+                with self._lock:
+                    self._running = None
         return {"output": mission.answer or answer, "status": mission.status,
                 "mission": mission.id, "steps": mission.usage["steps"],
                 "usage": dict(mission.usage), "reason": mission.reason,
                 "next_goal": mission.next_goal, "intent": None,
-                "agents": ["memory", "worker"]}
+                "approved": mission.approved, "agents": ["memory", "worker"],
+                "trace_id": mission.trace_id or None}
 
     async def _decide(self, mission, step, memories, report, history=()):
         remaining = self.max_steps - step
@@ -656,6 +866,8 @@ class TeamSession:
         if self._auto_task is not None and not self._auto_task.done():
             raise RuntimeError("Unattended loop is already running")
         self._pause_seconds = max(0.0, float(pause))
+        # Reclassify work interrupted by a previous process before claiming it.
+        self.missions.recover()
         for goal in goals:
             if isinstance(goal, str) and goal.strip():
                 await self.submit(goal)
@@ -675,11 +887,14 @@ class TeamSession:
                 if time.monotonic() - started > max_seconds:
                     self._auto_state = "stopped: time cap reached"
                     return
-                mission = self.missions.next_pending()
+                mission = self.missions.claim_next(f"auto-{os.getpid()}", lease_seconds=self.max_seconds)
                 if mission is None:
                     # No human input: the memory agent chooses the next objective.
                     self._auto_state = "thinking"
                     mission = await self._propose_mission()
+                    if mission is not None:
+                        mission = self.missions.claim_next(
+                            f"auto-{os.getpid()}", lease_seconds=self.max_seconds) or mission
                     if mission is None:
                         # Keep a concrete proposal error; only a clean empty
                         # proposal means there is nothing left to do.
@@ -688,7 +903,7 @@ class TeamSession:
                         return
                 self._auto_state = "running"
                 try:
-                    result = await self.run_mission(mission)
+                    result = await self.run_mission(mission, source="auto")
                 except AgentInterrupted:
                     break
                 except Exception:
@@ -724,7 +939,7 @@ class TeamSession:
         self._emit({"type": "team.thinking", "agent": "memory", "step": 0})
         goal = ""
         try:
-            goal = await self.memory.propose(role=role, memories=memories, last=last)
+            goal, _message = await self.memory.propose(role=role, memories=memories, last=last)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

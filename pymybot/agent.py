@@ -24,9 +24,12 @@ from urllib.parse import urlsplit
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (AIMessage, AIMessageChunk, HumanMessage,
                                      SystemMessage, messages_from_dict, messages_to_dict)
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
+from pydantic import ConfigDict, Field, ValidationError
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command, interrupt
 
@@ -35,6 +38,7 @@ from .agent_executor import RobotExecutor
 from .agent_intent import MODES, classify_intent
 from .agent_memory import aggregate_cold, estimate_request_tokens, summarize_turn
 from .agent_prompt import DEFAULT_CONTEXT_BYTES, read_operator_prompt
+from .agent_telemetry import current_trace_id, span
 from .agent_skill_runner import python_scripts
 from .agent_skills import CLI_SKILLS, SkillsLibrary, default_skills_root
 from .agent_state import (extract_turn_data, format_soul, format_stats, format_user,
@@ -132,6 +136,13 @@ class AgentConfig:
     protect_prompts: bool = True
     hot_turns: int = 3
     warm_turns: int = 10
+    max_requests: int = 64
+    max_tool_calls: int = 128
+    turn_timeout: float = 0.0
+    # Provider retries stay opt-in: a retry can duplicate provider cost and is
+    # explicitly rejected for dispatched tool outcomes.
+    model_retries: int = 0
+    fallback_models: tuple[str, ...] = ()
 
     def __post_init__(self):
         if type(self.auto_stats) is not bool:
@@ -168,10 +179,24 @@ class AgentConfig:
         object.__setattr__(self, "sandbox_mode", sandbox)
         if self.allow_web and not self.enable_web:
             raise AgentConfigurationError("allow_web requires enable_web")
-        for name, low, high in (("hot_turns", 1, 50), ("warm_turns", 0, 200)):
+        for name, low, high in (("hot_turns", 1, 50), ("warm_turns", 0, 200),
+                                ("max_requests", 1, 10_000), ("max_tool_calls", 1, 100_000),
+                                ("model_retries", 0, 10)):
             value = getattr(self, name)
             if type(value) is not int or not low <= value <= high:
                 raise AgentConfigurationError(f"{name} must be in {low}..{high}")
+        timeout = self.turn_timeout
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) \
+                or not math.isfinite(timeout) or timeout < 0 or timeout > 24 * 3600:
+            raise AgentConfigurationError("turn_timeout must be 0 (disabled) or 0..86400 seconds")
+        object.__setattr__(self, "turn_timeout", float(timeout))
+        fallbacks = self.fallback_models
+        if isinstance(fallbacks, str):
+            fallbacks = (fallbacks,)
+        if not isinstance(fallbacks, tuple) or any(not isinstance(item, str) or not item.strip()
+                                                    for item in fallbacks):
+            raise AgentConfigurationError("fallback_models must be model strings")
+        object.__setattr__(self, "fallback_models", tuple(item.strip() for item in fallbacks))
         endpoint = str(self.search_endpoint or "").strip()
         if endpoint:
             if not self.enable_web:
@@ -183,6 +208,59 @@ class AgentConfig:
                 raise AgentConfigurationError(
                     "search_endpoint must be an HTTPS (or loopback HTTP) URL without credentials")
         object.__setattr__(self, "search_endpoint", endpoint)
+
+
+class _FallbackChatModel(BaseChatModel):
+    """A BaseChatModel that tries provider models in order.
+
+    LangChain's generic RunnableWithFallbacks is not accepted by
+    ``create_agent`` because the graph needs a chat model that can bind tools.
+    This small wrapper keeps one chat-model surface while delegating tool
+    binding and generation to each provider in turn.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    models: tuple = ()
+    tools: tuple = ()
+    tool_kwargs: dict = Field(default_factory=dict)
+
+    @property
+    def _llm_type(self):
+        return "pymybot-fallback"
+
+    @property
+    def _identifying_params(self):
+        return {"models": [type(model).__name__ for model in self.models]}
+
+    def bind_tools(self, tools, **kwargs):
+        return _FallbackChatModel(models=self.models, tools=tuple(tools), tool_kwargs=dict(kwargs))
+
+    def _targets(self):
+        for model in self.models:
+            yield model.bind_tools(list(self.tools), **self.tool_kwargs) if self.tools else model
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        failure = None
+        for target in self._targets():
+            try:
+                message = target.invoke(messages)
+            except Exception as exc:
+                failure = exc
+                continue
+            return ChatResult(generations=[ChatGeneration(message=message)])
+        raise failure
+
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
+        failure = None
+        for target in self._targets():
+            try:
+                message = await target.ainvoke(messages)
+            except Exception as exc:
+                failure = exc
+                continue
+            return ChatResult(generations=[ChatGeneration(message=message)])
+        raise failure
 
 
 @dataclass
@@ -209,22 +287,30 @@ class ModelClient:
             raise failure
 
 
-def _secure_anthropic_client(api_key, base_url, timeout):
+def _secure_anthropic_client(api_key, base_url, timeout, retries):
     import anthropic
     import httpx2
     client = httpx2.AsyncClient(follow_redirects=False, limits=httpx2.Limits(
         max_connections=100, max_keepalive_connections=0))
-    return anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url, max_retries=0,
+    return anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url, max_retries=retries,
                                     timeout=timeout, http_client=client)
 
 
-def create_model(config):
-    """Create an explicit provider model; never probe credentials with a request."""
-    provider, separator, name = config.model.partition(":")
+def _parse_model_spec(spec):
+    provider, separator, name = str(spec).partition(":")
     if not separator or not name.strip() or provider not in PROVIDERS:
         choices = [f"{item}:MODEL" for item in PROVIDERS]
         raise AgentConfigurationError("Set --model or MYBOT_MODEL to "
                                       + ", ".join(choices[:-1]) + " or " + choices[-1])
+    return provider, name.strip()
+
+
+def create_model(config):
+    """Create provider models, retries and optional fallback chains.
+
+    Every construction is lazy: credentials are read but no model request is
+    sent, so a bad fallback still fails before any hardware action.
+    """
     if config.base_url:
         try:
             url = urlsplit(config.base_url)
@@ -235,58 +321,74 @@ def create_model(config):
             _ = url.port
         except ValueError:
             raise AgentConfigurationError("Base URL must use HTTPS (or loopback HTTP), without credentials/query/fragment") from None
-    key_env = config.api_key_env or PROVIDER_KEY_ENV[provider]
-    # Report the setting, never its secret value.
-    if not key_env.isidentifier():
-        raise AgentConfigurationError("--api-key-env must name an environment variable")
-    key = os.environ.get(key_env, "")
-    if not key.strip():
-        raise AgentConfigurationError(f"Missing API key environment variable: {key_env}")
     # SDKs append "/path" to the base, so trailing slashes must be normalized.
     custom_url = config.base_url.rstrip("/") if config.base_url else None
     if custom_url:
         custom_url += "/"
     timeout = float(config.timeout)
-    if provider == "anthropic":
-        from functools import cached_property
-        from langchain_anthropic import ChatAnthropic
-        from pydantic import PrivateAttr
+    retries = int(config.model_retries)
+    resources = []
 
-        class SecureChatAnthropic(ChatAnthropic):
-            _async_override: object = PrivateAttr(default=None)
+    def build(spec):
+        provider, name = _parse_model_spec(spec)
+        key_env = config.api_key_env or PROVIDER_KEY_ENV[provider]
+        # Report the setting, never its secret value.
+        if not key_env.isidentifier():
+            raise AgentConfigurationError("--api-key-env must name an environment variable")
+        key = os.environ.get(key_env, "")
+        if not key.strip():
+            raise AgentConfigurationError(f"Missing API key environment variable: {key_env}")
+        if provider == "anthropic":
+            from functools import cached_property
+            from langchain_anthropic import ChatAnthropic
+            from pydantic import PrivateAttr
 
-            @property
-            def model_name(self):
-                return self.model
+            class SecureChatAnthropic(ChatAnthropic):
+                _async_override: object = PrivateAttr(default=None)
 
-            @cached_property
-            def _async_client(self):
-                if self._async_override is not None:
-                    return self._async_override
-                return super()._async_client
+                @property
+                def model_name(self):
+                    return self.model
 
-        base = custom_url or "https://api.anthropic.com/"
-        client = _secure_anthropic_client(key, base, timeout)
-        model = SecureChatAnthropic(model=name, api_key=key, base_url=base,
-                                    timeout=timeout, max_retries=0,
-                                    max_tokens=MAX_OUTPUT_TOKENS, stream_usage=True)
-        model._async_override = client
-        return model, ModelClient(base_url=base, provider=provider, resources=(client,))
-    from langchain_openai import ChatOpenAI
-    import httpx2
-    base = custom_url or ("https://api.deepseek.com/v1/" if provider == "deepseek"
-                          else "https://api.openai.com/v1/")
-    http = httpx2.AsyncClient(follow_redirects=False, limits=httpx2.Limits(
-        max_connections=100, max_keepalive_connections=0))
-    model = ChatOpenAI(model=name, api_key=key, base_url=base, timeout=timeout,
-                       max_retries=0, max_tokens=MAX_OUTPUT_TOKENS, stream_usage=True,
-                       model_kwargs={"parallel_tool_calls": False},
-                       # An explicit client owns transport settings. Without this,
-                       # langchain-openai installs its own socket-option transport,
-                       # which also disables httpx proxy-environment support.
-                       http_socket_options=(),
-                       http_async_client=http)
-    return model, ModelClient(base_url=base, provider=provider, resources=(http,))
+                @cached_property
+                def _async_client(self):
+                    if self._async_override is not None:
+                        return self._async_override
+                    return super()._async_client
+
+            base = custom_url or "https://api.anthropic.com/"
+            client = _secure_anthropic_client(key, base, timeout, retries)
+            model = SecureChatAnthropic(model=name, api_key=key, base_url=base,
+                                        timeout=timeout, max_retries=retries,
+                                        max_tokens=MAX_OUTPUT_TOKENS, stream_usage=True)
+            model._async_override = client
+            resources.append(client)
+            return model, base
+        from langchain_openai import ChatOpenAI
+        import httpx2
+        base = custom_url or ("https://api.deepseek.com/v1/" if provider == "deepseek"
+                              else "https://api.openai.com/v1/")
+        http = httpx2.AsyncClient(follow_redirects=False, limits=httpx2.Limits(
+            max_connections=100, max_keepalive_connections=0))
+        model = ChatOpenAI(model=name, api_key=key, base_url=base, timeout=timeout,
+                           max_retries=retries, max_tokens=MAX_OUTPUT_TOKENS, stream_usage=True,
+                           model_kwargs={"parallel_tool_calls": False},
+                           # An explicit client owns transport settings. Without this,
+                           # langchain-openai installs its own socket-option transport,
+                           # which also disables httpx proxy-environment support.
+                           http_socket_options=(),
+                           http_async_client=http)
+        resources.append(http)
+        return model, base
+
+    primary, base = build(config.model)
+    fallbacks = []
+    for spec in config.fallback_models:
+        fallback, _ = build(spec)
+        fallbacks.append(fallback)
+    model = _FallbackChatModel(models=(primary, *fallbacks)) if fallbacks else primary
+    return model, ModelClient(base_url=base, provider=config.model.partition(":")[0],
+                              resources=tuple(resources), max_retries=retries)
 
 
 def request_endpoint(client):
@@ -677,6 +779,7 @@ class AgentSession:
         self._pruned_turns = 0
         self._camera = None
         self._checkpointer = InMemorySaver()
+        self._deadline = None
 
     # -- tools -------------------------------------------------------------
     def _build_tools(self):
@@ -933,12 +1036,23 @@ class AgentSession:
                         if self.session_log is not None:
                             self.session_log.close()
 
+    def reset_stop(self):
+        """Clear a cooperative stop so a stopped conversation can run again."""
+        reset = getattr(self.executor, "reset_stop", None)
+        if callable(reset):
+            reset()
+        self._last_call = None
+        self._repeat_count = 0
+
     def _check(self):
         if getattr(self.executor, "faulted", False) and not getattr(self.executor, "interrupted", False):
             raise AgentError("Execution outcome is unknown; inspect the robot and workspace before restarting. "
                              "Actions are not rolled back or automatically retried")
         if self.executor.stop_event.is_set():
             raise AgentInterrupted("Interrupted; already dispatched actions are not rolled back")
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            raise AgentBudgetExceeded(
+                f"Agent turn exceeded its {self.config.turn_timeout:g}-second wall-clock budget")
 
     def _log(self, kind, **fields):
         if self.session_log is not None:
@@ -1230,6 +1344,9 @@ class AgentSession:
 
     # -- tool execution ----------------------------------------------------
     def _count_tool_call(self):
+        if self._tool_calls >= self.config.max_tool_calls:
+            raise AgentBudgetExceeded(
+                f"Agent turn reached its {self.config.max_tool_calls}-tool-call budget")
         self._tool_calls += 1
 
     async def invoke_tool(self, name, arguments, *, emit=True):
@@ -1278,14 +1395,15 @@ class AgentSession:
             return result
         self._check()
         async with self._tool_lock:
-            if name in WEB_TOOLS:
-                result = await self._web_call(name, arguments)
-            elif name in CAMERA_TOOLS:
-                result = await self._camera_call(name, arguments)
-            elif name in self._skill_tools:
-                result = await self._skill_action_call(name, arguments)
-            else:
-                result = await self.executor.call(name, arguments, timeout=None)
+            with span("agent.tool", tool=name):
+                if name in WEB_TOOLS:
+                    result = await self._web_call(name, arguments)
+                elif name in CAMERA_TOOLS:
+                    result = await self._camera_call(name, arguments)
+                elif name in self._skill_tools:
+                    result = await self._skill_action_call(name, arguments)
+                else:
+                    result = await self.executor.call(name, arguments, timeout=None)
         self.events.append({"tool": name, **{k: result[k] for k in ("ok", "executed", "state")}})
         self._log("tool_result", tool=name,
                   **{key: result[key] for key in ("ok", "executed", "state") if key in result},
@@ -1529,6 +1647,9 @@ class AgentSession:
     def _middleware(self):
         async def hook(request, handler):
             self._check()
+            if self._requests >= self.config.max_requests:
+                raise AgentBudgetExceeded(
+                    f"Agent turn reached its {self.config.max_requests}-request budget")
             self._requests += 1
             messages = list(request.messages)
             trimmed = self._trim_messages(messages)
@@ -1539,7 +1660,9 @@ class AgentSession:
                 overrides["messages"] = trimmed
             if overrides:
                 request = request.override(**overrides)
-            return await handler(request)
+            with span("agent.model_call", request=self._requests,
+                      messages=len(trimmed)):
+                return await handler(request)
 
         return [wrap_model_call(hook)]
 
@@ -1581,6 +1704,8 @@ class AgentSession:
             raise AgentError("Concurrent turns on one robot session are not supported")
         self._asking = True
         started = time.monotonic()
+        self._deadline = (started + self.config.turn_timeout
+                          if self.config.turn_timeout > 0 else None)
         first_event = len(self.events)
         self._turn += 1
         self._last_call = None
@@ -1656,7 +1781,8 @@ class AgentSession:
             self._save_history()
             return {"output": output, "usage": usage, "intent": self.intent.as_dict(),
                     "prompt_version": self.prompt_version,
-                    "role": self.role.name if self.role is not None else None}
+                    "role": self.role.name if self.role is not None else None,
+                    "trace_id": current_trace_id()}
         except BaseException as exc:
             # Do not resume a partially executed turn after cancellation, model
             # failure or a limit exception. No tool/action replay is attempted.
@@ -1666,6 +1792,7 @@ class AgentSession:
         finally:
             self._in_graph = False
             self._asking = False
+            self._deadline = None
 
 
 async def console_line(prompt, stop):
@@ -1711,6 +1838,12 @@ async def confirm_console(name, arguments, stop):
         print(_display_text(f"Layer {arguments['layer']} · {arguments['reason']}\n{arguments['diff']}"),
               file=sys.stderr)
         answer = await console_line("Approve prompt replacement and private backup? [y/N] ", stop)
+        return answer is not None and answer.strip().lower() in {"y", "yes"}
+    if name == "plan:approve":
+        goal = _display_text(str(arguments.get("goal") or ""))
+        print(f"Mission plan ({arguments.get('source') or 'operator'}):\n{goal}", file=sys.stderr)
+        answer = await console_line(
+            "Approve this mission plan and allow the worker to act? [y/N] ", stop)
         return answer is not None and answer.strip().lower() in {"y", "yes"}
     # Never approve hidden/truncated arguments. repr neutralizes terminal controls.
     description = repr(dumps(arguments))
@@ -1843,7 +1976,12 @@ async def run_cli_agent(args, stop):
                              search_endpoint=getattr(args, "search_endpoint", "") or "",
                              auto_stats=not getattr(args, "no_prompt_stats", False),
                              hot_turns=getattr(args, "hot_turns", 3),
-                             warm_turns=getattr(args, "warm_turns", 10))
+                             warm_turns=getattr(args, "warm_turns", 10),
+                             max_requests=getattr(args, "max_requests", 64),
+                             max_tool_calls=getattr(args, "max_tool_calls", 128),
+                             turn_timeout=getattr(args, "turn_timeout", 0.0),
+                             model_retries=getattr(args, "model_retries", 0),
+                             fallback_models=tuple(getattr(args, "fallback_model", ()) or ()))
         try:
             from .mcp_client import load_servers
             mcp_servers = load_servers(config.mcp_config)
@@ -1884,7 +2022,9 @@ async def run_cli_agent(args, stop):
         session = TeamSession(worker, model, role=role, on_event=renderer,
                               max_steps=getattr(args, "team_steps", 8),
                               max_seconds=getattr(args, "mission_timeout", 1800.0),
-                              max_tokens=getattr(args, "mission_tokens", 400_000))
+                              max_tokens=getattr(args, "mission_tokens", 400_000),
+                              confirm=confirm,
+                              require_plan_approval=getattr(args, "require_plan_approval", False))
         result = await _conversation(session, args, stop, renderer)
     except BaseException as exc:
         failure = exc

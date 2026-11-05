@@ -439,6 +439,18 @@ class RobotExecutor:
     def cancel(self):
         self._stop.set()
 
+    def reset_stop(self):
+        """Clear a previous cooperative stop before a new mission starts.
+
+        A latched fault is deliberately not cleared; only the operator can
+        restart a faulty executor, and a fresh stop event must not make the
+        next mission fail immediately.
+        """
+        if self._closing:
+            raise SecurityError("Executor is closing")
+        self._stop.clear()
+        self._interrupted = False
+
     def _owner(self):
         ident = threading.get_ident()
         if self._owner_thread_id is None:

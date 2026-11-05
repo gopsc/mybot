@@ -41,6 +41,7 @@ camera = ["av>=19.0.2,<20"]
 web = ["httpx>=0.28,<1", "beautifulsoup4>=4.12,<5"]
 # MCP 2 renamed the low-level Server API; the server targets the 1.x contract.
 mcp = ["mcp>=1.30,<2"]
+observability = ["opentelemetry-api>=1.30,<2", "opentelemetry-sdk>=1.30,<2"]
 agent = [
   "langchain>=1.4,<2",
   "langgraph>=1.2,<2",

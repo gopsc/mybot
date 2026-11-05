@@ -1,0 +1,7 @@
+{
+  "relay-read": {"tool_events": [{"tool": "run_skill", "ok": true, "state": "completed"}],
+                  "usage": {"tool_calls": 1, "input_tokens": 10, "output_tokens": 3}},
+  "safe-stop": {"tool_events": [{"tool": "run_skill", "ok": true, "state": "completed"},
+                                 {"tool": "read_variables", "ok": true, "state": "completed"}],
+                 "usage": {"tool_calls": 2}}
+}

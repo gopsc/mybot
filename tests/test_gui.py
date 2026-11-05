@@ -790,7 +790,11 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     assert params["robot"] == app._robot_path()
     assert params["allowShell"] is True
     assert params["timeout"] == app.cfg.timeout
-    assert "maxRequests" not in params and "maxToolCalls" not in params
+    assert params["maxRequests"] == app.cfg.max_requests
+    assert params["maxToolCalls"] == app.cfg.max_tool_calls
+    assert params["turnTimeout"] == app.cfg.turn_timeout
+    assert params["modelRetries"] == app.cfg.model_retries
+    assert params["requirePlanApproval"] is False
 
 
 def test_abort_button_targets_the_server_not_the_agent_turn(ui, qapp):

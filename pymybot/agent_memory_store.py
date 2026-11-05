@@ -313,25 +313,34 @@ class MemoryStore:
                           reverse=True)
             return [doc.entry for doc in docs[:max(0, int(limit))]]
 
-    def search(self, query, *, k=8, budget_bytes=6000):
-        """Return the most relevant memories, bounded by count and bytes."""
+    def search(self, query, *, k=8, budget_bytes=6000, kinds=None, tags=None):
+        """Return the most relevant memories, bounded by count, bytes and filters."""
+        wanted_kinds = {kind for kind in (kinds or ()) if kind in KINDS}
+        wanted_tags = {_normalise(tag) for tag in (tags or ()) if str(tag).strip()}
         if not isinstance(query, str) or not query.strip():
-            return self.recent(k)
+            entries = self.recent(max(0, int(k)) * 2)
+            return [entry for entry in entries
+                    if (not wanted_kinds or entry.kind in wanted_kinds)
+                    and (not wanted_tags or wanted_tags.intersection(_normalise(tag) for tag in entry.tags))][:k]
         if len(query.encode("utf-8")) > MAX_QUERY:
             query = query.encode("utf-8")[:MAX_QUERY].decode("utf-8", "ignore")
         terms = list(dict.fromkeys(tokenize(query)))
         with self._lock:
             if not self._docs:
                 return []
-            scored = self._rank_locked(terms)
+            scored = self._rank_locked(terms, wanted_kinds, wanted_tags)
             return self._bounded(scored, k, budget_bytes)
 
-    def _rank_locked(self, terms):
+    def _rank_locked(self, terms, kinds=frozenset(), tags=frozenset()):
         total = len(self._docs)
         average = statistics.fmean(doc.length for doc in self._docs) or 1.0
         now = _now()
         ranked = []
         for document in self._docs:
+            if kinds and document.entry.kind not in kinds:
+                continue
+            if tags and not tags.intersection(_normalise(tag) for tag in document.entry.tags):
+                continue
             score = 0.0
             for term in terms:
                 frequency = document.counts.get(term, 0)
@@ -347,9 +356,57 @@ class MemoryStore:
             days = max(0.0, (now - stamp).total_seconds() / 86400) if stamp else 365.0
             recency = 0.5 ** (days / _RECENCY_HALF_LIFE_DAYS)
             score += _SALIENCE_WEIGHT * document.entry.salience + _RECENCY_WEIGHT * recency
+            if tags:
+                score += 0.35 * len(tags.intersection(_normalise(tag) for tag in document.entry.tags))
             ranked.append((score, document))
         ranked.sort(key=lambda item: item[0], reverse=True)
         return [document for score, document in ranked if score > 0] or [doc for _, doc in ranked]
+
+    def review(self, limit=50, *, kinds=None, tags=None):
+        """Return bounded entries for an operator review surface."""
+        wanted_kinds = {kind for kind in (kinds or ()) if kind in KINDS}
+        wanted_tags = {_normalise(tag) for tag in (tags or ()) if str(tag).strip()}
+        result = []
+        for entry in self.recent(max(0, int(limit)) * 3):
+            if wanted_kinds and entry.kind not in wanted_kinds:
+                continue
+            if wanted_tags and not wanted_tags.intersection(_normalise(tag) for tag in entry.tags):
+                continue
+            result.append(entry.as_dict())
+            if len(result) >= max(0, int(limit)):
+                break
+        return result
+
+    def forget(self, ids=None, *, kinds=None, tags=None):
+        """Remove selected memories; never follows links or rewrites foreign files."""
+        wanted_ids = {str(item) for item in (ids or ()) if str(item).strip()}
+        wanted_kinds = {kind for kind in (kinds or ()) if kind in KINDS}
+        wanted_tags = {_normalise(tag) for tag in (tags or ()) if str(tag).strip()}
+        if not wanted_ids and not wanted_kinds and not wanted_tags:
+            raise MemoryStoreError("forget requires ids, kinds or tags")
+        with self._lock:
+            removed = []
+            keep = []
+            for document in self._docs:
+                entry = document.entry
+                matches = ((entry.id in wanted_ids) if wanted_ids else False)
+                matches |= bool(wanted_kinds and entry.kind in wanted_kinds)
+                matches |= bool(wanted_tags and wanted_tags.intersection(
+                    _normalise(tag) for tag in entry.tags))
+                if matches:
+                    removed.append(entry.as_dict())
+                else:
+                    keep.append(document)
+            if not removed:
+                return []
+            self._docs = keep
+            self._seen = {_normalise(item.entry.text): item.entry for item in keep}
+            self._df = Counter()
+            for item in keep:
+                for token in item.counts:
+                    self._df[token] += 1
+            self._rewrite()
+            return removed
 
     @staticmethod
     def _bounded(documents, k, budget_bytes):

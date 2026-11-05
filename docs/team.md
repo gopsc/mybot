@@ -47,11 +47,17 @@ pymybot 的 Agent 默认拆成两个互相说话的智能体：**记忆体**负�
 执行体完成后记忆体判断 `done` / `blocked`，再提出下一个目标。停止只有两种方式：
 点「停止」或触及预算上限。
 
-- 每次任务有步数、墙钟、token 三个预算，任一耗尽状态记为 `paused`（可续跑）。
+- 每次任务有步数、墙钟、token、模型请求数和工具调用数五个上限；前三个任一耗尽记为
+  `paused`（可续跑），后两个由 `AgentConfig` 逐轮硬性拒绝。
 - 执行体失败不再重试，任务记为 `failed`；任务结束事件带有 `attempts`（执行体被调用次数）
   和失败原因，GUI/JSON 都能看到，不会表现成“记忆体独奏”。
+- 任务状态持久化到角色目录的 `missions/<id>.json`，进程重启后可查；重启后 `running`
+  且已派发动作的任务变成 `failed`/结果未知，绝不自动重放。`paused` 任务可被下一次
+  `agent.start` 自动续跑。
+- 停止会清除执行体的协作停止事件；再次启动不会立刻被上一次 stop 拦住。
+- 无人值守可开启 `--require-plan-approval`：每个自主任务先向 GUI/终端请求计划批准，
+  拒绝即记为 `blocked`，执行体不会收到任何指令。
 - 上一轮 `failed`/`blocked` 时，记忆体被要求提出修复目标；换不出目标就明确报告原因并停止。
-- 任务状态持久化到角色目录的 `missions/<id>.json`，进程重启后可查。
 - 取消沿用协作式停止：`cancel()` / GUI「停止」/ `Ctrl+C` 都会在下一次 `_check()` 生效。
 
 ## 长期记忆与检索
@@ -82,11 +88,34 @@ serve：
 
 - `agent.start` 启动后台自主循环，可带可选 `task` 种子；
 - `agent.stop` 停止；`agent.status` 查询；
-- `agent.ask` 只跑一个任务（给外部客户端用），不启动循环。
+- `agent.ask` 只跑一个任务（给外部客户端用），不启动循环；
+- `agent.memory` 查看长期记忆与统计，`agent.memory.forget` 按 id/kind/tag 删除记忆；
+- `agent.missions` 查看持久任务历史。
 
-自主运行受四道上限：单任务步数、单任务墙钟、单任务 token、自动任务总数
-（`--max-missions`，默认 20）。记忆体可以用 `next_goal` 提议下一个目标，但只会在
-上限内入队，不会无限自我续命；连续没有可做目标时循环自行停止。
+记忆体输出优先使用 provider 的结构化输出（Pydantic schema），失败时只修复一次，最后
+回退到文档化的 JSON 文本解析。模型/传输错误不会被伪装成解析错误而额外重试。
+
+自主运行受五道上限：单任务步数、单任务墙钟、单任务 token、单轮模型请求数、
+单轮工具调用数，另有自动任务总数（`--max-missions`，默认 20）。记忆体可以用
+`next_goal` 提议下一个目标，但只会在上限内入队，不会无限自我续命；连续没有可做
+目标时循环自行停止。
+
+## 可观测与回归评测
+
+安装 `pip install "pymybot[observability]"` 并配置 OpenTelemetry exporter 后，
+`agent.mission`、`agent.model_call`、`agent.tool` 会生成 span；事件和任务结果同时带
+`trace_id`。没有该依赖时所有追踪调用是无副作用的 no-op。
+
+`tools/agent_eval.py` 用确定性工具回执评分，不调用模型：
+
+```sh
+python -m tools.agent_eval \
+  --cases tests/fixtures/agent_eval/cases.json \
+  --runs  tests/fixtures/agent_eval/runs.json
+```
+
+评分覆盖缺失/禁止工具、`unknown` 结果、失败工具、重复调用和工具预算，适合作为 CI
+回归门禁。
 
 ## 安全边界
 

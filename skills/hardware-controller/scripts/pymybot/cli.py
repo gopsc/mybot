@@ -61,6 +61,16 @@ def positive_timeout(value):
     return number
 
 
+def nonnegative_timeout(value):
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a number of seconds") from None
+    if not math.isfinite(number) or not 0 <= number <= MAX_TIMEOUT:
+        raise argparse.ArgumentTypeError(f"must be 0 or a positive value at most {MAX_TIMEOUT} seconds")
+    return number
+
+
 def variable(value):
     name, separator, text = value.partition("=")
     try:
@@ -384,6 +394,18 @@ def parser():
                                  help="token budget for one mission (default: 400000)")
             command.add_argument("--max-missions", type=bounded_int(1, 1000), default=20,
                                  help="automatic mission cap for one autonomous run (default: 20)")
+            command.add_argument("--max-requests", type=bounded_int(1, 10_000), default=64,
+                                 help="maximum model requests per worker turn (default: 64)")
+            command.add_argument("--max-tool-calls", type=bounded_int(1, 100_000), default=128,
+                                 help="maximum tool calls per worker turn (default: 128)")
+            command.add_argument("--turn-timeout", type=nonnegative_timeout, default=0.0,
+                                 help="optional wall-clock budget for one worker turn; 0 disables it")
+            command.add_argument("--model-retries", type=bounded_int(0, 10), default=0,
+                                 help="optional provider retries for transient model failures (default: 0)")
+            command.add_argument("--fallback-model", action="append", default=[], metavar="PROVIDER:MODEL",
+                                 help="fallback model tried after the primary model fails; repeatable")
+            command.add_argument("--require-plan-approval", action="store_true",
+                                 help="ask the operator to approve every autonomous mission plan")
     return p
 
 
@@ -435,7 +457,10 @@ def parse_args(argv=None):
                  or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
                  or args.role or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint
                  or args.team_steps != 8
-                 or args.mission_timeout != 1800.0 or args.mission_tokens != 400_000):
+                 or args.mission_timeout != 1800.0 or args.mission_tokens != 400_000
+                 or args.max_requests != 64 or args.max_tool_calls != 128
+                 or args.turn_timeout or args.model_retries != 0 or args.fallback_model
+                 or args.require_plan_approval):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
         if not args.input:
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")

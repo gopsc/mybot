@@ -11,8 +11,9 @@ pytest.importorskip("langchain")
 
 from agent_fakes import FunctionModel, ModelResponse, TextPart
 
+from pymybot.agent_contracts import PlanDecision
 from pymybot.agent_memory_store import (MemoryStore, MemoryStoreError, tokenize)
-from pymybot.agent_team import Mission, MissionStore, TeamSession, parse_decision
+from pymybot.agent_team import MemoryAgent, Mission, MissionStore, TeamSession, parse_decision
 
 
 def memory_model(*decisions):
@@ -33,10 +34,15 @@ class FakeExecutor:
     def __init__(self):
         self.stop_event = threading.Event()
         self.cancelled = False
+        self.reset_calls = 0
 
     def cancel(self):
         self.cancelled = True
         self.stop_event.set()
+
+    def reset_stop(self):
+        self.reset_calls += 1
+        self.stop_event.clear()
 
 
 class FakeWorker:
@@ -79,6 +85,99 @@ def test_tokenize_mixes_ascii_and_cjk():
     tokens = tokenize("BME280 温度 0x76")
     assert "bme280" in tokens and "0x76" in tokens
     assert "温度" in tokens
+
+
+def test_memory_review_filters_and_forget(tmp_path):
+    store = MemoryStore(tmp_path / "memory")
+    gotcha = store.append("继电器上电会抖一下", kind="gotcha", tags=["relay"])
+    preference = store.append("用户偏好中文", kind="preference", tags=["user"])
+    reviewed = store.review(limit=10, kinds=["gotcha"])
+    assert [item["id"] for item in reviewed] == [gotcha.id]
+    removed = store.forget(tags=["relay"])
+    assert [item["id"] for item in removed] == [gotcha.id]
+    remaining = store.search("用户", k=2)
+    assert remaining and remaining[0].id == preference.id
+
+
+def test_mission_recovery_does_not_replay_in_flight_work(tmp_path):
+    store = MissionStore(tmp_path / "missions")
+    mission = store.create("巡检")
+    mission.status = "running"
+    mission.in_flight = True
+    store.save(mission)
+    recovered = store.recover()
+    assert recovered[0]["status"] == "failed"
+    assert "unknown" in recovered[0]["reason"]
+    assert store.next_resumable() is None
+
+
+def test_mission_claim_lease_and_release(tmp_path):
+    store = MissionStore(tmp_path / "missions")
+    mission = store.create("排队任务")
+    claimed = store.claim_next("worker-1", lease_seconds=60)
+    assert claimed is not None and claimed.status == "running"
+    assert claimed.lease_owner == "worker-1"
+    assert store.claim_next("worker-2") is None
+    store.release(claimed, status="done")
+    assert store.load(mission.id).lease_owner == ""
+
+
+def test_team_resumes_paused_mission_from_next_step(tmp_path):
+    missions = MissionStore(tmp_path / "missions")
+    mission = missions.create("继续巡检")
+    mission.status = "paused"
+    mission.usage["steps"] = 1
+    mission.steps = [{"step": 1, "brief": "检查", "report": "已检查", "completed": True}]
+    missions.save(mission)
+    worker = FakeWorker()
+    team = TeamSession(worker, memory_model({"action": "done", "summary": "完成"}),
+                       mission_store=missions, memory_store=MemoryStore(tmp_path / "memory"))
+    result = asyncio.run(team.run_mission(missions.load(mission.id), source="auto"))
+    assert result["status"] == "done" and result["output"] == "完成"
+    assert worker.asks == []  # the next planning step said done
+
+
+def test_team_plan_approval_denies_without_worker(tmp_path):
+    reply = {"approved": False}
+
+    async def confirm(name, arguments):
+        assert name == "plan:approve"
+        return reply
+
+    worker = FakeWorker()
+    team = TeamSession(worker, memory_model(), role=None, confirm=confirm,
+                       require_plan_approval=True)
+    result = asyncio.run(team.ask("检查继电器"))
+    assert result["status"] == "blocked"
+    assert result["approved"] is False
+    assert worker.asks == []
+
+
+def test_team_reset_stop_clears_executor_event():
+    worker = FakeWorker()
+    team = TeamSession(worker, memory_model(), role=None)
+    team.cancel()
+    assert worker.executor.stop_event.is_set()
+    team._reset_stop()
+    assert not worker.executor.stop_event.is_set()
+    assert worker.executor.reset_calls == 1
+
+
+class StructuredMemoryModel:
+    model_name = "structured-test"
+
+    def with_structured_output(self, schema, include_raw=True):
+        class Runnable:
+            async def ainvoke(inner, messages):
+                return {"parsed": PlanDecision(action="done", summary="完成"),
+                        "raw": None, "parsing_error": None}
+        return Runnable()
+
+
+def test_memory_agent_prefers_structured_output():
+    agent = MemoryAgent(StructuredMemoryModel())
+    decision, _ = asyncio.run(agent.decide(goal="检查", step=1, remaining=3, memories=[], report=""))
+    assert decision["action"] == "done" and decision["summary"] == "完成"
 
 
 def test_memory_append_search_and_reload(tmp_path):
