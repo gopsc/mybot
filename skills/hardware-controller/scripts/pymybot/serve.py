@@ -119,6 +119,26 @@ def agent_available():
     return importlib.util.find_spec("langgraph") is not None
 
 
+class _RobotSession:
+    """One named robot session: its own Robot, owner thread and busy state.
+
+    Sessions are isolated from each other — a long action on one robot never
+    blocks a sample on another — while the single ``owner`` flag still keeps
+    the whole session layer mutually exclusive with the agent.
+    """
+
+    __slots__ = ("name", "robot", "info", "worker", "op", "idle")
+
+    def __init__(self, name):
+        self.name = name
+        self.robot = None
+        self.info = {}
+        self.op = None
+        self.idle = asyncio.Event()
+        self.idle.set()
+        self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"serve-robot-{name}")
+
+
 class Server:
     def __init__(self, out, stop, *, enable_agent=True, enable_session_log=True):
         self.out = out
@@ -126,15 +146,13 @@ class Server:
         self.enable_agent = enable_agent
         self.enable_session_log = enable_session_log
         self._write_lock = threading.Lock()
-        self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="serve-robot")
-        self.robot = None
-        self.session = None
-        self.robot_op = None
+        self.sessions: dict[str, _RobotSession] = {}
+        self._activating: dict[str, _RobotSession] = {}
         # Ownership includes initialization and cleanup, not just published objects.
         self.owner = None
-        self.robot_idle = asyncio.Event()
-        self.robot_idle.set()
-        self.deactivating = None
+        self._root_idle = asyncio.Event()
+        self._root_idle.set()
+        self.deactivating: dict[str, asyncio.Task] = {}
         self.requests = {}
         self.tasks = set()
         self.client_calls = {}
@@ -143,6 +161,32 @@ class Server:
         self.agent_key = None
         self.agent_lock = asyncio.Lock()
         self.closing = False
+
+    # -- compatibility views over the default (or single) session ----------
+    @property
+    def robot(self):
+        entry = self._any_session()
+        return entry.robot if entry is not None else None
+
+    @property
+    def session(self):
+        entry = self._any_session()
+        return entry.info if entry is not None else None
+
+    @property
+    def robot_idle(self):
+        entry = self._any_session()
+        return entry.idle if entry is not None else self._root_idle
+
+    @property
+    def robot_op(self):
+        entry = self._any_session()
+        return entry.op if entry is not None else None
+
+    def _any_session(self):
+        if not self.sessions:
+            return None
+        return self.sessions.get("default") or next(iter(self.sessions.values()))
 
     # -- transport -------------------------------------------------------
     def send(self, message):
@@ -274,35 +318,61 @@ class Server:
             raise RpcError(WRONG_STATE, "A robot session owns the robot; deactivate it before using the agent")
 
     # -- session robot ----------------------------------------------------
-    async def on_worker(self, fn, *args):
-        future = asyncio.get_running_loop().run_in_executor(self.worker, fn, *args)
-        operation = self.robot_op
+    @staticmethod
+    def _session_name(params):
+        name = params.text("session", cap=64) or "default"
+        try:
+            safe_ident(name)
+        except ValueError as exc:
+            raise RpcError(INVALID_PARAMS, f"'session': {exc}") from None
+        return name
+
+    def _session(self, name=None, *, required=True):
+        key = name or "default"
+        entry = self.sessions.get(key)
+        if entry is None and required:
+            raise RpcError(WRONG_STATE, f"No active session {key!r}; call session.activate first")
+        return entry
+
+    async def on_worker(self, fn, *args, entry=None):
+        entry = entry if entry is not None else self._session()
+        future = asyncio.get_running_loop().run_in_executor(entry.worker, fn, *args)
+        operation = entry.op
         await_cancel = (lambda: self.cancel({"id": operation[0]})) if operation else None
         return await self.finish(future, await_cancel)
 
-    def claim(self, ident, method):
+    def claim(self, ident, method, entry):
         self.require_owner("session")
-        if self.deactivating is not None:
+        if self.deactivating.get(entry.name) is not None:
             raise RpcError(BUSY, "Session is deactivating")
-        if self.robot_op is not None:
-            raise RpcError(BUSY, f"Session is busy with '{self.robot_op[1]}'")
-        self.robot_op = (ident, method)
-        self.robot_idle.clear()
+        if entry.op is not None:
+            raise RpcError(BUSY, f"Session {entry.name!r} is busy with '{entry.op[1]}'")
+        entry.op = (ident, method)
+        entry.idle.clear()
 
-    def release(self, ident):
-        if self.robot_op and self.robot_op[0] == ident:
-            self.robot_op = None
-            self.robot_idle.set()
+    def release(self, ident, entry):
+        if entry.op and entry.op[0] == ident:
+            entry.op = None
+            entry.idle.set()
 
-    def require_session(self):
-        if self.robot is None:
+    def require_session(self, name=None):
+        entry = self._session(name)
+        if entry.robot is None:
             raise RpcError(WRONG_STATE, "No active session; call session.activate first")
-        return self.robot
+        return entry
 
-    def status(self):
-        return {"state": "Active" if self.robot is not None else "Inactive",
-                **(self.session or {}), "busy": self.robot_op[1] if self.robot_op else None,
-                "agent": self.agent is not None}
+    def status(self, entry=None):
+        sessions = [{"session": entry.name,
+                     "robot": entry.info.get("robot"),
+                     "busy": entry.op[1] if entry.op else None}
+                    for entry in self.sessions.values()]
+        ops = [entry.op[1] for entry in (*self.sessions.values(), *self._activating.values())
+               if entry.op is not None]
+        view = entry if entry is not None else self._any_session()
+        return {"state": "Active" if self.sessions else "Inactive",
+                **(view.info if view is not None else {}),
+                "busy": ops[0] if ops else None,
+                "agent": self.agent is not None, "sessions": sessions}
 
     async def m_initialize(self, ident, params, cancel):
         return {"protocol": PROTOCOL, "version": __version__,
@@ -318,12 +388,15 @@ class Server:
         module_paths = params.strings("modulePaths") or None
         allow_hardware = params.flag("allowHardware")
         bindings = params.bindings("vars")
+        name = self._session_name(params)
         self.require_owner("session")
-        if self.deactivating is not None:
-            raise RpcError(BUSY, "Session is deactivating")
-        if self.robot is not None:
-            raise RpcError(WRONG_STATE, "Session already active; deactivate it first")
-        self.claim(ident, "session.activate")
+        if name in self._activating or self.deactivating.get(name) is not None:
+            raise RpcError(BUSY, "Session is activating or deactivating")
+        if name in self.sessions:
+            raise RpcError(WRONG_STATE, f"Session {name!r} already active; deactivate it first")
+        entry = _RobotSession(name)
+        self._activating[name] = entry
+        self.claim(ident, "session.activate", entry)
         self.owner = "session"
         holder = {}
         self.requests[ident]["hooks"].append(lambda: holder.get("robot") and holder["robot"].stop_event.set())
@@ -344,59 +417,86 @@ class Server:
             return robot, hardware
 
         try:
-            robot, hardware = await self.on_worker(activate)
+            robot, hardware = await self.on_worker(activate, entry=entry)
             if cancel.is_set():
                 raise BudgetExceeded("Stop requested; activation rolled back")
-            self.robot = robot
-            self.session = {"robot": robot.structure_path, "allowHardware": allow_hardware, "since": time.time()}
+            entry.robot = robot
+            entry.info = {"robot": robot.structure_path, "allowHardware": allow_hardware,
+                          "since": time.time(), "session": name}
+            self.sessions[name] = entry
         except BaseException:
             # The owner thread must also clean partially completed activation.
             if "robot" in holder:
-                await self.on_worker(holder["robot"].deactivate)
+                await self.on_worker(holder["robot"].deactivate, entry=entry)
+            entry.worker.shutdown(wait=True)
             raise
         finally:
-            self.release(ident)
-            if self.robot is None and self.deactivating is None:
+            self.release(ident, entry)
+            self._activating.pop(name, None)
+            if not self.sessions and self.owner == "session":
                 self.owner = None
         self.notify("session", self.status())
-        return {**self.status(), "hardware": hardware}
+        return {**self.status(entry), "hardware": hardware}
 
     async def m_session_deactivate(self, ident, params, cancel):
-        await self.deactivate()
+        if params.raw.get("session") is None:
+            # Omitted session means "tear everything down" (back-compat path).
+            await self.deactivate()
+        else:
+            await self.deactivate(self._session_name(params))
         return self.status()
 
     async def m_abort(self, ident, params, cancel):
         """Best-effort stop for whichever side currently owns the hardware."""
         if self.agent is not None:
             return await self._abort_agent()
-        if self.robot is not None:
+        if self.sessions:
             return await self._abort_session()
         return {"state": "Inactive", "aborted": False, "agent": False,
                 "safe_failures": [], "destroy_failures": []}
 
     async def m_session_abort(self, ident, params, cancel):
-        return await self._abort_session()
+        return await self._abort_session(
+            self._session_name(params) if params.raw.get("session") is not None else None)
 
-    async def _abort_session(self):
-        """Best-effort stop for a direct robot session; always ends the session."""
-        robot = self.robot
-        if robot is None:
+    async def _abort_session(self, name=None):
+        """Best-effort stop for direct robot sessions; named abort ends that one,
+        unnamed abort ends every session."""
+        targets = ([self._session(name)] if name is not None
+                   else list(self.sessions.values()))
+        if not targets:
             return {"state": "Inactive", "aborted": False,
                     "safe_failures": [], "destroy_failures": []}
         self.require_owner("session")
-        # Wake a running cooperative action before waiting for the owner thread;
-        # the abort task itself is queued behind that action.
-        robot.stop_event.set()
-        if self.robot_op is not None:
-            self.cancel({"id": self.robot_op[0]})
-        try:
-            receipt = await self.on_worker(robot.abort, "operator")
-        finally:
-            self.robot = None
-            self.session = None
+        safe_failures, destroy_failures = [], []
+        receipt = None
+        for entry in targets:
+            robot = entry.robot
+            if robot is None:
+                continue
+            # Wake a running cooperative action before waiting for the owner
+            # thread; the abort task itself is queued behind that action.
+            robot.stop_event.set()
+            if entry.op is not None:
+                self.cancel({"id": entry.op[0]})
+            try:
+                receipt = await self.on_worker(robot.abort, "operator", entry=entry)
+            finally:
+                self.sessions.pop(entry.name, None)
+                entry.worker.shutdown(wait=True)
+            data = receipt.get("data") if isinstance(receipt, dict) else None
+            body = data if isinstance(data, dict) else receipt
+            if isinstance(body, dict):
+                safe_failures.extend(body.get("safe_failures") or [])
+                destroy_failures.extend(body.get("destroy_failures") or [])
+        self.notify("session", self.status())
+        if not self.sessions and self.owner == "session":
             self.owner = None
-            self.notify("session", self.status())
-        return receipt
+        base = receipt if isinstance(receipt, dict) else {}
+        merged = {"aborted": bool(targets),
+                  "safe_failures": safe_failures, "destroy_failures": destroy_failures}
+        merged.update({key: value for key, value in base.items() if key != "data"})
+        return merged
 
     async def m_agent_abort(self, ident, params, cancel):
         return await self._abort_agent()
@@ -425,38 +525,66 @@ class Server:
             receipt = {**result, "aborted": False}
         return {**receipt, "agent": True, "conversationClosed": closed}
 
-    async def deactivate(self):
+    async def deactivate(self, name=None):
+        """Deactivate one named session, or every session when unnamed.
+
+        A session that is still activating is also targeted: the wait covers
+        its rollback, so deactivation never completes before cleanup does.
+        """
+        names = [name] if name is not None else [*self.sessions, *self._activating]
         cancelled = False
-        while self.owner == "session":
-            if self.deactivating is None or self.deactivating.cancelled():
-                self.deactivating = asyncio.create_task(self._deactivate())
+        while any(self.owner == "session"
+                  and (item in self.sessions or item in self._activating
+                       or self.deactivating.get(item) is not None)
+                  for item in names):
+            # A cleanup task cancelled before its first step never ran its
+            # finally, so it stays behind as a done entry; drop finished tasks
+            # or the loop would never recreate them and spin forever.
+            for item, task in list(self.deactivating.items()):
+                if task.done():
+                    self.deactivating.pop(item, None)
+            for item in names:
+                if ((item in self.sessions or item in self._activating)
+                        and self.deactivating.get(item) is None):
+                    self.deactivating[item] = asyncio.create_task(self._deactivate(item))
             try:
-                await self.finish(self.deactivating)
+                if self.deactivating:
+                    await asyncio.gather(*(self.finish(task) for task in tuple(self.deactivating.values())),
+                                         return_exceptions=False)
                 break
             except asyncio.CancelledError:
                 cancelled = True
         if cancelled:
             raise asyncio.CancelledError
 
-    async def _deactivate(self):
+    async def _deactivate(self, name):
         cancelled = False
+        entry = self.sessions.get(name) or self._activating.get(name)
         try:
-            if self.robot_op is not None:
-                self.cancel({"id": self.robot_op[0]})
+            if entry is None:
+                return
+            if entry.op is not None:
+                self.cancel({"id": entry.op[0]})
             # Loop-wide cancellation can target this cleanup task directly.
             while True:
                 try:
-                    await self.robot_idle.wait()
+                    await entry.idle.wait()
                     break
                 except asyncio.CancelledError:
                     cancelled = True
-            if self.robot is not None:
-                await self.on_worker(self.robot.deactivate)
+            # An activation still in flight cleans up after its own rollback;
+            # only a published session deactivates its robot here.
+            if entry.robot is not None and name in self.sessions:
+                await self.on_worker(entry.robot.deactivate, entry=entry)
         finally:
-            self.robot = None
-            self.session = None
-            self.owner = None
-            self.deactivating = None
+            # A failed or cancelled deactivation still ends the session, exactly
+            # like the previous single-session teardown did.
+            if name in self.sessions:
+                self.sessions.pop(name, None)
+                entry.worker.shutdown(wait=True)
+            self.deactivating.pop(name, None)
+            if not self.sessions and not self._activating and self.owner == "session":
+                self.owner = None
             self.notify("session", self.status())
         if cancelled:
             raise asyncio.CancelledError
@@ -465,29 +593,31 @@ class Server:
         source = params.text("input", required=True)
         bindings = params.bindings("vars")
         timeout = params.seconds("timeout", 180)
-        robot = self.require_session()
-        self.claim(ident, "run")
+        entry = self.require_session(self._session_name(params))
+        robot = entry.robot
+        self.claim(ident, "run", entry)
         try:
             path = Path(source).absolute()
             def run():
                 return robot.run(read_file(path), base_dir=str(path.parent), vars=bindings,
                                  timeout=timeout, cancel=cancel)
-            return {"outputs": await self.on_worker(run)}
+            return {"outputs": await self.on_worker(run, entry=entry)}
         finally:
-            self.release(ident)
+            self.release(ident, entry)
 
     async def m_apply_sql(self, ident, params, cancel):
         sql = params.text("sql", required=True)
-        robot = self.require_session()
-        self.claim(ident, "apply-sql")
+        entry = self.require_session(self._session_name(params))
+        robot = entry.robot
+        self.claim(ident, "apply-sql", entry)
         try:
-            output = await self.on_worker(lambda: robot.apply_sql(sql, cancel=cancel))
+            output = await self.on_worker(lambda: robot.apply_sql(sql, cancel=cancel), entry=entry)
             hardware = [{"name": name, "type": table.name}
                         for name, (table, row) in robot._rows(robot.tables).items()
                         if table.name not in {"Alias", "Vars"}]
             return {"output": output, "hardware": hardware}
         finally:
-            self.release(ident)
+            self.release(ident, entry)
 
     async def m_sample(self, ident, params, cancel):
         name = params.text("name", required=True)
@@ -498,12 +628,14 @@ class Server:
         count = params.integer("count", 1, MAX_SAMPLES, default=1)
         interval = params.integer("intervalMs", 0, 60000, default=0) / 1000
         timeout = params.seconds("timeout")
-        robot = self.require_session()
-        self.claim(ident, "sample")
+        entry = self.require_session(self._session_name(params))
+        robot = entry.robot
+        self.claim(ident, "sample", entry)
         try:
-            return await self.on_worker(self.sample, robot, ident, name, count, interval, timeout, cancel)
+            return await self.on_worker(self.sample, robot, ident, name, count, interval,
+                                        timeout, cancel, entry=entry)
         finally:
-            self.release(ident)
+            self.release(ident, entry)
 
     def sample(self, robot, ident, name, count, interval, timeout, cancel):
         budget = Budget(robot.stop_event, timeout, cancel)
@@ -941,7 +1073,10 @@ class Server:
                         if self.owner == "agent":
                             self.owner = None
             finally:
-                await asyncio.to_thread(self.worker.shutdown, wait=True)
+                workers = [entry.worker for entry in list(self.sessions.values())]
+                self.sessions.clear()
+                if workers:
+                    await asyncio.to_thread(lambda: [worker.shutdown(wait=True) for worker in workers])
 
 
 def _reader(fd, queue, loop):

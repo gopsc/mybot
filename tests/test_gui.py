@@ -19,6 +19,7 @@ from pymybot.gui import protocol as gui_protocol
 from pymybot.gui.config import GuiConfig, merge_args
 from pymybot.gui.protocol import (CliCall, RpcError, ServeClient, cli_args, parse_result,
                                   resolve_python, sessions_args)
+from PySide6.QtWidgets import QDialog
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
@@ -392,6 +393,9 @@ def app_factory(monkeypatch, qapp, tmp_path):
 
     instances = []
     monkeypatch.setattr(gui_app, "ServeClient", FakeClient)
+    # The first-run model wizard is modal; window tests opt out and the wizard
+    # has dedicated tests that drive it through a stub.
+    monkeypatch.setenv("MYBOT_GUI_MODEL_WIZARD", "0")
 
     def build(config_path=None, config=None):
         if config is None:
@@ -1596,3 +1600,105 @@ def test_start_skips_a_missing_structure_file(ui):
     assert client.requests[-1][0] == "agent.start"
     assert "robot" not in client.requests[-1][1]
     assert "结构文件不存在" in app.status_notice.text()
+
+
+class _StubWizard(QDialog):
+    """Stand-in for ModelSetupDialog that records how often it opened."""
+
+    opened = []
+
+    def __init__(self, parent=None, *, accepted=False, values=None):
+        super().__init__(parent)
+        self.values = dict(values) if accepted else None
+        type(self).opened.append(self)
+
+    def exec(self):
+        if self.values:
+            return QDialog.DialogCode.Accepted
+        return QDialog.DialogCode.Rejected
+
+
+def test_first_run_model_wizard_saves_once(app_factory, tmp_path, monkeypatch):
+    gui, app = app_factory(config_path=tmp_path / "settings.json")
+    monkeypatch.setenv("MYBOT_GUI_MODEL_WIZARD", "1")
+    monkeypatch.setattr(gui, "ModelSetupDialog", lambda parent: _StubWizard(
+        parent, accepted=True,
+        values={"model": "openai:gpt-4o", "base_url": "", "api_key_env": "OPENAI_API_KEY"}))
+    app.cfg.model = ""
+    app.cfg.model_setup_done = False
+
+    app.maybe_model_setup()
+
+    assert len(_StubWizard.opened) == 1
+    assert app.cfg.model == "openai:gpt-4o" and app.cfg.model_setup_done is True
+    assert "openai:gpt-4o" in app.model_label.text()
+    stored = json.loads((tmp_path / "settings.json").read_text())
+    assert stored["model"] == "openai:gpt-4o" and stored["model_setup_done"] is True
+    app.maybe_model_setup()  # Remembered: the wizard never nags again.
+    assert len(_StubWizard.opened) == 1
+    _StubWizard.opened.clear()
+
+
+def test_first_run_model_wizard_skip_is_remembered(app_factory, tmp_path, monkeypatch):
+    gui, app = app_factory(config_path=tmp_path / "settings.json")
+    monkeypatch.setenv("MYBOT_GUI_MODEL_WIZARD", "1")
+    monkeypatch.setattr(gui, "ModelSetupDialog", lambda parent: _StubWizard(parent))
+    app.cfg.model = ""
+    app.cfg.model_setup_done = False
+
+    app.maybe_model_setup()
+
+    assert len(_StubWizard.opened) == 1
+    assert app.cfg.model == "" and app.cfg.model_setup_done is True
+    stored = json.loads((tmp_path / "settings.json").read_text())
+    assert stored["model"] == "" and stored["model_setup_done"] is True
+    app.maybe_model_setup()
+    assert len(_StubWizard.opened) == 1
+    _StubWizard.opened.clear()
+
+
+def test_first_run_model_wizard_skips_when_model_comes_from_env(app_factory, monkeypatch):
+    gui, app = app_factory()
+    monkeypatch.setenv("MYBOT_GUI_MODEL_WIZARD", "1")
+    monkeypatch.setenv("MYBOT_MODEL", "openai:from-env")
+    app.cfg.model = ""
+    app.cfg.model_setup_done = False
+
+    app.maybe_model_setup()
+
+    assert _StubWizard.opened == []
+    assert app.cfg.model_setup_done is True
+    _StubWizard.opened.clear()
+
+
+def test_model_setup_dialog_builds_values_and_validates(qapp, monkeypatch):
+    from pymybot.gui import dialogs as gui_dialogs
+
+    warnings = []
+    monkeypatch.setattr(gui_dialogs.QMessageBox, "warning",
+                        lambda *args, **kwargs: warnings.append(args[1]))
+    dialog = gui_dialogs.ModelSetupDialog()
+    assert dialog.provider.count() >= 5  # skip entry plus the four built-ins
+    assert dialog.provider.currentData() == ""  # skip is the safe default
+    assert not dialog.model_name.isEnabled()
+
+    dialog.provider.setCurrentIndex(1)  # first built-in provider
+    assert dialog.model_name.isEnabled()
+    assert dialog.key_env.text() == "OPENAI_API_KEY"
+    dialog._save()
+    assert warnings == ["缺少模型名"] and dialog.values is None
+
+    dialog.model_name.setText("gpt-4o")
+    dialog.base_url.setText("ftp://example.invalid")
+    dialog._save()
+    assert warnings[-1] == "端点无效"
+    dialog.base_url.setText("https://proxy.example/v1")
+    dialog.key_env.setText("not an ident")
+    dialog._save()
+    assert warnings[-1] == "密钥变量无效"
+    dialog.key_env.setText("MY_KEY_ENV")
+    dialog._save()
+    assert dialog.values == {"model": "openai:gpt-4o", "base_url": "https://proxy.example/v1",
+                             "api_key_env": "MY_KEY_ENV"}
+    dialog._skip()
+    assert dialog.values == {}

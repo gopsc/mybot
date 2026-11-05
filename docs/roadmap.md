@@ -13,8 +13,8 @@ release; security and reproducibility work takes precedence.
 
 ## 0.3.x — operator experience
 
-- [ ] First-run model setup wizard in the GUI (no shared key, no hidden default).
-- [ ] Guided hardware discovery for UART/FTDI devices.
+- [x] First-run model setup wizard in the GUI (no shared key, no hidden default).
+- [x] Guided hardware discovery for UART/FTDI devices.
 - [x] Action-script editor with syntax highlighting and dry-run (removed in
   0.6.0; the GUI now offers the command panel and a read-only resource browser).
 - [ ] Sampling charts and a session timeline in the GUI.
@@ -34,12 +34,12 @@ release; security and reproducibility work takes precedence.
 - [x] Shared frozen-asset plan for the onedir and onefile PyInstaller specs.
 - [x] Runnable `pymybot new` scaffold and a README quick start.
 - [ ] Remote MCP transports (HTTP/SSE), after a network threat-model review.
-- [ ] Pluggable model providers beyond the current four, without duplicating
+- [x] Pluggable model providers beyond the current four, without duplicating
   HTTP code.
 - [ ] Streaming tool results for long-running actions.
-- [ ] Multi-robot sessions with explicit per-robot locks.
+- [x] Multi-robot sessions with explicit per-robot locks.
 - [ ] Stronger cancellation for blocking native I/O (documented limits remain).
-- [ ] Optional OpenTelemetry traces for agent/tool latency.
+- [x] Optional OpenTelemetry traces for agent/tool latency.
 
 ## Before 1.0
 

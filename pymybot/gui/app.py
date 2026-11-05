@@ -31,7 +31,7 @@ from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
-                      PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
+                      ModelSetupDialog, PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
 from .protocol import CANCELLED, RpcError, ServeClient, resolve_python
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
@@ -158,6 +158,35 @@ class App(QMainWindow):
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         self._start_timer.start(120)
         self._refresh_status()
+
+    def maybe_model_setup(self):
+        """First-run wizard: offer guided model setup exactly once.
+
+        Called by run_gui once the main window is visible — never during
+        construction, so embedding or testing the window cannot trip a modal
+        dialog. Skipped or completed, the visit is remembered so the dialog
+        never nags; the settings dialog remains the manual path. Headless runs
+        and MYBOT_GUI_MODEL_WIZARD=0 never open the dialog.
+        """
+        if self._stopping or self.cfg.model_setup_done:
+            return
+        enabled = os.environ.get("MYBOT_GUI_MODEL_WIZARD", "1").strip().lower()
+        if enabled in {"0", "false", "no", "off"}:
+            return
+        if self.cfg.model or os.environ.get("MYBOT_MODEL"):
+            self.cfg.model_setup_done = True
+            self._save()
+            return
+        dialog = ModelSetupDialog(self)
+        accepted = self._exec_dialog(dialog) == QDialog.DialogCode.Accepted and dialog.values
+        self.cfg.model_setup_done = True
+        if accepted:
+            for key in ("model", "base_url", "api_key_env"):
+                setattr(self.cfg, key, dialog.values[key])
+            self._sync_controls()
+            self._refresh_model_label()
+            self._notice("模型已配置；新对话将使用它")
+        self._save()
 
     def _build(self):
         self.setWindowTitle(TITLE)
@@ -1871,11 +1900,12 @@ def run_gui(args):
         screen = application.primaryScreen()
         if screen is not None:
             splash.move(screen.availableGeometry().center() - splash.rect().center())
-        splash.entered.connect(lambda: splash.fade_out(lambda: _fade_in(window)))
+        splash.entered.connect(lambda: splash.fade_out(lambda: (_fade_in(window), window.maybe_model_setup())))
         splash.cancelled.connect(lambda: (window.shutdown(), loop.quit()))
         splash.show()
     else:
         window.show()
+        window.maybe_model_setup()
     try:
         loop.exec()
     finally:

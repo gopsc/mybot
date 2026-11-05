@@ -42,6 +42,12 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
         elif self.path.startswith("/big"):
             self._send(200, "text/html", b"<p>" + b"x" * 5000 + b"</p>")
+        elif self.path.startswith("/blocked/search"):
+            self._send(403, "text/html", b"<html>forbidden</html>")
+        elif self.path.startswith("/html/search"):
+            self._send(200, "text/html", b"<html>not json</html>")
+        elif self.path.startswith("/down/search"):
+            self._send(503, "text/plain", b"unavailable")
         elif self.path.startswith("/search"):
             payload = {"results": [
                 {"title": "A", "url": "https://example.com/a", "content": "first"},
@@ -116,6 +122,24 @@ def test_search_allows_an_explicit_loopback_endpoint(base_url):
     data = search("robot", endpoint=base_url)
     assert data["provider"] == "searx"
     assert [item["title"] for item in data["results"]] == ["A", "C"]
+
+
+def test_search_errors_name_the_operator_fix(base_url):
+    # 404: the endpoint must be the instance base URL, not a deeper path.
+    with pytest.raises(WebError, match=r"404.*base URL.*appended automatically"):
+        search("robot", endpoint=f"{base_url}/wrong-base", policy=_loopback())
+    # 403: the JSON format is disabled for anonymous clients.
+    with pytest.raises(WebError, match=r"403.*settings\.yml.*search\.formats"):
+        search("robot", endpoint=f"{base_url}/blocked", policy=_loopback())
+    # HTML instead of JSON: same settings.yml fix.
+    with pytest.raises(WebError, match=r"non-JSON.*search\.formats"):
+        search("robot", endpoint=f"{base_url}/html", policy=_loopback())
+    # Instance down: connection-level failure names the endpoint.
+    with pytest.raises(WebError, match="Cannot reach the SearXNG endpoint"):
+        search("robot", endpoint="http://127.0.0.1:9", policy=_loopback())
+    # Other statuses stay generic.
+    with pytest.raises(WebError, match="HTTP 503"):
+        search("robot", endpoint=f"{base_url}/down", policy=_loopback())
 
 
 def test_agent_registers_web_tools_only_when_enabled():

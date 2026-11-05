@@ -222,18 +222,30 @@ def search(query, *, endpoint, policy=None):
                           headers={"Host": parts.hostname,
                                    "User-Agent": f"pymybot/{__version__} (agent web tool)"})
     try:
-        per_request = {"params": {"q": query, "format": "json", "safesearch": "1"}}
-        if parts.scheme == "https":
-            per_request["extensions"] = {"sni_hostname": parts.hostname}
-        response = client.get(pinned, **per_request)
+        try:
+            per_request = {"params": {"q": query, "format": "json", "safesearch": "1"}}
+            if parts.scheme == "https":
+                per_request["extensions"] = {"sni_hostname": parts.hostname}
+            response = client.get(pinned, **per_request)
+        except (httpx.HTTPError, OSError) as exc:
+            raise WebError(f"Cannot reach the SearXNG endpoint {url} ({type(exc).__name__}); "
+                           "check that the instance is running and --search-endpoint is correct") from None
     finally:
         client.close()
+    if response.status_code == 404:
+        raise WebError("HTTP 404 from the SearXNG endpoint: --search-endpoint must be the instance "
+                       "base URL (e.g. http://127.0.0.1:8080); '/search' is appended automatically")
+    if response.status_code == 403:
+        raise WebError("HTTP 403 from the SearXNG endpoint: public instances usually deny the JSON "
+                       "format for anonymous clients; enable it in settings.yml "
+                       "(search.formats: [html, json]) or point --search-endpoint at a private instance")
     if response.status_code >= 400:
         raise WebError(f"Search endpoint returned HTTP {response.status_code}")
     try:
         payload = response.json()
     except ValueError:
-        raise WebError("Search endpoint did not return JSON") from None
+        raise WebError("Search endpoint returned non-JSON content: the instance likely disables the "
+                       "JSON format; settings.yml needs search.formats to include 'json'") from None
     results = []
     for item in (payload.get("results") or [])[:MAX_RESULTS]:
         if not isinstance(item, dict):
