@@ -44,7 +44,8 @@ composed prompt in numeric order — `011_robot.md` sits between core layer 10
 and SOUL layer 97 — and are read-only to the agent: only 10/97/98/99 keep their
 existing ownership and approval rules. Bundled extra layers are seeded into a
 role's prompt directory on first use (never overwriting an edited file), so a
-new role starts with every default layer. Reserved numbers (0, 10, 97, 98, 99,
+new role starts with every default layer; the bundled extras are
+`011_robot.md` (摄像头机器人) and `012_skill_store.md` (技能商店). Reserved numbers (0, 10, 97, 98, 99,
 100) and values above 99 are rejected, each extra layer is capped at 64 KiB, and
 the composed prompt stays capped at 128 KiB. The global `~/.mybot/prompts` and
 the bundled defaults keep the fixed six-layer contract; this applies to role

@@ -16,6 +16,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Creating a role copies every bundled skill by default (no skills root is
   required), and `roles repair` also adds bundled skills the role lacks.
   Copying never overwrites an existing file.
+- Two bundled extra layers seed role prompt homes: `011_robot.md` (camera robot:
+  observe the environment before acting, report what is actually visible) and
+  `012_skill_store.md` (search the SkillHub store and install skills with the
+  operator's approval instead of hand-writing everything).
 - The Agent is now a **dual-agent team**: a tool-less **memory agent** plans,
   reflects and owns long-term memory, while a **worker agent** keeps the skill,
   file, shell, web, camera and MCP surface. They exchange a JSON brief/report per
@@ -72,6 +76,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- All bundled prompt layers are now Chinese (safety prefix, core, SOUL, USER,
+  STATS and the safety suffix); identifiers stay in English inside backticks so
+  a Markdown formatter cannot escape them. Layers 0/100 trust hashes moved with
+  the manifest, so existing runtime copies must be refreshed or restored.
 - The bundled core prompt tells the agent to start from the physical interface
   — cameras, buses, serial devices and the skill's hardware commands — and to
   treat files and shell as supporting tools, rather than exploring a directory

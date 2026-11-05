@@ -15,7 +15,7 @@ import pymybot.prompts as prompts
 from pymybot.paths import asset_path
 from pymybot.security import SecurityError
 
-CORE_SHA = "9299267ee190ea90a44670708890f1063fd52a15d5b35afbfc11fc41bdff95ab"
+CORE_SHA = "05315a84d7c21e5469cc2d92922e999e47cb86c57406d749514a710aee3ace32"
 IDS = ["0", "10", "97", "98", "99", "100"]
 
 
@@ -66,13 +66,13 @@ def test_core_routes_skill_creation_through_read_skill(library):
     assert "read_skill" in text
     assert "`skill-authoring`" in text
     assert "技能编写规范" in text
-    assert "before calling install_skill" in text
-    assert "do not edit them in place with write_file" in text
+    assert "再调用 `install_skill`" in text
+    assert "不要用 `write_file`" in text
     assert "`<skill>_run`" in text and "hardware_controller_run" in text
     assert "run_skill" not in text
     assert "run_action_script" not in text
-    assert "does not load a robot of its own" in text
-    assert "Operating priority" in text and "physical interface" in text
+    assert "本会话自身不加载 robot" in text
+    assert "优先使用物理接口" in text and "优先通过技能" in text
 
 
 def test_bundle_content_upgrade_keeps_existing_homes(library):
@@ -633,8 +633,22 @@ def test_global_home_does_not_seed_extra_layers(bundle, tmp_path):
     assert [row["id"] for row in library.list_layers()] == IDS
 
 
-def test_role_library_loads_numbered_extra_layers(tmp_path):
-    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", extra_layers=True)
+@pytest.fixture
+def bare_bundle(tmp_path):
+    """A trusted bundle without any operator-authored extra layers."""
+    target = tmp_path / "bare-bundle"
+    target.mkdir()
+    source = asset_path("prompts")
+    shutil.copyfile(source / "manifest.json", target / "manifest.json")
+    manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+    for layer in manifest["layers"]:
+        shutil.copyfile(source / layer["file"], target / layer["file"])
+    return target
+
+
+def test_role_library_loads_numbered_extra_layers(bare_bundle, tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", defaults=bare_bundle,
+                                    extra_layers=True)
     library.ensure_home()
     (library.home / "005_context.md").write_text("CONTEXT-EXTRA\n", encoding="utf-8")
     (library.home / "011_robot.md").write_text("ROBOT-EXTRA\n", encoding="utf-8")
@@ -643,10 +657,10 @@ def test_role_library_loads_numbered_extra_layers(tmp_path):
     assert rows[1]["external"] is True and rows[1]["editable"] is False
     assert "ROBOT-EXTRA" in library.read("11")["content"]
     composed = library.compose()
-    assert composed.text.index("CONTEXT-EXTRA") < composed.text.index("You are the mybot agent")
-    assert (composed.text.index("You are the mybot agent")
+    assert composed.text.index("CONTEXT-EXTRA") < composed.text.index("你是在通用机器人设备上运行的 mybot 智能体")
+    assert (composed.text.index("你是在通用机器人设备上运行的 mybot 智能体")
             < composed.text.index("ROBOT-EXTRA") < composed.text.index("# SOUL"))
-    assert composed.text.index("ROBOT-EXTRA") < composed.text.index("Final safety reminder")
+    assert composed.text.index("ROBOT-EXTRA") < composed.text.index("最后的安全提醒")
     assert "11" in composed.layer_hashes
 
 
@@ -674,8 +688,9 @@ def test_role_extra_layer_numbers_are_validated(tmp_path):
         library.compose()
 
 
-def test_role_extra_layers_are_read_only_to_the_agent_and_capped(tmp_path):
-    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", extra_layers=True)
+def test_role_extra_layers_are_read_only_to_the_agent_and_capped(bare_bundle, tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", defaults=bare_bundle,
+                                    extra_layers=True)
     library.ensure_home()
     (library.home / "011_robot.md").write_text("robot\n", encoding="utf-8")
     with pytest.raises(SecurityError, match="Use a prompt layer ID"):
