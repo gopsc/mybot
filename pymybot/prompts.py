@@ -412,6 +412,33 @@ class PromptLibrary:
                         fcntl.flock(descriptor, fcntl.LOCK_UN)
                 os.close(descriptor)
 
+    def _layer_mismatch(self, runtime_layers, *, require_all):
+        """Editable-layer hashes are operator/agent state, not bundle state.
+
+        The runtime manifest records the hash of the pristine bundled copy,
+        while the file itself is what the operator or the agent edits; only the
+        immutable 0/100 layers have their content enforced against this hash.
+        Comparing everything except editable sha256 values keeps a bundle
+        content upgrade from bricking existing homes. Nothing is weakened:
+        _manifest() already pins layer ids, filenames, editability and byte
+        caps, so a hand-edited runtime manifest still fails closed here.
+        Older manifests may omit layers a newer bundle adds (ensure_home
+        fills them); unknown ids are tampering.
+        """
+        ids = tuple(layer["id"] for layer in runtime_layers)
+        if require_all and ids != _IDS:
+            return True
+        for layer in runtime_layers:
+            trusted = self._by_id.get(layer["id"])
+            if trusted is None:
+                return True
+            if layer["editable"]:
+                layer = {key: value for key, value in layer.items() if key != "sha256"}
+                trusted = {key: value for key, value in trusted.items() if key != "sha256"}
+            if layer != trusted:
+                return True
+        return False
+
     def _runtime_manifest(self, directory, *, allow_missing=False):
         try:
             data, info = _read(directory, "manifest.json", _MAX_MANIFEST_BYTES)
@@ -423,10 +450,10 @@ class PromptLibrary:
             version = runtime["version"]
             trusted_version = self._manifest["version"]
             if version == trusted_version:
-                if runtime != self._manifest:
+                if self._layer_mismatch(runtime["layers"], require_all=True):
                     raise SecurityError("Runtime prompt manifest differs from the trusted bundle")
             elif version < trusted_version:
-                if any(layer != self._by_id[layer["id"]] for layer in runtime["layers"]):
+                if self._layer_mismatch(runtime["layers"], require_all=False):
                     raise SecurityError("Older runtime prompt manifest changed a trusted layer")
             else:
                 raise SecurityError("Runtime prompt manifest is newer than the trusted bundle")
