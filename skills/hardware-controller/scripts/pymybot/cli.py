@@ -125,7 +125,7 @@ def parser():
         "run": "Activate, execute an action script and deactivate (virtual-only by default)",
         "sample": "Activate and read a named variable; activation itself may write to devices",
         "apply-sql": "Apply SQL to a temporarily active robot; does not write the structure file",
-        "agent": "LangGraph task or interactive session on the terminal (see --no-gui)",
+        "agent": "Dual-agent autonomous run (memory plans, worker acts); no human chat",
         "gui": "PySide6 agent window (the default entry; no command required)",
         "serve": "Long-lived stdio JSON-RPC 2.0 server for IDE frontends (one JSON object per line)",
         "mcp": "Standard MCP stdio server for MCP clients (read-only unless --allow-execution)",
@@ -330,7 +330,7 @@ def parser():
             command.add_argument("--interval-ms", type=bounded_int(0, MAX_INTERVAL_MS), default=0,
                                  help=f"delay between samples, 0..{MAX_INTERVAL_MS} (default: 0)")
         if name == "agent":
-            command.add_argument("--task", help="one natural-language task; omit for interactive TTY mode")
+            command.add_argument("--task", help="optional seed: run exactly this mission instead of the self-directed loop")
             command.add_argument("--model", help="provider:model; defaults to MYBOT_MODEL")
             command.add_argument("--base-url", help="provider endpoint; defaults to MYBOT_BASE_URL")
             command.add_argument("--api-key-env", help="environment variable holding the API key (never the key itself)")
@@ -375,6 +375,15 @@ def parser():
                                  help="operator mcpServers JSON file; exposes external MCP tools to the model")
             command.add_argument("--allow-mcp-tools", action="store_true",
                                  help="preapprove external MCP tool calls; requires --mcp-config")
+            command.add_argument("--team-steps", type=bounded_int(1, 50), default=8,
+                                 help="maximum plan/act/reflect steps per mission (default: 8)")
+            command.add_argument("--mission-timeout", type=positive_timeout, default=1800.0,
+                                 help="wall-clock budget for one mission in seconds (default: 1800)")
+            command.add_argument("--mission-tokens", type=bounded_int(1024, 10_000_000),
+                                 default=400_000,
+                                 help="token budget for one mission (default: 400000)")
+            command.add_argument("--max-missions", type=bounded_int(1, 1000), default=20,
+                                 help="automatic mission cap for one autonomous run (default: 20)")
     return p
 
 
@@ -424,7 +433,9 @@ def parse_args(argv=None):
                 or args.allow_actions or args.workspace_dir
                 or args.enable_shell or args.allow_file_writes or args.allow_shell
                  or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
-                 or args.role or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
+                 or args.role or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint
+                 or args.team_steps != 8
+                 or args.mission_timeout != 1800.0 or args.mission_tokens != 400_000):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
         if not args.input:
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
@@ -448,8 +459,6 @@ def parse_args(argv=None):
         raise UsageError("--allow-mcp-tools requires --mcp-config or --role")
     if args.input:
         raise UsageError("--input requires --no-agent or the run command; use --task for an agent")
-    if args.task is None and not sys.stdin.isatty():
-        raise UsageError("Non-interactive agent mode requires --task; use --no-agent --input for direct execution")
     if args.task is not None:
         checked_text(args.task, 16 * 1024)
         if not args.task.strip():

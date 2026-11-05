@@ -26,7 +26,7 @@ python -m pymybot doctor
 | `pymybot run --robot SQL --input MT` | Activate, run one action, deactivate | Yes |
 | `pymybot sample --robot SQL --name VAR` | Read a named variable (`--count`, `--interval-ms`) | Yes |
 | `pymybot apply-sql --robot SQL --sql "..."` | Apply restricted SQL to a temporary session | Yes |
-| `pymybot agent ...` | LangGraph task/REPL | Via approved tools |
+| `pymybot agent ...` | Dual-agent autonomous run (or one seeded mission with `--task`) | Via approved tools |
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
 | `pymybot new NAME [--dir DIR] [--force]` | Generate a runnable `robots/`, `scripts/` and `modules/` skeleton | No |
@@ -69,15 +69,18 @@ semantics. Typical usage:
 ```sh
 pymybot roles create technician --description "Field technician"
 pymybot roles list
-pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"
+pymybot agent --role technician                       # 记忆体自拟目标，自主循环
+pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"  # 只跑这一个任务
 pymybot agent --role technician --robot robots/my.sql --scripts-dir scripts --task "运行自检"
 pymybot roles clear-history technician --yes
 pymybot roles delete technician --yes        # permanently remove the role directory
 ```
 
-Agent conversations require a role: `pymybot agent` without `--role` and
-`serve` `agent.ask` without `role` fail with a usage/invalid-params error. There
-is no global default conversation.
+Autonomous runs require a role: `pymybot agent` without `--role` and
+`serve` `agent.start`/`agent.ask` without `role` fail with a usage/invalid-params
+error. There is no global default conversation, no chat composer and no
+single-agent path: the memory and worker agents talk to each other after the
+operator clicks 启动 or runs the command.
 
 Creation copies the bundled prompt baseline. Optional `--skills-dir` and
 `--mcp-config` on `roles create` import those capabilities into the role. Once
@@ -247,7 +250,10 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `run` | `input`, optional `vars`, `timeout` | `outputs` |
 | `apply-sql` | `sql` | session mutation |
 | `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
-| `agent.ask` | `task`, `role` (required), optional `robot`, optional `scriptsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | multi-turn result with `intent` metadata and `agent.event` notifications |
+| `agent.ask` | `task`, `role` (required), optional `robot`, optional `scriptsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `enableWeb`, `allowWeb`, `searchEndpoint`, `workspaceDir`, `enableShell`, `allowFileWrites`, agent options | runs one mission to completion without starting the loop; `agent.event` notifications carry `agent: memory\|worker\|system` |
+| `agent.start` | `role` (required), optional `task` seed, `maxMissions`, `maxSeconds`, `pauseSeconds`, agent options | starts the self-directed loop and returns its status; `team.message`, `mission.*` and `team.stopped` events follow |
+| `agent.stop` | — | stops the autonomous loop cooperatively |
+| `agent.status` | — | current loop state, active mission and memory statistics |
 | `agent.reset` | optional `role`, `clearHistory` | closes the conversation and releases hardware; clears role history only when requested, preferring the named role over the active conversation's role |
 | `roles.list` / `roles.show` | optional `name` for `show` | list or inspect role-owned resources |
 | `roles.create` | `name`, optional `description`, `skillsDir`, `mcpConfig` | create from the bundled prompt baseline |

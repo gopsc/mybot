@@ -109,12 +109,6 @@ def test_input_is_not_implicitly_a_model_task(files, capsys, no_agent_import):
     assert code == 2 and "--no-agent" in result["error"]["message"]
 
 
-def test_non_tty_requires_task(files, capsys, monkeypatch, no_agent_import):
-    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: False))
-    code, result, _ = invoke(capsys, "--robot", files[0], "--role", "test-role")
-    assert code == 2 and "--task" in result["error"]["message"]
-
-
 @pytest.mark.parametrize("prefix", [[], ["agent"]])
 def test_default_and_explicit_agent_routing(files, capsys, monkeypatch, prefix):
     called = []

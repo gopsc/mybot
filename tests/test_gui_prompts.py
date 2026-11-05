@@ -141,10 +141,10 @@ def test_settings_lazy_load_and_stats_payload_roundtrip(widgets, window, tmp_pat
         setattr(window.cfg, key, value)
     window.cfg.store(tmp_path / "saved.json")
     assert GuiConfig.load(tmp_path / "saved.json").auto_stats is False
-    params = json.loads(json.dumps(window._agent_params("hello")))
+    params = json.loads(json.dumps(window._agent_params()))
     assert params["autoStats"] is False
     window.cfg.auto_stats = True
-    assert window._agent_params("hello")["autoStats"] is True
+    assert window._agent_params()["autoStats"] is True
     assert not any("USER 层" in label.text() for label in settings.findChildren(QLabel))
 
 
@@ -375,7 +375,6 @@ def test_send_guard_blocks_tampered_safety_before_rpc(window, layer):
         window.agent_available = True
         window.cfg.robot = str(ASSETS / "robots" / "relay-test.sql")
         layer_path(library, layer).write_text("modified safety", encoding="utf-8")
-        window.task_box.setPlainText("do not contact a model")
         sequence = client._seq
         failures = []
 
@@ -383,7 +382,7 @@ def test_send_guard_blocks_tampered_safety_before_rpc(window, layer):
             dialog = QApplication.activeModalWidget()
             try:
                 assert isinstance(dialog, QMessageBox)
-                assert "发送已阻止" in dialog.windowTitle()
+                assert "启动已阻止" in dialog.windowTitle()
                 assert "0 / 100" in dialog.text() and "设置 → 提示词" in dialog.text()
                 click(dialog.button(QMessageBox.StandardButton.Ok))
             except Exception as exc:
@@ -392,10 +391,10 @@ def test_send_guard_blocks_tampered_safety_before_rpc(window, layer):
                     dialog.reject()
 
         QTimer.singleShot(0, dismiss)
-        click(window.send_button)
+        click(window.start_button)
         assert not failures
         assert client._seq == sequence
-        assert window.task_box.toPlainText() == "do not contact a model"
+        assert not window.pending_start
         assert not window.busy
     finally:
         window.serve = None
@@ -443,6 +442,5 @@ def test_prompt_version_events_and_responses_update_status(window, qapp):
     assert digest[:16] in window.status_prompt.text()
     window._on_agent_event({"id": 999, "event": {"type": "prompt_version", "hash": "b" * 16}})
     assert digest[:16] in window.status_prompt.text()
-    window._turn_done(window.generation, 42, {"prompt_version": {"hash": "c" * 64, "layers": {}}}, None)
-    assert window.status_prompt.text() == "提示词：" + "c" * 16
+    assert digest[:16] in window.status_prompt.text()
     assert "c" * 64 not in window.chat.toPlainText()

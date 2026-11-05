@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor, QPalette
 PALETTE = {
     "user": "#1d4ed8", "assistant": "#1e293b", "tool": "#526177",
     "toolerr": "#b42318", "error": "#b42318", "system": "#5b6675",
+    "memory": "#7c3aed", "worker": "#0f766e",
 }
 STYLESHEET = """
 QWidget { color: #1e293b; }

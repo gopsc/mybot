@@ -891,7 +891,12 @@ class AgentSession:
                 # A start that ran out of time or was stopped must not be reported
                 # as a configuration error the operator could try to "fix".
                 self._check()
-                raise AgentConfigurationError("Cannot load robot, scripts or workspace configuration; no model request was sent")
+                error = context.get("error") if isinstance(context, dict) else None
+                kind = error.get("type") if isinstance(error, dict) else None
+                raise AgentConfigurationError(
+                    "Cannot load robot, scripts or workspace configuration"
+                    + (f" ({kind})" if kind else "")
+                    + "; no model request was sent")
             self.context = context
             if self._mcp is not None and not self._mcp_ready:
                 try:
@@ -1558,7 +1563,13 @@ class AgentSession:
         return Command(resume=decisions)
 
     # -- turns -------------------------------------------------------------
-    async def ask(self, prompt):
+    async def ask(self, prompt, *, intent_mode=None):
+        """Run one turn.
+
+        ``intent_mode`` lets a caller (the dual-agent team) override routing for
+        a single turn: autonomous briefs are already operator-approved work, so
+        the lexical classifier must not narrow the tool surface by accident.
+        """
         checked_text(prompt, MAX_PROMPT)
         if not prompt.strip():
             raise AgentError("Task must not be empty")
@@ -1574,7 +1585,7 @@ class AgentSession:
         self._tool_calls = 0
         self._pruned_turns = 0
         self._log("user", text=prompt)
-        self.intent = classify_intent(prompt, self.config.intent_mode,
+        self.intent = classify_intent(prompt, intent_mode or self.config.intent_mode,
                                       extra_tools=self._skill_tools.keys())
         self._log("intent", **self.intent.as_dict())
         try:
@@ -1753,6 +1764,12 @@ class StreamRenderer:
             tail = f" {_display_text(str(state))}" if state else ""
             self.stream.write(f"⇦ {_display_text(str(event['tool']))}{tail}\n")
             self.stream.flush()
+        elif kind == "team.message":
+            if event.get("agent") != "memory":
+                return  # The worker's text already streamed as text_delta.
+            self._end_line()
+            self.stream.write(f"[记忆体] {_display_text(str(event.get('text') or ''))}\n")
+            self.stream.flush()
 
     def _end_line(self):
         if self.mid_line:
@@ -1768,34 +1785,23 @@ class StreamRenderer:
 
 
 async def _conversation(session, args, stop, renderer=None):
+    """Run one seeded mission, or the self-directed loop when no seed is given."""
     if args.task is not None:
         result = await session.ask(args.task)
         if renderer is not None:
             renderer.end_turn()
         return {"mode": "agent", **result, "tool_events": session.events}
-    await session.start()
-    print("mybot agent ready; /exit to quit. Approvals are separate from --allow-hardware.", file=sys.stderr)
-    count, last = 0, ""
-    while not stop.is_set():
-        prompt = await console_line("mybot> ", stop)
-        if prompt is None or prompt.strip() in {"/exit", "/quit"}:
-            break
-        if not prompt.strip():
-            continue
-        if prompt.strip() == "/clear":
-            session.clear_history()
-            print("Conversation history cleared; hardware remains owned by this session.", file=sys.stderr)
-            continue
-        result = await session.ask(prompt)
-        streamed = renderer.end_turn() if renderer is not None else False
-        last = result["output"]
-        if not streamed:
-            print(last, file=sys.stderr)
-        count += 1
-        session.events[:] = session.events[-1000:]
+    await session.auto_start(max_missions=getattr(args, "max_missions", 20))
+    print("mybot autonomous run started; Ctrl+C to stop.", file=sys.stderr)
+    try:
+        while session.auto_status().get("running") and not stop.is_set():
+            await asyncio.sleep(0.5)
+    finally:
+        status = await session.auto_stop()
     if stop.is_set():
         raise AgentInterrupted("Interrupted; already dispatched actions are not rolled back")
-    return {"mode": "agent", "turns": count, "output": last, "tool_events": session.events}
+    return {"mode": "agent", "autonomous": True, "status": status,
+            "tool_events": session.events}
 
 
 async def run_cli_agent(args, stop):
@@ -1803,6 +1809,9 @@ async def run_cli_agent(args, stop):
     failure = result = None
     cleanup_errors = []
     try:
+        if getattr(args, "robot", None) and not Path(args.robot).is_file():
+            raise AgentConfigurationError(
+                f"Robot structure not found: {args.robot}; no model request was sent")
         try:
             from .roles import load_role
             role = load_role(args.role) if getattr(args, "role", None) else None
@@ -1862,10 +1871,16 @@ async def run_cli_agent(args, stop):
             return await confirm_console(name, arguments, stop)
 
         renderer = StreamRenderer()
-        session = AgentSession(executor, model, config, confirm=confirm,
-                               on_event=renderer, skills=skills, workspace=workspace_dir is not None,
-                               enable_shell=args.enable_shell, session_log=session_log,
-                               mcp_servers=mcp_servers, role=role)
+        worker = AgentSession(executor, model, config, confirm=confirm,
+                              skills=skills, session_log=session_log,
+                              workspace=workspace_dir is not None,
+                              enable_shell=args.enable_shell,
+                              mcp_servers=mcp_servers, role=role)
+        from .agent_team import TeamSession
+        session = TeamSession(worker, model, role=role, on_event=renderer,
+                              max_steps=getattr(args, "team_steps", 8),
+                              max_seconds=getattr(args, "mission_timeout", 1800.0),
+                              max_tokens=getattr(args, "mission_tokens", 400_000))
         result = await _conversation(session, args, stop, renderer)
     except BaseException as exc:
         failure = exc

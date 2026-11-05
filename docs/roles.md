@@ -6,7 +6,7 @@ an optional external MCP configuration and resumable model history. Robot
 structures, action scripts, hardware permissions and approval grants remain
 operator/session settings; a role never grants them.
 
-**Agent conversations require a role.** `pymybot agent` without `--role`, the
+**Autonomous agent runs require a role.** `pymybot agent` without `--role`, the
 GUI without a selected role and `serve` `agent.ask` without `role` are rejected;
 there is no global default conversation.
 

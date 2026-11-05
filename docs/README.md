@@ -10,6 +10,7 @@
 | [Controller MCP](../skills/hardware-controller/references/mcp.md) | expose pymybot to MCP clients and give the agent external MCP tools |
 | [GUI guide](gui.md) | install, configure and operate the window |
 | [Agent roles](roles.md) | create and load role-owned prompts, skills, MCP and resumable history |
+| [Dual-agent team](team.md) | understand the memory/worker split, lexical RAG, budgets and unattended mode |
 | [Development](development.md) | set up, test, lint, package and freeze |
 | [Controller testing](../skills/hardware-controller/references/testing.md) | understand the test layers and CI channels |
 | [Release](release.md) | cut a reproducible release |
