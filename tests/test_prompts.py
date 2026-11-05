@@ -15,7 +15,7 @@ import pymybot.prompts as prompts
 from pymybot.paths import asset_path
 from pymybot.security import SecurityError
 
-CORE_SHA = "db32f90666a79e846c0562cbe2201e51b30c8d5f053a1eed6b27017ddda71e0c"
+CORE_SHA = "9299267ee190ea90a44670708890f1063fd52a15d5b35afbfc11fc41bdff95ab"
 IDS = ["0", "10", "97", "98", "99", "100"]
 
 
@@ -72,6 +72,7 @@ def test_core_routes_skill_creation_through_read_skill(library):
     assert "run_skill" not in text
     assert "run_action_script" not in text
     assert "does not load a robot of its own" in text
+    assert "Operating priority" in text and "physical interface" in text
 
 
 def test_bundle_content_upgrade_keeps_existing_homes(library):
@@ -609,6 +610,27 @@ def test_bundle_can_be_inspected_but_not_mutated(bundle):
         library.restore(False)
     assert not (bundle / ".prompts.lock").exists()
     assert (bundle / "manifest.json").stat().st_mode == before
+
+
+def test_role_home_seeds_bundled_extra_layers(bundle, tmp_path):
+    (bundle / "011_robot.md").write_text("ROLE-SEED\n", encoding="utf-8")
+    home = tmp_path / "role-prompts"
+    library = prompts.PromptLibrary(home=home, defaults=bundle, extra_layers=True)
+    result = library.ensure_home()
+    assert "011_robot.md" in result["created"]
+    assert "ROLE-SEED" in (home / "011_robot.md").read_text(encoding="utf-8")
+    (home / "011_robot.md").write_text("OPERATOR-EDIT\n", encoding="utf-8")
+    library.ensure_home()
+    assert "OPERATOR-EDIT" in (home / "011_robot.md").read_text(encoding="utf-8")
+
+
+def test_global_home_does_not_seed_extra_layers(bundle, tmp_path):
+    (bundle / "011_robot.md").write_text("x\n", encoding="utf-8")
+    home = tmp_path / "global-prompts"
+    library = prompts.PromptLibrary(home=home, defaults=bundle)
+    library.ensure_home()
+    assert not (home / "011_robot.md").exists()
+    assert [row["id"] for row in library.list_layers()] == IDS
 
 
 def test_role_library_loads_numbered_extra_layers(tmp_path):

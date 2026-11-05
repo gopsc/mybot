@@ -20,8 +20,10 @@ def test_role_uses_bundled_prompt_baseline_without_touching_global(tmp_path):
     root = tmp_path / "roles"
     role = create_role("维修工程师", description="现场诊断", root=root)
     assert role.root == root / "维修工程师"
-    assert role.prompt_library().compose().text == PromptLibrary(
-        home=tmp_path / "global", defaults=role.prompt_library().defaults).compose().text
+    baseline = PromptLibrary(home=tmp_path / "global", defaults=role.prompt_library().defaults)
+    baseline.ensure_home()
+    for layer_id in ("0", "10", "97", "98", "99", "100"):
+        assert role.prompt_library().read(layer_id)["content"] == baseline.read(layer_id)["content"]
 
     role.prompt_library().update("97", "# SOUL\n\n谨慎、先诊断。", actor="operator")
     global_library = PromptLibrary(home=tmp_path / "global", defaults=role.prompt_library().defaults)
@@ -243,7 +245,7 @@ def test_role_info_flags_and_repair_restores_incomplete_skills(tmp_path):
     assert "i2c-address-probe" in fixed["runnable"] and not fixed["incomplete"]
 
 
-def test_create_role_rejects_manifest_without_entrypoint(tmp_path):
+def test_create_role_copies_source_even_without_an_entrypoint(tmp_path):
     source = tmp_path / "source" / "demo"
     source.mkdir(parents=True)
     (source / "SKILL.md").write_text(
@@ -253,8 +255,10 @@ def test_create_role_rejects_manifest_without_entrypoint(tmp_path):
         "run": {"entrypoint": "scripts/run.py", "actions": {"go": {"argv": []}}},
     }), encoding="utf-8")
 
-    with pytest.raises(SecurityError, match="entrypoint"):
-        create_role("bad", skills_from=source.parent, root=tmp_path / "roles")
+    role = create_role("bad", skills_from=source.parent, root=tmp_path / "roles")
+    assert (role.skills_dir / "demo" / "SKILL.md").is_file()
+    info = role.info()
+    assert "demo" in info["incomplete"]
 
 
 def test_role_history_writer_lock_blocks_a_second_live_session(tmp_path):

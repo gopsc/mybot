@@ -1090,7 +1090,7 @@ def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
         "prompt_update", "prompt_update", "prompt_update", "session_end"]
     assert events[1]["text"] == "hello"
     assert events[2]["name"] == "off"
-    assert events[3]["layers"].keys() == {"0", "10", "97", "98", "99", "100"}
+    assert {"0", "10", "97", "98", "99", "100"} <= set(events[3]["layers"])
     assert events[4]["text"] == "done"
     assert events[6]["actor"] == "stats"
     assert events[7]["actor"] == "user-extract"

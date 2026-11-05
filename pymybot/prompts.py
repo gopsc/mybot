@@ -557,6 +557,35 @@ class PromptLibrary:
             except OSError:
                 pass
 
+    def _seed_extra_layers(self, directory):
+        """Copy bundled operator-authored layers into a role home once.
+
+        Bundled NNN_name.md files beside the trusted six seed a role's prompt
+        directory; existing files are never replaced, so operator edits survive.
+        """
+        with _directory(self.defaults) as defaults:
+            defaults.guard()
+            known = {layer["file"] for layer in self._manifest["layers"]}
+            seeded = set()
+            added = []
+            for entry in sorted(defaults.path.iterdir(), key=lambda item: item.name):
+                name = entry.name
+                if name in known or not _EXTRA_FILE.fullmatch(name):
+                    continue
+                identity = str(int(name[:3]))
+                if identity in self._by_id or int(identity) not in _EXTRA_IDS:
+                    raise SecurityError(f"Bundled prompt layer {name} uses a reserved layer number")
+                if identity in seeded:
+                    raise SecurityError(f"Bundled prompt layers share layer number {identity}")
+                seeded.add(identity)
+                data, _ = _read(defaults, name, _MAX_LAYER_BYTES)
+                if data is None:
+                    continue
+                if _stat(directory, name) is None:
+                    _atomic(directory, name, data)
+                    added.append(name)
+            return added
+
     def ensure_home(self):
         with self._locked(create=True) as directory:
             manifest_data, manifest_info, upgrade = self._runtime_manifest(directory, allow_missing=True)
@@ -582,6 +611,8 @@ class PromptLibrary:
                     created.append("manifest.json")
             else:
                 _read(directory, "manifest.json", _MAX_MANIFEST_BYTES, private=True)
+            if self.extra_layers:
+                created.extend(self._seed_extra_layers(directory))
             return {"root": str(self.home), "created": created}
 
     def list_layers(self):

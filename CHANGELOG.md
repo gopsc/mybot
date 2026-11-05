@@ -11,8 +11,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Role prompt libraries load operator-authored extra layers: any `NNN_name.md`
   file in `~/.mybot/roles/<name>/prompts` (001–099, reserved numbers rejected)
   joins the composed prompt in numeric order, so `011_robot.md` sits between
-  core 10 and SOUL 97. Extras are read-only to the agent, capped at 64 KiB each
-  and ignored by the global and bundled prompt homes.
+  core 10 and SOUL 97. Extras are read-only to the agent, capped at 64 KiB each,
+  ignored by the global home, and bundled extras seed role homes on first use.
+- Creating a role copies every bundled skill by default (no skills root is
+  required), and `roles repair` also adds bundled skills the role lacks.
+  Copying never overwrites an existing file.
 - The Agent is now a **dual-agent team**: a tool-less **memory agent** plans,
   reflects and owns long-term memory, while a **worker agent** keeps the skill,
   file, shell, web, camera and MCP surface. They exchange a JSON brief/report per
@@ -69,6 +72,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The bundled core prompt tells the agent to start from the physical interface
+  — cameras, buses, serial devices and the skill's hardware commands — and to
+  treat files and shell as supporting tools, rather than exploring a directory
+  tree as an end in itself.
 - The bundled core prompt identifies the agent as running on a general-purpose
   robot device — a host that may expose cameras, buses, serial ports, network
   access and a shell — instead of a bench-side "robot assistant", matching the
