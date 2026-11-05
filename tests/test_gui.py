@@ -19,6 +19,7 @@ from pymybot.gui import protocol as gui_protocol
 from pymybot.gui.config import GuiConfig, merge_args
 from pymybot.gui.protocol import (CliCall, RpcError, ServeClient, cli_args, parse_result,
                                   resolve_python, sessions_args)
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1702,3 +1703,137 @@ def test_model_setup_dialog_builds_values_and_validates(qapp, monkeypatch):
                              "api_key_env": "MY_KEY_ENV"}
     dialog._skip()
     assert dialog.values == {}
+
+
+# -- workspace FilesPanel ----------------------------------------------------
+def _collect_tree(item, out):
+    out.append((item.text(0), item.data(0, Qt.ItemDataRole.UserRole)))
+    for index in range(item.childCount()):
+        _collect_tree(item.child(index), out)
+
+
+def _make_workspace(tmp_path):
+    (tmp_path / "robot.sql").write_text("CREATE TABLE Relay(name String);", encoding="utf-8")
+    (tmp_path / "script.mt").write_text("@Action\nrelay0.test;\n1;\n@\n", encoding="utf-8")
+    (tmp_path / "main.py").write_text("def hello():\n    return 'world'\n", encoding="utf-8")
+    (tmp_path / "doc.md").write_text("# 标题\n\n正文 **加粗**\n", encoding="utf-8")
+    (tmp_path / "page.html").write_text(
+        "<html><body><h1>Hi</h1><img src='secret.png'></body></html>", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("plain notes\n", encoding="utf-8")
+    (tmp_path / "blob.bin").write_bytes(b"\x00\x01\x02\xff\xfe" * 64)
+    for name in (".secret", "node_modules"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "inner.txt").write_text("hidden", encoding="utf-8")
+    os.symlink("/definitely/missing/target", tmp_path / "broken-link")
+    return tmp_path
+
+
+def _files_panel(qapp, root):
+    from pymybot.gui.dialogs import FilesPanel
+    panel = FilesPanel()
+    panel.set_root(str(root))
+    return panel
+
+
+def _select(panel, name):
+    found = []
+
+    def walk(item):
+        if item.data(0, Qt.ItemDataRole.UserRole) and item.text(0) == name:
+            found.append(item)
+        for index in range(item.childCount()):
+            walk(item.child(index))
+
+    walk(panel.tree.invisibleRootItem())
+    assert found, name
+    panel.tree.setCurrentItem(found[0])
+
+
+def test_files_panel_lists_workspace_skipping_hidden_and_links(qapp, tmp_path):
+    _make_workspace(tmp_path)
+    panel = _files_panel(qapp, tmp_path)
+    entries = []
+    _collect_tree(panel.tree.invisibleRootItem(), entries)
+    names = [text for text, _data in entries]
+    for expected in ("robot.sql", "script.mt", "main.py", "doc.md", "page.html", "notes.txt"):
+        assert any(name == expected for name in names), expected
+    assert not any("inner" in name for name in names)  # hidden/vendored dirs pruned
+    assert not any("broken-link" in name for name in names)
+    assert f"{len([n for n in names if n.endswith(('.sql', '.mt', '.py', '.md', '.html', '.txt', '.bin'))])} 个文件" \
+        in panel.status.text()
+    assert panel.status.text().endswith(str(tmp_path.absolute()))
+
+
+def test_files_panel_previews_each_kind(qapp, tmp_path):
+    from PySide6.QtGui import QColor, QPixmap
+    _make_workspace(tmp_path)
+    pixmap = QPixmap(8, 8)
+    pixmap.fill(QColor("red"))
+    assert pixmap.save(str(tmp_path / "photo.png"))
+    panel = _files_panel(qapp, tmp_path)
+
+    _select(panel, "robot.sql")
+    assert panel.preview.currentWidget() is panel.code
+    assert "CREATE TABLE Relay" in panel.code.toPlainText()
+
+    _select(panel, "main.py")
+    assert panel.preview.currentWidget() is panel.code
+
+    _select(panel, "doc.md")
+    assert panel.preview.currentWidget() is panel.markdown
+    assert "标题" in panel.markdown.toPlainText()
+
+    _select(panel, "notes.txt")
+    assert panel.preview.currentWidget() is panel.code
+    assert "plain notes" in panel.code.toPlainText()
+
+    _select(panel, "page.html")
+    assert panel.preview.currentWidget() is panel.html
+
+    _select(panel, "photo.png")
+    assert panel.preview.currentWidget() is panel.image
+    assert not panel.image.pixmap().isNull()
+
+    _select(panel, "blob.bin")
+    assert panel.preview.currentWidget() is panel.placeholder
+    assert "二进制" in panel.placeholder.text()
+
+
+def test_files_preview_never_loads_local_or_remote_resources(qapp, tmp_path):
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QTextDocument
+    _make_workspace(tmp_path)
+    panel = _files_panel(qapp, tmp_path)
+    # SafeTextBrowser refuses every resource load, so an <img> in the HTML
+    # preview can never read a workspace secret or a remote URL.
+    assert panel.html.loadResource(
+        int(QTextDocument.ResourceType.ImageResource), QUrl("secret.png")) is None
+    assert panel.html.loadResource(
+        int(QTextDocument.ResourceType.ImageResource), QUrl("https://evil.example/x.png")) is None
+    _select(panel, "page.html")
+    assert panel.preview.currentWidget() is panel.html
+    assert "Hi" in panel.html.toPlainText()
+
+
+def test_files_panel_truncates_the_tree(qapp, tmp_path, monkeypatch):
+    from pymybot.gui.dialogs import FilesPanel
+    for index in range(8):
+        (tmp_path / f"f{index}.txt").write_text("x", encoding="utf-8")
+    monkeypatch.setattr(FilesPanel, "MAX_ENTRIES", 4)
+    panel = _files_panel(qapp, tmp_path)
+    assert panel._truncated is True
+    assert "已截断" in panel.status.text() or any(
+        "已截断" in panel.tree.topLevelItem(i).text(0)
+        for i in range(panel.tree.topLevelItemCount()))
+
+
+def test_window_files_tab_tracks_the_workspace(ui):
+    gui, app = ui
+    index = app.notebook.indexOf(app.files)
+    assert app.notebook.tabText(index) == "文件"
+    app.show_files()
+    assert app.notebook.currentWidget() is app.files
+    assert app.files.root == Path(app._workspace_root()).absolute()
+    # Toolbar buttons exist: filter, refresh, preview, open, folder.
+    assert app.files.filter.placeholderText()
+    assert app.files.open_folder is not None

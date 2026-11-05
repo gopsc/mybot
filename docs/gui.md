@@ -59,6 +59,8 @@ duplicate robot logic.
 | 工具 → 长期记忆 / 任务历史 | Reads the active role's long-term memory and persisted missions over `agent.memory` / `agent.missions` and shows them in a read-only preview. |
 | 工具 → 环境诊断 | Renders `pymybot doctor`: interpreter, assets and optional dependencies, colour-coded by status, with copy-JSON. |
 | 资源 tab | Structures (`*.sql`), Python/Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
+| 文件 tab | Operator-local workspace file manager: a bounded tree (4000 entries, depth 4, dot-directories/venvs/symlinks skipped) with a name filter, inline previews (MT/Lua/SQL/Python highlighting, Markdown, sandboxed HTML, images) and 刷新 / 预览 / 在系统中打开 / 打开目录 actions. The HTML preview renders in a `QTextBrowser` that never runs JavaScript and never loads local or remote resources. Read-only: nothing is written or executed; writes stay with the agent's approved file tools. |
+| 配置向导（模型组） | Reopens the first-run model setup wizard at any time; the sidebar button sits under the model summary. |
 | 启动 | Starts the dual-agent autonomous loop (`agent.start`). There is no chat input: the memory agent proposes goals, the worker acts. |
 | 停止 / 急停 | **停止** ends the autonomous loop cooperatively (`agent.stop`). **急停** has no confirmation dialog: it sends `abort`, cancels the loop, calls driver `safe()` hooks and releases hardware. It is best-effort, not a hardware emergency stop. |
 | 清空 / 复制对话 | Clear the window transcript (after confirmation) or copy it to the clipboard. |
@@ -234,9 +236,16 @@ the GUI executable itself has no console. See
 | --- | --- |
 | Entry screen | ![splash](screenshots/gui-splash.png) |
 | Main window (streaming chat, tool receipts) | ![main](screenshots/gui.png) |
+| Workspace files (tree + code preview) | ![files](screenshots/gui-files.png) |
+| Workspace files (sandboxed HTML preview) | ![files-html](screenshots/gui-files-html.png) |
+| First-run model setup wizard | ![wizard](screenshots/gui-wizard.png) |
 | Command panel (`query` example) | ![command](screenshots/gui-command.png) |
 | Settings (model/budgets, prompts) | ![settings](screenshots/gui-settings.png) |
 | Resource preview (scripts, skills, docs) | ![resources](screenshots/gui-resources.png) |
 | MCP configuration editor | ![mcp](screenshots/gui-mcp.png) |
 | Session manager | ![sessions](screenshots/gui-sessions.png) |
 | Environment diagnostics | ![doctor](screenshots/gui-doctor.png) |
+
+Every image above is generated from the real window against the real serve
+backend by `python tools/gui_screenshots.py` — nothing is mocked except the
+operator home and the display (offscreen).

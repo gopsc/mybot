@@ -8,6 +8,19 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- GUI **workspace file manager** (`文件` tab): a bounded, read-only tree of the
+  operator workspace (dot-directories, venvs and symlinks skipped) with a name
+  filter and inline previews — MT/Lua/SQL/Python keyword highlighting,
+  Markdown, sandboxed HTML (a `QTextBrowser` that never runs JavaScript and
+  never loads local or remote resources) and images. 刷新 / 预览 /
+  在系统中打开 / 打开目录 stay operator-local; writes remain with the agent's
+  approved file tools. The tree follows workspace and role changes.
+- GUI **model setup wizard** is reachable anytime from the sidebar 配置向导
+  button (the first-run dialog keeps its once-and-remembered behaviour).
+- `tools/gui_screenshots.py` regenerates every screenshot under
+  `docs/screenshots` from the real window against the real serve backend
+  (offscreen, disposable demo workspace); README and the GUI guide embed the
+  regenerated images.
 - **Multi-robot named sessions in `serve`**: `session.activate` accepts an
   optional `session` name, and `run` / `apply-sql` / `sample` /
   `session.abort` / `session.deactivate` address one named session. Each

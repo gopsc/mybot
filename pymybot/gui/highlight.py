@@ -32,6 +32,8 @@ LANGUAGES = {
             "number", "alias", "vars"),
     "mt": ("action", "reflex", "include", "merge", "alias", "vars", "struct", "if", "else", "end",
            "while", "loop", "break", "controller"),
+    # Plain text: a pattern that can never match, so nothing is coloured.
+    "plain": (r"(?!x)x",),
 }
 
 
