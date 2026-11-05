@@ -86,7 +86,11 @@ is not interrupted by new tokens.
    - the Python interpreter (leave empty to use the workspace `.venv` or the
      bundled interpreter);
    - the model, e.g. `openai:gpt-4o`, `openai-chat:my-model`,
-     `anthropic:claude-sonnet-4-5` or `deepseek:deepseek-chat`;
+     `anthropic:claude-sonnet-4-5` or `deepseek:deepseek-chat`. On the very
+     first start with no model configured, a setup wizard offers the same
+     choice (provider, model name, optional endpoint, key variable name); it
+     appears once — after saving **or** skipping it never opens again, and
+     `MYBOT_GUI_MODEL_WIZARD=0` disables it entirely;
    - the base URL only when using a self-hosted OpenAI-compatible endpoint;
    - the **name** of the environment variable holding the API key. The key
      itself is never stored in the settings file;

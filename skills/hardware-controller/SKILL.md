@@ -30,7 +30,7 @@ hardware_controller_run(command="check", args=[
 
 `command` 是下文的 CLI 子命令，`args` 是该子命令的原始参数，一个列表元素对应一个 token。工具的工作目录是技能目录，因此路径写 `assets/...` 即可；不要传 entrypoint、绝对宿主路径或自行拼接命令。一次调用只执行一个子命令。
 
-Agent 通用工具只开放 `doctor`、`scripts`、`hardware`、`query`、`check`、`run`、`sample`，以及只读的 `assets list` / `assets read`。`apply-sql`、`assets write/delete`、`new`、`prompts`、`roles`、`sessions`、`mcp`、`serve`、`agent` 属于操作员管理面或长驻入口，只能由操作员直接使用 CLI，不能从 Agent 工具调用。
+Agent 通用工具只开放 `doctor`、`discover`、`scripts`、`hardware`、`query`、`check`、`run`、`sample`，以及只读的 `assets list` / `assets read`。`apply-sql`、`assets write/delete`、`new`、`prompts`、`roles`、`sessions`、`mcp`、`serve`、`agent` 属于操作员管理面或长驻入口，只能由操作员直接使用 CLI，不能从 Agent 工具调用。
 
 MCP 入口见第 5 节。
 
@@ -39,6 +39,7 @@ MCP 入口见第 5 节。
 | 子命令 | 在什么情况下使用 | 激活硬件 |
 | --- | --- | --- |
 | `doctor` | 第一次使用；解释器/依赖/资产/prompt 清单异常；任何命令报环境类错误前 | 否 |
+| `discover` | 写结构 SQL 前枚举宿主串口/FTDI/I2C/SPI 设备，`hints` 直接给出可用的建表 SQL（只读，不加 `--probe`） | 否 |
 | `scripts` | 不知道有哪些 `.mt` 动作脚本，或确认脚本目录是否被正确加载 | 否 |
 | `hardware` | 写动作前确认变量名、总线、地址、controller/trigger 接线 | 否 |
 | `query` | 只想查看结构内容（`SHOW TABLES`、`SELECT`），不需要动作 | 否 |

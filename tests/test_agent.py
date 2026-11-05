@@ -1062,6 +1062,137 @@ def test_failure_endpoint_is_the_request_url(monkeypatch, provider, url):
     assert agent_module.request_endpoint(object()) is None
 
 
+@pytest.fixture
+def fresh_providers(monkeypatch):
+    monkeypatch.setattr(agent_module, "_REGISTERED_PROVIDERS", {})
+    monkeypatch.setattr(agent_module, "_PROVIDER_PLUGINS_LOADED", False)
+    monkeypatch.setattr(agent_module, "_PROVIDER_PLUGIN_ERRORS", {})
+
+
+def test_registered_provider_reuses_the_openai_http_path(monkeypatch, fresh_providers):
+    monkeypatch.setenv("TESTGRID_API_KEY", "offline-testgrid-key")
+    agent_module.register_provider("testgrid", key_env="TESTGRID_API_KEY",
+                                   base_url="https://api.testgrid.invalid/v1//")
+
+    async def scenario():
+        model, client = create_model(AgentConfig(model="testgrid:k2"))
+        try:
+            assert model.model_name == "k2"
+            assert str(client.base_url) == "https://api.testgrid.invalid/v1/"
+            assert client.provider == "testgrid"
+            assert agent_module.request_endpoint(client) == \
+                "POST https://api.testgrid.invalid/v1/chat/completions"
+        finally:
+            await client.close()
+    asyncio.run(scenario())
+
+
+def test_registered_provider_joins_the_rejection_message_and_key_lookup(fresh_providers):
+    agent_module.register_provider("testgrid", key_env="TESTGRID_API_KEY",
+                                   base_url="https://api.testgrid.invalid/v1/")
+    with pytest.raises(AgentConfigurationError) as exc:
+        create_model(AgentConfig(model="unknown:x"))
+    assert "testgrid:MODEL" in str(exc.value)
+    with pytest.raises(AgentConfigurationError, match="TESTGRID_API_KEY"):
+        create_model(AgentConfig(model="testgrid:k2"))
+
+
+def test_registered_provider_can_supply_a_custom_builder(monkeypatch, fresh_providers):
+    monkeypatch.setenv("WIDGET_API_KEY", "offline-widget-key")
+    seen = {}
+
+    class StubProviderModel:
+        def __init__(self, name):
+            self.model_name = name
+
+    def build(model, *, key, base_url, timeout, retries):
+        seen.update(model=model, key=key, base_url=base_url, timeout=timeout, retries=retries)
+        return StubProviderModel(model)
+
+    agent_module.register_provider("widget", key_env="WIDGET_API_KEY", build=build)
+    agent_module.register_provider("spare", key_env="WIDGET_API_KEY", build=build)
+    model, client = create_model(AgentConfig(model="widget:m1", fallback_models=("spare:m2",)))
+    try:
+        assert isinstance(model, agent_module._FallbackChatModel)
+        assert [item.model_name for item in model.models] == ["m1", "m2"]
+        assert seen == {"model": "m2", "key": "offline-widget-key", "base_url": "",
+                        "timeout": 180.0, "retries": 0}
+        assert client.provider == "widget" and client.base_url == ""
+    finally:
+        asyncio.run(client.close())
+
+
+@pytest.mark.parametrize("name", ["9bad", "x" * 33, "", None, "has space"])
+def test_register_provider_rejects_bad_names(name, fresh_providers):
+    with pytest.raises(AgentConfigurationError, match="Provider name"):
+        agent_module.register_provider(name, key_env="KEY", base_url="https://h.invalid/v1/")
+
+
+def test_register_provider_rejects_duplicates_and_bad_settings(fresh_providers):
+    agent_module.register_provider("grid", key_env="GRID_KEY", base_url="https://grid.invalid/v1/")
+    with pytest.raises(AgentConfigurationError, match="already registered"):
+        agent_module.register_provider("grid", key_env="GRID_KEY", base_url="https://grid.invalid/v1/")
+    with pytest.raises(AgentConfigurationError, match="built in"):
+        agent_module.register_provider("openai", key_env="KEY", base_url="https://h.invalid/v1/")
+    with pytest.raises(AgentConfigurationError, match="key_env"):
+        agent_module.register_provider("bad", key_env="not an ident", base_url="https://h.invalid/v1/")
+    with pytest.raises(AgentConfigurationError, match="must be callable"):
+        agent_module.register_provider("bad", key_env="KEY", build="nope")
+    with pytest.raises(AgentConfigurationError, match="base_url is required"):
+        agent_module.register_provider("bad", key_env="KEY")
+    with pytest.raises(AgentConfigurationError, match="Base URL"):
+        agent_module.register_provider("bad", key_env="KEY", base_url="http://grid.invalid/v1/")
+
+
+def test_provider_entry_point_loads_once(monkeypatch, fresh_providers):
+    import importlib.metadata
+    calls = []
+
+    class FakeEntry:
+        name = "plug"
+
+        def load(self):
+            calls.append("load")
+
+            def register():
+                agent_module.register_provider("plug", key_env="PLUG_API_KEY",
+                                               base_url="https://api.plug.invalid/v1/")
+            return register
+
+    monkeypatch.setattr(importlib.metadata, "entry_points",
+                        lambda **kwargs: [FakeEntry()] if kwargs.get("group") == "pymybot.model_providers" else [])
+    monkeypatch.setenv("PLUG_API_KEY", "offline-plug-key")
+    model, client = create_model(AgentConfig(model="plug:m"))
+    try:
+        assert model.model_name == "m" and str(client.base_url) == "https://api.plug.invalid/v1/"
+        assert calls == ["load"]
+        create_model(AgentConfig(model="plug:m"))  # Cached: the plugin is not reloaded.
+        assert calls == ["load"]
+    finally:
+        asyncio.run(client.close())
+
+
+def test_broken_provider_plugin_never_blocks_builtins(monkeypatch, fresh_providers):
+    import importlib.metadata
+    attempts = []
+
+    class Broken:
+        name = "broken"
+
+        def load(self):
+            attempts.append("load")
+            raise ImportError("missing dependency")
+
+    monkeypatch.setattr(importlib.metadata, "entry_points",
+                        lambda **kwargs: [Broken()] if kwargs.get("group") == "pymybot.model_providers" else [])
+    with pytest.raises(AgentConfigurationError, match="OPENAI_API_KEY"):
+        create_model(AgentConfig(model="openai:m"))
+    with pytest.raises(AgentConfigurationError) as exc:
+        create_model(AgentConfig(model="broken:m"))
+    assert "Provider plugin 'broken' failed to load: ImportError: missing dependency" in str(exc.value)
+    assert attempts == ["load"]
+
+
 def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
     from pymybot import cli
 

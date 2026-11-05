@@ -93,7 +93,13 @@ MAX_IDENTICAL_CALLS = 3
 # Single source of truth: validation, key lookup, rejection message and the provider tests all derive from this.
 PROVIDER_KEY_ENV = {"openai": "OPENAI_API_KEY", "openai-chat": "OPENAI_API_KEY",
                     "anthropic": "ANTHROPIC_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
+PROVIDER_BASE_URL = {"openai": "https://api.openai.com/v1/", "openai-chat": "https://api.openai.com/v1/",
+                     "anthropic": "https://api.anthropic.com/", "deepseek": "https://api.deepseek.com/v1/"}
 PROVIDERS = tuple(PROVIDER_KEY_ENV)
+# Process-local registry filled by register_provider()/provider plugins.
+_REGISTERED_PROVIDERS: dict[str, dict] = {}
+_PROVIDER_PLUGINS_LOADED = False
+_PROVIDER_PLUGIN_ERRORS: dict[str, str] = {}
 PROMPT_TOOLS = frozenset({"read_prompt", "update_prompt"})
 AGENT_PROMPT_LAYERS = frozenset({"97", "98", "99"})
 MAX_PROMPT_UPDATES = 20
@@ -296,10 +302,100 @@ def _secure_anthropic_client(api_key, base_url, timeout, retries):
                                     timeout=timeout, http_client=client)
 
 
+def _validate_base_url(url):
+    """Normalize a provider base URL: HTTPS (or loopback HTTP), no credentials/query/fragment.
+
+    SDKs append "/path" to the base, so trailing slashes are normalized.
+    """
+    try:
+        parsed = urlsplit(url)
+        local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+        valid = (parsed.scheme == "https" or (parsed.scheme == "http" and local)) and parsed.hostname
+        if not valid or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError
+        _ = parsed.port
+    except ValueError:
+        raise AgentConfigurationError(
+            "Base URL must use HTTPS (or loopback HTTP), without credentials/query/fragment") from None
+    return url.rstrip("/") + "/"
+
+
+def register_provider(name, *, key_env, base_url="", build=None):
+    """Register a model provider so ``--model NAME:MODEL`` accepts it.
+
+    Without ``build`` the provider reuses the hardened OpenAI-compatible HTTP
+    path — the same client, timeouts and proxy handling as ``openai`` — so a
+    new endpoint never duplicates transport code; ``base_url`` is required.
+    A custom ``build(model, *, key, base_url, timeout, retries)`` must return a
+    bindable chat model and owns every client resource it creates.
+
+    Registration is process-local: call it before the agent starts, or ship it
+    behind a ``pymybot.model_providers`` entry point for automatic loading.
+    """
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,31}", name):
+        raise AgentConfigurationError("Provider name must be 1-32 chars: letter/underscore first,"
+                                      " then letters, digits, dashes or underscores")
+    if name in PROVIDER_KEY_ENV:
+        raise AgentConfigurationError(f"Provider {name!r} is built in and cannot be replaced")
+    if name in _REGISTERED_PROVIDERS:
+        raise AgentConfigurationError(f"Provider {name!r} is already registered")
+    if not isinstance(key_env, str) or not key_env.isidentifier():
+        raise AgentConfigurationError("key_env must name an environment variable")
+    if build is not None and not callable(build):
+        raise AgentConfigurationError("build must be callable")
+    if build is None and not base_url:
+        raise AgentConfigurationError("base_url is required for an OpenAI-compatible provider")
+    if base_url:
+        base_url = _validate_base_url(base_url)
+    _REGISTERED_PROVIDERS[name] = {"key_env": key_env, "base_url": base_url, "build": build}
+
+
+def _load_provider_plugins():
+    """Load providers advertised under the ``pymybot.model_providers`` entry-point group.
+
+    The entry point names a callable (``package.module:register``) whose call
+    invokes :func:`register_provider`. A broken plugin never blocks the
+    built-ins; its error surfaces only when that provider is requested.
+    """
+    global _PROVIDER_PLUGINS_LOADED
+    if _PROVIDER_PLUGINS_LOADED:
+        return
+    _PROVIDER_PLUGINS_LOADED = True
+    try:
+        from importlib.metadata import entry_points
+        group = entry_points(group="pymybot.model_providers")
+    except Exception:
+        return
+    for entry in group:
+        try:
+            register = entry.load()
+            if callable(register):
+                register()
+        except Exception as exc:
+            _PROVIDER_PLUGIN_ERRORS[entry.name] = f"{type(exc).__name__}: {exc}"
+
+
+def available_providers():
+    """Provider names accepted by ``--model``, including registered plugins."""
+    _load_provider_plugins()
+    return (*PROVIDERS, *_REGISTERED_PROVIDERS)
+
+
+def _all_provider_names():
+    return available_providers()
+
+
+def _provider_key_env(provider):
+    return PROVIDER_KEY_ENV.get(provider) or _REGISTERED_PROVIDERS[provider]["key_env"]
+
+
 def _parse_model_spec(spec):
     provider, separator, name = str(spec).partition(":")
-    if not separator or not name.strip() or provider not in PROVIDERS:
-        choices = [f"{item}:MODEL" for item in PROVIDERS]
+    if not separator or not name.strip() or provider not in _all_provider_names():
+        failure = _PROVIDER_PLUGIN_ERRORS.get(provider)
+        if failure and separator:
+            raise AgentConfigurationError(f"Provider plugin {provider!r} failed to load: {failure}")
+        choices = [f"{item}:MODEL" for item in _all_provider_names()]
         raise AgentConfigurationError("Set --model or MYBOT_MODEL to "
                                       + ", ".join(choices[:-1]) + " or " + choices[-1])
     return provider, name.strip()
@@ -311,33 +407,21 @@ def create_model(config):
     Every construction is lazy: credentials are read but no model request is
     sent, so a bad fallback still fails before any hardware action.
     """
-    if config.base_url:
-        try:
-            url = urlsplit(config.base_url)
-            local = url.hostname in {"localhost", "127.0.0.1", "::1"}
-            valid = (url.scheme == "https" or (url.scheme == "http" and local)) and url.hostname
-            if not valid or url.username or url.password or url.query or url.fragment:
-                raise ValueError
-            _ = url.port
-        except ValueError:
-            raise AgentConfigurationError("Base URL must use HTTPS (or loopback HTTP), without credentials/query/fragment") from None
-    # SDKs append "/path" to the base, so trailing slashes must be normalized.
-    custom_url = config.base_url.rstrip("/") if config.base_url else None
-    if custom_url:
-        custom_url += "/"
+    custom_url = _validate_base_url(config.base_url) if config.base_url else None
     timeout = float(config.timeout)
     retries = int(config.model_retries)
     resources = []
 
     def build(spec):
         provider, name = _parse_model_spec(spec)
-        key_env = config.api_key_env or PROVIDER_KEY_ENV[provider]
+        key_env = config.api_key_env or _provider_key_env(provider)
         # Report the setting, never its secret value.
         if not key_env.isidentifier():
             raise AgentConfigurationError("--api-key-env must name an environment variable")
         key = os.environ.get(key_env, "")
         if not key.strip():
             raise AgentConfigurationError(f"Missing API key environment variable: {key_env}")
+        registered = _REGISTERED_PROVIDERS.get(provider)
         if provider == "anthropic":
             from functools import cached_property
             from langchain_anthropic import ChatAnthropic
@@ -356,7 +440,7 @@ def create_model(config):
                         return self._async_override
                     return super()._async_client
 
-            base = custom_url or "https://api.anthropic.com/"
+            base = custom_url or PROVIDER_BASE_URL["anthropic"]
             client = _secure_anthropic_client(key, base, timeout, retries)
             model = SecureChatAnthropic(model=name, api_key=key, base_url=base,
                                         timeout=timeout, max_retries=retries,
@@ -364,10 +448,14 @@ def create_model(config):
             model._async_override = client
             resources.append(client)
             return model, base
+        if registered is not None and registered["build"] is not None:
+            base = custom_url or registered["base_url"]
+            return registered["build"](name, key=key, base_url=base,
+                                       timeout=timeout, retries=retries), base
         from langchain_openai import ChatOpenAI
         import httpx2
-        base = custom_url or ("https://api.deepseek.com/v1/" if provider == "deepseek"
-                              else "https://api.openai.com/v1/")
+        base = custom_url or (registered["base_url"] if registered is not None
+                              else PROVIDER_BASE_URL[provider])
         http = httpx2.AsyncClient(follow_redirects=False, limits=httpx2.Limits(
             max_connections=100, max_keepalive_connections=0))
         model = ChatOpenAI(model=name, api_key=key, base_url=base, timeout=timeout,

@@ -411,6 +411,110 @@ class PromptPanel(QWidget):
             self.status.setText(f"预览失败：{exc}；可通过恢复全部默认修复安全层。")
 
 
+class ModelSetupDialog(QDialog):
+    """First-run guided model setup.
+
+    The wizard records the provider, model name, optional endpoint and the
+    environment variable that holds the API key. The key VALUE never enters
+    the window: it is read by the backend from the operator's environment, so
+    there is no shared key and no hidden default.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        apply_theme(self)
+        self.setWindowTitle("首次运行：配置模型")
+        self.setModal(True)
+        self.resize(580, 320)
+        self.values = None
+        from ..agent import PROVIDER_KEY_ENV, available_providers
+        self._key_envs = PROVIDER_KEY_ENV
+        layout = QVBoxLayout(self)
+        intro = QLabel("选择模型提供商并填写模型名。密钥的值保存在你自己的环境变量中，"
+                       "本窗口只记录变量名，从不读取、显示或存储密钥。\n"
+                       "没有配置时智能体无法启动；也可以稍后在设置里完成。")
+        intro.setWordWrap(True)
+        intro.setObjectName("secondaryText")
+        layout.addWidget(intro)
+        form = QFormLayout()
+        self.provider = QComboBox()
+        self.provider.addItem(f"稍后再说（跳过向导）", "")
+        for name in available_providers():
+            self.provider.addItem(f"{name}  ·  密钥变量 {self._key_envs.get(name, '自定义')}", name)
+        self.provider.currentIndexChanged.connect(self._provider_changed)
+        form.addRow("提供商", self.provider)
+        self.model_name = QLineEdit()
+        self.model_name.setPlaceholderText("例如 gpt-4o / claude-sonnet-4-5 / deepseek-chat")
+        self.model_name.textChanged.connect(self._refresh_preview)
+        form.addRow("模型名", self.model_name)
+        self.base_url = QLineEdit()
+        self.base_url.setPlaceholderText("留空使用官方端点；自托管/OpenAI 兼容端点填 HTTPS 地址")
+        form.addRow("端点 Base URL", self.base_url)
+        self.key_env = QLineEdit()
+        self.key_env.textChanged.connect(self._refresh_preview)
+        form.addRow("API Key 环境变量名", self.key_env)
+        layout.addLayout(form)
+        self.preview = QLabel("")
+        self.preview.setWordWrap(True)
+        self.preview.setObjectName("secondaryText")
+        layout.addWidget(self.preview)
+        layout.addStretch(1)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        self.skip_button = QPushButton("跳过")
+        self.skip_button.clicked.connect(self._skip)
+        buttons.addWidget(self.skip_button)
+        self.save_button = QPushButton("保存并使用")
+        self.save_button.setProperty("role", "primary")
+        self.save_button.setDefault(True)
+        self.save_button.clicked.connect(self._save)
+        buttons.addWidget(self.save_button)
+        layout.addLayout(buttons)
+        self._provider_changed()
+
+    def _provider_changed(self, *_):
+        name = self.provider.currentData()
+        self.key_env.setText(self._key_envs.get(name, ""))
+        configured = bool(name)
+        for widget in (self.model_name, self.base_url, self.key_env):
+            widget.setEnabled(configured)
+        self._refresh_preview()
+
+    def _refresh_preview(self, *_):
+        name = self.provider.currentData()
+        if not name:
+            self.preview.setText("跳过：不保存任何模型设置；可在 设置 → 模型与预算 中手动填写。")
+            return
+        model = f"{name}:{self.model_name.text().strip()}" if self.model_name.text().strip() else "—"
+        endpoint = self.base_url.text().strip() or "官方默认端点"
+        self.preview.setText(f"将配置：{model} · {endpoint} · 密钥读取环境变量 {self.key_env.text().strip() or '—'}")
+
+    def _skip(self):
+        self.values = {}
+        self.reject()
+
+    def _save(self):
+        name = self.provider.currentData()
+        if not name:
+            self._skip()
+            return
+        model = self.model_name.text().strip()
+        if not model:
+            QMessageBox.warning(self, "缺少模型名", "请填写模型名，或选择“跳过”。")
+            return
+        base_url = self.base_url.text().strip()
+        if base_url and not base_url.startswith(("http://", "https://")):
+            QMessageBox.warning(self, "端点无效", "Base URL 需要以 http:// 或 https:// 开头。")
+            return
+        key_env = self.key_env.text().strip()
+        if not key_env.isidentifier():
+            QMessageBox.warning(self, "密钥变量无效",
+                                "API Key 环境变量名必须是合法的变量名（字母、数字、下划线）。")
+            return
+        self.values = {"model": f"{name}:{model}", "base_url": base_url, "api_key_env": key_env}
+        self.accept()
+
+
 class McpConfigDialog(QDialog):
     """Edit and validate one operator ``mcpServers`` file.
 

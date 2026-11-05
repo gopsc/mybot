@@ -168,6 +168,59 @@ def test_session_persists_hot_sql_until_deactivate(workspace, client_factory):
     assert client.close() == 0
 
 
+def test_named_sessions_run_side_by_side(workspace, client_factory):
+    client = client_factory(workspace)
+    (workspace / "quick.mt").write_text("@Action\nt0.delay;\n10;\n@\n", encoding="utf-8")
+    first = client.call("session.activate", {"robot": str(workspace / "robot.sql"), "session": "arm"})
+    second = client.call("session.activate", {"robot": str(workspace / "bh1750.sql"), "session": "sensor"})
+    assert first["session"] == "arm" and second["session"] == "sensor"
+    assert client.error("session.activate", {"robot": str(workspace / "robot.sql"),
+                                             "session": "arm"})["code"] == serve.WRONG_STATE
+    assert client.call("session.status")["sessions"] == [
+        {"session": "arm", "robot": str(workspace / "robot.sql"), "busy": None},
+        {"session": "sensor", "robot": str(workspace / "bh1750.sql"), "busy": None}]
+
+    # A long action on one robot never blocks a call on another robot.
+    long_run = client.send("run", {"input": str(workspace / "long.mt"), "session": "arm"})
+    deadline = time.monotonic() + 5
+    while client.call("session.status")["busy"] != "run":
+        assert time.monotonic() < deadline, "long run never claimed the session"
+    assert client.error("run", {"input": str(workspace / "action.mt"),
+                                "session": "arm"})["code"] == serve.BUSY
+    assert client.call("run", {"input": str(workspace / "quick.mt"), "session": "sensor"})["outputs"]
+    assert client.call("sample", {"name": "cl0", "count": 2, "intervalMs": 20,
+                                  "session": "sensor"}) == {"name": "cl0", "count": 2}
+    assert client.error("run", {"input": str(workspace / "action.mt"),
+                                "session": "ghost"})["code"] == serve.WRONG_STATE
+
+    # Ending one session leaves the other one usable.
+    receipt = client.call("session.abort", {"session": "arm"})
+    assert receipt["state"] == "Aborted" and receipt["aborted"] is True
+    assert (await_error := client.wait(long_run))["error"]["code"] == serve.CANCELLED
+    assert client.error("run", {"input": str(workspace / "action.mt"),
+                                "session": "arm"})["code"] == serve.WRONG_STATE
+    assert client.call("run", {"input": str(workspace / "quick.mt"), "session": "sensor"})["outputs"]
+    assert client.call("session.deactivate")["state"] == "Inactive"
+    assert client.call("session.abort")["aborted"] is False
+    assert client.close() == 0
+
+
+def test_named_deactivate_ends_only_that_session(workspace, client_factory):
+    client = client_factory(workspace)
+    client.call("session.activate", {"robot": str(workspace / "robot.sql"), "session": "arm"})
+    client.call("session.activate", {"robot": str(workspace / "robot.sql"), "session": "aux"})
+    assert client.call("session.deactivate", {"session": "arm"})["sessions"] == [
+        {"session": "aux", "robot": str(workspace / "robot.sql"), "busy": None}]
+    assert len(client.call("run", {"input": str(workspace / "action.mt"), "session": "aux"})["outputs"]) == 2
+    assert client.error("run", {"input": str(workspace / "action.mt"),
+                                "session": "arm"})["code"] == serve.WRONG_STATE
+    # Re-activating an ended session starts from the file, without hot SQL.
+    again = client.call("session.activate", {"robot": str(workspace / "robot.sql"), "session": "arm"})
+    assert {h["name"] for h in again["hardware"]} == {"t0", "relay0", "dev"}
+    assert client.call("session.deactivate")["state"] == "Inactive"
+    assert client.close() == 0
+
+
 @pytest.mark.parametrize("method", ["abort", "session.abort"])
 def test_abort_ends_the_session(workspace, client_factory, method):
     client = client_factory(workspace)
@@ -306,7 +359,7 @@ def test_stdout_carries_only_protocol_and_eof_deactivates(workspace, client_fact
     *protocol, final = [json.loads(line) for line in client.raw]
     assert all(message["jsonrpc"] == "2.0" for message in protocol)
     assert protocol[-1] == {"jsonrpc": "2.0", "method": "session",
-                            "params": {"state": "Inactive", "busy": None, "agent": False}}
+                            "params": {"state": "Inactive", "busy": None, "agent": False, "sessions": []}}
     assert final == {"ok": True, "command": "serve", "stopped": False}
     assert "VIRTUAL" in "".join(client.stderr)  # Lua driver output goes to stderr.
 
@@ -333,7 +386,7 @@ def test_shutdown_with_eof_closes_active_session(workspace, client_factory):
     assert client.call("shutdown") == {}
     assert client.close() == 0
     assert client.next() == {"jsonrpc": "2.0", "method": "session",
-                             "params": {"state": "Inactive", "busy": None, "agent": False}}
+                             "params": {"state": "Inactive", "busy": None, "agent": False, "sessions": []}}
     assert client.next() == {"ok": True, "command": "serve", "stopped": False}
 
 
@@ -916,7 +969,7 @@ def test_owner_cleanup_survives_inner_and_outer_task_cancellation(workspace, mon
         monkeypatch.setattr(h.server.robot_idle, "wait", wait_for_idle)
         deactivation = h.start("session.deactivate")
         await asyncio.wait_for(waiting.wait(), 5)
-        inner = h.server.deactivating
+        inner = h.server.deactivating["default"]
         h.tasks[operation].cancel()
         h.tasks[deactivation].cancel()
         inner.cancel()

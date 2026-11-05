@@ -97,7 +97,7 @@ export DEEPSEEK_API_KEY="sk-..."
 
 **对话必须属于一个角色**：角色的提示词、技能、工作区和模型历史互相隔离，不再有全局默认对话。没有 `--role` 的 `pymybot agent`、未选角色的 GUI，以及缺少 `role` 的 `serve` `agent.ask` 都会被拒绝。角色可以随时用 `pymybot roles delete NAME --yes` 或 GUI 的「删除」移除（整个目录，不可恢复）。
 
-支持的模型提供商有 `openai`、`openai-chat`、`anthropic` 和 `deepseek`。密钥只从环境变量读；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。
+支持的模型提供商有 `openai`、`openai-chat`、`anthropic` 和 `deepseek`。密钥只从环境变量读；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。其他 OpenAI 兼容提供商可用 `pymybot.agent.register_provider` 注册（复用内置的 HTTP 通道），或通过 `pymybot.model_providers` entry point 由第三方包自动注册。
 
 Agent 默认是双智能体：记忆体负责规划、反思与长期记忆，执行体负责工具与硬件。
 启动后记忆体自拟目标并持续派活，受步数、墙钟、token 与任务数上限约束；

@@ -20,6 +20,7 @@ python -m pymybot doctor
 | `pymybot --no-gui ...` | Terminal agent or controller command | Depending on command |
 | `pymybot gui` | Explicit GUI entry | No |
 | `pymybot check --robot SQL [--input MT]` | Static validation of SQL, modules, references and MT/Include syntax | No |
+| `pymybot discover [--buses i2c,spi,uart,ftdi] [--probe]` | Read-only host device enumeration with structure-SQL hints | No |
 | `pymybot hardware --robot SQL` | List declared hardware and metadata | No |
 | `pymybot scripts [--scripts-dir DIR]` | List `.mt` action scripts | No |
 | `pymybot query --robot SQL --sql "..."` | `SHOW TABLES;` or `SELECT * FROM table [WHERE ...];` | No |
@@ -241,15 +242,15 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | Method | Parameters | Result |
 | --- | --- | --- |
 | `initialize` | — | `protocol`, `version`, `agent`, `mcp`, `status` |
-| `session.status` | — | `state`, `robot`, `busy`, ... |
-| `session.activate` | `robot`, optional `modulePaths`, `allowHardware`, `vars` | session state |
-| `session.deactivate` | — | cancels work and cleans drivers |
-| `abort` | — | best-effort stop for the active session or Agent executor; returns `state`, `aborted`, `safe_failures`, `destroy_failures` |
-| `session.abort` | — | abort a direct robot session; always ends the session |
+| `session.status` | — | `state`, `robot`, `busy`, `sessions` (one `{session, robot, busy}` per active session) |
+| `session.activate` | `robot`, optional `session` (name, default `default`), `modulePaths`, `allowHardware`, `vars` | session state; several named sessions may be active side by side |
+| `session.deactivate` | optional `session` (omitted: deactivate every session) | cancels that session's work and cleans its drivers |
+| `abort` | — | best-effort stop for every active session or the Agent executor; returns `state`, `aborted`, `safe_failures`, `destroy_failures` |
+| `session.abort` | optional `session` (omitted: every session) | abort direct robot sessions; aborted sessions end |
 | `agent.abort` | — | stop the Agent executor; closes an idle conversation |
-| `run` | `input`, optional `vars`, `timeout` | `outputs` |
-| `apply-sql` | `sql` | session mutation |
-| `sample` | `name`, optional `count`, `intervalMs`, `timeout` | `sample` notifications |
+| `run` | `input`, optional `session`, `vars`, `timeout` | `outputs` |
+| `apply-sql` | `sql`, optional `session` | session mutation |
+| `sample` | `name`, optional `session`, `count`, `intervalMs`, `timeout` | `sample` notifications |
 | `agent.ask` | `task`, `role` (required), optional `robot`, `modulePaths`, `scriptsDir`, `skillsDir`, `vars`, `mcpConfig`, `allowMcpTools`, `allowHardware`, `allowActions`, `allowShell`, `allowFileWrites`, `enableShell`, `enableWeb`, `allowWeb`, `workspaceDir`, `model`, `baseUrl`, `apiKeyEnv`, `timeout`, `maxHistoryBytes`, `maxContextTokens`, `contextReserveTokens`, `hotTurns`, `warmTurns`, `promptFile`, `autoStats` (boolean, default `true`), `contextBytes`, `intent`, `sandbox`, `protectPrompts`, `searchEndpoint` | runs one memory/worker mission to completion without starting the loop; `agent.event` notifications carry `agent: memory\|worker\|system` |
 | `agent.start` | `role` (required), optional `task` seed, `maxMissions`, `maxSeconds`, `pauseSeconds`, `maxRequests`, `maxToolCalls`, `turnTimeout`, `modelRetries`, `fallbackModels`, `requirePlanApproval`, agent options | starts the self-directed loop and returns its status; `team.message`, `mission.*`, `plan.*` and `team.stopped` events follow |
 | `agent.stop` | — | stops the autonomous loop cooperatively and clears the worker stop latch |
@@ -265,9 +266,11 @@ when the process exits; clients should ignore lines without `jsonrpc`.
 | `cancel` | `id` | cancels a request (`-32800` for the cancelled request) |
 | `shutdown` | — | cleanup and exit |
 
-Only one hardware operation runs at a time (`-32001` when busy). An active
-session and an agent conversation are mutually exclusive (`-32002` when the
-state is wrong).
+One robot operation runs at a time **per named session** (`-32001` when that
+session is busy); different sessions never block each other, while an agent
+conversation remains mutually exclusive with every session (`-32002` when the
+state is wrong). Sessions are isolated: each owns its Robot, owner thread and
+hot-SQL lifetime; omitting `session` addresses the default session.
 
 `abort` is the client-facing stop: it chooses the current owner, sets the stop
 flag immediately, waits for the active action to unwind, calls optional driver
@@ -287,7 +290,7 @@ Agent mode is documented in the README. The important flags are:
 
 | Option | Meaning |
 | --- | --- |
-| `--model PROVIDER:MODEL` | `openai`, `openai-chat`, `anthropic` or `deepseek`; defaults to `MYBOT_MODEL`. |
+| `--model PROVIDER:MODEL` | `openai`, `openai-chat`, `anthropic` or `deepseek` plus any registered provider; defaults to `MYBOT_MODEL`. |
 | `--base-url URL` | Custom OpenAI-compatible endpoint; HTTPS required except loopback. |
 | `--api-key-env NAME` | Environment variable holding the key; never pass the key itself. |
 | `--task TEXT` | One-shot task; without it, start the REPL. `/clear` explicitly clears the current role history. |
@@ -324,10 +327,51 @@ self-hosted SearXNG must enable the `json` output format. An explicitly
 configured loopback endpoint may use `http://127.0.0.1:PORT` (also `localhost`
 or `::1`); other endpoints must be HTTPS on port 443. `web_fetch` still refuses
 loopback and private targets independently of the configured search endpoint.
+Configuration failures name the fix: 404 (endpoint must be the instance base
+URL — `/search` is appended), 403 and non-JSON bodies (enable the `json` format
+in `settings.yml` or use a private instance), and unreachable endpoints name
+the URL that refused the connection.
 
 A turn blocks the fourth identical tool call with a structured `not_executed`
 receipt instead of replaying a stuck loop; the transcript records `intent` and
 `loop_guard` events.
+
+## Custom model providers
+
+Beyond the four built-ins, extra OpenAI-compatible endpoints are pluggable
+without duplicating transport code:
+
+```python
+from pymybot.agent import register_provider
+
+# Reuses the hardened openai HTTP path (client, timeouts, proxy handling):
+register_provider("moonshot", key_env="MOONSHOT_API_KEY",
+                  base_url="https://api.moonshot.cn/v1/")
+
+# Or supply a builder for a non-OpenAI SDK; it must return a bindable
+# chat model and own the client resources it creates:
+register_provider("gemini", key_env="GEMINI_API_KEY", build=build_gemini_model)
+```
+
+After registration `--model moonshot:kimi-k2` (and fallback chains) work like
+any built-in. A package can also ship a `pymybot.model_providers` entry point
+whose callable performs the registration; plugins load once per process and a
+broken plugin never blocks the built-ins.
+
+## `discover` command
+
+```sh
+pymybot discover                       # every bus, passive enumeration
+pymybot discover --buses uart,ftdi     # subset of i2c,spi,uart,ftdi
+pymybot discover --probe               # also open/close each real UART port
+```
+
+Read-only host enumeration shared with the hardware-controller skill:
+I2C/SPI/UART come from the bundled `Dev_enum` driver, FTDI USB adapters are
+listed by pyftdi and mapped to HAL-ready `ftdi://` URLs, and `hints` maps every
+found device to the `CREATE TABLE UART/I2C/SPI` declaration that uses it.
+Nothing is opened unless `--probe` is set; probing never writes, but an open
+can pulse DTR/RTS, so boards that reset on those lines should not be probed.
 
 ## `mcp` server
 

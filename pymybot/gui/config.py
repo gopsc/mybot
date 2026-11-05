@@ -91,6 +91,8 @@ class GuiConfig:
     enable_web: bool = False
     search_endpoint: str = ""
     session_log: bool = True
+    # First-run model wizard: shown once, then remembered (even when skipped).
+    model_setup_done: bool = False
     # Tool availability is a preference; approval grants stay runtime-only.
     enable_file_tools: bool = False
     enable_shell: bool = False
@@ -151,6 +153,7 @@ class GuiConfig:
             search_endpoint=_text(self.search_endpoint, 2048),
             allow_web=bool(self.allow_web and self.enable_web),
             session_log=self.session_log if isinstance(self.session_log, bool) else True,
+            model_setup_done=bool(self.model_setup_done),
             enable_file_tools=bool(self.enable_file_tools or self.enable_shell),
             enable_shell=bool(self.enable_shell),
             allow_hardware=bool(self.allow_hardware),

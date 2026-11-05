@@ -31,7 +31,9 @@ _SAFE_ENV = (
 # A manifest-free skill is a CLI passthrough. Keep the model on the documented
 # hardware-controller surface; administrative mutators (assets write/delete,
 # roles, prompts, sessions, new, gui, serve, mcp, agent) are not reachable.
-_GENERIC_COMMANDS = frozenset({"assets", "doctor", "hardware", "scripts", "query", "check", "run", "sample"})
+# discover joins doctor as a read-only host enumeration surface.
+_GENERIC_COMMANDS = frozenset({"assets", "discover", "doctor", "hardware", "scripts",
+                               "query", "check", "run", "sample"})
 _ASSET_READ_COMMANDS = frozenset({"list", "read"})
 _HARDWARE_COMMANDS = frozenset({"run", "sample"})
 _VAR_COMMANDS = frozenset({"hardware", "query", "check", "run", "sample"})

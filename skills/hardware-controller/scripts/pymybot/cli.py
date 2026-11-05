@@ -129,6 +129,7 @@ def parser():
     commands = p.add_subparsers(dest="command", required=True)
     descriptions = {
         "check": "Statically validate structure SQL, modules/references and optional action Includes",
+        "discover": "Enumerate host UART/FTDI/I2C/SPI devices read-only and suggest structure SQL",
         "hardware": "List declared hardware without probing or activating it",
         "scripts": "List relative .mt script paths without executing Lua",
         "query": "Read structure tables using SELECT * or SHOW TABLES, without activation",
@@ -309,6 +310,13 @@ def parser():
         if name in {"serve", "agent"}:
             command.add_argument("--no-session-log", action="store_true",
                                  help="do not write conversation transcripts under ~/.mybot/sessions")
+        if name == "discover":
+            command.add_argument("--buses", default="all",
+                                 help="comma-separated subset of i2c,spi,uart,ftdi or all (default: all)")
+            command.add_argument("--probe", action="store_true",
+                                 help="briefly open each real UART port to report in-use state;"
+                                      " nothing is written, but DTR/RTS may pulse")
+            continue
         if name == "scripts":
             command.add_argument("--scripts-dir", help="default: packaged assets/scripts, else source scripts")
             continue
@@ -414,7 +422,7 @@ def parse_args(argv=None):
     if arguments in (["--version"], ["-V"]):
         print(f"pymybot {__version__}")
         raise SystemExit(0)
-    commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql",
+    commands = {"check", "discover", "hardware", "scripts", "query", "run", "sample", "apply-sql",
                  "agent", "gui", "serve", "mcp", "doctor", "sessions", "prompts", "roles", "new",
                  "assets"}
     # --no-gui is a top-level switch: the GUI is the default entry, so drop it
@@ -782,6 +790,12 @@ def execute(args, stop):
         return assets_command(args)
     if args.command == "doctor":
         return doctor()
+    if args.command == "discover":
+        from .discover import DiscoveryError, discover, parse_buses
+        try:
+            return discover(parse_buses(args.buses), probe=args.probe)
+        except DiscoveryError as exc:
+            raise UsageError(str(exc)) from None
     if args.command == "prompts":
         return prompt_command(args)
     if args.command == "roles":
