@@ -12,7 +12,6 @@ This layer is automatically maintained by the system. It tracks:
 - **total_input_tokens** / **total_output_tokens**: Token usage
 - **tool_usage**: Most frequently used tools (top 20)
 - **first_seen** / **last_seen**: Activity timestamps
-- **robot**: Last used robot configuration
 - **last_action**: Most recent action state
 - **recent_errors**: Last 5 errors encountered
 - **total_errors**: Cumulative error count

@@ -1153,12 +1153,8 @@ class AgentSession:
         events = self.events[first_event:]
         action_tools = IO_TOOLS | SKILL_TOOLS | CAMERA_TOOLS | frozenset(self._skill_tools.keys())
         actions = [event for event in events if event["tool"] in action_tools]
-        robot = getattr(self.executor, "robot_path", "") or ""
-        if not robot and isinstance(self.context, dict):
-            robot = self.context.get("robot", "")
         turn_data = extract_turn_data(turn_messages, events)
         turn_data.update({
-            "robot": Path(str(robot)).name,
             "last_action": actions[-1]["state"] if actions else "not_executed",
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "faulted": bool(getattr(self.executor, "faulted", False)),

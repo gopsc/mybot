@@ -13,7 +13,7 @@
       "file": "010_core.md",
       "editable": true,
       "max_bytes": 32768,
-      "sha256": "4b9d11f5a0b6c6efc11f8151345d187cc88b691188c25247a0c3ddfbf4f05e11"
+      "sha256": "e7c55349a5ca9a4c65f5f54d215f6fa00db0216f080f0d200913f914d112b938"
     },
     {
       "id": "97",
@@ -34,7 +34,7 @@
       "file": "099_stats.md",
       "editable": "agent",
       "max_bytes": 4096,
-      "sha256": "4ff2b00a29bba3d10595e9f0bfad04e96962aab7dbd4da1a8b6751a601c20ba9"
+      "sha256": "52064f14d73753425435f04ddec0d628bd37e962245221c92e75901fe87a8918"
     },
     {
       "id": "100",

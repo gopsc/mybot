@@ -59,8 +59,6 @@ def merge_stats(existing: dict[str, Any], turn_data: dict[str, Any]) -> dict[str
     stats["total_input_tokens"] = stats.get("total_input_tokens", 0) + turn_data.get("input_tokens", 0)
     stats["total_output_tokens"] = stats.get("total_output_tokens", 0) + turn_data.get("output_tokens", 0)
 
-    if turn_data.get("robot"):
-        stats["robot"] = turn_data["robot"]
     if turn_data.get("elapsed_seconds") is not None:
         stats["last_elapsed_seconds"] = turn_data["elapsed_seconds"]
     if turn_data.get("faulted") is not None:

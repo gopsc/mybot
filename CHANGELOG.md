@@ -64,6 +64,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The bundled core prompt routes hardware work through the per-skill
+  `<skill>_run` tool (for example `hardware_controller_run`) instead of a
+  `run_skill` name the model never sees, states that the session loads no robot
+  of its own, and the STATS layer drops the always-empty `robot` field along
+  with the stats code that carried it.
 - The GUI and the agent entries no longer load or pass a robot structure. The
   window settings drop `robot` and `vars`, `agent.start`/`agent.ask` drop
   `robot`, `scriptsDir`, `modulePaths` and `vars`, and `pymybot agent --robot`,

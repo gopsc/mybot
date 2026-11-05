@@ -211,7 +211,7 @@ def test_stats_are_bounded_host_metadata_and_can_be_disabled(monkeypatch):
             after = session.prompts.read("99")
             assert (after["sha256"] != before) is auto_stats
             if auto_stats:
-                assert '"robot": "robot.sql"' in after["content"]
+                assert '"robot"' not in after["content"]
                 assert '"total_tool_calls": 0' in after["content"]
                 for private in ("secret-never-include", "USER-CONTENT-SECRET", "/private/workspace"):
                     assert private not in after["content"]

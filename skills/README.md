@@ -10,8 +10,8 @@ the controller Runtime explicitly loads trusted code and assets from
 | [`hardware-controller/`](hardware-controller/SKILL.md) | Self-contained Python controller, MCP server, Agent `run_skill`, `assets` CRUD, authoritative controller docs, the three-layer scripting grammar references, and default robots/scripts/modules assets |
 | [`skill-authoring/`](skill-authoring/SKILL.md) | 技能编写规范: SKILL.md layout, frontmatter, trigger descriptions, references and the approved workspace `install_skill` workflow |
 | [`brave-heart/`](brave-heart/SKILL.md) | 勇气与意志力支持：恐惧场景识别、激励引导、微小第一步与呼吸练习 |
-| [`i2c-address-probe/`](i2c-address-probe/SKILL.md) | 宿主侧 I2C 地址探测（只读），sh/Python 脚本、判读手册，Agent 可经 `run_skill` 的 `list-buses` / `scan` 执行 |
-| [`i2c-uart-spi-enum/`](i2c-uart-spi-enum/SKILL.md) | 跨平台 I2C/UART/SPI 设备枚举（只读），Python 脚本与判读手册，Agent 可经 `run_skill` 执行 |
+| [`i2c-address-probe/`](i2c-address-probe/SKILL.md) | 宿主侧 I2C 地址探测（只读），sh/Python 脚本、判读手册，Agent 可经 `i2c_address_probe_run` 的 `list-buses` / `scan` 执行 |
+| [`i2c-uart-spi-enum/`](i2c-uart-spi-enum/SKILL.md) | 跨平台 I2C/UART/SPI 设备枚举（只读），Python 脚本与判读手册，Agent 可经 `i2c_uart_spi_enum_run` 执行 |
 | [`system-status-report/`](system-status-report/SKILL.md) | 跨平台系统状态采集（只读），纯 Python 标准库，输出文本或单行 JSON |
 
 ## Single source of truth
