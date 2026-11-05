@@ -295,7 +295,7 @@ class Workspace:
                                      sandbox=self.sandbox, workspace=self.path,
                                      protected_paths=self.shell_protected_paths)
             elif name == "create_directory":
-                result = self._create_directory(parts, parent, fd, guard, check)
+                result = self._create_directory(parts, parent, fd, guard, check, started)
             elif name == "list_files":
                 result = self._listing(relative, parent, fd, check)
             elif name == "read_file":
@@ -336,7 +336,7 @@ class Workspace:
             guard()
             return result
 
-    def _create_directory(self, parts, parent, fd, guard, check):
+    def _create_directory(self, parts, parent, fd, guard, check, started):
         """Create one directory below a verified parent; linked paths are rejected."""
         check()
         guard()
@@ -361,6 +361,7 @@ class Workspace:
                 os.mkdir(parent / name)
         except FileExistsError:
             raise FileExistsError("Directory already exists") from None
+        started()
         guard()
         info = current()
         if info is None or _linked(info) or not stat.S_ISDIR(info.st_mode):

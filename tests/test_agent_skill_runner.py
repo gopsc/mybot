@@ -213,7 +213,7 @@ def test_i2c_skill_lists_buses_without_hardware():
     assert isinstance(result["output"]["adapters"], list)
 
 
-def test_hardware_controller_assets_read_and_list():
+def test_hardware_controller_allows_asset_reads_but_not_mutations():
     runner = SkillRunner(SkillsLibrary(ROOT / "skills"))
     listed = runner.run("hardware-controller", "run",
                         {"command": "assets", "args": ["list", "--kind", "robots"]})
@@ -223,4 +223,35 @@ def test_hardware_controller_assets_read_and_list():
                       {"command": "assets",
                        "args": ["read", "--kind", "robots", "--path", "relay-test.sql"]})
     assert read["exit_code"] == 0 and read["output_error"] is None
-    assert read["output"]["path"] == "relay-test.sql" and "content" in read["output"]
+    assert "content" in read["output"]
+    for command, args in (("assets", ["write", "--kind", "scripts", "--path", "x.mt",
+                                      "--content-file", "/etc/hosts"]),
+                          ("assets", ["delete", "--kind", "scripts", "--path", "x.mt", "--yes"]),
+                          ("roles", ["delete", "--yes", "victim"])):
+        with pytest.raises(SecurityError):
+            runner.run("hardware-controller", "run", {"command": command, "args": args})
+    with pytest.raises(SecurityError):
+        runner.run("hardware-controller", "run", {"args": ["doctor"]})
+
+
+def test_generic_runner_forwards_host_grants_and_asset_aliases(tmp_path):
+    root = tmp_path / "skills"
+    skill = root / "demo"
+    scripts = skill / "scripts"
+    scripts.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Demo generic skill.\n---\n\n# Demo\n", encoding="utf-8")
+    (scripts / "echo.py").write_text(
+        "import json, sys\nprint(json.dumps({'argv': sys.argv[1:]}))\n", encoding="utf-8")
+    modules = tmp_path / "modules"
+    modules.mkdir()
+    runner = SkillRunner(SkillsLibrary(root), module_paths=[modules])
+    result = runner.run(
+        "demo", "run",
+        {"command": "run", "args": ["--robot", "assets/robots/relay-test.sql"]},
+        allow_hardware=True, bindings={"speed": "2"})
+    argv = result["output"]["argv"]
+    assert argv[0] == "run" and "--allow-hardware" in argv
+    assert "--var" in argv and "speed=2" in argv
+    assert "--module-path" in argv and str(modules) in argv
+    assert argv[argv.index("--robot") + 1] == "relay-test.sql"

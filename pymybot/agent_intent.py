@@ -60,7 +60,8 @@ class IntentDecision:
     extra_tools: frozenset[str] = frozenset()
 
     def allows(self, tool):
-        return not self.restricted or tool in self.tools or tool in self.extra_tools
+        return (not self.restricted or tool in self.tools
+                or (tool in self.extra_tools and "run_skill" in self.tools))
 
     def as_dict(self):
         return {"name": self.name, "confidence": round(self.confidence, 2),

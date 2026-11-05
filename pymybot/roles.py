@@ -7,6 +7,7 @@ loading a role never changes the global prompt library or grants permissions.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -166,6 +167,48 @@ def write_history(path, turns, cold=None, warm=None):
     if warm:
         payload["warm"] = list(warm)
     _write_json(Path(path), payload)
+
+
+@contextmanager
+def role_session_lock(role):
+    """Hold one cross-process writer lock for a role conversation.
+
+    History is a read/modify/write file; two windows using the same role would
+    otherwise silently replace each other's turns. This is a hard, local lock,
+    not a security boundary.
+    """
+    path = role.root / ".agent.lock"
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    locked = False
+    try:
+        if os.name == "nt":
+            import msvcrt
+            if os.fstat(descriptor).st_size == 0:
+                os.write(descriptor, b"\0")
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        locked = True
+        yield path
+    except OSError:
+        if not locked:
+            raise SecurityError(f"Role '{role.name}' is already in use by another conversation") from None
+        raise
+    finally:
+        if locked:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+            except OSError:
+                pass
+        os.close(descriptor)
 
 
 @dataclass(frozen=True)
@@ -405,7 +448,8 @@ def create_role(name, *, description="", skills_from=None, mcp_from=None, root=N
 
 def clear_role_history(name, root=None):
     role = load_role(name, root)
-    write_history(role.history_file, [])
+    with role_session_lock(role):
+        write_history(role.history_file, [])
     return role.info()
 
 

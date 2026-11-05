@@ -1046,6 +1046,7 @@ class App(QMainWindow):
         workspace = self._workspace_root()
         params = {
             "task": task, "role": self.cfg.role or None,
+            "robot": self._robot_path(),
             "scriptsDir": self._scripts_root(),
             "skillsDir": "" if self.cfg.role else self._skills_root(),
             "mcpConfig": "" if self.cfg.role else self._mcp_root(),
@@ -1053,12 +1054,14 @@ class App(QMainWindow):
             "allowActions": bool(self.cfg.allow_actions),
             "allowHardware": True,
             "allowMcpTools": True,
+            "allowShell": True,
             "workspaceDir": workspace,
             "enableShell": True,
             "allowFileWrites": True,
             "maxHistoryBytes": self.cfg.max_history_bytes,
             "maxContextTokens": self.cfg.max_context_tokens,
             "contextReserveTokens": self.cfg.context_reserve_tokens,
+            "timeout": self.cfg.timeout,
             "hotTurns": self.cfg.hot_turns,
             "warmTurns": self.cfg.warm_turns,
             "promptFile": _absolute(self.cfg.prompt_file, workspace),

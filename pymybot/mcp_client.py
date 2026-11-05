@@ -22,6 +22,8 @@ from .security import SecurityError, read_file
 
 MAX_CONFIG_BYTES = 1024 * 1024
 MAX_SERVERS = 16
+MAX_TOOLS = 256
+MAX_TOOL_PAGES = 32
 MAX_ARGS = 64
 MAX_ARG = 4096
 MAX_ENV = 64
@@ -216,9 +218,13 @@ class MCPManager:
                     await session.initialize()
                     sessions[server.name] = session
                     cursor = None
-                    while True:
+                    pages = 0
+                    while pages < MAX_TOOL_PAGES and len(self.tools) < MAX_TOOLS:
+                        pages += 1
                         listed = await session.list_tools(cursor=cursor)
                         for tool in listed.tools:
+                            if len(self.tools) >= MAX_TOOLS:
+                                break
                             self.tools.append({
                                 "server": server.name, "remote": tool.name,
                                 "description": tool.description or "",

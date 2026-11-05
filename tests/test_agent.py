@@ -336,6 +336,34 @@ def test_workspace_reads_do_not_require_action_approval(tool, arguments):
     asyncio.run(scenario())
 
 
+def test_shell_requires_approval_unless_preapproved():
+    async def scenario(config):
+        executor = FakeExecutor()
+        approvals = []
+
+        async def confirm(name, arguments):
+            approvals.append(name)
+            return False
+
+        session = AgentSession(executor, None, config, workspace=True, enable_shell=True,
+                               confirm=confirm)
+        try:
+            result = await session.dispatch("shell", {"command": "echo hi"})
+        finally:
+            await session.close()
+        return result, executor.calls, approvals
+
+    denied, calls, approvals = asyncio.run(
+        scenario(AgentConfig(intent_mode="off")))
+    assert denied["state"] == "not_executed" and calls == []
+    assert approvals == ["shell"]
+
+    allowed, calls, approvals = asyncio.run(
+        scenario(AgentConfig(intent_mode="off", allow_shell=True)))
+    assert allowed["state"] == "completed" and calls
+    assert approvals == []
+
+
 def test_shell_registration_requires_workspace():
     with pytest.raises(AgentConfigurationError, match="workspace"):
         AgentSession(FakeExecutor(), scripted_model([TextPart("unused")]), enable_shell=True)
@@ -848,7 +876,7 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
         pytest.fail("Workspace tools must not activate hardware")
     monkeypatch.setattr(Robot, "active", forbidden_activation)
     monkeypatch.setattr(agent_module, "create_model", lambda _: (FunctionModel(respond, stream_function=stream), None))
-    flags = ["--enable-shell"] if shell else []
+    flags = ["--enable-shell", "--allow-shell"] if shell else []
     code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),
                      "--role", "test-role", *flags,
                      "--allow-file-writes", "--task", "write, edit, read and run shell"])

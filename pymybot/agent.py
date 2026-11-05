@@ -41,10 +41,11 @@ from .agent_state import (extract_turn_data, format_soul, format_stats, format_u
                           merge_stats, parse_existing_soul, parse_existing_stats,
                           parse_existing_user, update_soul_profile, update_user_profile)
 from .errors import AgentInterrupted
+from .images import image_header
 from .mcp_client import MCPManager
 from .paths import asset_path
 from .prompts import PromptLibrary, PromptWriteError
-from .roles import read_history, write_history
+from .roles import read_history, role_session_lock, write_history
 from .sandbox import SANDBOX_MODES, describe_backend
 from .security import SecurityError, checked_text, dumps
 from .session_log import SessionLog, create_session_log
@@ -53,7 +54,24 @@ MAX_TEXT = 64 * 1024
 MAX_MCP_TEXT = 32 * 1024
 MAX_MCP_TOTAL = 64 * 1024
 MAX_MCP_IMAGE = 2 * 1024 * 1024
+MAX_MCP_TOOLS = 256
+MAX_MCP_DESCRIPTION = 4 * 1024
+MAX_MCP_SCHEMA_PROPERTIES = 256
+MAX_MCP_NODES = 4096
 _TERMINAL_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+_TOOL_NAME = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _unique_tool_name(raw, taken):
+    """Provider-safe tool name, bounded to 64 characters and collision-free."""
+    base = _TOOL_NAME.sub("_", str(raw)).strip("_")[:64] or "tool"
+    candidate, index = base, 2
+    while candidate in taken:
+        suffix = f"_{index}"
+        candidate = base[:64 - len(suffix)] + suffix
+        index += 1
+    taken.add(candidate)
+    return candidate
 
 
 def _display_text(text):
@@ -100,6 +118,7 @@ class AgentConfig:
     context_reserve_tokens: int = 2048
     allow_actions: bool = False
     allow_file_writes: bool = False
+    allow_shell: bool = False
     mcp_config: str | None = None
     allow_mcp_tools: bool = False
     prompt_file: str | None = None
@@ -117,6 +136,8 @@ class AgentConfig:
     def __post_init__(self):
         if type(self.auto_stats) is not bool:
             raise AgentConfigurationError("auto_stats must be a boolean")
+        if type(self.allow_shell) is not bool:
+            raise AgentConfigurationError("allow_shell must be a boolean")
         if not math.isfinite(self.timeout) or not 0 < self.timeout <= 3600:
             raise AgentConfigurationError("Agent timeout must be in (0, 3600] seconds")
         for name, low, high in (("history_bytes", 64 * 1024, 64 * 1024 * 1024),
@@ -225,7 +246,7 @@ def create_model(config):
     custom_url = config.base_url.rstrip("/") if config.base_url else None
     if custom_url:
         custom_url += "/"
-    timeout = min(30.0, config.timeout)
+    timeout = float(config.timeout)
     if provider == "anthropic":
         from functools import cached_property
         from langchain_anthropic import ChatAnthropic
@@ -313,7 +334,12 @@ def _intent_instructions(decision):
 def _bounded_mcp(value, budget=None, depth=0):
     """Bound one external MCP result like a tool receipt, never the raw stream."""
     if budget is None:
-        budget = [MAX_MCP_TOTAL]
+        budget = [MAX_MCP_TOTAL, MAX_MCP_NODES]
+    elif len(budget) == 1:
+        budget.append(MAX_MCP_NODES)
+    budget[1] -= 1
+    if budget[1] <= 0:
+        return "<node limit>"
     if depth > 8:
         return "<depth limit>"
     if isinstance(value, str):
@@ -371,7 +397,7 @@ def _image_blocks(result):
 def _mcp_content(result):
     """Convert one MCP CallToolResult into LangChain content blocks and an artifact."""
     from mcp.types import EmbeddedResource, ImageContent, TextContent
-    budget = [MAX_MCP_TOTAL]
+    budget = [MAX_MCP_TOTAL, MAX_MCP_NODES]
     text = []
     images = []
     for item in result.content:
@@ -386,8 +412,17 @@ def _mcp_content(result):
             if len(data) > MAX_MCP_IMAGE or len(data) > max(0, budget[0]):
                 text.append(f"<image omitted: {len(data)} bytes>")
                 continue
+            try:
+                fmt, _ = image_header(data)
+            except ValueError:
+                text.append("<invalid image>")
+                continue
+            media = item.mimeType
+            if media != "image/" + fmt:
+                text.append("<image MIME mismatch>")
+                continue
             budget[0] -= len(data)
-            images.append({"type": "image", "base64": item.data, "mime_type": item.mimeType})
+            images.append({"type": "image", "base64": item.data, "mime_type": media})
         elif isinstance(item, EmbeddedResource):
             text.append(_bounded_mcp(str(item.resource), budget))
         else:
@@ -423,7 +458,7 @@ def _json_schema_model(name, schema):
     mapping = {"string": str, "integer": int, "number": float, "boolean": bool,
                "array": list, "object": dict}
     fields = {}
-    for field, spec in (properties or {}).items():
+    for field, spec in list((properties or {}).items())[:MAX_MCP_SCHEMA_PROPERTIES]:
         if not isinstance(field, str) or not field.isidentifier():
             continue
         kind = spec.get("type") if isinstance(spec, dict) else None
@@ -530,7 +565,8 @@ def _enumerate_skill_tools(skills):
             if not scripts and skill_name not in CLI_SKILLS:
                 continue
             script_name = scripts[0].name if scripts else "hardware_controller.py"
-            tool_name = f"{skill_name}_run".replace("-", "_")
+            tool_name = _unique_tool_name(f"{skill_name}_run".replace("-", "_"), set(tools))
+            restricted = skill_name in CLI_SKILLS
             tools[tool_name] = {
                 "name": tool_name,
                 "description": (f"Run the {skill_name} skill script {script_name}. "
@@ -540,6 +576,7 @@ def _enumerate_skill_tools(skills):
                     "properties": {
                         "command": {
                             "type": "string",
+                            "minLength": 1,
                             "description": "CLI subcommand documented by the skill, for example doctor",
                         },
                         "args": {
@@ -548,7 +585,7 @@ def _enumerate_skill_tools(skills):
                             "description": "Additional CLI arguments, one list item per token",
                         },
                     },
-                    "required": [],
+                    "required": ["command"] if restricted else [],
                 },
                 "_skill": skill_name,
                 "_action": "run",
@@ -568,6 +605,8 @@ def _enumerate_skill_tools(skills):
             if not isinstance(action_spec, dict):
                 continue
             tool_name, tool_def = _skill_action_to_tool(skill_name, action_name, action_spec)
+            tool_name = _unique_tool_name(tool_name, set(tools))
+            tool_def["name"] = tool_name
             tools[tool_name] = tool_def
     return tools
 
@@ -613,6 +652,8 @@ class AgentSession:
         self._sandbox_label = (describe_backend(self.config.sandbox_mode)
                                if self.enable_shell else "")
         self._skill_tools = {}
+        self._mcp_tools = []
+        self._role_lock = None
         self.tools, self._tool_guide = self._build_tools()
         self._mcp = MCPManager(self.mcp_servers, timeout=self.config.timeout) if self.mcp_servers else None
         self._mcp_ready = False
@@ -808,37 +849,62 @@ class AgentSession:
         if self._mcp is None or self._mcp_ready:
             return
         await self._mcp.start()
-        for spec in self._mcp.tools:
+        taken = {tool.name for tool in self.tools}
+        for spec in self._mcp.tools[:MAX_MCP_TOOLS]:
             server, remote = spec["server"], spec["remote"]
-            display = f"{server}_{remote}"
+            display = _unique_tool_name(f"{server}_{remote}", taken)
+            description = (spec["description"] or display)[:MAX_MCP_DESCRIPTION]
 
             async def call(_display=display, _server=server, _remote=remote, **arguments):
                 return await self.invoke_mcp_tool(_display, _server, _remote, arguments)
 
             self.tools.append(StructuredTool.from_function(
-                coroutine=call, name=display, description=spec["description"] or display,
+                coroutine=call, name=display, description=description,
                 args_schema=_json_schema_model(display, spec["input_schema"]),
                 response_format="content_and_artifact"))
+            self._mcp_tools.append(self.tools[-1])
         self._mcp_ready = True
 
+    def _refresh_tools(self):
+        """Rebuild skill tools after install/uninstall without dropping MCP tools."""
+        tools, guide = self._build_tools()
+        self.tools = tools + self._mcp_tools
+        self._tool_guide = guide
+
     # -- lifecycle ---------------------------------------------------------
+    def _acquire_role_lock(self):
+        if self.role is not None and self._role_lock is None:
+            lock = role_session_lock(self.role)
+            lock.__enter__()
+            self._role_lock = lock
+
+    def _release_role_lock(self):
+        lock, self._role_lock = self._role_lock, None
+        if lock is not None:
+            lock.__exit__(None, None, None)
+
     async def start(self):
-        context = await self.executor.start()
-        if context.get("ok") is False:
-            # A start that ran out of time or was stopped must not be reported
-            # as a configuration error the operator could try to "fix".
-            self._check()
-            raise AgentConfigurationError("Cannot load robot, scripts or workspace configuration; no model request was sent")
-        self.context = context
-        if self._mcp is not None and not self._mcp_ready:
-            try:
-                await self._build_mcp_tools()
-            except (AgentError, AgentInterrupted):
-                raise
-            except BaseException as exc:
-                raise AgentConfigurationError(
-                    f"Cannot start MCP servers ({type(exc).__name__}); no model request was sent") from None
-        return self.context
+        self._acquire_role_lock()
+        try:
+            context = await self.executor.start()
+            if context.get("ok") is False:
+                # A start that ran out of time or was stopped must not be reported
+                # as a configuration error the operator could try to "fix".
+                self._check()
+                raise AgentConfigurationError("Cannot load robot, scripts or workspace configuration; no model request was sent")
+            self.context = context
+            if self._mcp is not None and not self._mcp_ready:
+                try:
+                    await self._build_mcp_tools()
+                except (AgentError, AgentInterrupted):
+                    raise
+                except BaseException as exc:
+                    raise AgentConfigurationError(
+                        f"Cannot start MCP servers ({type(exc).__name__}); no model request was sent") from None
+            return self.context
+        except BaseException:
+            self._release_role_lock()
+            raise
 
     async def close(self):
         try:
@@ -852,8 +918,11 @@ class AgentSession:
                 try:
                     await self.executor.close()
                 finally:
-                    if self.session_log is not None:
-                        self.session_log.close()
+                    try:
+                        self._release_role_lock()
+                    finally:
+                        if self.session_log is not None:
+                            self.session_log.close()
 
     def _check(self):
         if getattr(self.executor, "faulted", False) and not getattr(self.executor, "interrupted", False):
@@ -975,6 +1044,7 @@ class AgentSession:
     def _needs_approval(self, name):
         return ((name in IO_TOOLS and not self.config.allow_actions)
                 or (name in FILE_WRITE_TOOLS and not self.config.allow_file_writes)
+                or (name == "shell" and not self.config.allow_shell)
                 or (name in WEB_TOOLS and not self.config.allow_web)
                 or name in {"install_skill", "uninstall_skill"})
 
@@ -1077,7 +1147,7 @@ class AgentSession:
         self._compose_prompt()
         return result
 
-    def _update_stats(self, started, first_event, expected_hash):
+    def _update_stats(self, started, first_event, expected_hash, turn_messages):
         if not self.config.auto_stats:
             return
         events = self.events[first_event:]
@@ -1086,10 +1156,13 @@ class AgentSession:
         robot = getattr(self.executor, "robot_path", "") or ""
         if not robot and isinstance(self.context, dict):
             robot = self.context.get("robot", "")
-        turn_data = {"robot": Path(str(robot)).name,
-                     "last_action": actions[-1]["state"] if actions else "not_executed",
-                     "tool_calls": len(events), "elapsed_seconds": round(time.monotonic() - started, 3),
-                     "faulted": bool(getattr(self.executor, "faulted", False))}
+        turn_data = extract_turn_data(turn_messages, events)
+        turn_data.update({
+            "robot": Path(str(robot)).name,
+            "last_action": actions[-1]["state"] if actions else "not_executed",
+            "elapsed_seconds": round(time.monotonic() - started, 3),
+            "faulted": bool(getattr(self.executor, "faulted", False)),
+        })
         try:
             existing = parse_existing_stats(self.prompts.read("99")["content"])
             merged = merge_stats(existing, turn_data)
@@ -1140,7 +1213,7 @@ class AgentSession:
         stats_hash = self.prompt_snapshot.layer_hashes.get("99", "")
         user_hash = self.prompt_snapshot.layer_hashes.get("98", "")
         soul_hash = self.prompt_snapshot.layer_hashes.get("97", "")
-        self._update_stats(started, first_event, stats_hash)
+        self._update_stats(started, first_event, stats_hash, turn_messages)
         turn_data = extract_turn_data(turn_messages, self.events[first_event:])
         self._update_user_layer(turn_messages, user_hash)
         self._update_soul_layer(turn_messages, turn_data.get("tool_usage", {}), soul_hash)
@@ -1220,6 +1293,14 @@ class AgentSession:
             detail = f" ({kind})" if isinstance(kind, str) and kind else ""
             raise AgentError(f"Execution outcome is unknown{detail}; inspect the robot and workspace before restarting. "
                              "Actions are not rolled back or automatically retried")
+        if (result.get("ok") and result.get("executed")
+                and name in {"install_skill", "uninstall_skill"}):
+            try:
+                self._refresh_tools()
+            except Exception as exc:
+                self._log("skill_refresh_error", error=type(exc).__name__)
+                print(f"mybot: skill tool refresh failed ({type(exc).__name__}); "
+                      "start a new conversation to load it", file=sys.stderr)
         self._check()  # Preserve the receipt, but never request another model after stop.
         return result
 
@@ -1737,6 +1818,7 @@ async def run_cli_agent(args, stop):
                              context_reserve_tokens=getattr(args, "context_reserve_tokens", 2048),
                              allow_actions=args.allow_actions,
                              allow_file_writes=args.allow_file_writes,
+                             allow_shell=getattr(args, "allow_shell", False),
                              mcp_config=mcp_config,
                              allow_mcp_tools=getattr(args, "allow_mcp_tools", False),
                              prompt_file=getattr(args, "prompt_file", None),

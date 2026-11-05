@@ -84,6 +84,13 @@ def _mono(widget):
     widget.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
 
 
+class SafeTextBrowser(QTextBrowser):
+    """Preview widget that never loads local/remote resources from Markdown."""
+
+    def loadResource(self, _resource_type, _url):
+        return None
+
+
 class PreviewDialog(QDialog):
     """Read-only preview for transcripts, scripts and Markdown documents."""
 
@@ -96,7 +103,7 @@ class PreviewDialog(QDialog):
         layout = QVBoxLayout(self)
         self.path = str(path or "")
         if language == "markdown":
-            self.view = QTextBrowser()
+            self.view = SafeTextBrowser()
             self.view.setOpenExternalLinks(False)
             self.view.setMarkdown(text)
         else:
@@ -1166,7 +1173,7 @@ class ResourcePanel(QWidget):
         self.preview = QStackedWidget()
         self.placeholder = _label("选择一个脚本、技能或文档预览", secondary=True)
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.markdown = QTextBrowser()
+        self.markdown = SafeTextBrowser()
         self.markdown.setOpenExternalLinks(False)
         self.markdown.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.code = QPlainTextEdit()

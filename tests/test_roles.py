@@ -255,3 +255,26 @@ def test_create_role_rejects_manifest_without_entrypoint(tmp_path):
 
     with pytest.raises(SecurityError, match="entrypoint"):
         create_role("bad", skills_from=source.parent, root=tmp_path / "roles")
+
+
+def test_role_history_writer_lock_blocks_a_second_live_session(tmp_path):
+    pytest.importorskip("langchain")
+    from pymybot.agent import AgentConfig, AgentSession
+
+    role = create_role("locked", root=tmp_path / "roles")
+
+    async def scenario():
+        first = AgentSession(_Executor(), None, AgentConfig(auto_stats=False), role=role)
+        await first.start()
+        try:
+            second = AgentSession(_Executor(), None, AgentConfig(auto_stats=False), role=role)
+            with pytest.raises(SecurityError, match="already in use"):
+                await second.start()
+            await second.close()
+        finally:
+            await first.close()
+        third = AgentSession(_Executor(), None, AgentConfig(auto_stats=False), role=role)
+        await third.start()
+        await third.close()
+
+    asyncio.run(scenario())

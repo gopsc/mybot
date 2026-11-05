@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import stat
 import time
 
@@ -29,6 +30,7 @@ MAX_PROMPT_TOTAL = 128 * 1024
 _MAX_LAYER_BYTES = 64 * 1024
 _MAX_MANIFEST_BYTES = 32 * 1024
 _MAX_BACKUP_BYTES = 1024 * 1024
+_MAX_BACKUPS = 50
 _IDS = ("0", "10", "97", "98", "99", "100")
 _EDITABLE = {"0": False, "10": True, "97": "agent", "98": "agent",
              "99": "agent", "100": False}
@@ -463,7 +465,23 @@ class PromptLibrary:
                 _atomic(backup, "metadata.json", (json.dumps(metadata, ensure_ascii=False,
                         allow_nan=False, sort_keys=True) + "\n").encode("utf-8"))
             directory.guard()
+            self._prune_backups(backup_root)
         return str(target)
+
+    @staticmethod
+    def _prune_backups(backup_root):
+        """Keep backup growth bounded; automatic STATS updates run every turn."""
+        try:
+            entries = [entry for entry in backup_root.iterdir()
+                       if entry.is_dir() and not entry.is_symlink()]
+        except OSError:
+            return
+        entries.sort(key=lambda entry: entry.name, reverse=True)
+        for entry in entries[_MAX_BACKUPS:]:
+            try:
+                shutil.rmtree(entry)
+            except OSError:
+                pass
 
     def ensure_home(self):
         with self._locked(create=True) as directory:

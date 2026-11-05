@@ -22,7 +22,7 @@ pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人�
 | --- | --- | --- |
 | **GUI** | 桌面调试、演示、查看逐次回执 | `pymybot` |
 | **CLI 控制器** | CI/CD、脚本、无模型环境 | `pymybot check / run / sample / ...` |
-| **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --task "..."`（可加 `--robot`） |
+| **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --role NAME --task "..."`（可加 `--robot`） |
 | **MCP** | Claude Desktop、Cursor、其他 MCP 客户端 | `pymybot mcp --robot ...` |
 
 另外还有一个长驻的 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
@@ -277,7 +277,7 @@ TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/assets
 | Shell 驱动 | 关闭 | `--allow-hardware` |
 | Agent 硬件 Skill 动作 | 免审批，默认硬件权限 | 仅限已安装的可信技能；操作员承担执行风险 |
 | Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |
-| Agent Shell | 关闭 | `--enable-shell`（提示词保护要求可用的 bubblewrap） |
+| Agent Shell | 关闭 | `--enable-shell`（默认逐次审批；自动化可加 `--allow-shell` 预批准；提示词保护要求可用的 bubblewrap） |
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
 | Agent 外部 MCP 工具 | 逐次确认 | `--allow-mcp-tools`（外部服务不是沙箱） |
 

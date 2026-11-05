@@ -549,3 +549,52 @@ def test_robotless_executor_runs_generic_and_skill_tools(tmp_path):
             await executor.close()
 
     asyncio.run(scenario())
+
+
+def test_installed_skill_tools_refresh_inside_one_session(tmp_path):
+    pytest.importorskip("langchain")
+    from pymybot.agent import AgentConfig, AgentSession
+
+    root = tmp_path / "skills"
+    root.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    source = workspace / "demo"
+    (source / "scripts").mkdir(parents=True)
+    (source / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Demo runnable skill.\n---\n\n# Demo\n", encoding="utf-8")
+    (source / "scripts" / "run.py").write_text(
+        "import json\nprint(json.dumps({'ok': True}))\n", encoding="utf-8")
+
+    async def confirm(name, arguments):
+        return True
+
+    async def scenario():
+        library = SkillsLibrary(root)
+        executor = RobotExecutor(None, skills=library, workspace_dir=str(workspace))
+        session = AgentSession(executor, None, AgentConfig(intent_mode="off"),
+                               skills=library, workspace=True,
+                               confirm=confirm)
+        try:
+            before = {tool.name for tool in session.tools}
+            assert "demo_run" not in before
+            result = await session.dispatch("install_skill", {"path": "demo"})
+            assert result["ok"] and result["executed"]
+            assert "demo_run" in {tool.name for tool in session.tools}
+        finally:
+            await session.close()
+
+    asyncio.run(scenario())
+
+
+def test_skill_tool_names_are_provider_safe(tmp_path):
+    root = tmp_path / "skills"
+    skill = root / "my.skill"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: my.skill\ndescription: Dotted skill.\n---\n", encoding="utf-8")
+    (skill / "scripts" / "run.py").write_text("print('{}')\n", encoding="utf-8")
+    from pymybot.agent import _enumerate_skill_tools
+    tools = _enumerate_skill_tools(SkillsLibrary(root))
+    assert "my_skill_run" in tools
+    assert all(len(name) <= 64 and all(c.isalnum() or c in "_-" for c in name) for name in tools)

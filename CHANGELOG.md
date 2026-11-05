@@ -11,10 +11,9 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `pymybot assets list/read/write/delete` manages the bundled `robots` (`.sql`),
   `modules` (`.py`/`.lua`) and `scripts` (`.mt`) asset files in place, with
   traversal/symlink/suffix guards, `--force` to overwrite and `--yes` to delete.
-  The hardware-controller Skill exposes these to the Agent as `assets_list`,
-  `assets_read`, `assets_write`, `assets_overwrite` and `assets_delete`
-  `run_skill` actions, so the model can create, retrieve, overwrite and then run
-  robot scripts through one self-contained skill.
+  The hardware-controller Skill exposes only the read-only `assets list` and
+  `assets read` subcommands to the Agent; write/delete remain operator CLI
+  actions and are not reachable through `run_skill`.
 - `--robot` and `--input` now resolve against the bundled asset roots: an
   absolute path or a path that already exists relative to CWD is used as-is,
   otherwise a bare or relative name falls back to `assets/robots` / `assets/scripts`.
@@ -116,6 +115,25 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The `pydantic-ai-slim` dependency; install `pymybot[agent]` for
   `langchain`, `langgraph` and the provider integrations.
+
+### Security
+
+- Manifest-free skills now pass through an explicit CLI allowlist. The
+  hardware-controller Agent surface is limited to `doctor`, `hardware`, `scripts`,
+  `query`, `check`, `run`, `sample` and read-only `assets list` / `assets read`;
+  `assets write`, `assets delete`, `roles`, `prompts`, `sessions`, `new`, `gui`,
+  `serve`, `mcp` and `agent` are no longer reachable from `run_skill`.
+- Workspace shell commands now require approval unless the operator passes the
+  new `--allow-shell` flag (the GUI preauthorizes them as documented). Shell was
+  previously callable without the confirmation promised by the security model.
+- Chat intent no longer inherits the unrestricted skill-tool escape hatch;
+  hardware skills require an intent that actually allows `run_skill`.
+- Host-granted skill runs now forward operator `--var`, `--module-path` and
+  `--allow-hardware` values, and resolve documented `assets/robots|x` aliases
+  against the packaged asset roots instead of creating a nested bogus path.
+- Project-context names are escaped to one line, prompt backups retain the
+  newest 50 snapshots, MCP tools/schemas/results are capped, and one live
+  conversation per role is enforced with `.agent.lock`.
 
 ### Fixed
 

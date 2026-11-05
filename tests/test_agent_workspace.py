@@ -243,7 +243,10 @@ def test_parent_must_exist_and_file_must_be_regular(workspace, tmp_path):
 
 
 def test_create_directory_creates_one_level_below_an_existing_parent(workspace, tmp_path):
-    assert invoke(workspace, "create_directory", {"path": "build"}) == {"path": "build", "created": True}
+    starts = []
+    assert invoke(workspace, "create_directory", {"path": "build"}, starts=starts) == {
+        "path": "build", "created": True}
+    assert starts == [True]
     assert (tmp_path / "build").is_dir()
     assert invoke(workspace, "create_directory", {"path": "build/sub"})["created"] is True
     assert (tmp_path / "build" / "sub").is_dir()
