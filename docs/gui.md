@@ -84,10 +84,6 @@ is not interrupted by new tokens.
    - the base URL only when using a self-hosted OpenAI-compatible endpoint;
    - the **name** of the environment variable holding the API key. The key
      itself is never stored in the settings file;
-   - optional **变量覆盖** (`NAME=VALUE`, one per line) for structure
-     `Alias`/`Vars` rows. They are applied before activation, passed to every
-     agent action, kept in memory for this launch only, and never written to
-     the settings file;
    - whether **保存会话转录** is enabled. It is on by default; turning it off
      starts `serve` with `--no-session-log`. `MYBOT_SESSION_LOG=0` in the
      environment still disables transcripts regardless of this checkbox. Use

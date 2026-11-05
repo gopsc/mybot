@@ -10,7 +10,6 @@ import asyncio
 import os
 import sys
 import threading
-from pathlib import Path
 
 from .agent import (
     AgentConfig,
@@ -176,9 +175,6 @@ async def run_cli_agent(args, stop):
     failure = result = None
     cleanup_errors = []
     try:
-        if getattr(args, "robot", None) and not Path(args.robot).is_file():
-            raise AgentConfigurationError(
-                f"Robot structure not found: {args.robot}; no model request was sent")
         try:
             from .roles import load_role
             role = load_role(args.role) if getattr(args, "role", None) else None
@@ -215,7 +211,7 @@ async def run_cli_agent(args, stop):
                 f"Cannot load MCP configuration: {exc}; no model request was sent") from None
         model, client = create_model(config)
         session_log = create_session_log(enabled=not getattr(args, "no_session_log", False),
-                                         robot=args.robot or "", model=config.model, mode="cli",
+                                         robot="", model=config.model, mode="cli",
                                          role=role.name if role is not None else "")
         try:
             skills_dir = role.skills_dir if role is not None else (args.skills_dir or default_skills_root())
@@ -224,10 +220,9 @@ async def run_cli_agent(args, stop):
             raise AgentConfigurationError(
                 f"Cannot load skills configuration: {exc}; no model request was sent") from None
         workspace_dir = str(role.workspace_dir) if role is not None else args.workspace_dir
-        executor = RobotExecutor(args.robot, module_paths=args.module_path,
-                                 scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
-                                 stop_event=stop,
-                                 vars=getattr(args, "bindings", None),
+        # Hardware structures belong to the hardware-controller skill; an agent
+        # conversation never loads one of its own.
+        executor = RobotExecutor(None, stop_event=stop,
                                  skills=skills, workspace_dir=workspace_dir, enable_shell=args.enable_shell,
                                  sandbox=config.sandbox_mode)
         if args.enable_shell:

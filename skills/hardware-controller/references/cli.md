@@ -70,7 +70,7 @@ semantics. Typical usage:
 pymybot roles create technician --description "Field technician"
 pymybot roles list
 pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"
-pymybot agent --role technician --robot robots/my.sql --scripts-dir scripts --task "运行自检"
+pymybot agent --role technician --task "运行自检"
 pymybot roles clear-history technician --yes
 pymybot roles delete technician --yes        # permanently remove the role directory
 ```

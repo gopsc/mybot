@@ -173,7 +173,7 @@ def test_cli_accepts_prompt_and_context_flags(tmp_path):
     from pymybot.cli import parse_args
 
     profile = tmp_path / "profile.md"
-    args = parse_args(["agent", "--robot", "x.sql", "--task", "hi", "--role", "demo",
+    args = parse_args(["agent", "--task", "hi", "--role", "demo",
                        "--prompt-file", str(profile), "--context-bytes", "0"])
     assert args.prompt_file == str(profile)
     assert args.context_bytes == 0

@@ -69,15 +69,6 @@ def _absolute(path, root):
     return str(candidate if candidate.is_absolute() else Path(root or ".").absolute() / candidate)
 
 
-def _parse_bindings(text):
-    bindings = {}
-    for line in str(text).splitlines():
-        name, separator, value = line.strip().partition("=")
-        if separator and name.strip().isidentifier():
-            bindings[name.strip()] = value
-    return bindings
-
-
 def _label(text="", *, secondary=False):
     label = QLabel(text)
     label.setTextFormat(Qt.TextFormat.PlainText)
@@ -549,7 +540,6 @@ class App(QMainWindow):
         if not chosen or self._stopping:
             return
         self.cfg.workspace = chosen
-        self.cfg.robot = ""
         self.refresh_context()
         self._restart_server()
 
@@ -689,9 +679,6 @@ class App(QMainWindow):
         if self.cfg.role:
             return str(role_path(self.cfg.role) / "workspace")
         return self.cfg.workspace or default_workspace()
-
-    def _robot_path(self):
-        return _absolute(self.cfg.robot, self._workspace_root())
 
     def _scripts_root(self):
         root = self._workspace_root()
@@ -979,16 +966,6 @@ class App(QMainWindow):
         if not self._require_role():
             return
         self._sync_config()
-        scripts = self._scripts_root()
-        if not Path(scripts).is_dir():
-            self._message("脚本目录不存在", f"脚本根目录不存在：\n{scripts}")
-            return
-        robot = self._robot_path()
-        if robot and not Path(robot).is_file():
-            # Older GUI configs may keep a structure path that no longer exists;
-            # the autonomous agent can still use file, skill and web tools.
-            self._notice(f"结构文件不存在，已跳过：{_brief(robot, 80)}", seconds=10)
-            robot = ""
         client, generation = self.serve, self.generation
         if self._stopping or client is None or self.busy:
             return
@@ -1003,7 +980,7 @@ class App(QMainWindow):
                           "检查，必要时明确确认「恢复全部默认」修复后再启动。")
             return
         try:
-            ident, future = client.start_request("agent.start", self._agent_params(robot=robot))
+            ident, future = client.start_request("agent.start", self._agent_params())
         except RpcError as exc:
             self._chat_line(str(exc), "error")
             return
@@ -1062,17 +1039,17 @@ class App(QMainWindow):
             self._chat_line("[已停止] 自主循环结束。", "system")
         self._set_busy(False)
 
-    def _agent_params(self, robot=None):
+    def _agent_params(self):
+        """Agent parameters; hardware structures belong to the skill, not the GUI.
+
+        The controller runtime and its ``robots/`` live in the hardware-controller
+        skill, so an agent conversation never loads a structure of its own.
+        """
         workspace = self._workspace_root()
         params = {
             "role": self.cfg.role or None,
-            "robot": self._robot_path() if robot is None else robot,
-            "scriptsDir": self._scripts_root(),
             "skillsDir": "" if self.cfg.role else self._skills_root(),
             "mcpConfig": "" if self.cfg.role else self._mcp_root(),
-            "vars": self.cfg.vars or None,
-            "allowActions": bool(self.cfg.allow_actions),
-            "allowHardware": True,
             "allowMcpTools": True,
             "allowShell": True,
             "workspaceDir": workspace,
@@ -1286,7 +1263,7 @@ class App(QMainWindow):
         workspace = self._workspace_root()
         dialog = CommandDialog(
             self, python=resolve_python(workspace, self.cfg.python), cwd=workspace,
-            robot=self._robot_path(), module_paths=self._module_paths(),
+            module_paths=self._module_paths(),
             scripts_dir=self._scripts_root(), timeout=self.cfg.timeout,
             confirm=lambda title, text: self._message(title, text, confirm=True))
         self._exec_dialog(dialog)
@@ -1584,7 +1561,6 @@ class SettingsDialog(QDialog):
                     browse_file=True, caption="选择操作者指导文件",
                     file_filter="Markdown/文本 (*.md *.txt);;所有文件 (*)")
         self._field(advanced_form, cfg, "search_endpoint", "SearXNG 搜索端点（留空仅抓取）")
-        self._field(advanced_form, cfg, "vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）", kind="lines")
         advanced_form.addRow(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
         tabs.addTab(advanced, "高级 / MCP")
 
@@ -1646,10 +1622,7 @@ class SettingsDialog(QDialog):
         for name, widget in self.entries.items():
             if name == "workspace" and self._role:
                 continue
-            if name == "vars":
-                values[name] = _parse_bindings(widget.toPlainText())
-            else:
-                values[name] = widget.text().strip()
+            values[name] = widget.text().strip()
         values.update(max_history_bytes=max(64, self.history_bytes.value()) * 1024,
                       max_context_tokens=(self.max_context_tokens.value()
                                           if self.max_context_enabled.isChecked() else None),

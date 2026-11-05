@@ -22,7 +22,7 @@ pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人�
 | --- | --- | --- |
 | **GUI** | 桌面调试、演示、查看逐次回执 | `pymybot` |
 | **CLI 控制器** | CI/CD、脚本、无模型环境 | `pymybot check / run / sample / ...` |
-| **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --role NAME --task "..."`（可加 `--robot`） |
+| **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --role NAME --task "..."` |
 | **MCP** | Claude Desktop、Cursor、其他 MCP 客户端 | `pymybot mcp --robot ...` |
 
 另外还有一个长驻的 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
@@ -80,7 +80,7 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 
 GUI 用 PySide6（Qt 6）；只在命令行里用的话，不需要装 `gui` 可选依赖。
 
-第一次打开，在 **设置** 里选 workspace、结构文件和模型。如果你只想控制硬件，不配模型也能用。要启动自主智能体，先点工具栏的「新建」创建一个角色，再点「启动」；没有输入框，人类只负责启动、观察和停止。「删除」会在确认后移除整个角色目录。
+第一次打开，在 **设置** 里选 workspace 和模型。如果你只想控制硬件，不配模型也能用；结构文件由 hardware-controller 技能自带，窗口不再配置。要启动自主智能体，先点工具栏的「新建」创建一个角色，再点「启动」；没有输入框，人类只负责启动、观察和停止。「删除」会在确认后移除整个角色目录。
 
 ### 3. 启用 AI Agent
 
@@ -91,7 +91,6 @@ export DEEPSEEK_API_KEY="sk-..."
 .venv/bin/python -m pymybot roles create technician --description "Field technician"
 .venv/bin/python -m pymybot --no-gui \
   --role technician \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
   --task "列出硬件并解释每个变量的作用"
 ```
 
@@ -110,7 +109,6 @@ Agent 也能通过 `--mcp-config` 接外部 MCP 服务，把它们的工具放�
 .venv/bin/python -m pymybot roles create researcher --mcp-config ./mcp.json
 .venv/bin/python -m pymybot --no-gui \
   --role researcher \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
   --task "列出硬件"
 ```
 

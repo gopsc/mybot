@@ -1196,11 +1196,9 @@ def test_serve_dual_agent_reports_both_voices(tmp_path, monkeypatch):
         async def close(self):
             pass
 
-    robot = tmp_path / "robot.sql"
-    robot.write_text("CREATE TABLE dummy(name String);", encoding="utf-8")
     monkeypatch.setattr(agent_module, "create_model",
                         lambda config: (FunctionModel(respond), FakeClient()))
-    params = {"task": "检查继电器", "robot": str(robot), "role": role.name, "model": "openai:fake"}
+    params = {"task": "检查继电器", "role": role.name, "model": "openai:fake"}
 
     async def scenario():
         out = Out()
@@ -1266,7 +1264,7 @@ def test_serve_start_runs_the_autonomous_loop(tmp_path, monkeypatch):
     robot.write_text("CREATE TABLE dummy(name String);", encoding="utf-8")
     monkeypatch.setattr(agent_module, "create_model",
                         lambda config: (FunctionModel(respond), FakeClient()))
-    params = {"robot": str(robot), "role": role.name, "model": "openai:fake",
+    params = {"role": role.name, "model": "openai:fake",
               "maxMissions": 2, "pauseSeconds": 0.01}
 
     async def scenario():

@@ -373,7 +373,6 @@ def test_send_guard_blocks_tampered_safety_before_rpc(window, layer):
         assert info["protocol"] == 1
         window.serve = client
         window.agent_available = True
-        window.cfg.robot = str(ASSETS / "robots" / "relay-test.sql")
         layer_path(library, layer).write_text("modified safety", encoding="utf-8")
         sequence = client._seq
         failures = []

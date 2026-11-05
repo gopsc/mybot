@@ -98,7 +98,7 @@ def test_legacy_pydanticai_history_is_ignored(tmp_path):
 
 
 def test_role_cli_flags():
-    args = parse_args(["agent", "--robot", "robot.sql", "--task", "hi", "--role", "demo"])
+    args = parse_args(["agent", "--task", "hi", "--role", "demo"])
     assert args.role == "demo"
     args = parse_args(["roles", "create", "demo", "--description", "test"])
     assert args.role_action == "create" and args.name == "demo"
@@ -107,7 +107,7 @@ def test_role_cli_flags():
     args = parse_args(["roles", "delete", "demo", "--yes"])
     assert args.role_action == "delete" and args.name == "demo" and args.yes is True
     with pytest.raises(UsageError):
-        parse_args(["agent", "--robot", "robot.sql", "--task", "hi",
+        parse_args(["agent", "--task", "hi",
                     "--role", "demo", "--skills-dir", "skills"])
 
 

@@ -64,6 +64,14 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The GUI and the agent entries no longer load or pass a robot structure. The
+  window settings drop `robot` and `vars`, `agent.start`/`agent.ask` drop
+  `robot`, `scriptsDir`, `modulePaths` and `vars`, and `pymybot agent --robot`,
+  `--module-path`, `--var` and `--var-env` are rejected unless `--no-agent`
+  turns the call into a direct `run`. Hardware structures belong to the
+  `hardware-controller` skill and are passed to `hardware_controller_run` as
+  `--robot assets/robots/*.sql`; a stale structure in an old GUI configuration
+  can no longer stop an autonomous run before the first model request.
 - `pymybot agent` and serve `agent.ask` now run the dual-agent team by default;
   each call is a multi-step mission rather than a single tool loop. The
   `agent.ask` response gains `agents`, `status`, `mission` and `steps`, and

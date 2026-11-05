@@ -36,7 +36,7 @@ separate implementation for the desktop, CI and the model.
 | --- | --- | --- |
 | GUI | Desktop debugging, demos, live tool receipts | `pymybot` |
 | CLI controller | CI/CD, scripts, no model required | `pymybot check / run / sample / ...` |
-| AI agent | Natural-language robot control | `pymybot --no-gui --role NAME --robot ... --task "..."` |
+| AI agent | Natural-language robot control | `pymybot --no-gui --role NAME --task "..."` |
 | MCP | Claude Desktop, Cursor and other MCP clients | `pymybot mcp --robot ...` |
 
 A long-lived `serve` backend exposes the same session over stdio JSON-RPC 2.0 for
@@ -100,8 +100,7 @@ python -m venv .venv
 export MYBOT_MODEL="deepseek:deepseek-chat"
 export DEEPSEEK_API_KEY="sk-..."
 .venv/bin/python -m pymybot roles create technician --description "Field technician"
-.venv/bin/python -m pymybot --no-gui --role technician \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql --task "List the hardware"
+.venv/bin/python -m pymybot --no-gui --role technician --task "List the hardware"
 # Agent conversations require a role; create one first, delete it with
 # `pymybot roles delete technician --yes` when it is no longer needed.
 

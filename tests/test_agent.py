@@ -819,7 +819,7 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
     thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
     thread.start()
     try:
-        code = cli.main(["--no-gui", "--robot", str(path), "--task", "列出硬件", "--model", "openai-chat:test",
+        code = cli.main(["--no-gui", "--task", "列出硬件", "--model", "openai-chat:test",
                          "--role", "test-role", "--base-url", f"http://127.0.0.1:{server.server_port}/v1"])
     finally:
         server.shutdown()
@@ -874,7 +874,7 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(agent_cli_module, "create_model",
                         lambda _: (team_model(FunctionModel(respond, stream_function=stream)), None))
     flags = ["--enable-shell", "--allow-shell"] if shell else []
-    code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),
+    code = cli.main(["--no-gui",
                      "--role", "test-role", *flags,
                      "--allow-file-writes", "--task", "write, edit, read and run shell"])
     captured = capsys.readouterr()
@@ -896,7 +896,7 @@ def test_provider_error_is_sanitized_and_not_retried(tmp_path, monkeypatch, caps
     path = tmp_path / "robot.sql"
     path.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
     with fake_openai(lambda *_: (500, {"error": {"message": "SECRET must not leak", "type": "server_error"}})) as (url, requests):
-        code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
+        code = cli.main(["--no-gui", "--task", "hello",
                          "--role", "test-role", "--model", "openai:test", "--base-url", url])
     captured = capsys.readouterr()
     assert code == 1 and len(requests) == 1
@@ -919,7 +919,7 @@ def test_unusable_skills_root_fails_as_configuration_before_any_request(tmp_path
         pytest.fail("skills root must be validated before a model request is sent")
 
     with fake_openai(forbid) as (url, requests):
-        code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
+        code = cli.main(["--no-gui", "--task", "hello",
                          "--role", role.name, "--model", "openai:test", "--base-url", url])
     captured = capsys.readouterr()
     assert requests == []
