@@ -88,6 +88,16 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   — cameras, buses, serial devices and the skill's hardware commands — and to
   treat files and shell as supporting tools, rather than exploring a directory
   tree as an end in itself.
+- The memory agent's self-proposed goals now prefer the physical world. Its
+  prompt offered "workspace maintenance" as one of four goal categories and
+  never mentioned sensing, so an unattended run — worst with an empty role
+  description, which renders as "not provided" — reached for the cheapest
+  verifiable goal and inventoried the filesystem. Pure-file goals (directory
+  inventories, generated listings, scaffold skeletons, unrelated refactors) are
+  now rejected, and an unavailable physical interface must leave the goal empty
+  with the gap named in `reason` rather than being replaced by file work. The
+  core-prompt guidance above only ever reached the worker, which executes a
+  brief it does not choose.
 - The bundled core prompt identifies the agent as running on a general-purpose
   robot device — a host that may expose cameras, buses, serial ports, network
   access and a shell — instead of a bench-side "robot assistant", matching the

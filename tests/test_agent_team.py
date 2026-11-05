@@ -10,6 +10,7 @@ pytest.importorskip("langchain")
 
 from agent_fakes import FunctionModel, ModelResponse, TextPart
 
+from pymybot import agent_team
 from pymybot.agent_memory_store import (MemoryStore, MemoryStoreError, tokenize)
 from pymybot.agent_team import Mission, MissionStore, TeamSession, parse_decision
 
@@ -175,6 +176,20 @@ def test_auto_loop_proposes_its_own_first_goal(tmp_path):
     goals = [json.loads(path.read_text(encoding="utf-8"))["goal"]
              for path in (tmp_path / "missions").glob("*.json")]
     assert goals == ["巡检继电器"]
+
+
+def test_propose_prompt_prefers_physical_goals_over_filesystem_work():
+    """Goal steering belongs to the memory agent, which never sees 010_core.md.
+
+    Its prompt used to offer 工作区维护 as one of four goal categories and never
+    mentioned sensing, so an unattended run with an empty role description picked
+    the cheapest verifiable goal: inventorying the workspace and writing reports.
+    """
+    text = agent_team._PROPOSE_SYSTEM
+    assert "工作区维护" not in text
+    assert "物理世界" in text
+    assert "清点目录" in text
+    assert "不要改用文件任务" in text
 
 
 # -- mission store --------------------------------------------------------
