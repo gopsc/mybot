@@ -785,7 +785,8 @@ class RobotExecutor:
                         roots["robots"] = self._workspace_dir / "robots"
                     if "scripts" not in roots and (self._workspace_dir / "scripts").is_dir():
                         roots["scripts"] = self._workspace_dir / "scripts"
-                data = SkillRunner(self._skills, roots=roots).run(
+                data = SkillRunner(self._skills, roots=roots,
+                                   module_paths=self.module_paths).run(
                     arguments["skill"], arguments["action"], arguments.get("arguments"),
                     allow_hardware=True, bindings=self._vars, deadline=deadline,
                     check=lambda: self._check(deadline), started=started)

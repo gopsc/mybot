@@ -28,6 +28,16 @@ _SAFE_ENV = (
     "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "HOME", "USERPROFILE",
     "TEMP", "TMP", "TMPDIR", "MYBOT_HOME",
 )
+# A manifest-free skill is a CLI passthrough. Keep the model on the documented
+# hardware-controller surface; administrative mutators (assets write/delete,
+# roles, prompts, sessions, new, gui, serve, mcp, agent) are not reachable.
+_GENERIC_COMMANDS = frozenset({"assets", "doctor", "hardware", "scripts", "query", "check", "run", "sample"})
+_ASSET_READ_COMMANDS = frozenset({"list", "read"})
+_HARDWARE_COMMANDS = frozenset({"run", "sample"})
+_VAR_COMMANDS = frozenset({"hardware", "query", "check", "run", "sample"})
+_ROBOT_COMMANDS = _VAR_COMMANDS
+_PATH_KINDS = {"--robot": ("robots", "assets/robots/"),
+               "--input": ("scripts", "assets/scripts/")}
 
 
 def python_scripts(directory):
@@ -39,16 +49,17 @@ def python_scripts(directory):
                   if path.suffix == ".py" and path.is_file() and not path.is_symlink())
 
 
-def _generic_actions(stem):
+def _generic_actions(stem, *, restricted=False):
     """One manifest-free action that forwards a documented CLI invocation."""
     return {"run": {
-        "description": f"Run {stem} with CLI arguments",
+        "description": f"Run {stem} with a documented hardware-controller subcommand",
         "effect": "read",
         "output": "json",
         "params": {
             "command": {
                 "type": "string",
-                "description": "CLI subcommand documented by the skill, for example doctor",
+                "description": ("One of: " + ", ".join(sorted(_GENERIC_COMMANDS)))
+                if restricted else "Optional CLI subcommand",
             },
             "args": {
                 "type": "array",
@@ -56,17 +67,19 @@ def _generic_actions(stem):
             },
         },
         "passthrough": True,
+        "_restricted": restricted,
     }}
 
 
 class SkillRunner:
     """Resolve one trusted Skill entrypoint and run it in a bounded subprocess."""
 
-    def __init__(self, skills, *, roots=None):
+    def __init__(self, skills, *, roots=None, module_paths=None):
         if not isinstance(skills, SkillsLibrary):
             raise SecurityError("Skills are not configured")
         self.skills = skills
         self.roots = {name: Path(path).absolute() for name, path in (roots or {}).items()}
+        self.module_paths = tuple(Path(path).absolute() for path in (module_paths or ()) if str(path).strip())
 
     def _manifest(self, skill):
         entry = self.skills.skills.get(skill)
@@ -92,11 +105,14 @@ class SkillRunner:
                 raise SecurityError("skill.json must declare actions")
             return directory, entrypoint, actions, run.get("packaged", "source")
         scripts = python_scripts(directory)
+        restricted = directory.name in CLI_SKILLS
         if scripts:
-            return directory, f"scripts/{scripts[0].name}", _generic_actions(scripts[0].stem), "source"
+            return (directory, f"scripts/{scripts[0].name}",
+                    _generic_actions(scripts[0].stem, restricted=restricted), "source")
         if directory.name in CLI_SKILLS:
             # The packaged controller CLI is the entrypoint; no script ships.
-            return directory, "scripts/hardware_controller.py", _generic_actions("hardware_controller"), "cli"
+            return (directory, "scripts/hardware_controller.py",
+                    _generic_actions("hardware_controller", restricted=True), "cli")
         raise SecurityError("Skill has neither skill.json nor scripts/ directory")
 
     def _action(self, actions, action):
@@ -153,19 +169,112 @@ class SkillRunner:
                 values[name] = str(value)
         return values
 
+    def _resolve_generic_path(self, flag, value):
+        """Resolve documented asset aliases and workspace-relative CLI paths."""
+        value = str(value)
+        if not value or value == "-" or os.path.isabs(value):
+            return value
+        if flag in _PATH_KINDS:
+            kind, prefix = _PATH_KINDS[flag]
+            if value.startswith(prefix):
+                # SKILL.md documents assets/robots/x.sql and assets/scripts/x.mt;
+                # the packaged CLI resolves those bare names against its asset root.
+                value = value[len(prefix):]
+            rel = Path(value)
+            candidates = [rel]
+            if len(rel.parts) > 1 and rel.parts[0] == kind:
+                candidates.append(Path(rel.name))
+            roots = [self.roots.get(kind), self.roots.get("skill_assets"),
+                     self.roots.get("workspace")]
+            workspace_kind = self.roots.get("workspace")
+            if workspace_kind is not None:
+                roots.append(workspace_kind / kind)
+            for root in roots:
+                if root is None:
+                    continue
+                for candidate in candidates:
+                    path = root / candidate
+                    if path.is_file():
+                        return str(path.resolve())
+            return value
+        if flag in {"--scripts-dir", "--module-path"}:
+            roots = [self.roots.get("scripts"), self.roots.get("workspace"),
+                     self.roots.get("skill_assets")]
+            if flag == "--scripts-dir" and value.startswith("assets/scripts/"):
+                value = value[len("assets/scripts/"):]
+            if flag == "--scripts-dir" and value in {"", ".", "scripts"}:
+                root = self.roots.get("scripts") or self.roots.get("workspace")
+                if root is not None and root.is_dir():
+                    return str(root.resolve())
+                return value
+            for root in roots:
+                if root is not None and (root / value).is_dir():
+                    return str((root / value).resolve())
+        return value
+
+    def _rewrite_generic_paths(self, argv):
+        """Keep relative host paths useful without trusting model absolute paths."""
+        out, index = [], 0
+        while index < len(argv):
+            token = argv[index]
+            flag, separator, inline = token.partition("=")
+            if flag in _PATH_KINDS or flag in {"--scripts-dir", "--module-path"}:
+                if separator:
+                    out.append(flag + "=" + self._resolve_generic_path(flag, inline))
+                    index += 1
+                    continue
+                if index + 1 < len(argv):
+                    out.extend((flag, self._resolve_generic_path(flag, argv[index + 1])))
+                    index += 2
+                    continue
+            out.append(token)
+            index += 1
+        return out
+
+    @staticmethod
+    def _existing_var_names(argv):
+        names = set()
+        for index, token in enumerate(argv):
+            if token == "--var" and index + 1 < len(argv):
+                names.add(argv[index + 1].split("=", 1)[0])
+            elif token.startswith("--var="):
+                names.add(token[6:].split("=", 1)[0])
+        return names
+
     def _argv(self, spec, values, allow_hardware, bindings):
         if spec.get("passthrough"):
             argv = []
-            command = values.pop("command", "")
+            restricted = bool(spec.get("_restricted"))
+            command = str(values.pop("command", "")).strip()
+            if restricted:
+                if not command:
+                    raise SecurityError("Skill CLI command is required")
+                if command not in _GENERIC_COMMANDS:
+                    raise SecurityError(
+                        "Skill subcommand is not allowed: " + command[:80]
+                        + "; allowed: " + ", ".join(sorted(_GENERIC_COMMANDS)))
             if command:
-                argv.append(str(command))
-            argv.extend(str(item) for item in (values.pop("args", None) or []))
+                argv.append(command)
+            raw_args = [str(item) for item in (values.pop("args", None) or [])]
+            if command == "assets" and (not raw_args or raw_args[0] not in _ASSET_READ_COMMANDS):
+                raise SecurityError("Only read-only 'assets list' and 'assets read' are allowed")
+            argv.extend(raw_args)
             for name, value in values.items():
                 if value.lower() in ("true", "false"):
                     if value.lower() == "true":
                         argv.append(f"--{name}")
                 else:
                     argv.extend((f"--{name}", value))
+            argv = self._rewrite_generic_paths(argv)
+            if allow_hardware and command in _HARDWARE_COMMANDS:
+                argv.append(_HARDWARE_FLAG)
+            if command in _VAR_COMMANDS:
+                existing = self._existing_var_names(argv)
+                for name, value in (bindings or {}).items():
+                    if name not in existing:
+                        argv.extend(("--var", f"{name}={value}"))
+            for path in (self.module_paths if command in _ROBOT_COMMANDS else ()):
+                argv.extend(("--module-path", str(path)))
             return argv
         argv = [_PLACEHOLDER.sub(
             lambda match: values.get(match.group(1), match.group(0)), token)

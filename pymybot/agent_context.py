@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
+import re
 
 MAX_WORKSPACE_ENTRIES = 24
 MAX_ROBOT_ENTRIES = 12
@@ -16,6 +17,12 @@ MAX_SCRIPT_ENTRIES = 24
 MAX_SKILL_ENTRIES = 16
 MAX_MODULE_ENTRIES = 12
 _TRUNCATION = "# truncated by project-context budget"
+_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _safe_name(value, limit=200):
+    """Keep a file/skill name on one line so it cannot forge a prompt section."""
+    return _CONTROLS.sub(lambda match: f"\\x{ord(match.group()):02x}", str(value))[:limit]
 
 
 @dataclass(frozen=True)
@@ -83,7 +90,7 @@ class ProjectContext:
         lines = ["Workspace top level:"]
         for item in visible:
             kind = "dir" if item.is_dir() else "file"
-            lines.append(f"- {kind}: {item.name}")
+            lines.append(f"- {kind}: {_safe_name(item.name)}")
         if len(children) > len(visible):
             lines.append(f"- … {len(children) - len(visible)} more entries")
         return lines
@@ -91,10 +98,10 @@ class ProjectContext:
     def _robot_lines(self):
         if self.robot is None:
             return []
-        lines = [f"Active structure: {self.robot.name}"]
+        lines = [f"Active structure: {_safe_name(self.robot.name)}"]
         siblings = _relative_names(self.robot.parent, "*.sql", MAX_ROBOT_ENTRIES) if self.robot.parent.is_dir() else []
         if siblings:
-            lines.append("Structure files: " + ", ".join(siblings))
+            lines.append("Structure files: " + ", ".join(_safe_name(name) for name in siblings))
         lines.append("Use the hardware-controller skill (hardware/query actions) for declarations; never assume names.")
         return lines
 
@@ -104,7 +111,8 @@ class ProjectContext:
         names = _relative_names(self.scripts, "*.mt", MAX_SCRIPT_ENTRIES)
         if not names:
             return []
-        return ["Trusted action scripts (relative to the scripts root): " + ", ".join(names)]
+        return ["Trusted action scripts (relative to the scripts root): "
+                + ", ".join(_safe_name(name) for name in names)]
 
     def _skill_lines(self):
         if self.skills is None or not getattr(self.skills, "enabled", False):
@@ -115,7 +123,8 @@ class ProjectContext:
             return []
         lines = []
         for skill in index[:MAX_SKILL_ENTRIES]:
-            lines.append(f"- {skill.get('name', '?')}: {skill.get('description', '')}".rstrip())
+            lines.append(f"- {_safe_name(skill.get('name', '?'))}: "
+                         f"{_safe_name(skill.get('description', ''))}".rstrip())
         if not lines:
             return []
         return ["Operator skills (read with read_skill):", *lines]
@@ -130,7 +139,8 @@ class ProjectContext:
                 for name in _relative_names(root, "*" + suffix, MAX_MODULE_ENTRIES)
             )[:MAX_MODULE_ENTRIES]
             if names:
-                lines.append(f"Drivers in {root.name}: " + ", ".join(names))
+                lines.append(f"Drivers in {_safe_name(root.name)}: "
+                             + ", ".join(_safe_name(name) for name in names))
         return lines
 
     def render(self):

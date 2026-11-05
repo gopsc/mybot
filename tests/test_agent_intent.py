@@ -50,6 +50,14 @@ def test_chinese_intent_classification(text, expected):
         assert decision.restricted and decision.confidence >= 0.55
 
 
+def test_chat_intent_does_not_allow_skill_tools():
+    chat = classify_intent("你好", extra_tools=["hardware_controller_run"])
+    assert chat.name == "chat" and chat.restricted
+    assert not chat.allows("hardware_controller_run")
+    control = classify_intent("运行自检", extra_tools=["hardware_controller_run"])
+    assert control.allows("hardware_controller_run")
+
+
 def test_skill_authoring_request_allows_skill_tools():
     decision = classify_intent("创建一个技能")
     assert decision.name == "author"

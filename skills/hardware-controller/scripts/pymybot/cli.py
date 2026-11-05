@@ -111,7 +111,7 @@ def parser():
         epilog="Use only trusted Lua modules: LuaJIT FFI is not malicious-code isolation. "
                "Activation itself may write to devices, including when sampling. "
                "Examples: pymybot --robot robot.sql   (GUI) | "
-               "pymybot --no-gui --robot robot.sql --task 'List hardware'   (terminal agent)")
+               "pymybot --no-gui --role NAME --robot robot.sql --task 'List hardware'   (terminal agent)")
     p.add_argument("--no-gui", action="store_true",
                    help="command-line interface instead of the GUI (the GUI is the default)")
     p.add_argument("--no-agent", action="store_true",
@@ -346,6 +346,8 @@ def parser():
                                  help="enable host shell execution (requires --workspace-dir); uses the --sandbox backend")
             command.add_argument("--allow-file-writes", action="store_true",
                                  help="preapprove workspace file creation/edits; requires --workspace-dir")
+            command.add_argument("--allow-shell", action="store_true",
+                                 help="preapprove workspace shell commands; requires --enable-shell")
             command.add_argument("--max-history-bytes", type=bounded_int(64 * 1024, 64 * 1024 * 1024),
                                  default=4 * 1024 * 1024,
                                  help="upper bound for retained conversation history (default: 4 MiB)")
@@ -420,7 +422,7 @@ def parse_args(argv=None):
     if args.no_agent:
         if (args.task is not None or args.model or args.base_url or args.api_key_env
                 or args.allow_actions or args.workspace_dir
-                or args.enable_shell or args.allow_file_writes
+                or args.enable_shell or args.allow_file_writes or args.allow_shell
                  or args.mcp_config or args.allow_mcp_tools or args.prompt_file or args.no_prompt_stats
                  or args.role or args.intent != "auto" or args.web or args.allow_web or args.search_endpoint):
             raise UsageError("--no-agent cannot be combined with model/task/agent tool options")
@@ -432,8 +434,10 @@ def parse_args(argv=None):
         raise UsageError("Agent conversations require --role NAME; create one with 'pymybot roles create NAME'")
     if args.role and args.workspace_dir:
         raise UsageError("--role owns its workspace; do not combine it with --workspace-dir")
-    if (args.enable_shell or args.allow_file_writes) and not (args.workspace_dir or args.role):
-        raise UsageError("--enable-shell/--allow-file-writes require --workspace-dir or --role")
+    if (args.enable_shell or args.allow_file_writes or args.allow_shell) and not (args.workspace_dir or args.role):
+        raise UsageError("--enable-shell/--allow-file-writes/--allow-shell require --workspace-dir or --role")
+    if args.allow_shell and not args.enable_shell:
+        raise UsageError("--allow-shell requires --enable-shell")
     if args.role and (args.skills_dir or args.mcp_config):
         raise UsageError("--role owns its skills and MCP configuration; do not combine it with --skills-dir/--mcp-config")
     if args.allow_web and not args.web:

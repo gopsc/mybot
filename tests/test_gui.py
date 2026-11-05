@@ -814,7 +814,9 @@ def test_request_includes_current_paths_variables_and_budgets(ui):
     assert "skillsDir" not in params and "mcpConfig" not in params
     assert "modulePaths" not in params
     assert params["vars"] == {"user": "alice"}
-    assert "timeout" not in params
+    assert params["robot"] == app._robot_path()
+    assert params["allowShell"] is True
+    assert params["timeout"] == app.cfg.timeout
     assert "maxRequests" not in params and "maxToolCalls" not in params
 
 

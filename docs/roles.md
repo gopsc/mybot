@@ -104,7 +104,10 @@ the newly selected role with its own capabilities and context.
 ## Resumable history
 
 After each complete successful turn, `AgentSession` serializes the full
-LangChain message history to `history.json` with an atomic replacement. The
+LangChain message history to `history.json` with an atomic replacement. One
+live conversation per role is enforced with a `.agent.lock` file; a second
+window or process using the same role fails instead of silently replacing the
+other writer's turns. The
 next CLI, GUI or JSON-RPC session using that role restores it before the first
 model request. The `history_bytes` byte cap prunes whole turns, preserving
 tool-call/receipt pairs; there is no turn-count limit. An optional

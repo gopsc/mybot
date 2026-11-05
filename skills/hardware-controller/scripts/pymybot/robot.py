@@ -341,17 +341,19 @@ class Robot:
 
     def _safe_all(self, variables, reason):
         failures = []
-        deadline = time.monotonic() + self.safe_budget_ms / 1000
-        for var in reversed(variables):
-            if var.kind not in {"python", "lua"}:
-                continue
+        candidates = [var for var in reversed(variables)
+                      if var.kind in {"python", "lua"} and var.has_safe()]
+        # Give every driver its own bounded safe() window; a fixed 5s total
+        # silently skipped most drivers on a robot with several devices.
+        budget = max(self.safe_budget_ms / 1000,
+                     len(candidates) * self.safe_timeout_ms / 1000)
+        deadline = time.monotonic() + budget
+        for var in candidates:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 failures.append("safe() budget exhausted before all drivers ran")
                 break
             try:
-                if not var.has_safe():
-                    continue
                 var.safe(reason, timeout=min(self.safe_timeout_ms / 1000, remaining))
             except Exception as exc:
                 message = str(exc).replace("\n", " ")[:512]
