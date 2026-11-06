@@ -362,12 +362,12 @@ class Server:
         return entry
 
     def status(self, entry=None):
-        sessions = [{"session": entry.name,
-                     "robot": entry.info.get("robot"),
-                     "busy": entry.op[1] if entry.op else None}
-                    for entry in self.sessions.values()]
-        ops = [entry.op[1] for entry in (*self.sessions.values(), *self._activating.values())
-               if entry.op is not None]
+        sessions = [{"session": item.name,
+                     "robot": item.info.get("robot"),
+                     "busy": item.op[1] if item.op else None}
+                    for item in self.sessions.values()]
+        ops = [item.op[1] for item in (*self.sessions.values(), *self._activating.values())
+               if item.op is not None]
         view = entry if entry is not None else self._any_session()
         return {"state": "Active" if self.sessions else "Inactive",
                 **(view.info if view is not None else {}),
@@ -907,8 +907,10 @@ class Server:
                 if actual != expected:
                     raise AgentConfigurationError(
                         f"Role '{role.name}' owns {name}; omit it or use the role path")
-        mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
-                      else key["mcpConfig"] or None if role is None else None)
+        if role is not None:
+            mcp_config = str(role.mcp_config) if role.mcp_config.is_file() else None
+        else:
+            mcp_config = key["mcpConfig"] or None
         workspace = (role.workspace_dir if role is not None
                      else Path(key["workspaceDir"]).absolute() if key["workspaceDir"] else None)
         if key["enableShell"] and workspace is None:

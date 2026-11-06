@@ -28,10 +28,9 @@ About dialog mark.
 
 ## What the window contains
 
-- **Menu bar** — 文件 (workspace, refresh, settings, quit),
-  工具 (MCP editor, sessions, diagnostics, resources, session folder, clear/copy
-  chat) and 帮助 (docs, about). The 文件 and 帮助 actions have keyboard
-  shortcuts; the remaining management entries are click-only.
+- **Menu bar** — 文件 (workspace, new conversation `Ctrl+N`, refresh, settings,
+  quit), 工具 (MCP editor, sessions, diagnostics, resources, session folder,
+  clear/copy chat) and 帮助 (docs, about).
 - **Toolbar** — workspace picker, Agent role selector/create, refresh,
   a 管理 menu, new conversation, stop and settings.
 - **Robot context** — skills directory and MCP configuration. The agent lists
@@ -61,9 +60,9 @@ duplicate robot logic.
 | 资源 tab | Structures (`*.sql`), Python/Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
 | 侧边栏（折叠卡片） | 三个可折叠卡片：**状态**（服务/智能体/运行状态 + 忙碌进度 + 跳转运行日志）、**机器人上下文**（技能目录、MCP 配置）、**模型**（当前模型 + 配置向导）。一次只展开一张卡，窗口保持安静。 |
 | 工具栏 | 高频操作显性化：打开工作区、角色切换、**清空**（窗口记录）、**抓拍**（主机摄像头单帧预览，内置视觉工具）、**朗读**（任务结束后朗读最新回复；无语音引擎时自动禁用）、**联网**（web_fetch/web_search 开关，新会话生效，SSRF 护栏常开）、启动/停止/急停/新对话/设置。 |
-| 文件 tab | Operator-local workspace file manager: a bounded tree (4000 entries, depth 4, dot-directories/venvs/symlinks skipped) with a name filter, inline previews (MT/Lua/SQL/Python highlighting, Markdown, sandboxed HTML, images) and 刷新 / 预览 / 在系统中打开 / 打开目录 actions. The HTML preview renders in a `QTextBrowser` that never runs JavaScript and never loads local or remote resources. Read-only: nothing is written or executed; writes stay with the agent's approved file tools. |
+| 文件 tab | Operator-local workspace file manager: a bounded tree (4000 entries, depth 4, dot-directories/venvs/symlinks skipped) with a name filter, inline previews (MT/Lua/SQL/Python highlighting, rendered Markdown, sandboxed HTML, images) and 刷新 / 预览 / 复制路径 / 在系统中打开 / 打开目录 actions. The status line separates file and directory counts. The HTML preview renders in a `QTextBrowser` that never runs JavaScript and never loads local or remote resources. Read-only: nothing is written or executed; writes stay with the agent's approved file tools. |
 | 配置向导（模型组） | Reopens the first-run model setup wizard at any time; the sidebar button sits under the model summary. |
-| 启动 | Starts the dual-agent autonomous loop (`agent.start`). There is no chat input: the memory agent proposes goals, the worker acts. |
+| 启动 | Starts the dual-agent autonomous loop (`agent.start`). The input above the buttons optionally seeds the first mission goal (`--task` pre-fills it, Enter starts); leaving it empty lets the memory agent propose every goal itself. |
 | 停止 / 急停 | **停止** ends the autonomous loop cooperatively (`agent.stop`). **急停** has no confirmation dialog: it sends `abort`, cancels the loop, calls driver `safe()` hooks and releases hardware. It is best-effort, not a hardware emergency stop. |
 | 清空 / 复制对话 | Clear the window transcript (after confirmation) or copy it to the clipboard. |
 | 打开会话目录 | Opens `~/.mybot/sessions` in the file manager. |
@@ -112,10 +111,12 @@ is not interrupted by new tokens.
 3. Pick the workspace. When a role is selected, its fixed
    `~/.mybot/roles/<name>/workspace` is used instead of the global workspace.
 
-4. Type a task. Hardware actions run through trusted skills without a
-   confirmation dialog; file writes and shell commands are enabled with the
-   workspace and run without approval. Only prompt updates and `install_skill`
-   ask for a dedicated approval.
+4. Optionally type an initial goal in the field above 启动 (or pass `--task` to
+   pre-fill it). Leaving it empty is normal: the memory agent proposes goals
+   itself. Hardware actions run through trusted skills without a confirmation
+   dialog; file writes and shell commands are enabled with the workspace and run
+   without approval. Only prompt updates and `install_skill` ask for a dedicated
+   approval.
 
 ## Agent roles
 
@@ -176,7 +177,7 @@ creating a runtime home.
 | Setting | Effect |
 | --- | --- |
 | File and Shell tools | Enabled automatically for the selected workspace, including file writes; calls run without approval. Shell uses the configured sandbox; with prompt protection enabled (the default) it refuses execution when bubblewrap is unusable or the sandbox is `off`, while disabling prompt protection allows the workspace-jail fallback. |
-| Web tools | `web_fetch` is always available; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval. |
+| Web tools | Controlled by the toolbar 联网 toggle (on by default, saved as a preference). `web_fetch` is enabled whenever the toggle is on; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval while the toggle is on. |
 | MCP tools | Every tool exposed by the configured `mcpServers` file runs without approval. |
 | Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only the documented CLI of a trusted skill (a legacy `skill.json` action or a top-level `scripts/*.py` command) can run. |
 | Prompt updates and skill installation | Still ask for dedicated per-call approval; ordinary tool grants do not cover them. Camera capture is a built-in tool and runs without approval. |
@@ -202,7 +203,13 @@ bar instead of failing silently.
 The window owns no robot logic. It launches one long-lived
 `python -m pymybot serve` child and speaks stdio JSON-RPC 2.0 to it. All reader
 callbacks are dispatched to the Qt GUI thread. This keeps the UI responsive
-during model streaming and hardware work.
+during model streaming and hardware work. The window is split by responsibility:
+`app.py` (window shell and lifecycle), `settings.py` (settings and tool
+approval), `prompts_panel.py` (settings prompt editor), `files.py` (workspace
+browser and snapshot preview), `dialogs.py` (MCP, sessions, commands,
+diagnostics and resources), `config.py` (preferences and path resolution),
+`protocol.py` (serve transport), `voice.py` (speech) and `widgets.py` (shared
+widget idioms).
 
 Frozen Windows builds prefer the sibling `pymybot.exe` for the `serve` child;
 the GUI executable itself has no console. See

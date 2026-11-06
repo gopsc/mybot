@@ -15,11 +15,10 @@ from PySide6.QtCore import (QEasingCurve, QEventLoop, QPropertyAnimation, Qt, QT
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics,
                            QKeySequence, QPixmap, QTextCharFormat, QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-    QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog,
+    QApplication, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog,
     QLabel,
-    QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTextBrowser, QToolBox, QToolButton,
+    QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
+    QScrollArea, QSplitter, QTabWidget, QToolBox, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -32,23 +31,18 @@ from ..roles import create_role as create_role_profile, list_roles, read_history
 from ..session_log import session_root
 from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
-from .config import GuiConfig, config_home, default_workspace, merge_args
-from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, FilesPanel, McpConfigDialog,
-                      ModelSetupDialog, PreviewDialog, PromptPanel, ResourcePanel,
-                      SessionsDialog, SnapshotDialog)
-from .protocol import CANCELLED, RpcError, ServeClient, resolve_python
+from .config import GuiConfig, absolute_path, config_home, default_workspace, merge_args
+from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
+                      ModelSetupDialog, PreviewDialog, ResourcePanel, SessionsDialog)
+from .files import FilesPanel, SnapshotDialog
+from .protocol import RpcError, ServeClient, resolve_python
+from .settings import SettingsDialog, ToolDialog
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
+from .widgets import SafeTextBrowser, button as _button, label as _label
 
 TITLE = "mybot · 智能体"
 MAX_DIALOG_ARGS = 4000
-INTENT_LABELS = {"auto": "自动", "off": "关闭", "chat": "闲聊", "inspect": "查看",
-                 "control": "控制", "author": "编写", "diagnose": "诊断"}
-INTENT_CHOICES = (("auto", "自动（推荐）"), ("off", "关闭"), ("chat", "闲聊（只读）"),
-                  ("inspect", "查看（只读）"), ("control", "控制（硬件动作）"),
-                  ("author", "编写（文件）"), ("diagnose", "诊断（含 Shell）"))
-SANDBOX_CHOICES = (("auto", "自动（bubblewrap 可用时）"), ("off", "关闭（仅工作区牢笼）"),
-                   ("bwrap", "强制 bubblewrap"))
 
 
 def _brief(value, limit=160):
@@ -62,43 +56,8 @@ def _brief(value, limit=160):
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
-def _absolute(path, root):
-    text = str(path or "").strip()
-    if not text:
-        return ""
-    candidate = Path(text)
-    return str(candidate if candidate.is_absolute() else Path(root or ".").absolute() / candidate)
-
-
-def _label(text="", *, secondary=False):
-    label = QLabel(text)
-    label.setTextFormat(Qt.TextFormat.PlainText)
-    label.setWordWrap(True)
-    if secondary:
-        label.setObjectName("secondaryText")
-    return label
-
-
-def _button(text, callback, *, role=None):
-    button = QPushButton(text)
-    if role:
-        button.setProperty("role", role)
-    button.clicked.connect(callback)
-    return button
-
-
-def _spin(value, maximum, fractional=False):
-    box = QDoubleSpinBox() if fractional else QSpinBox()
-    box.setRange(0.01 if fractional else 1, maximum)
-    box.setValue(value)
-    return box
-
-
-class ChatTranscript(QTextBrowser):
+class ChatTranscript(SafeTextBrowser):
     """Read-only transcript that never loads resources referenced by Markdown."""
-
-    def loadResource(self, _resource_type, _url):
-        return None
 
 
 class App(QMainWindow):
@@ -125,6 +84,8 @@ class App(QMainWindow):
         self.at_line_start = True
         self._assistant_start = None
         self._assistant_markdown = ""
+        # Last completed assistant segment, kept for speech after it is flushed.
+        self._last_reply_markdown = ""
         self.pending_start = False
         self.pending_reset = False
         self._delete_role_name = ""
@@ -158,11 +119,11 @@ class App(QMainWindow):
         self._start_timer.start(120)
         self._refresh_status()
         self.web_button.blockSignals(True)
-        # Web tools default to enabled and pre-approved; the toggle flips both
-        # for sessions started afterwards (allow_web stays runtime-only).
-        self.web_button.setChecked(True)
-        self.cfg.enable_web = True
-        self.cfg.allow_web = True
+        # Respect the stored preference (web defaults to enabled). Approval
+        # grants are runtime-only, so web starts pre-approved only when the
+        # saved preference has web enabled.
+        self.web_button.setChecked(bool(self.cfg.enable_web))
+        self.cfg.allow_web = bool(self.cfg.enable_web)
         self.web_button.blockSignals(False)
         QTimer.singleShot(600, self._probe_speech)
 
@@ -234,7 +195,9 @@ class App(QMainWindow):
         self.workspace_label.setWordWrap(False)
         self.workspace_label.setMaximumWidth(180)
         toolbar.addWidget(self.workspace_label)
-        toolbar.addWidget(_label("角色"))
+        role_caption = _label("角色")
+        role_caption.setWordWrap(False)
+        toolbar.addWidget(role_caption)
         self.role_box = QComboBox()
         self.role_box.setMinimumWidth(130)
         self.role_box.activated.connect(self.on_role_changed)
@@ -326,6 +289,7 @@ class App(QMainWindow):
         bar = self.menuBar()
         files = bar.addMenu("文件")
         action(files, "打开工作区…", self.pick_workspace, "Ctrl+O")
+        action(files, "新对话", self.new_conversation, "Ctrl+N")
         action(files, "刷新上下文", self.refresh_context, "F5")
         files.addSeparator()
         action(files, "设置…", self.open_settings, "Ctrl+,")
@@ -460,6 +424,11 @@ class App(QMainWindow):
         self.notebook.addTab(self.resources, "资源")
         self.notebook.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.notebook, 1)
+        self.task_edit = QLineEdit(self.cfg.task)
+        self.task_edit.setPlaceholderText("可选：给自主循环一个初始目标；留空则由记忆体自拟，回车即启动")
+        self.task_edit.setClearButtonEnabled(True)
+        self.task_edit.returnPressed.connect(self.start_autonomy)
+        layout.addWidget(self.task_edit)
         controls = QHBoxLayout()
         controls.setSpacing(10)
         self.start_button = _button("启动", self.start_autonomy, role="primary")
@@ -579,6 +548,8 @@ class App(QMainWindow):
         start, markdown = self._assistant_start, self._assistant_markdown
         self._assistant_start = None
         self._assistant_markdown = ""
+        if markdown.strip():
+            self._last_reply_markdown = markdown
         document = QTextDocument()
         document.setDefaultFont(self.chat.font())
         # Qt Markdown otherwise silently interprets/removes raw HTML. Escape it
@@ -844,7 +815,7 @@ class App(QMainWindow):
 
     def _scripts_root(self):
         root = self._workspace_root()
-        configured = _absolute(self.cfg.scripts_dir, root)
+        configured = absolute_path(self.cfg.scripts_dir, root)
         if configured:
             return configured
         candidate = Path(root).absolute() / "scripts"
@@ -857,16 +828,16 @@ class App(QMainWindow):
     def _skills_root(self):
         if self.cfg.role:
             return str(role_path(self.cfg.role) / "skills")
-        return _absolute(self.cfg.skills_dir, self._workspace_root())
+        return absolute_path(self.cfg.skills_dir, self._workspace_root())
 
     def _mcp_root(self):
         if self.cfg.role:
             return str(role_path(self.cfg.role) / "mcp.json")
-        return _absolute(self.cfg.mcp_config, self._workspace_root())
+        return absolute_path(self.cfg.mcp_config, self._workspace_root())
 
     def _module_paths(self):
         root = self._workspace_root()
-        values = [_absolute(item, root) for item in self.cfg.module_paths if str(item).strip()]
+        values = [absolute_path(item, root) for item in self.cfg.module_paths if str(item).strip()]
         if Path(root).absolute() == source_root():
             values = [str(asset_path("modules")) if value == str(Path(root).absolute() / "modules")
                       and not Path(value).exists() else value for value in values]
@@ -1082,7 +1053,7 @@ class App(QMainWindow):
                 line += f" · {_brief(reason, 160)}"
             self._chat_line(line, "system")
             if self.speech_enabled:
-                self.speaker.say(self._assistant_markdown or
+                self.speaker.say(self._last_reply_markdown or
                                  f"任务结束，状态{event.get('status')}。")
         elif kind == "team.propose":
             self._notice(f"记忆体自拟目标：{_brief(event.get('goal'), 80)}", seconds=4)
@@ -1233,7 +1204,7 @@ class App(QMainWindow):
             "timeout": self.cfg.timeout,
             "hotTurns": self.cfg.hot_turns,
             "warmTurns": self.cfg.warm_turns,
-            "promptFile": _absolute(self.cfg.prompt_file, workspace),
+            "promptFile": absolute_path(self.cfg.prompt_file, workspace),
             "autoStats": self.cfg.auto_stats,
             "contextBytes": self.cfg.context_bytes,
             "intent": self.cfg.intent_mode,
@@ -1245,6 +1216,11 @@ class App(QMainWindow):
             "allowWeb": bool(self.cfg.allow_web),
             "searchEndpoint": self.cfg.search_endpoint,
         }
+        goal = self.task_edit.text().strip()
+        if goal:
+            # Optional operator seed for the first mission; the memory agent
+            # still proposes every later goal itself.
+            params["task"] = goal
         for key, name in (("model", "model"), ("baseUrl", "base_url"), ("apiKeyEnv", "api_key_env")):
             value = getattr(self.cfg, name)
             if value:
@@ -1254,9 +1230,6 @@ class App(QMainWindow):
     def _show_prompt_version(self, digest):
         if isinstance(digest, str) and len(digest) >= 16 and all(c in "0123456789abcdef" for c in digest.lower()):
             self.status_prompt.setText(f"提示词：{digest[:16]}")
-
-    def stop_turn(self):
-        self.stop_autonomy()
 
     def toggle_speech(self, checked):
         """Read the latest assistant reply aloud whenever a turn finishes."""
@@ -1278,25 +1251,33 @@ class App(QMainWindow):
                      if checked else "联网已关闭，新会话生效")
 
     def capture_snapshot(self):
-        """Built-in vision: grab one JPEG from a host camera and preview it."""
+        """Built-in vision: enumerate and grab off the UI thread, then preview."""
         if self.busy:
             self._notice("执行中不能抓拍；先停止当前这一轮")
             return
-        from ..camera import CameraError, CameraService
-        try:
+        if not self.snapshot_button.isEnabled():
+            return
+        self.snapshot_button.setEnabled(False)
+        self._notice("正在抓拍…")
+
+        def grab():
+            from ..camera import CameraError, CameraService
             service = CameraService()
             cameras = service.list_cameras().get("cameras") or []
             if not cameras:
-                self._notice("未发现可用摄像头")
-                return
-            result = service.capture(cameras[0].get("index", 0))
-            data = result.get("data") or b""
-        except CameraError as exc:
-            self._notice(f"摄像头不可用：{exc}")
+                raise CameraError("未发现可用摄像头")
+            return service.capture(cameras[0].get("index", 0))
+
+        self._background(grab, self._snapshot_done)
+
+    def _snapshot_done(self, result, error):
+        if self._stopping:
             return
-        except Exception as exc:
-            self._notice(f"抓拍失败：{type(exc).__name__}")
+        self.snapshot_button.setEnabled(True)
+        if error is not None:
+            self._notice(f"抓拍失败：{error}" if str(error) else f"抓拍失败：{type(error).__name__}")
             return
+        data = (result or {}).get("data") or b""
         pixmap = QPixmap()
         if not data or not pixmap.loadFromData(data):
             self._notice("抓拍返回了无效图像")
@@ -1392,6 +1373,7 @@ class App(QMainWindow):
         self.turn_text = 0
         self._assistant_start = None
         self._assistant_markdown = ""
+        self._last_reply_markdown = ""
 
     def _load_role_history(self):
         """Populate the chat widget with the selected role's stored conversation."""
@@ -1613,7 +1595,6 @@ class App(QMainWindow):
         before = (self.cfg.workspace, self.cfg.python, self.cfg.session_log)
         for name, value in dialog.values.items():
             setattr(self.cfg, name, value)
-        self.cfg.task = ""
         self._sync_controls()
         saved = self._save()
         self._refresh_model_label()
@@ -1661,6 +1642,7 @@ class App(QMainWindow):
         self.refresh_button.setEnabled(not busy)
         self.role_box.setEnabled(not busy)
         self.create_role_button.setEnabled(not busy)
+        self.task_edit.setEnabled(not busy)
         self.busy_progress.setVisible(busy)
         self._refresh_status()
 
@@ -1706,259 +1688,6 @@ class App(QMainWindow):
         self.shutdown()
         event.accept()
         self.closed.emit()
-
-
-class ToolDialog(QDialog):
-    """Native modal approval; reject, Escape and window close all deny."""
-
-    def __init__(self, parent, tool, arguments, *, diff=None):
-        super().__init__(parent)
-        _apply_theme(self)
-        self.setWindowTitle("智能体请求调用工具")
-        self.setModal(True)
-        self.resize(620, 400)
-        self.setMinimumSize(520, 320)
-        layout = QVBoxLayout(self)
-        layout.addWidget(_label(f"工具：{tool}"))
-        layout.addWidget(_label("下面是模型给出的完整参数；批准后本次调用立即执行。", secondary=True))
-        self.arguments = QPlainTextEdit()
-        self.arguments.setReadOnly(True)
-        self.arguments.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-        self.arguments.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        self.arguments.setPlainText(arguments)
-        layout.addWidget(self.arguments, 1)
-        if tool == "prompt:update_prompt":
-            self.resize(820, 680)
-            self.warning = _label(
-                "警告：prompt:update_prompt 将持久修改提示词，影响后续模型行为。\n"
-                "请审阅完整差异；本次批准不授予未来自动修改权限。内容仅在此审批窗口显示。")
-            layout.addWidget(self.warning)
-            self.diff = QPlainTextEdit()
-            self.diff.setReadOnly(True)
-            self.diff.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-            self.diff.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-            self.diff.setPlainText(diff if diff else "（无文本差异）")
-            layout.addWidget(self.diff, 2)
-        row = QHBoxLayout()
-        row.addStretch()
-        self.approve_button = _button("批准并执行", self.accept)
-        self.deny_button = _button("拒绝", self.reject)
-        self.approve_button.setAutoDefault(False)
-        self.deny_button.setDefault(True)
-        row.addWidget(self.approve_button)
-        row.addWidget(self.deny_button)
-        layout.addLayout(row)
-        self.deny_button.setFocus()
-
-
-class SettingsDialog(QDialog):
-    """Tabbed operator settings covering every agent/backend switch."""
-
-    def __init__(self, parent, cfg: GuiConfig, workspace, config_path=""):
-        super().__init__(parent)
-        _apply_theme(self)
-        self.setWindowTitle("设置")
-        self.setModal(True)
-        self.resize(760, 760)
-        self.values = None
-        self.entries = {}
-        self.field_buttons = {}
-        self._workspace = workspace
-        self._role = cfg.role
-        layout = QVBoxLayout(self)
-        self.tabs = tabs = QTabWidget()
-        layout.addWidget(tabs, 1)
-
-        general = QWidget()
-        general_form = QFormLayout(general)
-        self._field(general_form, cfg, "workspace", "工作区", browse=True)
-        self._field(general_form, cfg, "python", "Python 解释器")
-        self._field(general_form, cfg, "skills_dir", "技能目录", browse=True)
-        tabs.addTab(general, "通用")
-
-        model = QWidget()
-        model_form = QFormLayout(model)
-        self._field(model_form, cfg, "model", "模型（provider:model）")
-        self._field(model_form, cfg, "base_url", "端点 Base URL")
-        self._field(model_form, cfg, "api_key_env", "API Key 环境变量名")
-        self.history_bytes = _spin(max(1, cfg.max_history_bytes // 1024), 65536)
-        self.max_context_enabled = QCheckBox("限制模型上下文窗口")
-        self.max_context_enabled.setChecked(cfg.max_context_tokens is not None)
-        self.max_context_tokens = _spin(cfg.max_context_tokens or 32768, 2 * 1024 * 1024)
-        self.max_context_tokens.setMinimum(1024)
-        self.context_reserve_tokens = _spin(cfg.context_reserve_tokens, 64 * 1024)
-        self.context_reserve_tokens.setMinimum(0)
-        self.max_context_tokens.setEnabled(self.max_context_enabled.isChecked())
-        self.context_reserve_tokens.setEnabled(self.max_context_enabled.isChecked())
-        self.max_context_enabled.toggled.connect(self.max_context_tokens.setEnabled)
-        self.max_context_enabled.toggled.connect(self.context_reserve_tokens.setEnabled)
-        for label, widget in (("历史上限（KiB）", self.history_bytes),
-                              ("最大上下文（tokens）", self.max_context_tokens),
-                              ("上下文预留（tokens）", self.context_reserve_tokens)):
-            model_form.addRow(label, widget)
-        model_form.addRow("", self.max_context_enabled)
-        self.context_enabled = QCheckBox("注入工程上下文（工作区/结构/脚本清单）")
-        self.context_enabled.setChecked(bool(cfg.context_bytes))
-        self.context_kib = _spin(max(1, cfg.context_bytes // 1024), 64)
-        self.context_enabled.toggled.connect(self.context_kib.setEnabled)
-        self.context_kib.setEnabled(self.context_enabled.isChecked())
-        context_row = QHBoxLayout()
-        context_row.addWidget(self.context_enabled, 1)
-        context_row.addWidget(self.context_kib)
-        context_row.addWidget(_label("KiB"))
-        model_form.addRow("工程上下文", context_row)
-        self.max_requests = _spin(cfg.max_requests, 10_000)
-        self.max_tool_calls = _spin(cfg.max_tool_calls, 100_000)
-        self.turn_timeout = _spin(int(cfg.turn_timeout) if cfg.turn_timeout else 1, 86400)
-        self.turn_timeout.setMinimum(0)
-        self.turn_timeout.setValue(int(cfg.turn_timeout or 0))
-        self.model_retries = _spin(cfg.model_retries, 10)
-        self.model_retries.setMinimum(0)
-        self.fallback_models = QLineEdit(",".join(cfg.fallback_models))
-        self.require_plan_approval = QCheckBox("自主任务逐次计划审批")
-        self.require_plan_approval.setChecked(bool(cfg.require_plan_approval))
-        for label, widget in (("单轮请求上限", self.max_requests),
-                              ("单轮工具上限", self.max_tool_calls),
-                              ("单轮墙钟（秒，0 关闭）", self.turn_timeout),
-                              ("模型重试", self.model_retries),
-                              ("备用模型（逗号分隔）", self.fallback_models)):
-            model_form.addRow(label, widget)
-        model_form.addRow(self.require_plan_approval)
-        self.intent_box = QComboBox()
-        for value, label in INTENT_CHOICES:
-            self.intent_box.addItem(label, value)
-        index = self.intent_box.findData(cfg.intent_mode)
-        self.intent_box.setCurrentIndex(max(0, index))
-        model_form.addRow("意图路由", self.intent_box)
-        self.sandbox_box = QComboBox()
-        for value, label in SANDBOX_CHOICES:
-            self.sandbox_box.addItem(label, value)
-        sandbox_index = self.sandbox_box.findData(cfg.sandbox_mode)
-        self.sandbox_box.setCurrentIndex(max(0, sandbox_index))
-        model_form.addRow("Shell 沙箱", self.sandbox_box)
-        self.protect_prompts = QCheckBox("保护提示词目录（关闭沙箱时需取消勾选）")
-        self.protect_prompts.setChecked(bool(cfg.protect_prompts))
-        model_form.addRow(self.protect_prompts)
-        self.session_log = QCheckBox("保存会话转录（~/.mybot/sessions）")
-        self.session_log.setChecked(bool(cfg.session_log))
-        model_form.addRow(self.session_log)
-        model_form.addRow(_label("密钥只读取环境变量，窗口不保存也不显示它。", secondary=True))
-        tabs.addTab(model, "模型与预算")
-
-        advanced = QWidget()
-        advanced_form = QFormLayout(advanced)
-        self._field(advanced_form, cfg, "mcp_config", "MCP 配置（mcpServers JSON）", browse_file=True)
-        self._field(advanced_form, cfg, "prompt_file", "可选操作者指导文件（OPERATOR，≤8 KiB）",
-                    browse_file=True, caption="选择操作者指导文件",
-                    file_filter="Markdown/文本 (*.md *.txt);;所有文件 (*)")
-        self._field(advanced_form, cfg, "search_endpoint", "SearXNG 搜索端点（留空仅抓取）")
-        advanced_form.addRow(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
-        tabs.addTab(advanced, "高级 / MCP")
-        self._bind_role_paths()
-
-        self.prompts = PromptPanel(
-            self, auto_stats=cfg.auto_stats,
-            home=role_path(cfg.role) / "prompts" if cfg.role else None,
-            extra_layers=bool(cfg.role),
-            operator_path=lambda: _absolute(self.entries["prompt_file"].text(),
-                                            self.entries["workspace"].text() or self._workspace))
-        tabs.addTab(self.prompts, "提示词")
-        tabs.currentChanged.connect(
-            lambda _index: self.prompts.ensure_loaded() if tabs.currentWidget() is self.prompts else None)
-
-        layout.addWidget(_label("工具默认开启并免审批；提示词更新和宿主抓图仍逐次确认。", secondary=True))
-        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        self.buttons.button(QDialogButtonBox.StandardButton.Save).setText("保存")
-        self.buttons.button(QDialogButtonBox.StandardButton.Save).setProperty("role", "primary")
-        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("取消")
-        self.buttons.accepted.connect(self._save)
-        self.buttons.rejected.connect(self.reject)
-        layout.addWidget(self.buttons)
-
-    def _field(self, form, cfg, name, label, *, kind="text", browse=False, browse_file=False,
-               caption="选择 MCP 配置", file_filter="JSON (*.json)"):
-        value = getattr(cfg, name)
-        if kind == "lines":
-            widget = QPlainTextEdit("\n".join(f"{key}={text}" for key, text in value.items()))
-            widget.setMaximumHeight(85)
-        else:
-            widget = QLineEdit(",".join(value) if isinstance(value, list) else str(value or ""))
-        self.entries[name] = widget
-        if browse:
-            row = QHBoxLayout()
-            row.addWidget(widget)
-            button = _button("…", lambda checked=False, w=widget: self._browse(w))
-            self.field_buttons[name] = button
-            row.addWidget(button)
-            form.addRow(label, row)
-        elif browse_file:
-            row = QHBoxLayout()
-            row.addWidget(widget)
-            button = _button("…", lambda checked=False, w=widget: self._browse_file(
-                w, caption, file_filter))
-            self.field_buttons[name] = button
-            row.addWidget(button)
-            form.addRow(label, row)
-        else:
-            form.addRow(label, widget)
-
-    def _bind_role_paths(self):
-        """Show role-owned paths read-only; the backend ignores global overrides."""
-        if not self._role:
-            return
-        root = role_path(self._role)
-        values = {"workspace": root / "workspace", "skills_dir": root / "skills",
-                  "mcp_config": root / "mcp.json"}
-        for name, path in values.items():
-            entry = self.entries[name]
-            entry.setText(str(path))
-            entry.setToolTip(str(path))
-            entry.setEnabled(False)
-            button = self.field_buttons.get(name)
-            if button is not None:
-                button.setEnabled(False)
-
-    def _browse(self, widget):
-        chosen = QFileDialog.getExistingDirectory(self, "选择目录", self._workspace)
-        if chosen:
-            widget.setText(chosen)
-
-    def _browse_file(self, widget, caption="选择 MCP 配置", file_filter="JSON (*.json)"):
-        chosen, _ = QFileDialog.getOpenFileName(self, caption, self._workspace, file_filter)
-        if chosen:
-            widget.setText(chosen)
-
-    def _save(self):
-        if self.prompts.editor.document().isModified() and not self.prompts.save():
-            return
-        values = {}
-        for name, widget in self.entries.items():
-            if self._role and name in {"workspace", "skills_dir", "mcp_config"}:
-                continue
-            values[name] = widget.text().strip()
-        values.update(max_history_bytes=max(64, self.history_bytes.value()) * 1024,
-                      max_context_tokens=(self.max_context_tokens.value()
-                                          if self.max_context_enabled.isChecked() else None),
-                      context_reserve_tokens=self.context_reserve_tokens.value(),
-                      context_bytes=(max(1, self.context_kib.value()) * 1024
-                                     if self.context_enabled.isChecked() else 0),
-                      intent_mode=self.intent_box.currentData(),
-                      sandbox_mode=self.sandbox_box.currentData(),
-                      protect_prompts=self.protect_prompts.isChecked(),
-                      session_log=self.session_log.isChecked(),
-                      max_requests=self.max_requests.value(),
-                      max_tool_calls=self.max_tool_calls.value(),
-                      turn_timeout=float(self.turn_timeout.value()),
-                      model_retries=self.model_retries.value(),
-                      fallback_models=[item.strip() for item in
-                                       self.fallback_models.text().split(",") if item.strip()],
-                      require_plan_approval=self.require_plan_approval.isChecked(),
-                      auto_stats=self.prompts.auto_stats.isChecked())
-        self.values = values
-        self.accept()
-
-    def _message(self, title, text):
-        QMessageBox.warning(self, title, text)
 
 
 def _check_display():

@@ -19,8 +19,9 @@ from pymybot.gui import protocol as gui_protocol
 from pymybot.gui.config import GuiConfig, merge_args
 from pymybot.gui.protocol import (CliCall, RpcError, ServeClient, cli_args, parse_result,
                                   resolve_python, sessions_args)
+from pymybot.gui.settings import SettingsDialog, ToolDialog
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog, QDialogButtonBox
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
@@ -133,6 +134,22 @@ def test_merge_args_prefers_explicit_flags():
     merged = merge_args(cfg, args)
     assert merged.workspace == "/flag" and merged.model == "deepseek:chat"
     assert merged.module_paths == ["m1", "m2"] and merged.timeout == 12
+
+
+def test_gui_flags_keep_stored_preferences_when_omitted():
+    from pymybot.cli import parse_args
+
+    cfg = GuiConfig(intent_mode="control", sandbox_mode="bwrap",
+                    context_bytes=8 * 1024, timeout=42)
+    merged = merge_args(cfg, parse_args(["gui"]))
+    assert merged.intent_mode == "control" and merged.sandbox_mode == "bwrap"
+    assert merged.context_bytes == 8 * 1024 and merged.timeout == 42
+
+    merged = merge_args(cfg, parse_args([
+        "gui", "--intent", "author", "--sandbox", "off",
+        "--context-bytes", "1024", "--timeout", "12"]))
+    assert merged.intent_mode == "author" and merged.sandbox_mode == "off"
+    assert merged.context_bytes == 1024 and merged.timeout == 12
 
 
 # -- serve client -----------------------------------------------------------
@@ -561,7 +578,7 @@ def test_theme_is_readable_without_changing_system_palette(app_factory, qapp, da
     dialogs = []
     try:
         gui, app = app_factory()
-        dialogs = [gui.SettingsDialog(app, app.cfg, str(ROOT)), gui.ToolDialog(app, "run", "{}")]
+        dialogs = [SettingsDialog(app, app.cfg, str(ROOT)), ToolDialog(app, "run", "{}")]
         for dialog in dialogs:
             dialog.show()
         qapp.processEvents()
@@ -647,7 +664,7 @@ def test_confirm_request_round_trips_to_the_server(ui, interact, decision):
     client = attach_client(app)
 
     def choose(dialog, test):
-        assert isinstance(dialog, gui.ToolDialog)
+        assert isinstance(dialog, ToolDialog)
         assert dialog.arguments.isReadOnly()
         assert '"script": "<b>a.mt</b>"' in dialog.arguments.toPlainText()
         if decision == "close":
@@ -722,10 +739,10 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     monkeypatch.setattr(app, "_restart_server", lambda: restarted.append(True))
 
     def save(dialog, test):
-        assert isinstance(dialog, gui.SettingsDialog)
+        assert isinstance(dialog, SettingsDialog)
         dialog.entries["model"].setText("openai:test")
         dialog.session_log.setChecked(False)
-        test.mouseClick(dialog.buttons.button(gui.QDialogButtonBox.StandardButton.Save), gui.Qt.MouseButton.LeftButton)
+        test.mouseClick(dialog.buttons.button(QDialogButtonBox.StandardButton.Save), gui.Qt.MouseButton.LeftButton)
 
     interact(save)
     app.open_settings()
@@ -746,7 +763,7 @@ def test_settings_cancel_does_not_apply(ui, interact, tmp_path, cancel):
         dialog.entries["model"].setText("must-not-save")
         dialog.session_log.setChecked(False)
         if cancel == "button":
-            test.mouseClick(dialog.buttons.button(gui.QDialogButtonBox.StandardButton.Cancel), gui.Qt.MouseButton.LeftButton)
+            test.mouseClick(dialog.buttons.button(QDialogButtonBox.StandardButton.Cancel), gui.Qt.MouseButton.LeftButton)
         elif cancel == "escape":
             test.keyClick(dialog, gui.Qt.Key.Key_Escape)
         else:
@@ -761,7 +778,7 @@ def test_settings_cancel_does_not_apply(ui, interact, tmp_path, cancel):
 def test_settings_failure_notice_after_modal_save(app_factory, interact, monkeypatch, tmp_path):
     gui, app = app_factory(config_path=tmp_path)
     interact(lambda dialog, test: test.mouseClick(
-        dialog.buttons.button(gui.QDialogButtonBox.StandardButton.Save), gui.Qt.MouseButton.LeftButton))
+        dialog.buttons.button(QDialogButtonBox.StandardButton.Save), gui.Qt.MouseButton.LeftButton))
     app.open_settings()
     assert "已应用" in app.status_notice.text() and "写入失败" in app.status_notice.text()
 
@@ -774,6 +791,15 @@ def test_start_sends_agent_start_without_a_task(ui):
     assert "task" not in client.requests[0][1]
     assert not app.start_button.isEnabled() and not app.new_button.isEnabled()
     assert app.stop_button.isEnabled()
+
+
+def test_start_sends_the_optional_goal(ui):
+    _, app = ui
+    client = attach_client(app)
+    app.task_edit.setText("巡检传送带并报告异常")
+    app.task_edit.returnPressed.emit()
+    assert client.requests[0][0] == "agent.start"
+    assert client.requests[0][1]["task"] == "巡检传送带并报告异常"
 
 
 def test_request_includes_current_paths_and_budgets(ui):
@@ -1145,7 +1171,7 @@ def test_sessions_args_builds_safe_commands():
 
 def test_settings_cover_backend_budgets(ui):
     gui, app = ui
-    dialog = gui.SettingsDialog(app, app.cfg, app.cfg.workspace, "")
+    dialog = SettingsDialog(app, app.cfg, app.cfg.workspace, "")
     try:
         role_root = gui.role_path(app.cfg.role)
         for name, path in (("workspace", role_root / "workspace"),
@@ -1712,7 +1738,7 @@ def _make_workspace(tmp_path):
 
 
 def _files_panel(qapp, root):
-    from pymybot.gui.dialogs import FilesPanel
+    from pymybot.gui.files import FilesPanel
     panel = FilesPanel()
     panel.set_root(str(root))
     return panel
@@ -1799,7 +1825,7 @@ def test_files_preview_never_loads_local_or_remote_resources(qapp, tmp_path):
 
 
 def test_files_panel_truncates_the_tree(qapp, tmp_path, monkeypatch):
-    from pymybot.gui.dialogs import FilesPanel
+    from pymybot.gui.files import FilesPanel
     for index in range(8):
         (tmp_path / f"f{index}.txt").write_text("x", encoding="utf-8")
     monkeypatch.setattr(FilesPanel, "MAX_ENTRIES", 4)
@@ -1864,15 +1890,41 @@ def test_speech_toggle_degrades_without_an_engine(ui, monkeypatch):
     assert "文本转语音" in app.status_notice.text()
 
 
-def test_capture_snapshot_reports_missing_camera(ui):
+def test_mission_end_speaks_the_latest_reply(ui, monkeypatch):
     gui, app = ui
-    app.capture_snapshot()  # No /dev/video* devices in CI; must degrade to a notice.
-    assert "摄像头" in app.status_notice.text()
+    spoken = []
+
+    class Speaker:
+        available = True
+
+        def say(self, text):
+            spoken.append(text)
+            return True
+
+        def stop(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(app, "speaker", Speaker())
+    app.speech_enabled = True
+    app.turn_id = "turn-1"
+    app._on_agent_event({"id": "turn-1", "event": {"type": "text_delta", "text": "机器人已就绪"}})
+    app._on_agent_event({"id": "turn-1", "event": {"type": "mission.end", "status": "done",
+                                                   "usage": {}, "reason": ""}})
+    assert spoken and "机器人已就绪" in spoken[0]
+
+
+def test_capture_snapshot_reports_missing_camera(ui, qapp):
+    gui, app = ui
+    app.capture_snapshot()  # Enumeration runs off the UI thread; degrades to a notice.
+    assert qt_wait(qapp, lambda: "摄像头" in app.status_notice.text())
 
 
 def test_snapshot_dialog_saves_into_the_workspace(qapp, tmp_path):
     from PySide6.QtGui import QColor, QPixmap
-    from pymybot.gui.dialogs import SnapshotDialog
+    from pymybot.gui.files import SnapshotDialog
 
     pixmap = QPixmap(16, 12)
     pixmap.fill(QColor("red"))
