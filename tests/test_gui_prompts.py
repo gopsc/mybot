@@ -132,7 +132,7 @@ def test_settings_lazy_load_and_stats_payload_roundtrip(widgets, window, tmp_pat
     index = settings.tabs.indexOf(settings.prompts)
     QTest.mouseClick(settings.tabs.tabBar(), Qt.MouseButton.LeftButton,
                      pos=settings.tabs.tabBar().tabRect(index).center())
-    assert settings.prompts.table.rowCount() == 6
+    assert settings.prompts.table.rowCount() >= 6  # bundled layers + seeded extras
     click(settings.prompts.auto_stats)
     click(settings.buttons.button(QDialogButtonBox.StandardButton.Save))
     assert settings.result() == QDialog.DialogCode.Accepted
@@ -373,7 +373,6 @@ def test_send_guard_blocks_tampered_safety_before_rpc(window, layer):
         assert info["protocol"] == 1
         window.serve = client
         window.agent_available = True
-        window.cfg.robot = str(ASSETS / "robots" / "relay-test.sql")
         layer_path(library, layer).write_text("modified safety", encoding="utf-8")
         sequence = client._seq
         failures = []

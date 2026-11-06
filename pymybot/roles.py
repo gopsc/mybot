@@ -238,7 +238,7 @@ class Role:
         return self.root / "history.json"
 
     def prompt_library(self):
-        return PromptLibrary(home=self.prompts_dir)
+        return PromptLibrary(home=self.prompts_dir, extra_layers=True)
 
     def info(self):
         skills = SkillsLibrary(self.skills_dir, required=True).index()["skills"]
@@ -421,14 +421,10 @@ def create_role(name, *, description="", skills_from=None, mcp_from=None, root=N
         skills = staging / "skills"
         skills.mkdir(mode=0o700)
         (staging / "workspace").mkdir(mode=0o700)
-        if skills_from:
-            _copy_skills(skills_from, skills)
-            for skill_dir in sorted(path for path in skills.iterdir()
-                                    if path.is_dir() and not path.name.startswith(".")):
-                if not _skill_complete(skill_dir):
-                    raise SecurityError(
-                        f"Skill '{skill_dir.name}' is missing its entrypoint; "
-                        "repair the source skills root or choose a complete one")
+        source_skills = (Path(skills_from).expanduser() if skills_from
+                         else Path(default_skills_root()))
+        if source_skills.is_dir():
+            _copy_skills(source_skills, skills)
         if mcp_from:
             source = Path(mcp_from).expanduser().absolute()
             text = read_file(source, MAX_CONFIG_BYTES)
@@ -461,27 +457,29 @@ def delete_role(name, root=None):
 
 
 def repair_role_skills(name, *, source=None, root=None):
-    """Fill missing files in a role's runnable skills from a complete source.
+    """Fill missing files and add missing skills from a complete source.
 
-    Only skills already installed in the role are considered, and only missing
-    files are copied: prompts, history, workspace files and existing skill files
-    are never replaced. The source defaults to the bundled skills root.
+    Every bundled skill is copied in full when the role lacks it; for skills the
+    role already has, only missing files are added. Prompts, history, workspace
+    files and existing skill files are never replaced. The source defaults to the
+    bundled skills root.
     """
     role = load_role(name, root)
     source_root = Path(source).expanduser() if source is not None else Path(default_skills_root())
     library = SkillsLibrary(source_root, required=True)
     repaired, incomplete, skipped = [], [], []
     for skill_name, entry in sorted(library.skills.items()):
-        if not entry["runnable"]:
-            continue
         target = role.skills_dir / skill_name
+        require = entry["runnable"]
         if not target.is_dir():
+            _merge_skill_tree(entry["directory"], target)
+            repaired.append(skill_name)
             continue
-        if _skill_complete(target, require_script=True):
+        if _skill_complete(target, require_script=require):
             skipped.append(skill_name)
             continue
         _merge_skill_tree(entry["directory"], target)
-        (repaired if _skill_complete(target, require_script=True) else incomplete).append(skill_name)
+        (repaired if _skill_complete(target, require_script=require) else incomplete).append(skill_name)
     return {
         "name": role.name,
         "source": str(source_root),

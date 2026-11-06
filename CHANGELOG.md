@@ -10,43 +10,22 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - GUI **workspace file manager** (`文件` tab): a bounded, read-only tree of the
   operator workspace (dot-directories, venvs and symlinks skipped) with a name
-  filter and inline previews — MT/Lua/SQL/Python keyword highlighting,
-  Markdown, sandboxed HTML (a `QTextBrowser` that never runs JavaScript and
-  never loads local or remote resources) and images. 刷新 / 预览 /
-  在系统中打开 / 打开目录 stay operator-local; writes remain with the agent's
-  approved file tools. The tree follows workspace and role changes.
-- GUI **model setup wizard** is reachable anytime from the sidebar 配置向导
-  button (the first-run dialog keeps its once-and-remembered behaviour).
-- `tools/gui_screenshots.py` regenerates every screenshot under
-  `docs/screenshots` from the real window against the real serve backend
-  (offscreen, disposable demo workspace); README and the GUI guide embed the
-  regenerated images.
-- **Multi-robot named sessions in `serve`**: `session.activate` accepts an
-  optional `session` name, and `run` / `apply-sql` / `sample` /
-  `session.abort` / `session.deactivate` address one named session. Each
-  session owns its robot, owner thread, busy state and hot-SQL lifetime, so a
-  long action on one robot never blocks a sample on another; the agent
-  conversation stays mutually exclusive with every session. `session.status`
-  reports every active session, and an unnamed `session.deactivate` /
-  `session.abort` tears them all down (back-compat default behaviour).
-- **Pluggable model providers**: `pymybot.agent.register_provider(name,
-  key_env=..., base_url=..., build=...)` adds OpenAI-compatible endpoints that
-  reuse the hardened built-in HTTP path (no duplicated transport code), or
-  accepts a custom builder. Packages can register providers through a
-  `pymybot.model_providers` entry point; broken plugins surface their error
-  only when that provider is requested.
-- `pymybot discover [--buses i2c,spi,uart,ftdi] [--probe]`: read-only host
-  device enumeration. I2C/SPI/UART reuse the bundled `Dev_enum` driver, FTDI
-  USB adapters are listed via pyftdi as HAL-ready `ftdi://` URLs, and `hints`
-  map every found device to the structure SQL that declares it. `--probe`
-  briefly opens real UART ports to report in-use state without writing.
-- GUI first-run model setup wizard: guided provider/model/endpoint/key-variable
-  choice shown once when no model is configured (no shared key, no hidden
-  default — only the variable name is stored), remembered after save or skip.
-- `web_search` configuration errors now name the fix: 404 (endpoint must be
-  the SearXNG base URL), 403 / non-JSON bodies (enable the `json` format in
-  `settings.yml` or use a private instance) and unreachable endpoints.
-
+- Role prompt libraries load operator-authored extra layers: any `NNN_name.md`
+  file in `~/.mybot/roles/<name>/prompts` (001–099, reserved numbers rejected)
+  joins the composed prompt in numeric order, so `011_robot.md` sits between
+  core 10 and SOUL 97. Extras are read-only to the agent, capped at 64 KiB each,
+  ignored by the global home, and bundled extras seed role homes on first use.
+- Creating a role copies every bundled skill by default (no skills root is
+  required), and `roles repair` also adds bundled skills the role lacks.
+  Copying never overwrites an existing file.
+- Two bundled extra layers seed role prompt homes: `011_robot.md` (camera robot:
+  observe the environment before acting, report what is actually visible) and
+  `012_skill_store.md` (search the SkillHub store and install skills with the
+  operator's approval instead of hand-writing everything).
+- Bundled skillhub-store skill: a cross-platform SkillHub CLI wrapper and
+  installer for searching, installing, verifying and upgrading Agent Skills.
+  Install needs network access and the operator's approval before it writes
+  into a skills directory.
 - The Agent is now a **dual-agent team**: a tool-less **memory agent** plans,
   reflects and owns long-term memory, while a **worker agent** keeps the skill,
   file, shell, web, camera and MCP surface. They exchange a JSON brief/report per
@@ -76,22 +55,6 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `pymybot agent --task` remains as a one-seed escape hatch: it runs exactly one
   mission instead of the self-directed loop.
 - Durable mission execution: `paused` missions resume from the next step;
-  `running` missions recovered after a process restart become `failed`/unknown
-  when an action may have been dispatched, and are never replayed. Mission files
-  now include a lease owner/deadline, in-flight marker, approval state and trace
-  id; `claim_next` gives the autonomous loop an atomic durable queue.
-- Planner output uses Pydantic structured output first, repairs one schema
-  failure, then falls back to the documented JSON parser. Provider/transport
-  failures are not silently converted into extra model calls.
-- Per-turn budgets for model requests, tool calls and optional wall-clock time;
-  optional provider retries and a BaseChatModel-compatible fallback chain.
-- Optional plan approval for autonomous missions (`--require-plan-approval` /
-  GUI checkbox): a denied plan blocks the mission before the worker receives any
-  instruction.
-- Operator memory review/forget surfaces (`agent.memory`,
-  `agent.memory.forget`, `agent.missions`) and GUI 长期记忆/任务历史 previews.
-- Optional OpenTelemetry spans (`agent.mission`, `agent.model_call`,
-  `agent.tool`) and deterministic trajectory scoring in `tools/agent_eval.py`.
 
 - `pymybot assets list/read/write/delete` manages the bundled `robots` (`.sql`),
   `modules` (`.py`/`.lua`) and `scripts` (`.mt`) asset files in place, with
@@ -120,6 +83,47 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+  STATS and the safety suffix); identifiers stay in English inside backticks so
+  a Markdown formatter cannot escape them. Layers 0/100 trust hashes moved with
+  the manifest, so existing runtime copies must be refreshed or restored.
+- The bundled core prompt tells the agent to start from the physical interface
+  — cameras, buses, serial devices and the skill's hardware commands — and to
+  treat files and shell as supporting tools, rather than exploring a directory
+  tree as an end in itself.
+- The memory agent's self-proposed goals now prefer the physical world. Its
+  prompt offered "workspace maintenance" as one of four goal categories and
+  never mentioned sensing, so an unattended run — worst with an empty role
+  description, which renders as "not provided" — reached for the cheapest
+  verifiable goal and inventoried the filesystem. Pure-file goals (directory
+  inventories, generated listings, scaffold skeletons, unrelated refactors) are
+  now rejected, and an unavailable physical interface must leave the goal empty
+  with the gap named in `reason` rather than being replaced by file work. The
+  core-prompt guidance above only ever reached the worker, which executes a
+  brief it does not choose.
+- The bundled core prompt identifies the agent as running on a general-purpose
+  robot device — a host that may expose cameras, buses, serial ports, network
+  access and a shell — instead of a bench-side "robot assistant", matching the
+  skill-owned controller and the built-in camera tools.
+- A runtime prompt manifest recorded by an older bundle no longer blocks every
+  startup after a bundle content upgrade. The trusted-manifest comparison now
+  ignores `sha256` for editable layers (their files are operator/agent state;
+  only layers 0/100 are content-enforced) while still failing closed on
+  layer-id changes, missing layers, safety-layer hashes, editability and byte
+  caps, so the GUI start guard and `compose()` keep working without
+  `prompts restore --all`.
+- The bundled core prompt routes hardware work through the per-skill
+  `<skill>_run` tool (for example `hardware_controller_run`) instead of a
+  `run_skill` name the model never sees, states that the session loads no robot
+  of its own, and the STATS layer drops the always-empty `robot` field along
+  with the stats code that carried it.
+- The GUI and the agent entries no longer load or pass a robot structure. The
+  window settings drop `robot` and `vars`, `agent.start`/`agent.ask` drop
+  `robot`, `scriptsDir`, `modulePaths` and `vars`, and `pymybot agent --robot`,
+  `--module-path`, `--var` and `--var-env` are rejected unless `--no-agent`
+  turns the call into a direct `run`. Hardware structures belong to the
+  `hardware-controller` skill and are passed to `hardware_controller_run` as
+  `--robot assets/robots/*.sql`; a stale structure in an old GUI configuration
+  can no longer stop an autonomous run before the first model request.
 - `pymybot agent` and serve `agent.ask` now run the dual-agent team by default;
   each call is a multi-step mission rather than a single tool loop. The
   `agent.ask` response gains `agents`, `status`, `mission` and `steps`, and

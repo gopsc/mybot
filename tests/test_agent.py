@@ -20,8 +20,10 @@ from agent_fakes import ModelResponse, TextPart, ToolCallPart, ToolReturnPart, U
 from agent_fakes import DeltaToolCall, FunctionModel, team_model
 
 import pymybot.agent as agent_module
+import pymybot.agent_cli as agent_cli_module
 from pymybot.agent import (AgentConfig, AgentSession, AgentBudgetExceeded, AgentInterrupted,
-                           AgentConfigurationError, confirm_console, create_model)
+                           AgentConfigurationError, create_model)
+from pymybot.agent_cli import confirm_console
 from pymybot.paths import asset_path
 
 
@@ -153,7 +155,7 @@ def test_streaming_is_opt_in_and_non_streamed_models_still_work():
 
 def test_stream_renderer_neutralizes_controls_in_text_and_tool_labels():
     buffer = io.StringIO()
-    renderer = agent_module.StreamRenderer(stream=buffer)
+    renderer = agent_cli_module.StreamRenderer(stream=buffer)
     renderer({"type": "text_delta", "text": "a\x1b[2Jb\x07c\x9bd\nnext\tok"})
     renderer({"type": "tool_call", "tool": "evil\x1b]0;pwn\x07", "arguments": {"x": 1}})
     renderer({"type": "tool_result", "tool": "evil\x1b]0;pwn\x07",
@@ -167,7 +169,7 @@ def test_stream_renderer_neutralizes_controls_in_text_and_tool_labels():
 
 def test_stream_renderer_neutralizes_and_truncates_tool_arguments():
     buffer = io.StringIO()
-    renderer = agent_module.StreamRenderer(stream=buffer)
+    renderer = agent_cli_module.StreamRenderer(stream=buffer)
     renderer({"type": "text_delta", "text": "部分回复"})
     renderer({"type": "tool_call", "tool": "run_action_script",
               "arguments": {"script": "a\x1b[2Jb.mt"}})
@@ -628,6 +630,8 @@ def install_cli_fakes(monkeypatch, executor, model, client):
         return executor
     monkeypatch.setattr(agent_module, "RobotExecutor", factory)
     monkeypatch.setattr(agent_module, "create_model", lambda _: (team_model(model), client))
+    monkeypatch.setattr(agent_cli_module, "RobotExecutor", factory)
+    monkeypatch.setattr(agent_cli_module, "create_model", lambda _: (team_model(model), client))
 
 
 @pytest.mark.parametrize("primary_failure", [False, True])
@@ -815,7 +819,7 @@ def test_custom_endpoint_reconnects_instead_of_reusing_keepalive(tmp_path, monke
     thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
     thread.start()
     try:
-        code = cli.main(["--no-gui", "--robot", str(path), "--task", "列出硬件", "--model", "openai-chat:test",
+        code = cli.main(["--no-gui", "--task", "列出硬件", "--model", "openai-chat:test",
                          "--role", "test-role", "--base-url", f"http://127.0.0.1:{server.server_port}/v1"])
     finally:
         server.shutdown()
@@ -867,8 +871,10 @@ def test_cli_workspace_tools_real_execution(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(Robot, "active", forbidden_activation)
     monkeypatch.setattr(agent_module, "create_model",
                         lambda _: (team_model(FunctionModel(respond, stream_function=stream)), None))
+    monkeypatch.setattr(agent_cli_module, "create_model",
+                        lambda _: (team_model(FunctionModel(respond, stream_function=stream)), None))
     flags = ["--enable-shell", "--allow-shell"] if shell else []
-    code = cli.main(["--no-gui", "--robot", str(robot), "--scripts-dir", str(tmp_path),
+    code = cli.main(["--no-gui",
                      "--role", "test-role", *flags,
                      "--allow-file-writes", "--task", "write, edit, read and run shell"])
     captured = capsys.readouterr()
@@ -890,7 +896,7 @@ def test_provider_error_is_sanitized_and_not_retried(tmp_path, monkeypatch, caps
     path = tmp_path / "robot.sql"
     path.write_text("CREATE TABLE Vars(name String,value Number);", encoding="utf-8")
     with fake_openai(lambda *_: (500, {"error": {"message": "SECRET must not leak", "type": "server_error"}})) as (url, requests):
-        code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
+        code = cli.main(["--no-gui", "--task", "hello",
                          "--role", "test-role", "--model", "openai:test", "--base-url", url])
     captured = capsys.readouterr()
     assert code == 1 and len(requests) == 1
@@ -913,7 +919,7 @@ def test_unusable_skills_root_fails_as_configuration_before_any_request(tmp_path
         pytest.fail("skills root must be validated before a model request is sent")
 
     with fake_openai(forbid) as (url, requests):
-        code = cli.main(["--no-gui", "--robot", str(path), "--scripts-dir", str(tmp_path), "--task", "hello",
+        code = cli.main(["--no-gui", "--task", "hello",
                          "--role", role.name, "--model", "openai:test", "--base-url", url])
     captured = capsys.readouterr()
     assert requests == []
@@ -1215,7 +1221,7 @@ def test_cli_agent_writes_transcript(monkeypatch, capsys, tmp_path):
         "prompt_update", "prompt_update", "prompt_update", "session_end"]
     assert events[1]["text"] == "hello"
     assert events[2]["name"] == "off"
-    assert events[3]["layers"].keys() == {"0", "10", "97", "98", "99", "100"}
+    assert {"0", "10", "97", "98", "99", "100"} <= set(events[3]["layers"])
     assert events[4]["text"] == "done"
     assert events[6]["actor"] == "stats"
     assert events[7]["actor"] == "user-extract"

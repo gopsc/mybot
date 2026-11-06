@@ -15,7 +15,7 @@ import pymybot.prompts as prompts
 from pymybot.paths import asset_path
 from pymybot.security import SecurityError
 
-CORE_SHA = "4b9d11f5a0b6c6efc11f8151345d187cc88b691188c25247a0c3ddfbf4f05e11"
+CORE_SHA = "05315a84d7c21e5469cc2d92922e999e47cb86c57406d749514a710aee3ace32"
 IDS = ["0", "10", "97", "98", "99", "100"]
 
 
@@ -66,10 +66,49 @@ def test_core_routes_skill_creation_through_read_skill(library):
     assert "read_skill" in text
     assert "`skill-authoring`" in text
     assert "技能编写规范" in text
-    assert "before calling install_skill" in text
-    assert "do not edit them in place with write_file" in text
-    assert "run_skill" in text
+    assert "再调用 `install_skill`" in text
+    assert "不要用 `write_file`" in text
+    assert "`<skill>_run`" in text and "hardware_controller_run" in text
+    assert "run_skill" not in text
     assert "run_action_script" not in text
+    assert "本会话自身不加载 robot" in text
+    assert "优先使用物理接口" in text and "优先通过技能" in text
+
+
+def test_bundle_content_upgrade_keeps_existing_homes(library):
+    """A role created by an older bundle keeps working after a content upgrade.
+
+    Editable-layer hashes in the runtime manifest record the pristine bundled
+    copy; the files are operator/agent state. Only 0/100 content is enforced.
+    """
+    runtime = library.home / "manifest.json"
+    manifest = json.loads(runtime.read_text(encoding="utf-8"))
+    for layer in manifest["layers"]:
+        if layer["editable"]:
+            layer["sha256"] = "0" * 64
+    runtime.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    assert library.compose().text
+    assert "list_cameras" in library.read("10")["content"]
+
+
+def test_runtime_manifest_tampering_still_fails_closed(library):
+    runtime = library.home / "manifest.json"
+    manifest = json.loads(runtime.read_text(encoding="utf-8"))
+
+    def write(mutate):
+        document = json.loads(json.dumps(manifest))
+        mutate(document)
+        runtime.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+        library.compose()
+
+    with pytest.raises(SecurityError, match="differs from the trusted bundle"):
+        write(lambda d: d["layers"].pop())                               # drop a layer
+    with pytest.raises(SecurityError, match="differs from the trusted bundle"):
+        write(lambda d: d["layers"][0].__setitem__("sha256", "0" * 64))  # safety layer
+    with pytest.raises(SecurityError, match="differs from the trusted bundle"):
+        write(lambda d: d["layers"][2].__setitem__("max_bytes", 4096))   # tighten a cap
+    with pytest.raises(SecurityError, match="Invalid prompt layer edit permissions"):
+        write(lambda d: d["layers"][3].__setitem__("editable", False))
 
 
 def test_bootstrap_preserves_existing_and_returns_only_created(tmp_path):
@@ -571,3 +610,91 @@ def test_bundle_can_be_inspected_but_not_mutated(bundle):
         library.restore(False)
     assert not (bundle / ".prompts.lock").exists()
     assert (bundle / "manifest.json").stat().st_mode == before
+
+
+def test_role_home_seeds_bundled_extra_layers(bundle, tmp_path):
+    (bundle / "011_robot.md").write_text("ROLE-SEED\n", encoding="utf-8")
+    home = tmp_path / "role-prompts"
+    library = prompts.PromptLibrary(home=home, defaults=bundle, extra_layers=True)
+    result = library.ensure_home()
+    assert "011_robot.md" in result["created"]
+    assert "ROLE-SEED" in (home / "011_robot.md").read_text(encoding="utf-8")
+    (home / "011_robot.md").write_text("OPERATOR-EDIT\n", encoding="utf-8")
+    library.ensure_home()
+    assert "OPERATOR-EDIT" in (home / "011_robot.md").read_text(encoding="utf-8")
+
+
+def test_global_home_does_not_seed_extra_layers(bundle, tmp_path):
+    (bundle / "011_robot.md").write_text("x\n", encoding="utf-8")
+    home = tmp_path / "global-prompts"
+    library = prompts.PromptLibrary(home=home, defaults=bundle)
+    library.ensure_home()
+    assert not (home / "011_robot.md").exists()
+    assert [row["id"] for row in library.list_layers()] == IDS
+
+
+@pytest.fixture
+def bare_bundle(tmp_path):
+    """A trusted bundle without any operator-authored extra layers."""
+    target = tmp_path / "bare-bundle"
+    target.mkdir()
+    source = asset_path("prompts")
+    shutil.copyfile(source / "manifest.json", target / "manifest.json")
+    manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+    for layer in manifest["layers"]:
+        shutil.copyfile(source / layer["file"], target / layer["file"])
+    return target
+
+
+def test_role_library_loads_numbered_extra_layers(bare_bundle, tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", defaults=bare_bundle,
+                                    extra_layers=True)
+    library.ensure_home()
+    (library.home / "005_context.md").write_text("CONTEXT-EXTRA\n", encoding="utf-8")
+    (library.home / "011_robot.md").write_text("ROBOT-EXTRA\n", encoding="utf-8")
+    rows = library.list_layers()
+    assert [row["id"] for row in rows] == ["0", "5", "10", "11", "97", "98", "99", "100"]
+    assert rows[1]["external"] is True and rows[1]["editable"] is False
+    assert "ROBOT-EXTRA" in library.read("11")["content"]
+    composed = library.compose()
+    assert composed.text.index("CONTEXT-EXTRA") < composed.text.index("你是在通用机器人设备上运行的 mybot 智能体")
+    assert (composed.text.index("你是在通用机器人设备上运行的 mybot 智能体")
+            < composed.text.index("ROBOT-EXTRA") < composed.text.index("# SOUL"))
+    assert composed.text.index("ROBOT-EXTRA") < composed.text.index("最后的安全提醒")
+    assert "11" in composed.layer_hashes
+
+
+def test_global_library_ignores_extra_files(tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "global-prompts")
+    library.ensure_home()
+    (library.home / "011_robot.md").write_text("operator draft\n", encoding="utf-8")
+    assert [row["id"] for row in library.list_layers()] == IDS
+    with pytest.raises(SecurityError, match="Use a prompt layer ID"):
+        library.read("11")
+
+
+def test_role_extra_layer_numbers_are_validated(tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", extra_layers=True)
+    library.ensure_home()
+    for name in ("010_extra.md", "100_tail.md", "101_late.md"):
+        path = library.home / name
+        path.write_text("x\n", encoding="utf-8")
+        with pytest.raises(SecurityError, match="reserved layer number"):
+            library.compose()
+        path.unlink()
+    (library.home / "011_a.md").write_text("a\n", encoding="utf-8")
+    (library.home / "011_b.md").write_text("b\n", encoding="utf-8")
+    with pytest.raises(SecurityError, match="share a layer number"):
+        library.compose()
+
+
+def test_role_extra_layers_are_read_only_to_the_agent_and_capped(bare_bundle, tmp_path):
+    library = prompts.PromptLibrary(home=tmp_path / "role-prompts", defaults=bare_bundle,
+                                    extra_layers=True)
+    library.ensure_home()
+    (library.home / "011_robot.md").write_text("robot\n", encoding="utf-8")
+    with pytest.raises(SecurityError, match="Use a prompt layer ID"):
+        library.update("11", "changed", actor="agent", reason="test")
+    (library.home / "012_big.md").write_text("x" * (64 * 1024 + 1), encoding="utf-8")
+    with pytest.raises(SecurityError, match="exceeds"):
+        library.read("12")

@@ -82,9 +82,9 @@ def test_parse_result_ignores_foreign_lines(stdout):
 # -- config -----------------------------------------------------------------
 def test_config_roundtrip_drops_runtime_grants(tmp_path):
     path = tmp_path / "settings.json"
-    cfg = GuiConfig(workspace=str(tmp_path), robot="robots/a.sql", task="hello",
+    cfg = GuiConfig(workspace=str(tmp_path), task="hello",
                     module_paths=["a", "", 3], model="openai:gpt-4o",
-                    vars={"user": "alice"}, allow_hardware=True, allow_actions=True, timeout=30,
+                    allow_hardware=True, allow_actions=True, timeout=30,
                     session_log=False)
     cfg.store(path)
     stored = json.loads(path.read_text(encoding="utf-8"))
@@ -95,7 +95,6 @@ def test_config_roundtrip_drops_runtime_grants(tmp_path):
     loaded = GuiConfig.load(path)
     assert loaded.workspace == str(tmp_path) and loaded.timeout == 30
     assert loaded.session_log is False
-    assert loaded.vars == {}
     assert loaded.allow_hardware is False and loaded.allow_actions is False
 
 
@@ -129,7 +128,7 @@ def test_config_rejects_hostile_values(tmp_path):
 
 def test_merge_args_prefers_explicit_flags():
     cfg = GuiConfig(workspace="/stored", model="openai:stored", module_paths=["old"])
-    args = SimpleNamespace(workspace_dir="/flag", robot="r.sql", model="deepseek:chat",
+    args = SimpleNamespace(workspace_dir="/flag", model="deepseek:chat",
                            module_path=["m1", "m2"], timeout=12)
     merged = merge_args(cfg, args)
     assert merged.workspace == "/flag" and merged.model == "deepseek:chat"
@@ -261,8 +260,8 @@ def test_no_gui_keeps_the_terminal_agent(monkeypatch, capsys, tmp_path):
         called.append(args)
         return {"mode": "agent", "output": "offline", "tool_events": []}
 
-    monkeypatch.setitem(sys.modules, "pymybot.agent", SimpleNamespace(run_cli_agent=run_cli_agent))
-    code = cli.main(["--no-gui", "--robot", str(robot), "--task", "hi", "--role", "test-role",
+    monkeypatch.setitem(sys.modules, "pymybot.agent_cli", SimpleNamespace(run_cli_agent=run_cli_agent))
+    code = cli.main(["--no-gui", "--task", "hi", "--role", "test-role",
                      "--model", "openai:test"])
     payload = json.loads(capsys.readouterr().out)
     assert code == 0 and payload["mode"] == "agent" and called[0].command == "agent"
@@ -403,8 +402,7 @@ def app_factory(monkeypatch, qapp, tmp_path):
             from pymybot.roles import create_role, load_role, role_path
             # Conversations require a role; most window tests need a usable one.
             role = load_role("test-role") if role_path("test-role").exists() else create_role("test-role")
-            config = GuiConfig(workspace=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"),
-                               role=role.name)
+            config = GuiConfig(workspace=str(ROOT), role=role.name)
         with monkeypatch.context() as patch:
             instance = gui_app.App(config, config_path or tmp_path / "settings.json")
         instance._start_timer.stop()
@@ -475,7 +473,7 @@ def test_role_selector_binds_agent_params_and_reset(app_factory, monkeypatch, tm
 
     monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "home"))
     role = create_role("tech")
-    config = GuiConfig(workspace=str(ROOT), robot=str(ASSETS / "robots" / "relay-test.sql"),
+    config = GuiConfig(workspace=str(ROOT),
                        role=role.name, skills_dir="global-skills", mcp_config="global-mcp.json")
     gui, app = app_factory(config=config)
     assert app.role_box.currentData() == "tech"
@@ -726,7 +724,6 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     def save(dialog, test):
         assert isinstance(dialog, gui.SettingsDialog)
         dialog.entries["model"].setText("openai:test")
-        dialog.entries["vars"].setPlainText("user=alice\npass=secret\nbad line")
         dialog.session_log.setChecked(False)
         test.mouseClick(dialog.buttons.button(gui.QDialogButtonBox.StandardButton.Save), gui.Qt.MouseButton.LeftButton)
 
@@ -734,11 +731,9 @@ def test_settings_dialog_save_updates_controls_and_restarts(ui, interact, monkey
     app.open_settings()
     assert restarted == [True]
     assert app.cfg.model == "openai:test"
-    assert app.cfg.vars == {"user": "alice", "pass": "secret"}
     assert "openai:test" in app.model_label.text()
     stored = json.loads((tmp_path / "settings.json").read_text())
     assert stored["session_log"] is False
-    assert "vars" not in stored
     assert "设置已保存" in app.status_notice.text()
 
 
@@ -781,18 +776,16 @@ def test_start_sends_agent_start_without_a_task(ui):
     assert app.stop_button.isEnabled()
 
 
-def test_request_includes_current_paths_variables_and_budgets(ui):
+def test_request_includes_current_paths_and_budgets(ui):
     _, app = ui
     client = attach_client(app)
     app.context_entries["skills_dir"].setText("skills")
-    app.cfg.vars = {"user": "alice"}
     app.start_button.click()
     params = client.requests[0][1]
     assert params["role"] == "test-role"
     assert "skillsDir" not in params and "mcpConfig" not in params
-    assert "modulePaths" not in params
-    assert params["vars"] == {"user": "alice"}
-    assert params["robot"] == app._robot_path()
+    assert "modulePaths" not in params and "scriptsDir" not in params
+    assert "vars" not in params and "robot" not in params
     assert params["allowShell"] is True
     assert params["timeout"] == app.cfg.timeout
     assert params["maxRequests"] == app.cfg.max_requests
@@ -1099,11 +1092,11 @@ def test_workspace_and_directory_choosers(app_factory, monkeypatch, tmp_path):
     monkeypatch.setattr(app, "_restart_server", lambda: restarted.append(True))
     monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", lambda *args: str(tmp_path))
     app.pick_workspace()
-    assert app.cfg.workspace == str(tmp_path) and app.cfg.robot == ""
+    assert app.cfg.workspace == str(tmp_path)
     assert restarted == [True]
     monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", lambda *args: "")
     app.pick_workspace()
-    assert app.cfg.robot == "" and restarted == [True]
+    assert restarted == [True]
 
 
 def test_missing_display_fails_before_qapplication(ui, monkeypatch):
@@ -1193,7 +1186,7 @@ def test_start_enables_all_tools_without_approval(ui):
     assert params["enableShell"] is True
     assert params["allowMcpTools"] is True
     assert params["enableWeb"] is True and params["allowWeb"] is True
-    assert params["allowActions"] is False and params["allowHardware"] is True
+    assert "allowActions" not in params and "allowHardware" not in params
     assert params["maxHistoryBytes"] == app.cfg.max_history_bytes
     assert params["maxContextTokens"] == 32768
     assert params["contextReserveTokens"] == 1024
@@ -1591,16 +1584,6 @@ def test_role_switch_loads_new_history(ui):
         assert "角色A" not in text
     finally:
         delete_role("history-other")
-
-
-def test_start_skips_a_missing_structure_file(ui):
-    _, app = ui
-    client = attach_client(app)
-    app.cfg.robot = "/nonexistent/robot.sql"
-    app.start_button.click()
-    assert client.requests[-1][0] == "agent.start"
-    assert "robot" not in client.requests[-1][1]
-    assert "结构文件不存在" in app.status_notice.text()
 
 
 class _StubWizard(QDialog):

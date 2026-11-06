@@ -1,6 +1,6 @@
 # CLI reference
 
-Source: This is the authoritative controller CLI and serve protocol document; the implementation lives in `skills/hardware-controller/scripts/pymybot/{cli,serve}.py`.
+Source: This is the authoritative controller CLI and serve protocol document; the implementation lives in `scripts/pymybot/{cli,serve}.py`.
 
 The CLI is the automation-friendly control surface. It prints exactly one JSON
 object on stdout per invocation; diagnostics and streaming agent output go to
@@ -70,9 +70,8 @@ semantics. Typical usage:
 ```sh
 pymybot roles create technician --description "Field technician"
 pymybot roles list
-pymybot agent --role technician                       # 记忆体自拟目标，自主循环
-pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"  # 只跑这一个任务
-pymybot agent --role technician --robot robots/my.sql --scripts-dir scripts --task "运行自检"
+pymybot agent --role technician --task "用 hardware-controller skill 列出 relay-test 的硬件"
+pymybot agent --role technician --task "运行自检"
 pymybot roles clear-history technician --yes
 pymybot roles delete technician --yes        # permanently remove the role directory
 ```
@@ -158,21 +157,19 @@ Reference the rows from ordinary structure cells with `$name` (Alias) or
 
 ```sql
 CREATE TABLE Alias (name String, alias String);
-INSERT INTO Alias (name, alias) VALUES ('user', 'COVER_ME');
-INSERT INTO Alias (name, alias) VALUES ('pass', 'COVER_ME');
+INSERT INTO Alias (name, alias) VALUES ('tcp0_host', 'COVER_ME');
 CREATE TABLE Vars (name String, value String);
-INSERT INTO Vars (name, value) VALUES ('device', 1);
--- ... HTTP bus ...
-CREATE TABLE Qsont (name String, HTTP String, user String, pass String, device Number);
-INSERT INTO Qsont (name, HTTP, user, pass, device)
-VALUES ('qs', '$cloud', '$user', '$pass', '$(device)');
+INSERT INTO Vars (name, value) VALUES ('tcp0_port', -1);
+-- ... 设备表用 $tcp0_host / $(tcp0_port) 引用 ...
+CREATE TABLE TCP (name String, host String, port Number);
+INSERT INTO TCP (name, host, port) VALUES ('tcp0', '$tcp0_host', '$(tcp0_port)');
 ```
 
 ```sh
-export QS_USER=iot_01 QS_PASS=pass123
-pymybot run --robot skills/hardware-controller/assets/robots/qsont.sql --input skills/hardware-controller/assets/scripts/qsont.mt \
+export RELAY_HOST=192.0.2.10
+pymybot run --robot assets/robots/famer.sql --input assets/scripts/famer.mt \
   --timeout 30 --allow-hardware \
-  --var-env user=QS_USER --var-env pass=QS_PASS --var device=1
+  --var-env tcp0_host=RELAY_HOST --var tcp0_port=8080
 ```
 
 The declared defaults stay in the tables, so `pymybot hardware`/`query` keep
@@ -189,17 +186,17 @@ python -m pymybot new mybot-arm
 
 # Static validation, no hardware
 python -m pymybot check \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/assets/scripts/relay-test.mt
+  --robot assets/robots/relay-test.sql \
+  --input assets/scripts/relay-test.mt
 
 # Pure-software end-to-end run (Timer + Relay)
 python -m pymybot run \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/assets/scripts/relay-test.mt \
+  --robot assets/robots/relay-test.sql \
+  --input assets/scripts/relay-test.mt \
   --timeout 10
 
 # Query the structure without activating it
-python -m pymybot query --robot skills/hardware-controller/assets/robots/relay-test.sql --sql "SHOW TABLES;"
+python -m pymybot query --robot assets/robots/relay-test.sql --sql "SHOW TABLES;"
 
 # Serve a long-lived session to an IDE
 python -m pymybot serve

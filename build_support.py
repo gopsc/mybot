@@ -61,3 +61,9 @@ class BuildPy(build_py):
             target = destination / source.relative_to(root)
             target.parent.mkdir(parents=True, exist_ok=True)
             copy2(source, target)
+        # Runtime dependency notes are referenced from SKILL.md, so they ship with
+        # the skill assets even though they are not an importable Python module.
+        for source in sorted((root / "skills").rglob("requirements.txt")):
+            target = destination / source.relative_to(root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            copy2(source, target)

@@ -152,7 +152,7 @@ def test_cli_and_gui_config_expose_intent(tmp_path):
     from pymybot.cli import parse_args
     from pymybot.gui.config import GuiConfig
 
-    args = parse_args(["agent", "--robot", "x.sql", "--task", "hi", "--role", "demo", "--intent", "control"])
+    args = parse_args(["agent", "--task", "hi", "--role", "demo", "--intent", "control"])
     assert args.intent == "control"
     gui = parse_args(["gui", "--intent", "author"])
     assert gui.intent == "author"

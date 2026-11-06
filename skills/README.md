@@ -10,9 +10,10 @@ the controller Runtime explicitly loads trusted code and assets from
 | [`hardware-controller/`](hardware-controller/SKILL.md) | Self-contained Python controller, MCP server, Agent `run_skill`, `assets` CRUD, authoritative controller docs, the three-layer scripting grammar references, and default robots/scripts/modules assets |
 | [`skill-authoring/`](skill-authoring/SKILL.md) | 技能编写规范: SKILL.md layout, frontmatter, trigger descriptions, references and the approved workspace `install_skill` workflow |
 | [`brave-heart/`](brave-heart/SKILL.md) | 勇气与意志力支持：恐惧场景识别、激励引导、微小第一步与呼吸练习 |
-| [`i2c-address-probe/`](i2c-address-probe/SKILL.md) | 宿主侧 I2C 地址探测（只读），sh/Python 脚本、判读手册，Agent 可经 `run_skill` 的 `list-buses` / `scan` 执行 |
-| [`i2c-uart-spi-enum/`](i2c-uart-spi-enum/SKILL.md) | 跨平台 I2C/UART/SPI 设备枚举（只读），Python 脚本与判读手册，Agent 可经 `run_skill` 执行 |
+| [`i2c-address-probe/`](i2c-address-probe/SKILL.md) | 宿主侧 I2C 地址探测（只读），sh/Python 脚本、判读手册，Agent 可经 `i2c_address_probe_run` 的 `list-buses` / `scan` 执行 |
+| [`i2c-uart-spi-enum/`](i2c-uart-spi-enum/SKILL.md) | 跨平台 I2C/UART/SPI 设备枚举（只读），Python 脚本与判读手册，Agent 可经 `i2c_uart_spi_enum_run` 执行 |
 | [`system-status-report/`](system-status-report/SKILL.md) | 跨平台系统状态采集（只读），纯 Python 标准库，输出文本或单行 JSON |
+| [`skillhub-store/`](skillhub-store/SKILL.md) | SkillHub 技能商店：搜索、安装、校验与升级 Agent Skills，含跨平台 CLI 安装器 |
 
 ## Single source of truth
 
@@ -38,6 +39,7 @@ the same-named pages in [`../docs/`](../docs) are redirect stubs for human reade
 | Host-side I2C probing | `i2c-address-probe/scripts/i2c_probe.py` | [`references/address-map.md`](i2c-address-probe/references/address-map.md), [`references/platform-support.md`](i2c-address-probe/references/platform-support.md) |
 | Host-side bus enumeration | `i2c-uart-spi-enum/scripts/bus_enum.py` | [`references/i2c.md`](i2c-uart-spi-enum/references/i2c.md), [`references/uart.md`](i2c-uart-spi-enum/references/uart.md), [`references/spi.md`](i2c-uart-spi-enum/references/spi.md) |
 | Host system metrics | `system-status-report/scripts/sys_status.py` | [`references/platform-notes.md`](system-status-report/references/platform-notes.md) |
+| Skill search and install | `skillhub-store/SKILL.md`, `skillhub-store/scripts/skillhub_cli.py` | [`references/cli-reference.md`](skillhub-store/references/cli-reference.md), [`references/install-method.md`](skillhub-store/references/install-method.md), [`references/skill-paths.md`](skillhub-store/references/skill-paths.md) |
 | Executable Skill actions | `hardware-controller/SKILL.md` CLI commands, `pymybot/agent_skill_runner.py` | [`hardware-controller/SKILL.md`](hardware-controller/SKILL.md#2-子命令速查) |
 
 The scripting grammars have no prose authority outside the implementation, so

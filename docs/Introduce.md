@@ -22,7 +22,7 @@ pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人�
 | --- | --- | --- |
 | **GUI** | 桌面调试、演示、查看逐次回执 | `pymybot` |
 | **CLI 控制器** | CI/CD、脚本、无模型环境 | `pymybot check / run / sample / ...` |
-| **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --role NAME --task "..."`（可加 `--robot`） |
+| **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --role NAME --task "..."` |
 | **MCP** | Claude Desktop、Cursor、其他 MCP 客户端 | `pymybot mcp --robot ...` |
 
 另外还有一个长驻的 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
@@ -80,7 +80,7 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 
 GUI 用 PySide6（Qt 6）；只在命令行里用的话，不需要装 `gui` 可选依赖。
 
-第一次打开，在 **设置** 里选 workspace、结构文件和模型。如果你只想控制硬件，不配模型也能用。要启动自主智能体，先点工具栏的「新建」创建一个角色，再点「启动」；没有输入框，人类只负责启动、观察和停止。「删除」会在确认后移除整个角色目录。
+第一次打开，在 **设置** 里选 workspace 和模型。如果你只想控制硬件，不配模型也能用；结构文件由 hardware-controller 技能自带，窗口不再配置。要启动自主智能体，先点工具栏的「新建」创建一个角色，再点「启动」；没有输入框，人类只负责启动、观察和停止。「删除」会在确认后移除整个角色目录。
 
 ### 3. 启用 AI Agent
 
@@ -91,13 +91,16 @@ export DEEPSEEK_API_KEY="sk-..."
 .venv/bin/python -m pymybot roles create technician --description "Field technician"
 .venv/bin/python -m pymybot --no-gui \
   --role technician \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
   --task "列出硬件并解释每个变量的作用"
 ```
 
 **对话必须属于一个角色**：角色的提示词、技能、工作区和模型历史互相隔离，不再有全局默认对话。没有 `--role` 的 `pymybot agent`、未选角色的 GUI，以及缺少 `role` 的 `serve` `agent.ask` 都会被拒绝。角色可以随时用 `pymybot roles delete NAME --yes` 或 GUI 的「删除」移除（整个目录，不可恢复）。
 
 支持的模型提供商有 `openai`、`openai-chat`、`anthropic` 和 `deepseek`。密钥只从环境变量读；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。其他 OpenAI 兼容提供商可用 `pymybot.agent.register_provider` 注册（复用内置的 HTTP 通道），或通过 `pymybot.model_providers` entry point 由第三方包自动注册。
+
+Agent 默认是双智能体：记忆体负责规划、反思与长期记忆，执行体负责工具与硬件。
+启动后记忆体自拟目标并持续派活，受步数、墙钟、token 与任务数上限约束；
+命令行用 `--task` 可以只跑一个种子任务。详见 [双智能体](team.md)。
 
 Agent 默认是双智能体：记忆体负责规划、反思与长期记忆，执行体负责工具与硬件。
 启动后记忆体自拟目标并持续派活，受步数、墙钟、token 与任务数上限约束；
@@ -110,7 +113,6 @@ Agent 也能通过 `--mcp-config` 接外部 MCP 服务，把它们的工具放�
 .venv/bin/python -m pymybot roles create researcher --mcp-config ./mcp.json
 .venv/bin/python -m pymybot --no-gui \
   --role researcher \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
   --task "列出硬件"
 ```
 

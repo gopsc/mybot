@@ -135,7 +135,7 @@ require_driver("i2c", {                -- 总线四选一："i2c" / "spi" / "uar
 （i2c：fd/address 存在性 + `i2c_set_addr`；spi：fd；uart/http：fd ≥ 0），
 然后以 `ctx` 调用用户函数。用户函数内可直接使用 HAL 全局与驱动文件里的 local
 （闭包链保留）。http 总线的 `fd` 来自 `HTTP` 列的 `$会话` 引用
-（范本 `modules/Qsont.lua`）。
+（总线驱动见 `modules/HTTP.py`）。
 
 ## 3. 传统写法：全局函数
 
@@ -199,7 +199,7 @@ SPI（pyftdi / Linux spidev；详见 `modules/lib/hal/spi.lua`）：
 | `spi_write(fd, val [, delay_us])` / `spi_read(fd [, delay_us])` | 单字节 |
 | `spi_write3` / `spi_write_multi(fd, data [, delay])` / `spi_read_multi(fd, n)` / `spi_xfer_full(fd, data)` | 多字节与全双工 |
 
-HTTP（标准库 urllib；`modules/HTTP.py` 是总线范本、`modules/Qsont.lua` 是驱动范本）：
+HTTP（标准库 urllib；`modules/HTTP.py` 是总线范本）：
 
 | 函数 | 说明 |
 | --- | --- |

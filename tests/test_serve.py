@@ -1120,8 +1120,8 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
     monkeypatch.setattr(agent_module, "create_model",
                         lambda config: (team_model(make_model()), FakeClient()))
     from pymybot.roles import create_role
-    params = {"task": "编写文件", "robot": str(workspace / "robot.sql"), "scriptsDir": str(workspace),
-              "model": "openai:fake", "role": create_role("test-role").name}
+    params = {"task": "编写文件", "model": "openai:fake",
+              "role": create_role("test-role").name, "single": True}
 
     async def scenario():
         out = Out()
@@ -1151,7 +1151,7 @@ def test_agent_tool_approval_round_trip(workspace, monkeypatch):
                                                    "executed": True, "state": "completed"}]
         assert any(m.get("method") == "agent.event" and m["params"]["event"]["type"] == "tool_call" for m in seen)
 
-        put({"id": 2, "method": "session.activate", "params": {"robot": params["robot"]}})
+        put({"id": 2, "method": "session.activate", "params": {"robot": "unused.sql"}})
         reply, _ = await until(2)
         assert reply["error"]["code"] == serve.WRONG_STATE
         put({"id": 3, "method": "agent.reset"})
@@ -1283,6 +1283,9 @@ def test_serve_dual_agent_reports_both_voices(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_module, "create_model",
                         lambda config: (FunctionModel(respond), FakeClient()))
     params = {"task": "检查继电器", "robot": str(robot), "role": role.name, "model": "openai:fake"}
+    monkeypatch.setattr(agent_module, "create_model",
+                        lambda config: (FunctionModel(respond), FakeClient()))
+    params = {"task": "检查继电器", "role": role.name, "model": "openai:fake"}
 
     async def scenario():
         out = Out()
@@ -1344,11 +1347,9 @@ def test_serve_start_runs_the_autonomous_loop(tmp_path, monkeypatch):
         async def close(self):
             pass
 
-    robot = tmp_path / "robot.sql"
-    robot.write_text("CREATE TABLE dummy(name String);", encoding="utf-8")
     monkeypatch.setattr(agent_module, "create_model",
                         lambda config: (FunctionModel(respond), FakeClient()))
-    params = {"robot": str(robot), "role": role.name, "model": "openai:fake",
+    params = {"role": role.name, "model": "openai:fake",
               "maxMissions": 2, "pauseSeconds": 0.01}
 
     async def scenario():

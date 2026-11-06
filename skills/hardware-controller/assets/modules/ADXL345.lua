@@ -21,7 +21,7 @@
 -- 各列写 '-' 按缺省值处理
 --
 -- call 无需额外参数，返回 { result, ACCEL_X, ACCEL_Y, ACCEL_Z }
--- （16 位补码语义的原始无符号码，与 MPU6050/BMI270/LSM6DSV 驱动同约定，
+-- （16 位补码语义的原始无符号码，与 MPU6050/LSM6DSV 驱动同约定，
 -- 负值由守护 sign='16' 展开）
 -- 接 sensor_daemon：fields=ACCEL_X|ACCEL_Y|ACCEL_Z，sign='16'
 --
@@ -33,7 +33,7 @@
 --   3. 启动：POWER_CTL(0x2D) 写 0x08（Measure 位；芯片复位后为待机态，
 --      写前先清 bit4 Sleep/bit5 Link——与 Adafruit 参考一致）
 --   4. 数据寄存器小端：DATAX0(0x32) 起 6 字节 = X_LSB,X_MSB,Y_LSB,...
---      （与 BMI270/LSM6DSV 同，与 MPU6050 相反）
+--      （与 LSM6DSV 同，与 MPU6050 相反）
 --   5. BW_RATE(0x2C) 低 4 位速率码：12.5Hz=0x7 线性到 3200Hz=0xF；
 --      高性能区外还有低功耗降带宽档 0x0~0x6（不使用）
 --   6. 敲击/自由落体/活动检测引擎（0x1D~0x30 中断组）本驱动未接——
