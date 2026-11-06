@@ -66,7 +66,7 @@ class GuiConfig:
     prompt_file: str = ""
     max_requests: int = 64
     max_tool_calls: int = 128
-    turn_timeout: float = 0.0
+    turn_timeout: int = 0
     model_retries: int = 0
     fallback_models: list[str] = field(default_factory=list)
     require_plan_approval: bool = False
@@ -121,9 +121,8 @@ class GuiConfig:
                           and 1 <= self.max_requests <= 10_000 else 64),
             max_tool_calls=(self.max_tool_calls if type(self.max_tool_calls) is int
                             and 1 <= self.max_tool_calls <= 100_000 else 128),
-            turn_timeout=(float(self.turn_timeout) if isinstance(self.turn_timeout, (int, float))
-                          and not isinstance(self.turn_timeout, bool)
-                          and 0 <= self.turn_timeout <= 86400 else 0.0),
+            turn_timeout=(self.turn_timeout if type(self.turn_timeout) is int
+                          and 0 <= self.turn_timeout <= 86400 else 0),
             model_retries=(self.model_retries if type(self.model_retries) is int
                            and 0 <= self.model_retries <= 10 else 0),
             fallback_models=_paths(self.fallback_models),

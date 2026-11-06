@@ -127,6 +127,15 @@ def test_config_rejects_hostile_values(tmp_path):
     assert cfg.workspace == "" and cfg.python == ""
 
 
+def test_config_coerces_legacy_float_turn_timeout(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"turn_timeout": 0.0}), encoding="utf-8")
+    cfg = GuiConfig.load(path)
+    assert isinstance(cfg.turn_timeout, int) and cfg.turn_timeout == 0
+    path.write_text(json.dumps({"turn_timeout": 30.5}), encoding="utf-8")
+    assert GuiConfig.load(path).turn_timeout == 0
+
+
 def test_merge_args_prefers_explicit_flags():
     cfg = GuiConfig(workspace="/stored", model="openai:stored", module_paths=["old"])
     args = SimpleNamespace(workspace_dir="/flag", model="deepseek:chat",
@@ -817,6 +826,7 @@ def test_request_includes_current_paths_and_budgets(ui):
     assert params["maxRequests"] == app.cfg.max_requests
     assert params["maxToolCalls"] == app.cfg.max_tool_calls
     assert params["turnTimeout"] == app.cfg.turn_timeout
+    assert isinstance(params["turnTimeout"], int)  # serve rejects float turnTimeout
     assert params["modelRetries"] == app.cfg.model_retries
     assert params["requirePlanApproval"] is False
 

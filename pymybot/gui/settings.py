@@ -128,9 +128,9 @@ class SettingsDialog(QDialog):
         model_form.addRow("工程上下文", context_row)
         self.max_requests = _spin(cfg.max_requests, 10_000)
         self.max_tool_calls = _spin(cfg.max_tool_calls, 100_000)
-        self.turn_timeout = _spin(int(cfg.turn_timeout) if cfg.turn_timeout else 1, 86400)
+        self.turn_timeout = _spin(cfg.turn_timeout or 1, 86400)
         self.turn_timeout.setMinimum(0)
-        self.turn_timeout.setValue(int(cfg.turn_timeout or 0))
+        self.turn_timeout.setValue(cfg.turn_timeout or 0)
         self.model_retries = _spin(cfg.model_retries, 10)
         self.model_retries.setMinimum(0)
         self.fallback_models = QLineEdit(",".join(cfg.fallback_models))
@@ -263,7 +263,7 @@ class SettingsDialog(QDialog):
                       session_log=self.session_log.isChecked(),
                       max_requests=self.max_requests.value(),
                       max_tool_calls=self.max_tool_calls.value(),
-                      turn_timeout=float(self.turn_timeout.value()),
+                      turn_timeout=self.turn_timeout.value(),
                       model_retries=self.model_retries.value(),
                       fallback_models=[item.strip() for item in
                                        self.fallback_models.text().split(",") if item.strip()],

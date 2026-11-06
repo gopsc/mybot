@@ -9,6 +9,8 @@ import pytest
 
 pytest.importorskip("langchain")
 
+from langchain_core.exceptions import ContextOverflowError
+
 from agent_fakes import FunctionModel, ModelResponse, TextPart
 
 from pymybot.agent_contracts import PlanDecision
@@ -181,6 +183,60 @@ def test_memory_agent_prefers_structured_output():
     assert decision["action"] == "done" and decision["summary"] == "完成"
 
 
+class RejectingStructuredModel:
+    """with_structured_output binds fine, but the endpoint rejects the request."""
+
+    model_name = "structured-reject"
+
+    def __init__(self, status=400, overflow=False):
+        self.status = status
+        self.overflow = overflow
+        self.plain = 0
+        self.inner = memory_model({"action": "done", "summary": "完成"})
+
+    def with_structured_output(self, schema, include_raw=True):
+        status, overflow = self.status, self.overflow
+
+        class Runnable:
+            async def ainvoke(inner, messages):
+                if overflow:
+                    error = ContextOverflowError("request exceeds the context window")
+                else:
+                    error = RuntimeError(f"Error code: {status} - unsupported request")
+                error.status_code = status
+                raise error
+        return Runnable()
+
+    async def ainvoke(self, messages):
+        self.plain += 1
+        return await self.inner.ainvoke(messages)
+
+
+def test_memory_agent_drops_structured_output_after_provider_400():
+    model = RejectingStructuredModel(status=400)
+    agent = MemoryAgent(model)
+    decision, _ = asyncio.run(agent.decide(goal="检查", step=1, remaining=3, memories=[], report=""))
+    assert decision["action"] == "done" and decision["summary"] == "完成"
+    assert model.plain == 1
+    assert agent._plan_runnable is None and agent._goal_runnable is None
+
+
+def test_memory_agent_keeps_structured_failure_for_non_400():
+    model = RejectingStructuredModel(status=503)
+    agent = MemoryAgent(model)
+    with pytest.raises(RuntimeError):
+        asyncio.run(agent.decide(goal="检查", step=1, remaining=3, memories=[], report=""))
+    assert model.plain == 0 and agent._plan_runnable is not None
+
+
+def test_memory_agent_never_downgrades_context_overflow():
+    model = RejectingStructuredModel(status=400, overflow=True)
+    agent = MemoryAgent(model)
+    with pytest.raises(ContextOverflowError):
+        asyncio.run(agent.decide(goal="检查", step=1, remaining=3, memories=[], report=""))
+    assert model.plain == 0 and agent._plan_runnable is not None
+
+
 def test_memory_append_search_and_reload(tmp_path):
     store = MemoryStore(tmp_path / "memory")
     first = store.append("BME280 在 I2C-1 0x76，温度偏高是过采样设置",
@@ -339,8 +395,35 @@ def test_team_stops_at_step_budget(tmp_path):
     team = TeamSession(worker, model, memory_store=MemoryStore(tmp_path / "memory"),
                        mission_store=MissionStore(tmp_path / "missions"), max_steps=1)
     result = asyncio.run(team.ask("永远做不完"))
-    assert result["status"] == "paused"
+    assert result["status"] == "blocked"  # cumulative budget: a resume can never advance
     assert "step budget" in result["reason"]
+
+
+class HeavyWorker(FakeWorker):
+    async def ask(self, text, *, intent_mode=None):
+        result = await super().ask(text, intent_mode=intent_mode)
+        result["usage"] = {"input_tokens": 1500, "output_tokens": 5}
+        return result
+
+
+def test_team_stops_at_token_budget(tmp_path):
+    team = TeamSession(HeavyWorker(["样本一"]), memory_model({"action": "continue", "brief": "采样"}),
+                       memory_store=MemoryStore(tmp_path / "memory"),
+                       mission_store=MissionStore(tmp_path / "missions"), max_tokens=1024)
+    result = asyncio.run(team.ask("采集传感器"))
+    assert result["status"] == "blocked"
+    assert "token budget" in result["reason"]
+    assert result["usage"]["input_tokens"] >= 1500
+
+
+def test_team_time_budget_still_pauses_for_resume(tmp_path):
+    team = TeamSession(FakeWorker(["样本"], delay=1.2),
+                       memory_model({"action": "continue", "brief": "采样"}),
+                       memory_store=MemoryStore(tmp_path / "memory"),
+                       mission_store=MissionStore(tmp_path / "missions"), max_seconds=1.0)
+    result = asyncio.run(team.ask("长时间采样"))
+    assert result["status"] == "paused"
+    assert "time budget" in result["reason"]
 
 
 def test_team_reports_blocked_without_acting(tmp_path):

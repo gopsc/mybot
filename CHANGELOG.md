@@ -129,7 +129,29 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   role's installed runnable skills (manifest, entrypoint, assets) from a
   complete source without overwriting existing files.
 
+### Fixed
+
+- GUI `agent.start` sent `turnTimeout` as a JSON float, which the serve-side
+  integer validation rejected (`'turnTimeout' has the wrong type`), so the GUI
+  could never start the autonomous loop; the field is an integer end-to-end now
+  and legacy settings files holding `0.0` are coerced on load.
+- The memory agent no longer aborts the autonomous loop when the provider
+  rejects the structured-output request itself with HTTP 400 (DeepSeek thinking
+  models refuse named `tool_choice` and `response_format: json_schema`): the
+  first 400 drops schema binding for the session and the documented plain-text
+  JSON parser takes over. Context-overflow 400s are re-raised unchanged.
+- Missions that exhaust a cumulative budget (steps, tokens) now end as
+  `blocked` instead of `paused`: a resume can never advance a cumulative
+  counter, so the autonomous loop used to re-claim the paused mission in a
+  hot spin until the mission cap. Wall-clock exhaustion stays `paused` (each
+  attempt gets a fresh window); the reason names the remedy (raise the budget
+  or split the goal).
+
 ### Changed
+
+- 记忆体提案提示词（`_PROPOSE_SYSTEM`）规则 3 扩充：上一轮 `blocked` 且修复确实
+  不可行时，改为提出另一个有价值、可执行的目标——执行体可以改变环境（安装缺失
+  依赖、编写结构 SQL、维护技能），"环境不会自行变化"不等于无事可做。
 
 - The bundled prompt layers are now written in Chinese (including the runtime
   STATS and the safety suffix); identifiers stay in English inside backticks so

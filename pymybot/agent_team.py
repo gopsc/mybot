@@ -29,6 +29,7 @@ import secrets
 import threading
 import time
 
+from langchain_core.exceptions import ContextOverflowError
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
@@ -90,7 +91,9 @@ _PROPOSE_SYSTEM = """你是 mybot 双智能体里的「记忆体」。现在没�
 1. 只输出一个 JSON 对象，不要 Markdown 代码围栏。
 2. 目标必须具体、可验收、一个任务内能完成；不要重复刚完成或明确失败的目标。
 3. 若上一轮状态是 failed 或 blocked，优先提出一个修复目标：换一种做法、先诊断原因，
-   或把任务拆小；同样的做法不要重复。
+   或把任务拆小；同样的做法不要重复。修复确实不可行时，改为提出另一个有价值、可执行的
+   目标：执行体可以改变环境（安装缺失依赖、编写结构 SQL、维护技能与工作区），
+   "环境不会自行变化"不等于无事可做。
 4. 目标要让机器人感知或作用于物理世界：用摄像头观察环境、采样传感器、扫描总线、
    驱动执行器，或通过技能执行硬件动作。文件与 shell 只是记录证据、交付结果的手段，
    不是目标本身：不要提出清点目录、生成清单文件、搭建目录骨架、重构无关文件这类
@@ -452,7 +455,10 @@ class MemoryAgent:
     Provider-native structured output is attempted first. If the model or the
     installed integration cannot produce a validated object, the same prompt is
     retried once with the schema error, then the documented free-text JSON
-    parser is used. A malformed response never becomes a tool call.
+    parser is used. A malformed response never becomes a tool call. An endpoint
+    that rejects the structured request itself with HTTP 400 (some
+    OpenAI-compatible servers refuse the response_format/tool_choice shape)
+    drops schema binding once per session and uses the text parser.
     """
 
     def __init__(self, model, *, timeout=60.0, structured=True):
@@ -481,36 +487,56 @@ class MemoryAgent:
     async def _invoke(self, messages, runnable, parser):
         """Try schema-constrained output, repair once, then fall back to text."""
         if runnable is not None:
-            current = list(messages)
-            for attempt in range(2):
-                try:
-                    result = await asyncio.wait_for(runnable.ainvoke(current), timeout=self.timeout)
-                except asyncio.TimeoutError:
+            try:
+                return await self._invoke_structured(messages, runnable, parser)
+            except Exception as exc:
+                if not self._downgradable(exc):
                     raise
-                except (ValueError, ValidationError, NameError) as exc:
-                    # A 200 response with an unparsable/unsupported structured
-                    # payload is a parser failure and gets one repair attempt.
-                    # NameError covers LangChain integrations that fail to
-                    # resolve their own annotations on newer Python versions.
-                    error = type(exc).__name__
-                except Exception:
-                    # Provider/transport failures are not parser failures. Do
-                    # not turn them into hidden extra model requests; the
-                    # configured provider retry setting owns that policy.
-                    raise
-                else:
-                    raw = result.get("raw") if isinstance(result, dict) else None
-                    parsed = result.get("parsed") if isinstance(result, dict) else result
-                    error = result.get("parsing_error") if isinstance(result, dict) else None
-                    if parsed is not None and not error:
-                        data = parsed.model_dump() if hasattr(parsed, "model_dump") else parsed
-                        return parser(json.dumps(data, ensure_ascii=False)), raw
-                    error = error or "schema validation failed"
-                if attempt == 0:
-                    current = [*messages, HumanMessage(
-                        "The previous answer failed schema validation: "
-                        f"{_clip(str(error), 300)}. Return only one JSON object matching the schema.")]
-            # Structured output is unusable; one plain call remains the fallback.
+                self._plan_runnable = None
+                self._goal_runnable = None
+        message = await asyncio.wait_for(
+            self.model.ainvoke(list(messages)), timeout=self.timeout)
+        return parser(_message_text(message)), message
+
+    @staticmethod
+    def _downgradable(exc):
+        """A 400 rejects the structured request shape, not the task; a context
+        overflow is a hard limit no request shape can fix."""
+        if isinstance(exc, ContextOverflowError):
+            return False
+        return getattr(exc, "status_code", None) == 400
+
+    async def _invoke_structured(self, messages, runnable, parser):
+        current = list(messages)
+        for attempt in range(2):
+            try:
+                result = await asyncio.wait_for(runnable.ainvoke(current), timeout=self.timeout)
+            except asyncio.TimeoutError:
+                raise
+            except (ValueError, ValidationError, NameError) as exc:
+                # A 200 response with an unparsable/unsupported structured
+                # payload is a parser failure and gets one repair attempt.
+                # NameError covers LangChain integrations that fail to
+                # resolve their own annotations on newer Python versions.
+                error = type(exc).__name__
+            except Exception:
+                # Provider/transport failures are not parser failures. Do
+                # not turn them into hidden extra model requests; the
+                # configured provider retry setting owns that policy.
+                raise
+            else:
+                raw = result.get("raw") if isinstance(result, dict) else None
+                parsed = result.get("parsed") if isinstance(result, dict) else result
+                error = result.get("parsing_error") if isinstance(result, dict) else None
+                if parsed is not None and not error:
+                    data = parsed.model_dump() if hasattr(parsed, "model_dump") else parsed
+                    return parser(json.dumps(data, ensure_ascii=False)), raw
+                error = error or "schema validation failed"
+            if attempt == 0:
+                current = [*messages, HumanMessage(
+                    "The previous answer failed schema validation: "
+                    f"{_clip(str(error), 300)}. Return only one JSON object matching the schema.")]
+        # Structured output is unusable; one plain call remains the fallback.
         message = await asyncio.wait_for(
             self.model.ainvoke(list(messages)), timeout=self.timeout)
         return parser(_message_text(message)), message
@@ -752,7 +778,14 @@ class TeamSession:
                             mission.status, reason = "paused", "mission time budget exhausted"
                             break
                         if mission.usage["input_tokens"] + mission.usage["output_tokens"] > self.max_tokens:
-                            mission.status, reason = "paused", "mission token budget exhausted"
+                            # Token usage is cumulative, so a resume can never
+                            # make progress; blocked removes the mission from
+                            # the claim pool instead of hot-spinning the loop.
+                            mission.status, reason = "blocked", (
+                                "mission token budget exhausted; "
+                                "raise missionTokens or split the goal")
+                            answer = reason
+                            self._speak("memory", reason)
                             break
                         decision, message = await self._decide(mission, step, memories, report, history)
                         input_tokens, output_tokens = _usage(message)
@@ -795,7 +828,10 @@ class TeamSession:
                         mission.updated = _now()
                         self.missions.save(mission)
                     else:
-                        mission.status, reason = "paused", f"step budget exhausted ({self.max_steps})"
+                        # Steps are cumulative across resumes (start_step picks
+                        # up where the last attempt stopped), so an exhausted
+                        # step budget can never advance either.
+                        mission.status, reason = "blocked", f"step budget exhausted ({self.max_steps})"
                     if mission.status == "running":
                         mission.status = "done"
             except AgentInterrupted:
