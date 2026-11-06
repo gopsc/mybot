@@ -1256,6 +1256,7 @@ def test_open_agent_rejects_conflicting_role_path_overrides(monkeypatch, tmp_pat
 
 def test_serve_dual_agent_reports_both_voices(tmp_path, monkeypatch):
     """agent.ask is the memory/worker team by default and tags both voices."""
+    pytest.importorskip("langchain")
     from pymybot import agent as agent_module
     from pymybot.roles import create_role, load_role, role_path
     from agent_fakes import FunctionModel, ModelResponse, TextPart
@@ -1324,6 +1325,7 @@ def test_serve_dual_agent_reports_both_voices(tmp_path, monkeypatch):
 
 def test_serve_start_runs_the_autonomous_loop(tmp_path, monkeypatch):
     """agent.start begins the self-directed dialogue with no human task."""
+    pytest.importorskip("langchain")
     from pymybot import agent as agent_module
     from pymybot.roles import create_role, load_role, role_path
     from agent_fakes import FunctionModel, ModelResponse, TextPart

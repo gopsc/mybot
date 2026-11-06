@@ -31,8 +31,9 @@ About dialog mark.
 - **Menu bar** — 文件 (workspace, new conversation `Ctrl+N`, refresh, settings,
   quit), 工具 (MCP editor, sessions, diagnostics, resources, session folder,
   clear/copy chat) and 帮助 (docs, about).
-- **Toolbar** — workspace picker, Agent role selector/create, refresh,
-  a 管理 menu, new conversation, stop and settings.
+- **Toolbar** — the operator's daily path only: workspace picker, Agent role
+  selector with 新建/删除, new conversation, abort and settings. Everything
+  else lives in the menus or the sidebar cards.
 - **Robot context** — skills directory and MCP configuration. The agent lists
   and captures host cameras with the built-in `list_cameras` / `capture_camera`
   tools; cameras are not declared in the structure.
@@ -58,8 +59,8 @@ duplicate robot logic.
 | 工具 → 长期记忆 / 任务历史 | Reads the active role's long-term memory and persisted missions over `agent.memory` / `agent.missions` and shows them in a read-only preview. |
 | 工具 → 环境诊断 | Renders `pymybot doctor`: interpreter, assets and optional dependencies, colour-coded by status, with copy-JSON. |
 | 资源 tab | Structures (`*.sql`), Python/Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
-| 侧边栏（折叠卡片） | 三个可折叠卡片：**状态**（服务/智能体/运行状态 + 忙碌进度 + 跳转运行日志）、**机器人上下文**（技能目录、MCP 配置）、**模型**（当前模型 + 配置向导）。一次只展开一张卡，窗口保持安静。 |
-| 工具栏 | 高频操作显性化：打开工作区、角色切换、**清空**（窗口记录）、**抓拍**（主机摄像头单帧预览，内置视觉工具）、**朗读**（任务结束后朗读最新回复；无语音引擎时自动禁用）、**联网**（web_fetch/web_search 开关，新会话生效，SSRF 护栏常开）、启动/停止/急停/新对话/设置。 |
+| 侧边栏（折叠卡片） | 四张可折叠卡片，一次只展开一张：**状态**（服务/智能体/运行状态 + 忙碌进度 + 跳转运行日志）、**机器人上下文**（技能目录、MCP 配置、刷新上下文）、**能力**（联网搜索开关、语音朗读开关、摄像头抓拍）、**模型**（当前模型 + 配置向导）。低频能力收进卡片，工具栏保持克制。 |
+| 工具栏 | 只保留高频路径：打开工作区、角色切换/新建/删除、新对话、急停、设置。刷新在机器人上下文卡片（F5），清空/复制对话、命令面板（Ctrl+Shift+P）、会话、记忆、诊断等都在 工具 菜单。 |
 | 文件 tab | Operator-local workspace file manager: a bounded tree (4000 entries, depth 4, dot-directories/venvs/symlinks skipped) with a name filter, inline previews (MT/Lua/SQL/Python highlighting, rendered Markdown, sandboxed HTML, images) and 刷新 / 预览 / 复制路径 / 在系统中打开 / 打开目录 actions. The status line separates file and directory counts. The HTML preview renders in a `QTextBrowser` that never runs JavaScript and never loads local or remote resources. Read-only: nothing is written or executed; writes stay with the agent's approved file tools. |
 | 配置向导（模型组） | Reopens the first-run model setup wizard at any time; the sidebar button sits under the model summary. |
 | 启动 | Starts the dual-agent autonomous loop (`agent.start`). The input above the buttons optionally seeds the first mission goal (`--task` pre-fills it, Enter starts); leaving it empty lets the memory agent propose every goal itself. |
@@ -177,7 +178,7 @@ creating a runtime home.
 | Setting | Effect |
 | --- | --- |
 | File and Shell tools | Enabled automatically for the selected workspace, including file writes; calls run without approval. Shell uses the configured sandbox; with prompt protection enabled (the default) it refuses execution when bubblewrap is unusable or the sandbox is `off`, while disabling prompt protection allows the workspace-jail fallback. |
-| Web tools | Controlled by the toolbar 联网 toggle (on by default, saved as a preference). `web_fetch` is enabled whenever the toggle is on; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval while the toggle is on. |
+| Web tools | Controlled by the sidebar 能力 card's 联网搜索 toggle (on by default, saved as a preference). `web_fetch` is enabled whenever the toggle is on; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval while the toggle is on. |
 | MCP tools | Every tool exposed by the configured `mcpServers` file runs without approval. |
 | Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only the documented CLI of a trusted skill (a legacy `skill.json` action or a top-level `scripts/*.py` command) can run. |
 | Prompt updates and skill installation | Still ask for dedicated per-call approval; ordinary tool grants do not cover them. Camera capture is a built-in tool and runs without approval. |

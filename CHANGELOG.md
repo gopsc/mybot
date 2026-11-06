@@ -145,6 +145,16 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The toolbar 联网 toggle now starts from the saved preference instead of
   forcing web on at every launch, and camera probing/capture runs off the UI
   thread so a slow device never freezes the window.
+- The toolbar now keeps only the daily path (workspace, role, 新对话, 急停,
+  设置). The sidebar gained a fourth **能力** card holding the 联网搜索 /
+  语音朗读 toggles and 摄像头抓拍, the robot-context card hosts 刷新上下文,
+  and the 管理 menu — a near-copy of 工具 — was removed. Collapsible cards
+  carry the low-frequency controls so the window stays scannable.
+- CI was consolidated for the development stage: one full pytest run with all
+  extras, one base-install run (agent tests skip themselves, catching hidden
+  hard dependencies), one Windows run, plus lint / macOS / wheel / quickstart /
+  docker smokes. The duplicated agent job and the four-Python matrix are gone;
+  the full suite no longer executes six times per push.
 - 启动 now accepts an optional initial goal (回车即启动)；留空时仍由记忆体
   自拟目标。The 文件 tab previews Markdown rendered, adds 复制路径 and reports
   file/directory counts separately.
@@ -299,6 +309,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- CI on gui-mybot is green again. Four tests imported `langchain` without the
+  repo's `pytest.importorskip` guard and failed every base-install job; the
+  camera notice now names the camera (`摄像头不可用：…`) when enumeration fails
+  on hosts without the camera extra; and a prompt-escaping test that requires a
+  newline inside a filename skips on NTFS instead of failing.
 - Launching the GUI without `--intent`, `--sandbox`, `--context-bytes` or
   `--timeout` no longer resets those saved preferences to the parser defaults;
   the flags are overrides now, and a regression test pins the behaviour.
