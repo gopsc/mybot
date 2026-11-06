@@ -178,7 +178,7 @@ creating a runtime home.
 | Setting | Effect |
 | --- | --- |
 | File and Shell tools | Enabled automatically for the selected workspace, including file writes; calls run without approval. Shell uses the configured sandbox; with prompt protection enabled (the default) it refuses execution when bubblewrap is unusable or the sandbox is `off`, while disabling prompt protection allows the workspace-jail fallback. |
-| Web tools | Controlled by the toolbar 联网 toggle (on by default, saved as a preference). `web_fetch` is enabled whenever the toggle is on; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval while the toggle is on. |
+| Web tools | Controlled by the sidebar 能力 card's 联网搜索 toggle (on by default, saved as a preference). `web_fetch` is enabled whenever the toggle is on; `web_search` additionally needs the SearXNG endpoint under 高级. Calls run without approval while the toggle is on. |
 | MCP tools | Every tool exposed by the configured `mcpServers` file runs without approval. |
 | Skill 执行 | Trusted skills run without approval, including physical hardware access; path/parameter/output/timeout limits and skill-directory write protection are removed. Only the documented CLI of a trusted skill (a legacy `skill.json` action or a top-level `scripts/*.py` command) can run. |
 | Prompt updates and skill installation | Still ask for dedicated per-call approval; ordinary tool grants do not cover them. Camera capture is a built-in tool and runs without approval. |
