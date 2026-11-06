@@ -75,7 +75,10 @@ class GuiConfig:
     intent_mode: str = "off"
     sandbox_mode: str = "auto"
     protect_prompts: bool = True
-    enable_web: bool = False
+    # GUI defaults to web enabled (same philosophy as other tools: enabled and
+    # pre-approved, with the SSRF guards always on); the toolbar toggle flips
+    # enable_web for future sessions while allow_web stays runtime-only below.
+    enable_web: bool = True
     search_endpoint: str = ""
     session_log: bool = True
     # First-run model wizard: shown once, then remembered (even when skipped).

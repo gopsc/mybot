@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 
 from PySide6.QtCore import (QEasingCurve, QFileSystemWatcher, QPropertyAnimation, QRunnable,
                             QThreadPool, QTimer, QUrl, Signal)
@@ -1506,6 +1507,62 @@ def _likely_text(sample):
         return False
     control = sum(1 for byte in sample if byte < 9 or 11 <= byte <= 12 or 14 <= byte <= 31)
     return control / len(sample) < 0.05
+
+
+class SnapshotDialog(QDialog):
+    """Preview one camera snapshot; saving is an explicit operator action."""
+
+    def __init__(self, parent, pixmap, *, workspace="", width=None, height=None):
+        super().__init__(parent)
+        apply_theme(self)
+        self.setWindowTitle("摄像头抓拍")
+        self.setModal(True)
+        self.resize(720, 560)
+        self.pixmap = pixmap
+        self.workspace = Path(workspace).absolute() if workspace else None
+        layout = QVBoxLayout(self)
+        info = (f"{pixmap.width()}×{pixmap.height()}" if pixmap.width() else "")
+        if width and height:
+            info += f"（传感器 {width}×{height}）"
+        label = QLabel(f"抓拍成功 {info}".strip())
+        label.setObjectName("secondaryText")
+        layout.addWidget(label)
+        view = QLabel()
+        view.setPixmap(pixmap.scaled(680, 420, Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation))
+        view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(view, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        save = QPushButton("保存到工作区")
+        save.setProperty("role", "primary")
+        save.clicked.connect(self.save_snapshot)
+        buttons.addWidget(save)
+        copy = QPushButton("复制到剪贴板")
+        copy.clicked.connect(self.copy_snapshot)
+        buttons.addWidget(copy)
+        close = QPushButton("关闭")
+        close.clicked.connect(self.accept)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+        self.status = _label("", secondary=True)
+        layout.addWidget(self.status)
+
+    def save_snapshot(self):
+        if self.workspace is None:
+            self.status.setText("未设置工作区，无法保存")
+            return
+        target = self.workspace / "snapshots"
+        target.mkdir(parents=True, exist_ok=True)
+        path = target / time.strftime("snapshot-%Y%m%d-%H%M%S.jpg")
+        if not self.pixmap.save(str(path), "JPG", 92):
+            self.status.setText(f"保存失败：{path}")
+            return
+        self.status.setText(f"已保存：{path}")
+
+    def copy_snapshot(self):
+        QApplication.clipboard().setPixmap(self.pixmap)
+        self.status.setText("已复制到剪贴板")
 
 
 class ResourcePanel(QWidget):

@@ -493,8 +493,9 @@ def test_cli_runs_the_team_by_default(tmp_path, monkeypatch, capsys):
         return ModelResponse(parts=[TextPart("执行完毕")])
 
     role = create_role("team-role")
-    monkeypatch.setattr(agent_module, "RobotExecutor", Executor)
-    monkeypatch.setattr(agent_module, "create_model", lambda config: (FunctionModel(respond), Client()))
+    from pymybot import agent_cli
+    monkeypatch.setattr(agent_cli, "RobotExecutor", Executor)
+    monkeypatch.setattr(agent_cli, "create_model", lambda config: (FunctionModel(respond), Client()))
 
     code = cli.main(["--no-gui", "--role", role.name, "--task", "检查继电器"])
     payload = json.loads(capsys.readouterr().out)

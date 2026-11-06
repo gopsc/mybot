@@ -134,7 +134,7 @@ def main():
     grab(splash, out, "gui-splash.png")
     splash.close()
 
-    config = GuiConfig(workspace=str(workspace), robot=str(workspace / "robot.sql"))
+    config = GuiConfig(workspace=str(workspace), model_setup_done=True)
     window = gui_app.App(config, home / "settings.json")
     try:
         wait_for(lambda: window.serve is not None, application, arguments.timeout,

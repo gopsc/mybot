@@ -276,11 +276,13 @@ def test_config_cli_and_gui_surfaces(tmp_path):
         AgentConfig(allow_web=True)
     with pytest.raises(AgentConfigurationError):
         AgentConfig(enable_web=True, search_endpoint="http://example.com")
-    args = parse_args(["agent", "--robot", "x.sql", "--task", "hi", "--role", "demo", "--web",
+    args = parse_args(["agent", "--task", "hi", "--role", "demo", "--web",
                        "--allow-web", "--search-endpoint", "https://searx.example"])
     assert args.web and args.allow_web and args.search_endpoint.endswith("searx.example")
     with pytest.raises(UsageError):
-        parse_args(["agent", "--robot", "x.sql", "--task", "hi", "--role", "demo", "--allow-web"])
+        parse_args(["agent", "--task", "hi", "--role", "demo", "--allow-web"])
+    with pytest.raises(UsageError):
+        parse_args(["agent", "--task", "hi", "--role", "demo", "--robot", "x.sql"])
     gui = parse_args(["gui", "--web", "--search-endpoint", "https://searx.example"])
     assert gui.web and gui.search_endpoint.endswith("searx.example")
     path = tmp_path / "settings.json"

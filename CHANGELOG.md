@@ -8,8 +8,56 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- GUI polish round: the sidebar is now **collapsible cards** (状态 / 机器人上下文
+  / 模型 — one open at a time, with a status card that jumps to the log); the
+  toolbar surfaces high-frequency actions — **清空**（窗口记录）、**抓拍**
+  （built-in vision: one host-camera JPEG with a save-to-workspace preview
+  dialog）、**朗读**（Qt text-to-speech reads the latest reply when a mission
+  ends; gracefully disabled without an engine）and a **联网** toggle for
+  web_fetch/web_search (guards always on, effective for new sessions).
+- Merged the upstream `dev/qing` work: the bundled **skillhub-store** skill,
+  Chinese prompt layers with operator-authored extra layers (`NNN_name.md`),
+  role creation copying every bundled skill, the agent running as a
+  general-purpose robot device without a GUI-configured structure, and the
+  memory agent preferring physical goals over file inventorying.
 - GUI **workspace file manager** (`文件` tab): a bounded, read-only tree of the
   operator workspace (dot-directories, venvs and symlinks skipped) with a name
+  filter and inline previews — MT/Lua/SQL/Python keyword highlighting,
+  Markdown, sandboxed HTML (a `QTextBrowser` that never runs JavaScript and
+  never loads local or remote resources) and images. 刷新 / 预览 /
+  在系统中打开 / 打开目录 stay operator-local; writes remain with the agent's
+  approved file tools. The tree follows workspace and role changes.
+- GUI **model setup wizard** is reachable anytime from the sidebar 配置向导
+  button (the first-run dialog keeps its once-and-remembered behaviour).
+- `tools/gui_screenshots.py` regenerates every screenshot under
+  `docs/screenshots` from the real window against the real serve backend
+  (offscreen, disposable demo workspace); README and the GUI guide embed the
+  regenerated images.
+- **Multi-robot named sessions in `serve`**: `session.activate` accepts an
+  optional `session` name, and `run` / `apply-sql` / `sample` /
+  `session.abort` / `session.deactivate` address one named session. Each
+  session owns its robot, owner thread, busy state and hot-SQL lifetime, so a
+  long action on one robot never blocks a sample on another; the agent
+  conversation stays mutually exclusive with every session. `session.status`
+  reports every active session, and an unnamed `session.deactivate` /
+  `session.abort` tears them all down (back-compat default behaviour).
+- **Pluggable model providers**: `pymybot.agent.register_provider(name,
+  key_env=..., base_url=..., build=...)` adds OpenAI-compatible endpoints that
+  reuse the hardened built-in HTTP path (no duplicated transport code), or
+  accepts a custom builder. Packages can register providers through a
+  `pymybot.model_providers` entry point; broken plugins surface their error
+  only when that provider is requested.
+- `pymybot discover [--buses i2c,spi,uart,ftdi] [--probe]`: read-only host
+  device enumeration. I2C/SPI/UART reuse the bundled `Dev_enum` driver, FTDI
+  USB adapters are listed via pyftdi as HAL-ready `ftdi://` URLs, and `hints`
+  map every found device to the structure SQL that declares it. `--probe`
+  briefly opens real UART ports to report in-use state without writing.
+- GUI first-run model setup wizard: guided provider/model/endpoint/key-variable
+  choice shown once when no model is configured (no shared key, no hidden
+  default — only the variable name is stored), remembered after save or skip.
+- `web_search` configuration errors now name the fix: 404 (endpoint must be
+  the SearXNG base URL), 403 / non-JSON bodies (enable the `json` format in
+  `settings.yml` or use a private instance) and unreachable endpoints.
 - Role prompt libraries load operator-authored extra layers: any `NNN_name.md`
   file in `~/.mybot/roles/<name>/prompts` (001–099, reserved numbers rejected)
   joins the composed prompt in numeric order, so `011_robot.md` sits between

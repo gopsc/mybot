@@ -1820,3 +1820,66 @@ def test_window_files_tab_tracks_the_workspace(ui):
     # Toolbar buttons exist: filter, refresh, preview, open, folder.
     assert app.files.filter.placeholderText()
     assert app.files.open_folder is not None
+
+
+# -- toolbar toggles, status card, snapshot ----------------------------------
+def test_toolbar_toggles_wire_config_and_agent_params(ui, tmp_path):
+    gui, app = ui
+    # The sidebar became a collapsible card set with a status card.
+    assert app.side_box.itemText(0) == "状态"
+    assert app.side_box.itemText(1) == "机器人上下文"
+    assert app.side_box.itemText(2) == "模型"
+    assert "服务：" in app.status_card.text()
+
+    # GUI defaults to web enabled (guards always on); the toggle flips it.
+    assert app.web_button.isChecked() is True
+    app.web_button.setChecked(False)
+    assert app.cfg.enable_web is False and app._agent_params()["enableWeb"] is False
+    app.web_button.setChecked(True)
+    assert app.cfg.enable_web is True and app.cfg.allow_web is True
+    params = app._agent_params()
+    assert params["enableWeb"] is True and params["allowWeb"] is True
+
+
+def test_speech_toggle_degrades_without_an_engine(ui, monkeypatch):
+    gui, app = ui
+
+    class NoEngine:
+        available = False
+
+        def say(self, text):
+            return False
+
+        def stop(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(app, "speaker", NoEngine())
+    app.speech_button.setEnabled(True)
+    app.speech_button.setChecked(True)  # toggle_speech refuses and unchecks
+    assert app.speech_button.isChecked() is False
+    assert app.speech_enabled is False
+    assert "文本转语音" in app.status_notice.text()
+
+
+def test_capture_snapshot_reports_missing_camera(ui):
+    gui, app = ui
+    app.capture_snapshot()  # No /dev/video* devices in CI; must degrade to a notice.
+    assert "摄像头" in app.status_notice.text()
+
+
+def test_snapshot_dialog_saves_into_the_workspace(qapp, tmp_path):
+    from PySide6.QtGui import QColor, QPixmap
+    from pymybot.gui.dialogs import SnapshotDialog
+
+    pixmap = QPixmap(16, 12)
+    pixmap.fill(QColor("red"))
+    dialog = SnapshotDialog(None, pixmap, workspace=str(tmp_path))
+    dialog.save_snapshot()
+    saved = list((tmp_path / "snapshots").glob("snapshot-*.jpg"))
+    assert len(saved) == 1 and saved[0].stat().st_size > 0
+    assert "已保存" in dialog.status.text()
+    dialog.copy_snapshot()
+    assert "剪贴板" in dialog.status.text()
