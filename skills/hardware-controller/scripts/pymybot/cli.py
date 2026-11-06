@@ -232,7 +232,7 @@ def parser():
                                  help="disable automatic host-generated prompt statistics")
         if name == "gui":
             # The window is always agent-centric: no agent/controller mode switch.
-            command.add_argument("--task", help="pre-fill the prompt box (not sent automatically)")
+            command.add_argument("--task", help="pre-fill the optional initial goal (not sent until 启动)")
             command.add_argument("--no-splash", action="store_true",
                                  help="skip the entry screen and open the main window immediately")
             command.add_argument("--workspace-dir", metavar="DIR", help="workspace root (default: current directory)")
@@ -250,21 +250,23 @@ def parser():
                                  help="allow direct hardware; trusted skills always receive hardware access")
             command.add_argument("--prompt-file", metavar="FILE",
                                  help="additional operator prompt/profile (UTF-8, max 8 KiB); does not replace runtime USER")
-            command.add_argument("--context-bytes", type=bounded_int(0, 64 * 1024), default=4 * 1024,
-                                 help="bounded project-context budget; 0 disables it (default: 4096)")
+            # Values default to None so an omitted flag never overwrites the
+            # operator's saved preference; the config owns the real defaults.
+            command.add_argument("--context-bytes", type=bounded_int(0, 64 * 1024), default=None,
+                                 help="bounded project-context budget override; 0 disables it (default: saved, 4096)")
             command.add_argument("--intent", choices=("auto", "off", "chat", "inspect", "control",
-                                                      "author", "diagnose"), default="auto",
-                                 help="intent routing: auto restricts tools by the request; off disables it")
-            command.add_argument("--sandbox", choices=("off", "auto", "bwrap"), default="auto",
-                                 help="shell sandbox: protected prompts require usable bubblewrap; off blocks agent shell")
+                                                      "author", "diagnose"), default=None,
+                                 help="intent routing override (default: saved, auto)")
+            command.add_argument("--sandbox", choices=("off", "auto", "bwrap"), default=None,
+                                 help="shell sandbox override (default: saved, auto)")
             command.add_argument("--web", action="store_true",
                                  help="enable web_fetch and (with --search-endpoint) web_search; needs pymybot[web]")
             command.add_argument("--allow-web", action="store_true",
                                  help="preapprove web requests; requires --web")
             command.add_argument("--search-endpoint", metavar="URL",
                                  help="SearXNG base URL for web_search; requires --web")
-            command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
-                                 help="provider/MCP/network timeout; Agent turns have no wall-clock limit (default: 180)")
+            command.add_argument("--timeout", type=positive_timeout, default=None, metavar="SECONDS",
+                                 help="provider/MCP/network timeout override (default: saved, 180)")
             continue
         if name == "mcp":
             command.add_argument("--robot", required=True, metavar="FILE",

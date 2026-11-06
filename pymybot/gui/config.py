@@ -176,6 +176,16 @@ class GuiConfig:
             return cls()
 
 
+def absolute_path(path, root):
+    """Resolve an operator path against ``root``; empty values stay empty."""
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    candidate = Path(text)
+    return str(candidate if candidate.is_absolute()
+               else Path(root or ".").absolute() / candidate)
+
+
 def default_workspace():
     """The GUI starts in the directory it was launched from."""
     try:

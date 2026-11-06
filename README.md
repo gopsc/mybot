@@ -40,6 +40,7 @@ Agent 默认拆成两个互相说话的智能体：**记忆体**只做规划与�
 
 ```sh
 # 点 GUI 的「启动」，或在终端启动：记忆体自拟目标，执行体动手
+# （GUI 上方可选填一个初始目标；留空即由记忆体自拟）
 pymybot agent --role technician
 pymybot agent --role technician --max-missions 5    # 可选：限制本轮任务数
 ```

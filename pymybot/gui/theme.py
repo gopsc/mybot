@@ -55,6 +55,8 @@ QPushButton, QToolButton {
 }
 QPushButton:hover, QToolButton:hover { background: #f1f5f9; border-color: #94a3b8; }
 QPushButton:pressed, QToolButton:pressed { background: #e2e8f0; }
+QToolButton:checked { background: #dbeafe; color: #1e40af; border-color: #2563eb; }
+QToolButton:checked:hover { background: #bfdbfe; border-color: #1d4ed8; }
 QPushButton:default, QPushButton:focus, QToolButton:focus { border-color: #2563eb; }
 QPushButton[role="primary"] { background: #2563eb; color: #ffffff; border-color: #2563eb; }
 QPushButton[role="primary"]:hover { background: #1d4ed8; border-color: #1d4ed8; }

@@ -131,9 +131,24 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The bundled prompt layers are now written in Chinese (including the runtime
   STATS and the safety suffix); identifiers stay in English inside backticks so
   a Markdown formatter cannot escape them. Layers 0/100 trust hashes moved with
   the manifest, so existing runtime copies must be refreshed or restored.
+- GUI maintainability pass: the window module (`gui/app.py`) no longer carries
+  its own copies of the spacing helpers or the approval/settings dialogs —
+  shared widgets live in `gui/widgets.py`, `ToolDialog` / `SettingsDialog` in
+  `gui/settings.py`, the prompt editor in `gui/prompts_panel.py`, and the
+  workspace browser/snapshot preview in `gui/files.py`; path/config sanitising
+  stays in `gui/config.py`. Behaviour is unchanged; the modules now have one
+  owner each.
+- The toolbar 联网 toggle now starts from the saved preference instead of
+  forcing web on at every launch, and camera probing/capture runs off the UI
+  thread so a slow device never freezes the window.
+- 启动 now accepts an optional initial goal (回车即启动)；留空时仍由记忆体
+  自拟目标。The 文件 tab previews Markdown rendered, adds 复制路径 and reports
+  file/directory counts separately.
+- 文件 menu gains Ctrl+N (新对话); docs/gui.md、README 和 CHANGELOG 同步更新。
 - The bundled core prompt tells the agent to start from the physical interface
   — cameras, buses, serial devices and the skill's hardware commands — and to
   treat files and shell as supporting tools, rather than exploring a directory
@@ -284,6 +299,17 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Launching the GUI without `--intent`, `--sandbox`, `--context-bytes` or
+  `--timeout` no longer resets those saved preferences to the parser defaults;
+  the flags are overrides now, and a regression test pins the behaviour.
+- 朗读 now speaks the actual last assistant segment. The mission-end handler
+  read `_assistant_markdown` after `_chat_line` had already flushed and cleared
+  it, so every mission spoke the generic status sentence instead of the reply.
+- The camera snapshot dialog reports an unwritable workspace as a status line
+  instead of raising out of the Qt slot, and the toolbar 抓拍 button re-enables
+  on every outcome.
+- The 文件 filter no longer keeps empty directories visible when their name does
+  not match, and directory-name matches reveal their hidden children.
 - Switching roles in the GUI now closes the previous role's Agent conversation
   before loading the new transcript, releasing its `.agent.lock` and hardware.
   The toolbar refresh action is disabled during a turn so an F5/refresh cannot

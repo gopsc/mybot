@@ -17,10 +17,11 @@ from PySide6.QtCore import QPoint, Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QDialogButtonBox, QLabel, QMessageBox
 
-from pymybot.gui.app import App, SettingsDialog, ToolDialog
+from pymybot.gui.app import App
 from pymybot.gui.config import GuiConfig, merge_args
-from pymybot.gui.dialogs import PromptPanel
+from pymybot.gui.prompts_panel import PromptPanel
 from pymybot.gui.protocol import ServeClient
+from pymybot.gui.settings import SettingsDialog, ToolDialog
 from pymybot.prompts import MAX_PROMPT_TOTAL, PromptLibrary
 
 ROOT = Path(__file__).resolve().parents[1]
