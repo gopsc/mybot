@@ -12,6 +12,7 @@ pytest.importorskip("langchain")
 from agent_fakes import FunctionModel, ModelResponse, TextPart
 
 from pymybot.agent_contracts import PlanDecision
+from pymybot import agent_team
 from pymybot.agent_memory_store import (MemoryStore, MemoryStoreError, tokenize)
 from pymybot.agent_team import MemoryAgent, Mission, MissionStore, TeamSession, parse_decision
 
@@ -281,6 +282,20 @@ def test_auto_loop_proposes_its_own_first_goal(tmp_path):
     assert goals == ["巡检继电器"]
 
 
+def test_propose_prompt_prefers_physical_goals_over_filesystem_work():
+    """Goal steering belongs to the memory agent, which never sees 010_core.md.
+
+    Its prompt used to offer 工作区维护 as one of four goal categories and never
+    mentioned sensing, so an unattended run with an empty role description picked
+    the cheapest verifiable goal: inventorying the workspace and writing reports.
+    """
+    text = agent_team._PROPOSE_SYSTEM
+    assert "工作区维护" not in text
+    assert "物理世界" in text
+    assert "清点目录" in text
+    assert "不要改用文件任务" in text
+
+
 # -- mission store --------------------------------------------------------
 
 def test_mission_roundtrip_and_next_pending(tmp_path):
@@ -478,8 +493,9 @@ def test_cli_runs_the_team_by_default(tmp_path, monkeypatch, capsys):
         return ModelResponse(parts=[TextPart("执行完毕")])
 
     role = create_role("team-role")
-    monkeypatch.setattr(agent_module, "RobotExecutor", Executor)
-    monkeypatch.setattr(agent_module, "create_model", lambda config: (FunctionModel(respond), Client()))
+    from pymybot import agent_cli
+    monkeypatch.setattr(agent_cli, "RobotExecutor", Executor)
+    monkeypatch.setattr(agent_cli, "create_model", lambda config: (FunctionModel(respond), Client()))
 
     code = cli.main(["--no-gui", "--role", role.name, "--task", "检查继电器"])
     payload = json.loads(capsys.readouterr().out)

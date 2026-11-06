@@ -36,10 +36,25 @@ or `.`, and cannot start with `.`. Role directories and their prompt, skill,
 MCP and history inputs reject links/junctions. On POSIX, created role content
 uses private directory/file permissions.
 
+## Extra prompt layers
+
+A role's `prompts/` directory may also contain operator-authored layers named
+`NNN_name.md` (three-digit number 001–099, lowercase name). They join the
+composed prompt in numeric order — `011_robot.md` sits between core layer 10
+and SOUL layer 97 — and are read-only to the agent: only 10/97/98/99 keep their
+existing ownership and approval rules. Bundled extra layers are seeded into a
+role's prompt directory on first use (never overwriting an edited file), so a
+new role starts with every default layer; the bundled extras are
+`011_robot.md` (摄像头机器人) and `012_skill_store.md` (技能商店). Reserved numbers (0, 10, 97, 98, 99,
+100) and values above 99 are rejected, each extra layer is capped at 64 KiB, and
+the composed prompt stays capped at 128 KiB. The global `~/.mybot/prompts` and
+the bundled defaults keep the fixed six-layer contract; this applies to role
+directories only.
+
 ## CLI
 
 ```sh
-# Empty skills and no MCP, using the bundled prompt baseline
+# Copied with every bundled skill, the bundled prompt baseline and its extra layers
 pymybot roles create technician --description " cautious field technician"
 
 # Import existing skills and an mcpServers JSON at creation time
@@ -49,7 +64,7 @@ pymybot roles create researcher \
 
 pymybot roles list
 pymybot roles show technician
-pymybot agent --role technician --robot skills/hardware-controller/assets/robots/relay-test.sql --task "列出硬件"
+pymybot agent --role technician --task "列出硬件"
 pymybot gui --role technician
 
 # Explicitly erase only this role's resumable model history
@@ -58,7 +73,7 @@ pymybot roles clear-history technician --yes
 # Permanently delete the role directory (prompts, skills, workspace, history)
 pymybot roles delete technician --yes
 
-# Fill missing skill files (entrypoint, scripts, assets) from the bundled skills
+# Fill missing skill files, and add bundled skills the role lacks
 pymybot roles repair technician --yes
 # ... or from a known-complete skills root
 pymybot roles repair technician --skills-dir ./skills --yes

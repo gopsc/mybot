@@ -40,7 +40,7 @@ pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
 原生 `/dev/i2c-*` / `/dev/spidev*`；UART 在 Windows 是 `COMn`，`loop://` 是无硬件回环。
 HTTP/TCP 的回环主机（`127.0.0.1` / `localhost` / `[::1]`）默认可用，其余主机要 `--allow-hardware`。
 
-- 可选依赖（`.[linux]` / Agent 摄像头 `.[camera]`）、设备权限与「检测不到硬件」的排查见 docs/faq.md；
+- 可选依赖（`.[linux]`）、设备权限与「检测不到硬件」的排查见 docs/faq.md；
   Windows 的 faulthandler 与 UTF-8 行为见 docs/testing.md。
 - 指令预算与可取消等待**不能中断阻塞的原生库调用**；进程退出不是物理急停。
 
@@ -61,7 +61,6 @@ HTTP/TCP 的回环主机（`127.0.0.1` / `localhost` / `[::1]`）默认可用，
 | `Host command execution requires explicit --allow-hardware`（Shell build） | Shell 驱动整个能力都要该开关；确认可信后加 `--allow-hardware` |
 | `command timed out after N ms`（Shell call） | 命令超时被击杀；调大 `timeout` 列/参数，或检查命令是否等待输入 |
 | `HTTP path must be relative to the declared base URL` | http_request 的 path 写了绝对/scheme-relative URL |
-| `login failed: HTTP 401 ...`（Qsont build） | user/pass 不对，或服务器不可达（看 status） |
 | `Cannot parse matrix cell ... as Float64` | MT 数据格写了裸文本；文本要写成 `$("...")` |
 | `@Action cell $(...) cannot produce a boolean result` | 参数表达式算出布尔；布尔只用于 `@if/@while` |
 | `expression '==' cannot compare a number with a text` | 跨类型比较；先统一类型 |

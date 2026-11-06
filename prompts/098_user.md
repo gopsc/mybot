@@ -1,18 +1,17 @@
 # USER
 
 此层由智能体自动维护，记录用户偏好和特征。
-内容会随着对话自动更新，无需手动编辑。
+内容随对话自动更新，无需手动编辑。
 
 ---
-# USER (User Profile Layer)
+# USER（用户画像层）
 
-This layer is automatically maintained by the agent. It tracks:
-- **primary_language**: User's preferred language (zh/en)
-- **languages**: Language usage counts
-- **topics**: Topics the user frequently discusses
-- **communication_style**: terse/moderate/verbose
-- **total_messages**: Number of user messages processed
-- **last_active**: Timestamp of last interaction
+本层由智能体自动维护，用于记录：
+- **primary_language**：用户首选语言（zh/en）
+- **languages**：语言使用次数
+- **topics**：用户经常讨论的主题
+- **communication_style**：表达风格（terse/moderate/verbose）
+- **total_messages**：已处理的用户消息数
+- **last_active**：最近一次交互时间
 
-The agent updates this layer after each conversation turn to build
-a persistent user preference profile.
+智能体在每轮对话后更新本层，逐步形成持久的用户偏好画像。

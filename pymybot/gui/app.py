@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import sys
@@ -12,15 +13,17 @@ from pathlib import Path
 from PySide6.QtCore import (QEasingCurve, QEventLoop, QPropertyAnimation, Qt, QTimer,
                             QUrl, Signal)
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics,
-                           QKeySequence, QTextCharFormat, QTextCursor, QTextDocument)
+                           QKeySequence, QPixmap, QTextCharFormat, QTextCursor, QTextDocument)
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QDoubleSpinBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QInputDialog,
     QLabel,
     QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTextBrowser, QToolButton,
+    QScrollArea, QSpinBox, QSplitter, QTabWidget, QTextBrowser, QToolBox, QToolButton,
     QVBoxLayout, QWidget,
 )
+
+logger = logging.getLogger(__name__)
 
 from ..agent_skills import default_skills_root
 from ..paths import asset_path, source_root
@@ -31,7 +34,8 @@ from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
 from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, FilesPanel, McpConfigDialog,
-                      ModelSetupDialog, PreviewDialog, PromptPanel, ResourcePanel, SessionsDialog)
+                      ModelSetupDialog, PreviewDialog, PromptPanel, ResourcePanel,
+                      SessionsDialog, SnapshotDialog)
 from .protocol import CANCELLED, RpcError, ServeClient, resolve_python
 from .splash import SplashScreen
 from .theme import PALETTE, apply_theme as _apply_theme
@@ -64,15 +68,6 @@ def _absolute(path, root):
         return ""
     candidate = Path(text)
     return str(candidate if candidate.is_absolute() else Path(root or ".").absolute() / candidate)
-
-
-def _parse_bindings(text):
-    bindings = {}
-    for line in str(text).splitlines():
-        name, separator, value = line.strip().partition("=")
-        if separator and name.strip().isidentifier():
-            bindings[name.strip()] = value
-    return bindings
 
 
 def _label(text="", *, secondary=False):
@@ -141,6 +136,9 @@ class App(QMainWindow):
         self._lifecycle_workers = []
         self._dialogs = set()
         self.font_mono = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont)
+        from .voice import Speaker
+        self.speaker = Speaker()
+        self.speech_enabled = False
 
         self.setWindowIcon(logo_icon())
         _apply_theme(self)
@@ -159,6 +157,22 @@ class App(QMainWindow):
         self._set_workspace_label(str(Path(self._workspace_root()).absolute()))
         self._start_timer.start(120)
         self._refresh_status()
+        self.web_button.blockSignals(True)
+        # Web tools default to enabled and pre-approved; the toggle flips both
+        # for sessions started afterwards (allow_web stays runtime-only).
+        self.web_button.setChecked(True)
+        self.cfg.enable_web = True
+        self.cfg.allow_web = True
+        self.web_button.blockSignals(False)
+        QTimer.singleShot(600, self._probe_speech)
+
+    def _probe_speech(self):
+        """Probe TTS off the constructor; disable the toggle when unusable."""
+        if self._stopping or self.speech_button.isChecked():
+            return
+        if not self.speaker.available:
+            self.speech_button.setEnabled(False)
+            self.speech_button.setToolTip("本机没有可用的文本转语音引擎")
 
     def maybe_model_setup(self):
         """First-run wizard: offer guided model setup exactly once.
@@ -231,6 +245,24 @@ class App(QMainWindow):
         toolbar.addWidget(self.delete_role_button)
         self.refresh_button = _button("刷新", self.refresh_context)
         toolbar.addWidget(self.refresh_button)
+        self.clear_button = _button("清空", self.clear_chat)
+        self.clear_button.setToolTip("清空窗口记录；模型上下文不受影响")
+        toolbar.addWidget(self.clear_button)
+        self.snapshot_button = _button("抓拍", self.capture_snapshot)
+        self.snapshot_button.setToolTip("用主机摄像头抓拍一张照片并预览（内置视觉工具）")
+        toolbar.addWidget(self.snapshot_button)
+        self.speech_button = QToolButton()
+        self.speech_button.setText("朗读")
+        self.speech_button.setCheckable(True)
+        self.speech_button.setToolTip("朗读助手的最新回复（Qt 文本转语音；不可用时禁用）")
+        self.speech_button.toggled.connect(self.toggle_speech)
+        toolbar.addWidget(self.speech_button)
+        self.web_button = QToolButton()
+        self.web_button.setText("联网")
+        self.web_button.setCheckable(True)
+        self.web_button.setToolTip("开启后智能体获得 web_fetch / web_search（搜索端点在设置中配置）；新会话生效")
+        self.web_button.toggled.connect(self.toggle_web)
+        toolbar.addWidget(self.web_button)
         toolbar.addStretch(1)
         self.manage_button = QToolButton()
         self.manage_button.setText("管理")
@@ -340,10 +372,35 @@ class App(QMainWindow):
             self._sync_files_root()
 
     def _build_side(self, side):
+        """Collapsible card sidebar: status, robot context, model.
+
+        QToolBox keeps one card open at a time so the window stays calm; the
+        status card offers a jump to the log instead of duplicating it.
+        """
         layout = QVBoxLayout(side)
         layout.setContentsMargins(0, 0, 4, 0)
-        layout.setSpacing(12)
-        robot = QGroupBox("机器人上下文")
+        self.side_box = QToolBox(side)
+        self.side_box.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        layout.addWidget(self.side_box)
+
+        status_page = QWidget()
+        status_layout = QVBoxLayout(status_page)
+        status_layout.setContentsMargins(8, 8, 8, 8)
+        self.status_card = QLabel()
+        self.status_card.setWordWrap(True)
+        self.status_card.setTextFormat(Qt.TextFormat.PlainText)
+        status_layout.addWidget(self.status_card)
+        self.busy_progress = QProgressBar()
+        self.busy_progress.setRange(0, 0)
+        self.busy_progress.setTextVisible(False)
+        self.busy_progress.hide()
+        status_layout.addWidget(self.busy_progress)
+        status_layout.addWidget(_button("查看运行日志", lambda: self.notebook.setCurrentWidget(self.log)))
+        status_layout.addWidget(_label("联网与朗读开关在工具栏；搜索端点在设置中配置。", secondary=True))
+        status_layout.addStretch()
+        self.side_box.addItem(status_page, "状态")
+
+        robot = QWidget()
         form = QFormLayout(robot)
         self.context_entries = {}
         fields = (
@@ -368,15 +425,16 @@ class App(QMainWindow):
             "可信技能（run_skill）执行免审批并默认获得硬件权限；只安装你信任的技能。"
             "文件、Shell、联网和 MCP 工具默认开启并免审批；提示词更新仍逐次确认。",
             secondary=True))
-        layout.addWidget(robot)
+        self.side_box.addItem(robot, "机器人上下文")
 
-        model = QGroupBox("模型（在设置中修改）")
+        model = QWidget()
         model_layout = QVBoxLayout(model)
+        model_layout.setContentsMargins(8, 8, 8, 8)
         self.model_label = _label()
         model_layout.addWidget(self.model_label)
         model_layout.addWidget(_button("配置向导", self.open_model_wizard))
-        layout.addWidget(model)
-        layout.addStretch()
+        model_layout.addStretch()
+        self.side_box.addItem(model, "模型")
         self._refresh_model_label()
 
     def _build_chat(self, right):
@@ -465,7 +523,7 @@ class App(QMainWindow):
             try:
                 callback()
             except Exception as exc:
-                print(f"pymybot gui: {type(exc).__name__}: {exc}", file=sys.stderr)
+                logger.error("%s: %s", type(exc).__name__, exc)
 
     def _background(self, fn, done=None, *, lifecycle=False):
         def run():
@@ -612,7 +670,6 @@ class App(QMainWindow):
         if not chosen or self._stopping:
             return
         self.cfg.workspace = chosen
-        self.cfg.robot = ""
         self.refresh_context()
         self._restart_server()
 
@@ -785,9 +842,6 @@ class App(QMainWindow):
             return str(role_path(self.cfg.role) / "workspace")
         return self.cfg.workspace or default_workspace()
 
-    def _robot_path(self):
-        return _absolute(self.cfg.robot, self._workspace_root())
-
     def _scripts_root(self):
         root = self._workspace_root()
         configured = _absolute(self.cfg.scripts_dir, root)
@@ -830,7 +884,7 @@ class App(QMainWindow):
         try:
             client.stop(grace=1)
         except Exception as exc:
-            print(f"pymybot gui: stop failed: {exc}", file=sys.stderr)
+            logger.warning("stop failed: %s", exc)
         finally:
             with self._lifecycle_lock:
                 event.set()
@@ -1027,6 +1081,9 @@ class App(QMainWindow):
             if reason:
                 line += f" · {_brief(reason, 160)}"
             self._chat_line(line, "system")
+            if self.speech_enabled:
+                self.speaker.say(self._assistant_markdown or
+                                 f"任务结束，状态{event.get('status')}。")
         elif kind == "team.propose":
             self._notice(f"记忆体自拟目标：{_brief(event.get('goal'), 80)}", seconds=4)
         elif kind == "team.stopped":
@@ -1074,22 +1131,13 @@ class App(QMainWindow):
         if not self._require_role():
             return
         self._sync_config()
-        scripts = self._scripts_root()
-        if not Path(scripts).is_dir():
-            self._message("脚本目录不存在", f"脚本根目录不存在：\n{scripts}")
-            return
-        robot = self._robot_path()
-        if robot and not Path(robot).is_file():
-            # Older GUI configs may keep a structure path that no longer exists;
-            # the autonomous agent can still use file, skill and web tools.
-            self._notice(f"结构文件不存在，已跳过：{_brief(robot, 80)}", seconds=10)
-            robot = ""
         client, generation = self.serve, self.generation
         if self._stopping or client is None or self.busy:
             return
         try:
             from ..prompts import PromptLibrary
-            library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None)
+            library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None,
+                                extra_layers=bool(self.cfg.role))
             library.ensure_home()
             library.compose()
         except Exception as exc:
@@ -1098,7 +1146,7 @@ class App(QMainWindow):
                           "检查，必要时明确确认「恢复全部默认」修复后再启动。")
             return
         try:
-            ident, future = client.start_request("agent.start", self._agent_params(robot=robot))
+            ident, future = client.start_request("agent.start", self._agent_params())
         except RpcError as exc:
             self._chat_line(str(exc), "error")
             return
@@ -1157,17 +1205,17 @@ class App(QMainWindow):
             self._chat_line("[已停止] 自主循环结束。", "system")
         self._set_busy(False)
 
-    def _agent_params(self, robot=None):
+    def _agent_params(self):
+        """Agent parameters; hardware structures belong to the skill, not the GUI.
+
+        The controller runtime and its ``robots/`` live in the hardware-controller
+        skill, so an agent conversation never loads a structure of its own.
+        """
         workspace = self._workspace_root()
         params = {
             "role": self.cfg.role or None,
-            "robot": self._robot_path() if robot is None else robot,
-            "scriptsDir": self._scripts_root(),
             "skillsDir": "" if self.cfg.role else self._skills_root(),
             "mcpConfig": "" if self.cfg.role else self._mcp_root(),
-            "vars": self.cfg.vars or None,
-            "allowActions": bool(self.cfg.allow_actions),
-            "allowHardware": True,
             "allowMcpTools": True,
             "allowShell": True,
             "workspaceDir": workspace,
@@ -1191,10 +1239,11 @@ class App(QMainWindow):
             "intent": self.cfg.intent_mode,
             "sandbox": self.cfg.sandbox_mode,
             "protectPrompts": self.cfg.protect_prompts,
-            "enableWeb": True,
-            "allowWeb": True,
+            # Web access follows the sidebar toggle; the SearXNG endpoint lives
+            # in settings (empty endpoint means fetch-only).
+            "enableWeb": bool(self.cfg.enable_web),
+            "allowWeb": bool(self.cfg.allow_web),
             "searchEndpoint": self.cfg.search_endpoint,
-            "modulePaths": self._module_paths(),
         }
         for key, name in (("model", "model"), ("baseUrl", "base_url"), ("apiKeyEnv", "api_key_env")):
             value = getattr(self.cfg, name)
@@ -1208,6 +1257,52 @@ class App(QMainWindow):
 
     def stop_turn(self):
         self.stop_autonomy()
+
+    def toggle_speech(self, checked):
+        """Read the latest assistant reply aloud whenever a turn finishes."""
+        self.speech_enabled = bool(checked)
+        if not checked:
+            self.speaker.stop()
+            return
+        if not self.speaker.available:
+            self.speech_button.setChecked(False)
+            self._notice("本机没有可用的文本转语音引擎，朗读不可用")
+            return
+        self._notice("朗读已开启；回复完成后自动播报")
+
+    def toggle_web(self, checked):
+        self.cfg.enable_web = bool(checked)
+        self.cfg.allow_web = bool(checked)
+        self._save()
+        self._notice("联网已开启，新会话生效；SearXNG 搜索端点在设置中配置"
+                     if checked else "联网已关闭，新会话生效")
+
+    def capture_snapshot(self):
+        """Built-in vision: grab one JPEG from a host camera and preview it."""
+        if self.busy:
+            self._notice("执行中不能抓拍；先停止当前这一轮")
+            return
+        from ..camera import CameraError, CameraService
+        try:
+            service = CameraService()
+            cameras = service.list_cameras().get("cameras") or []
+            if not cameras:
+                self._notice("未发现可用摄像头")
+                return
+            result = service.capture(cameras[0].get("index", 0))
+            data = result.get("data") or b""
+        except CameraError as exc:
+            self._notice(f"摄像头不可用：{exc}")
+            return
+        except Exception as exc:
+            self._notice(f"抓拍失败：{type(exc).__name__}")
+            return
+        pixmap = QPixmap()
+        if not data or not pixmap.loadFromData(data):
+            self._notice("抓拍返回了无效图像")
+            return
+        self._exec_dialog(SnapshotDialog(self, pixmap, workspace=self._workspace_root(),
+                                         width=result.get("width"), height=result.get("height")))
 
     def abort_all(self):
         """Best-effort stop; no confirmation so it remains usable in a hurry."""
@@ -1429,7 +1524,7 @@ class App(QMainWindow):
         workspace = self._workspace_root()
         dialog = CommandDialog(
             self, python=resolve_python(workspace, self.cfg.python), cwd=workspace,
-            robot=self._robot_path(), module_paths=self._module_paths(),
+            module_paths=self._module_paths(),
             scripts_dir=self._scripts_root(), timeout=self.cfg.timeout,
             confirm=lambda title, text: self._message(title, text, confirm=True))
         self._exec_dialog(dialog)
@@ -1476,7 +1571,8 @@ class App(QMainWindow):
                 if not isinstance(diff, str):
                     from difflib import unified_diff
                     from ..prompts import PromptLibrary
-                    library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None)
+                    library = PromptLibrary(home=role_path(self.cfg.role) / "prompts" if self.cfg.role else None,
+                                extra_layers=bool(self.cfg.role))
                     library.ensure_home()
                     before = library.read(data["layer"])
                     diff = "".join(unified_diff(
@@ -1532,7 +1628,7 @@ class App(QMainWindow):
             self.cfg.store(self.config_path)
         except OSError as exc:
             reason = f"设置保存失败（{self.config_path}）：{exc}"
-            print(f"pymybot gui: {reason}", file=sys.stderr)
+            logger.error("%s", reason)
             self._log(f"[gui] {reason}\n")
             self._notice("配置写入失败，详见日志")
             return False
@@ -1550,6 +1646,9 @@ class App(QMainWindow):
             flags.extend(("技能默认硬件", "工具免审批"))
         busy = "执行中…" if self.busy else "空闲"
         self.status_busy.setText(busy + ("（" + "、".join(flags) + "）" if flags else ""))
+        card = getattr(self, "status_card", None)
+        if card is not None:
+            card.setText(f"服务：{self.serve_state}\n{agent}\n运行：{busy}")
         self.start_button.setEnabled(not self.busy and not self._stopping)
         self.stop_button.setEnabled(self.busy)
         self.abort_button.setEnabled(self.serve is not None)
@@ -1580,6 +1679,7 @@ class App(QMainWindow):
         self._start_timer.stop()
         self._notice_timer.stop()
         self._pump_timer.stop()
+        self.speaker.shutdown()
         for dialog in tuple(self._dialogs):
             dialog.reject()
         for client in clients:
@@ -1752,7 +1852,6 @@ class SettingsDialog(QDialog):
                     browse_file=True, caption="选择操作者指导文件",
                     file_filter="Markdown/文本 (*.md *.txt);;所有文件 (*)")
         self._field(advanced_form, cfg, "search_endpoint", "SearXNG 搜索端点（留空仅抓取）")
-        self._field(advanced_form, cfg, "vars", "变量覆盖（NAME=VALUE，每行一个，仅本次运行）", kind="lines")
         advanced_form.addRow(_label(f"配置文件：{config_path or '（默认位置）'}", secondary=True))
         tabs.addTab(advanced, "高级 / MCP")
         self._bind_role_paths()
@@ -1760,6 +1859,7 @@ class SettingsDialog(QDialog):
         self.prompts = PromptPanel(
             self, auto_stats=cfg.auto_stats,
             home=role_path(cfg.role) / "prompts" if cfg.role else None,
+            extra_layers=bool(cfg.role),
             operator_path=lambda: _absolute(self.entries["prompt_file"].text(),
                                             self.entries["workspace"].text() or self._workspace))
         tabs.addTab(self.prompts, "提示词")
@@ -1835,10 +1935,7 @@ class SettingsDialog(QDialog):
         for name, widget in self.entries.items():
             if self._role and name in {"workspace", "skills_dir", "mcp_config"}:
                 continue
-            if name == "vars":
-                values[name] = _parse_bindings(widget.toPlainText())
-            else:
-                values[name] = widget.text().strip()
+            values[name] = widget.text().strip()
         values.update(max_history_bytes=max(64, self.history_bytes.value()) * 1024,
                       max_context_tokens=(self.max_context_tokens.value()
                                           if self.max_context_enabled.isChecked() else None),

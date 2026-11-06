@@ -42,24 +42,12 @@ def _key_env(value):
     return text if text.isidentifier() else ""
 
 
-def _bindings(value, cap=64):
-    if not isinstance(value, dict):
-        return {}
-    checked = {}
-    for name, text in list(value.items())[:cap]:
-        if (isinstance(name, str) and name.isidentifier()
-                and isinstance(text, str) and len(text) <= MAX_TEXT and "\x00" not in text):
-            checked[name] = text
-    return checked
-
-
 @dataclass
 class GuiConfig:
     """Everything the window needs; CLI flags override the stored values."""
 
     workspace: str = ""
     python: str = ""
-    robot: str = ""
     role: str = ""
     task: str = ""
     scripts_dir: str = ""
@@ -69,7 +57,6 @@ class GuiConfig:
     model: str = ""
     base_url: str = ""
     api_key_env: str = ""
-    vars: dict[str, str] = field(default_factory=dict)
     timeout: float = 180.0
     max_history_bytes: int = 4 * 1024 * 1024
     max_context_tokens: int | None = None
@@ -88,7 +75,10 @@ class GuiConfig:
     intent_mode: str = "off"
     sandbox_mode: str = "auto"
     protect_prompts: bool = True
-    enable_web: bool = False
+    # GUI defaults to web enabled (same philosophy as other tools: enabled and
+    # pre-approved, with the SSRF guards always on); the toolbar toggle flips
+    # enable_web for future sessions while allow_web stays runtime-only below.
+    enable_web: bool = True
     search_endpoint: str = ""
     session_log: bool = True
     # First-run model wizard: shown once, then remembered (even when skipped).
@@ -107,7 +97,6 @@ class GuiConfig:
         return GuiConfig(
             workspace=_text(self.workspace),
             python=_text(self.python),
-            robot=_text(self.robot),
             role=_text(self.role, 64),
             task=_text(self.task, 16 * 1024),
             scripts_dir=_text(self.scripts_dir),
@@ -117,7 +106,6 @@ class GuiConfig:
             model=_text(self.model, 1024),
             base_url=_text(self.base_url, 2048),
             api_key_env=_key_env(self.api_key_env),
-            vars=_bindings(self.vars),
             timeout=self.timeout if isinstance(self.timeout, (int, float)) and 0 < self.timeout <= 3600 else 180.0,
             max_history_bytes=(self.max_history_bytes if isinstance(self.max_history_bytes, int)
                                and 64 * 1024 <= self.max_history_bytes <= 64 * 1024 * 1024
@@ -166,10 +154,9 @@ class GuiConfig:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = asdict(self.sanitized())
-        # A one-shot prompt hint, per-launch approvals and variable values are not
-        # preferences; variable values may hold credentials, so they never reach disk.
+        # A one-shot prompt hint and per-launch approvals are not preferences.
         for key in ("task", "allow_hardware", "allow_actions", "allow_file_writes",
-                    "allow_mcp_tools", "allow_web", "vars"):
+                    "allow_mcp_tools", "allow_web"):
             data.pop(key, None)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
@@ -201,7 +188,6 @@ def merge_args(cfg, args):
     """Apply explicit CLI flags on top of the stored configuration."""
     overrides = {
         "workspace": getattr(args, "workspace_dir", None),
-        "robot": getattr(args, "robot", None),
         "role": getattr(args, "role", None),
         "task": getattr(args, "task", None),
         "scripts_dir": getattr(args, "scripts_dir", None),

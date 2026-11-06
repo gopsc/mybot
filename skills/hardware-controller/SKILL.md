@@ -9,11 +9,19 @@ description: 通过自包含的 pymybot Runtime 控制与编程机器人：Struc
 
 ## 1. 入口
 
+先安装 Runtime 依赖（核心依赖必装；`mcp`/`agent`/`gui` 等可选依赖在文件内以注释列出，按需取消注释）：
+
+```sh
+pip install -r scripts/requirements.txt
+```
+
+安装后跑一次 `doctor`（见 3.1）确认环境就绪。
+
 三种入口共享同一套 Runtime，不要复制或另建控制器实现：
 
 ```sh
 # 仓库根目录：自包含入口（本技能推荐）
-python skills/hardware-controller/scripts/hardware_controller.py <command> [options]
+python scripts/hardware_controller.py <command> [options]
 
 # 兼容入口：同一 Runtime
 python -m pymybot <command> [options]
@@ -63,10 +71,10 @@ MCP 入口见第 5 节。
 检查解释器、依赖、Lua 运行时、默认资产目录和 prompt manifest。没有硬件也可以运行。
 
 ```sh
-python skills/hardware-controller/scripts/hardware_controller.py doctor
+python scripts/hardware_controller.py doctor
 ```
 
-报告缺依赖或资产时先修环境，不要继续 `run`。
+报告缺依赖或资产时先修环境（依赖清单见 `scripts/requirements.txt`），不要继续 `run`。
 
 ### 3.2 `scripts` / `hardware` / `query`
 
@@ -168,7 +176,6 @@ python skills/hardware-controller/scripts/hardware_controller.py doctor
 - 优先复用 HAL、`context.call()` 和 `context.check()`，不要用临时 I/O 绕过权限、预算、句柄所有权或清理。
 - I2C、SPI、UART、TCP、HTTP、Shell 的普通表 driver 使用 Python；其他传感器 Lua driver、共享 Lua 库和 Lua Daemon 保持 Lua。
 - Python/Lua driver 都是可信进程内代码，不是沙箱。`check` 只编译 Python 源码，不执行导入、构造器或生命周期方法。
-- 摄像头不属于控制器：Agent 使用内置的 `list_cameras` / `capture_camera` 工具直接访问宿主设备。
 
 ## 5. MCP
 
@@ -181,9 +188,9 @@ python -m pymybot mcp --robot assets/robots/relay-test.sql --scripts-dir assets/
 在仓库根目录也可用自包含入口：
 
 ```sh
-python skills/hardware-controller/scripts/hardware_controller.py mcp \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --scripts-dir skills/hardware-controller/assets/scripts
+python scripts/hardware_controller.py mcp \
+  --robot assets/robots/relay-test.sql \
+  --scripts-dir assets/scripts
 ```
 
 MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物理硬件另需 `--allow-hardware`。工具、资源和客户端配置见 `references/mcp.md`。

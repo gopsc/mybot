@@ -232,14 +232,14 @@ def test_mcp_server_failures_are_reported_as_unknown(tmp_path):
 
 
 def test_cli_rejects_mcp_config_when_the_role_owns_it(capsys):
-    code = main(["--no-gui", "agent", "--robot", str(ASSETS / "robots/relay-test.sql"),
+    code = main(["--no-gui", "agent",
                  "--task", "list hardware", "--role", "demo", "--mcp-config", "mcp.json"])
     assert code == 2
     assert "--role owns its skills and MCP configuration" in capsys.readouterr().err
 
 
 def test_cli_rejects_invalid_history_and_mcp_configuration(tmp_path, capsys):
-    code = main(["--no-gui", "agent", "--robot", str(ASSETS / "robots/relay-test.sql"),
+    code = main(["--no-gui", "agent",
                  "--task", "list hardware", "--role", "demo", "--history-turns", "0"])
     assert code == 2
     assert "history-turns" in capsys.readouterr().err
@@ -247,7 +247,7 @@ def test_cli_rejects_invalid_history_and_mcp_configuration(tmp_path, capsys):
     from pymybot.roles import create_role
     role = create_role("broken-mcp")
     role.mcp_config.write_text('{"mcpServers": {"demo": {"url": "https://example.invalid"}}}', encoding="utf-8")
-    code = main(["--no-gui", "agent", "--robot", str(ASSETS / "robots/relay-test.sql"),
+    code = main(["--no-gui", "agent",
                  "--task", "list hardware", "--role", role.name])
     captured = capsys.readouterr()
     assert code == 1

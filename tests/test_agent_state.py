@@ -23,14 +23,14 @@ def test_parse_existing_stats_extracts_json():
 
 def test_merge_stats_accumulates_counters():
     existing = {"total_turns": 3, "total_tool_calls": 10, "first_seen": "2024-01-01T00:00:00+00:00"}
-    turn = {"tool_calls": 2, "input_tokens": 100, "output_tokens": 50, "robot": "test.sql",
+    turn = {"tool_calls": 2, "input_tokens": 100, "output_tokens": 50,
             "elapsed_seconds": 1.5, "faulted": False, "last_action": "done"}
     merged = merge_stats(existing, turn)
     assert merged["total_turns"] == 4
     assert merged["total_tool_calls"] == 12
     assert merged["total_input_tokens"] == 100
     assert merged["total_output_tokens"] == 50
-    assert merged["robot"] == "test.sql"
+    assert "robot" not in merged
     assert merged["last_elapsed_seconds"] == 1.5
     assert merged["first_seen"] == "2024-01-01T00:00:00+00:00"
 
@@ -66,7 +66,7 @@ def test_merge_stats_survives_operator_edited_non_numeric_fields():
 
 
 def test_format_stats_produces_valid_markdown():
-    stats = {"total_turns": 5, "robot": "test.sql"}
+    stats = {"total_turns": 5}
     formatted = format_stats(stats)
     assert formatted.startswith("# STATS\n\n")
     parsed = json.loads(formatted.replace("# STATS\n\n", "").strip())

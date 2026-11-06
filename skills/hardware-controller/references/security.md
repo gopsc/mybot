@@ -1,6 +1,6 @@
 # Security model
 
-Source: This is the authoritative controller security document; enforcement lives in `skills/hardware-controller/scripts/pymybot/`.
+Source: This is the authoritative controller security document; enforcement lives in `scripts/pymybot/`.
 
 pymybot is a local robot controller, not a multi-tenant service. This document
 describes the trust boundaries the code tries to enforce and the limits the

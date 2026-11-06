@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -19,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
+
+logger = logging.getLogger(__name__)
 
 FORMAT = 1
 MAX_EVENT_BYTES = 64 * 1024
@@ -141,7 +144,7 @@ class SessionLog:
                 self._file.flush()
             except OSError as exc:
                 self._closed = True
-                print(f"mybot: session log write failed: {exc}", file=sys.stderr)
+                logger.warning("session log write failed: %s", exc)
 
     def write_image(self, tool, image, turn=None):
         if not isinstance(image, dict):
@@ -208,7 +211,7 @@ def create_session_log(*, enabled=True, robot="", model="", mode="cli", role="")
     try:
         log = SessionLog(robot=robot, model=model, mode=mode, role=role)
     except (OSError, RuntimeError) as exc:
-        print(f"mybot: session log unavailable: {exc}", file=sys.stderr)
+        logger.warning("session log unavailable: %s", exc)
         return None
     print(f"mybot: session log: {log.path}", file=sys.stderr)
     return log

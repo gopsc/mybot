@@ -52,13 +52,15 @@ duplicate robot logic.
 
 | Entry | What it does |
 | --- | --- |
-| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, history/context budgets, per-turn request/tool/wall-clock limits, provider retries and fallback models, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. When a role is selected, its workspace, skills and MCP paths are shown read-only because the backend uses the role-owned paths. |
+| 设置 | Tabs for 通用 / 模型与预算 / 高级 / MCP / 提示词: interpreter, model endpoint/key variable, history/context budgets, per-turn request/tool/wall-clock limits, provider retries and fallback models, intent routing, Shell sandbox backend, transcript switch, MCP file, SearXNG endpoint and the operator prompt file. The 提示词 tab also lists role-specific extra layers (`NNN_name.md`) read-only beside the six bundled layers. The 意图路由 dropdown mirrors `--intent`; the status bar shows the active intent and confidence after each turn. When a role is selected, its workspace, skills and MCP paths are shown read-only because the backend uses the role-owned paths. |
 | 工具 → 命令面板 | Exposes `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, `doctor` and `sessions` with dynamic fields, an argv preview, hardware confirmation and the JSON result. It builds argv with the same helper as the GUI's hardware call. |
 | 工具 → MCP 配置 | JSON editor with syntax highlighting, the same `mcpServers` validator as the agent, a server table (environment values hidden), template insertion, formatting and atomic save. |
 | 工具 → 会话管理 | Newest-first transcript table with filtering, transcript preview, per-session delete, dry-run/execute pruning, and a folder shortcut. |
 | 工具 → 长期记忆 / 任务历史 | Reads the active role's long-term memory and persisted missions over `agent.memory` / `agent.missions` and shows them in a read-only preview. |
 | 工具 → 环境诊断 | Renders `pymybot doctor`: interpreter, assets and optional dependencies, colour-coded by status, with copy-JSON. |
 | 资源 tab | Structures (`*.sql`), Python/Lua drivers, scripts, skills and source-tree docs in a filterable tree; Markdown is rendered with Qt's Markdown engine, code uses a keyword/comment highlighter. Content is cached by mtime, a `QFileSystemWatcher` debounces reloads, and previews fade in with `QPropertyAnimation`. |
+| 侧边栏（折叠卡片） | 三个可折叠卡片：**状态**（服务/智能体/运行状态 + 忙碌进度 + 跳转运行日志）、**机器人上下文**（技能目录、MCP 配置）、**模型**（当前模型 + 配置向导）。一次只展开一张卡，窗口保持安静。 |
+| 工具栏 | 高频操作显性化：打开工作区、角色切换、**清空**（窗口记录）、**抓拍**（主机摄像头单帧预览，内置视觉工具）、**朗读**（任务结束后朗读最新回复；无语音引擎时自动禁用）、**联网**（web_fetch/web_search 开关，新会话生效，SSRF 护栏常开）、启动/停止/急停/新对话/设置。 |
 | 文件 tab | Operator-local workspace file manager: a bounded tree (4000 entries, depth 4, dot-directories/venvs/symlinks skipped) with a name filter, inline previews (MT/Lua/SQL/Python highlighting, Markdown, sandboxed HTML, images) and 刷新 / 预览 / 在系统中打开 / 打开目录 actions. The HTML preview renders in a `QTextBrowser` that never runs JavaScript and never loads local or remote resources. Read-only: nothing is written or executed; writes stay with the agent's approved file tools. |
 | 配置向导（模型组） | Reopens the first-run model setup wizard at any time; the sidebar button sits under the model summary. |
 | 启动 | Starts the dual-agent autonomous loop (`agent.start`). There is no chat input: the memory agent proposes goals, the worker acts. |
@@ -96,10 +98,6 @@ is not interrupted by new tokens.
    - the base URL only when using a self-hosted OpenAI-compatible endpoint;
    - the **name** of the environment variable holding the API key. The key
      itself is never stored in the settings file;
-   - optional **变量覆盖** (`NAME=VALUE`, one per line) for structure
-     `Alias`/`Vars` rows. They are applied before activation, passed to every
-     agent action, kept in memory for this launch only, and never written to
-     the settings file;
    - whether **保存会话转录** is enabled. It is on by default; turning it off
      starts `serve` with `--no-session-log`. `MYBOT_SESSION_LOG=0` in the
      environment still disables transcripts regardless of this checkbox. Use

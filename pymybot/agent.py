@@ -13,6 +13,7 @@ import difflib
 import hashlib
 import inspect
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ import sys
 import threading
 import time
 from urllib.parse import urlsplit
+
+logger = logging.getLogger(__name__)
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import wrap_model_call
@@ -53,6 +56,7 @@ from .roles import read_history, role_session_lock, write_history
 from .sandbox import SANDBOX_MODES, describe_backend
 from .security import SecurityError, checked_text, dumps
 from .session_log import SessionLog, create_session_log
+from .agent_utils import message_text
 
 MAX_TEXT = 64 * 1024
 MAX_MCP_TEXT = 32 * 1024
@@ -62,6 +66,7 @@ MAX_MCP_TOOLS = 256
 MAX_MCP_DESCRIPTION = 4 * 1024
 MAX_MCP_SCHEMA_PROPERTIES = 256
 MAX_MCP_NODES = 4096
+MAX_RECURSION = 200
 _TERMINAL_CONTROLS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 _TOOL_NAME = re.compile(r"[^A-Za-z0-9_-]")
 
@@ -80,6 +85,13 @@ def _unique_tool_name(raw, taken):
 
 def _display_text(text):
     return _TERMINAL_CONTROLS.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
+
+
+def _receipt(result):
+    """Extract the standard receipt fields from a tool result dict."""
+    return {key: result[key] for key in ("ok", "executed", "state") if key in result}
+
+
 MAX_PROMPT = 16 * 1024
 MAX_HISTORY = 4 * 1024 * 1024
 MAX_OUTPUT_TOKENS = 4096
@@ -502,19 +514,6 @@ def describe_failure(exc, endpoint=None):
         cause = cause.__cause__ or cause.__context__
     detail = f" ({' <- '.join(chain)})" if chain else ""
     return f"{type(exc).__name__}{detail}{where}"
-
-
-def _message_text(message):
-    content = getattr(message, "content", "")
-    if isinstance(content, str):
-        return content
-    parts = []
-    for block in content or []:
-        if isinstance(block, str):
-            parts.append(block)
-        elif isinstance(block, dict) and block.get("type") == "text":
-            parts.append(str(block.get("text", "")))
-    return "".join(parts)
 
 
 def _intent_instructions(decision):
@@ -1281,25 +1280,21 @@ class AgentSession:
         if emit and call_event:
             self._emit({"type": "tool_call", "tool": name, "arguments": arguments})
             self._log("tool_call", tool=name, arguments=arguments)
-        self.events.append({"tool": name, **{key: result[key] for key in ("ok", "executed", "state")},
-                            "error": error})
+        self.events.append({"tool": name, **_receipt(result), "error": error})
         self._log("tool_result", tool=name, **result)
         if emit:
-            self._emit({"type": "tool_result", "tool": name,
-                        **{key: result[key] for key in ("ok", "executed", "state")}})
+            self._emit({"type": "tool_result", "tool": name, **_receipt(result)})
         return result
 
     # -- prompt tools ------------------------------------------------------
     def _prompt_receipt(self, name, result, *, emit=True):
-        self.events.append({"tool": name, **{key: result[key] for key in ("ok", "executed", "state")}})
+        self.events.append({"tool": name, **_receipt(result)})
         data = result.get("data", {})
-        self._log("tool_result", tool=name,
-                  **{key: result[key] for key in ("ok", "executed", "state")},
+        self._log("tool_result", tool=name, **_receipt(result),
                   data={key: value for key, value in data.items() if key != "content"},
                   error=result.get("error"))
         if emit:
-            self._emit({"type": "tool_result", "tool": name,
-                        **{key: result[key] for key in ("ok", "executed", "state")}})
+            self._emit({"type": "tool_result", "tool": name, **_receipt(result)})
         return result
 
     async def _prompt_call(self, name, arguments, *, emit=True):
@@ -1364,12 +1359,8 @@ class AgentSession:
         events = self.events[first_event:]
         action_tools = IO_TOOLS | SKILL_TOOLS | CAMERA_TOOLS | frozenset(self._skill_tools.keys())
         actions = [event for event in events if event["tool"] in action_tools]
-        robot = getattr(self.executor, "robot_path", "") or ""
-        if not robot and isinstance(self.context, dict):
-            robot = self.context.get("robot", "")
         turn_data = extract_turn_data(turn_messages, events)
         turn_data.update({
-            "robot": Path(str(robot)).name,
             "last_action": actions[-1]["state"] if actions else "not_executed",
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "faulted": bool(getattr(self.executor, "faulted", False)),
@@ -1383,7 +1374,7 @@ class AgentSession:
             self._log("prompt_update", **data, approved=True)
         except (SecurityError, OSError, UnicodeError, PromptWriteError) as exc:
             self._log("prompt_stats_error", error=type(exc).__name__)
-            print(f"mybot: prompt STATS update failed ({type(exc).__name__}); continuing", file=sys.stderr)
+            logger.warning("prompt STATS update failed (%s); continuing", type(exc).__name__)
 
     def _update_user_layer(self, turn_messages, expected_hash):
         """Extract user preferences from turn messages and update layer 98."""
@@ -1474,12 +1465,11 @@ class AgentSession:
             result = {"ok": False, "executed": False, "state": "not_executed",
                       "error": f"Identical tool call repeated more than {MAX_IDENTICAL_CALLS} times; "
                                "stop and reassess instead of retrying."}
-            self.events.append({"tool": name, **{key: result[key] for key in ("ok", "executed", "state")}})
+            self.events.append({"tool": name, **_receipt(result)})
             self._log("tool_result", tool=name, **result)
             self._log("loop_guard", tool=name, repeats=self._repeat_count)
             if emit:
-                self._emit({"type": "tool_result", "tool": name,
-                            **{key: result[key] for key in ("ok", "executed", "state")}})
+                self._emit({"type": "tool_result", "tool": name, **_receipt(result)})
             return result
         self._check()
         async with self._tool_lock:
@@ -1492,14 +1482,12 @@ class AgentSession:
                     result = await self._skill_action_call(name, arguments)
                 else:
                     result = await self.executor.call(name, arguments, timeout=None)
-        self.events.append({"tool": name, **{k: result[k] for k in ("ok", "executed", "state")}})
-        self._log("tool_result", tool=name,
-                  **{key: result[key] for key in ("ok", "executed", "state") if key in result},
+        self.events.append({"tool": name, **_receipt(result)})
+        self._log("tool_result", tool=name, **_receipt(result),
                   data=result.get("data"), error=result.get("error"))
         self._log_images(name, result)
         if emit:
-            self._emit({"type": "tool_result", "tool": name,
-                        **{key: result[key] for key in ("ok", "executed", "state")}})
+            self._emit({"type": "tool_result", "tool": name, **_receipt(result)})
         if result["state"] == "unknown":
             if getattr(self.executor, "interrupted", False):
                 raise AgentInterrupted("Interrupted; already dispatched actions are not rolled back")
@@ -1514,8 +1502,8 @@ class AgentSession:
                 self._refresh_tools()
             except Exception as exc:
                 self._log("skill_refresh_error", error=type(exc).__name__)
-                print(f"mybot: skill tool refresh failed ({type(exc).__name__}); "
-                      "start a new conversation to load it", file=sys.stderr)
+                logger.warning("skill tool refresh failed (%s); start a new conversation to load it",
+                               type(exc).__name__)
         self._check()  # Preserve the receipt, but never request another model after stop.
         return result
 
@@ -1818,7 +1806,7 @@ class AgentSession:
             messages = self._build_context_messages(prompt)
             graph = self._build_graph()
             config = {"configurable": {"thread_id": f"{id(self)}-{self._turn}"},
-                      "recursion_limit": 10_000}
+                      "recursion_limit": MAX_RECURSION}
             inputs = {"messages": messages}
             self._in_graph = True
             try:
@@ -1830,7 +1818,7 @@ class AgentSession:
                         if mode == "messages":
                             chunk, _metadata = data
                             if isinstance(chunk, AIMessageChunk):
-                                text = _message_text(chunk)
+                                text = message_text(chunk)
                                 if text:
                                     self._emit({"type": "text_delta", "text": text})
                         elif mode == "updates" and "__interrupt__" in data:
@@ -1849,7 +1837,7 @@ class AgentSession:
             output = ""
             for message in reversed(new_messages):
                 if isinstance(message, AIMessage):
-                    output = _message_text(message)
+                    output = message_text(message)
                     break
             checked_text(output, MAX_TEXT)
             self.turns.append(turn_messages)
@@ -1880,261 +1868,3 @@ class AgentSession:
         finally:
             self._in_graph = False
             self._asking = False
-            self._deadline = None
-
-
-async def console_line(prompt, stop):
-    """Cancelable console wait; a blocked stdin reader must not hold shutdown open."""
-    print(prompt, file=sys.stderr, end="", flush=True)
-    loop = asyncio.get_running_loop()
-    ready = loop.create_future()
-
-    def finish(value):
-        if not ready.done():
-            ready.set_result(value)
-
-    def read():
-        try:
-            line = sys.stdin.readline()
-        except (OSError, ValueError):
-            line = ""
-        try:
-            loop.call_soon_threadsafe(finish, line)
-        except RuntimeError:
-            pass  # The session exited while this daemon reader was waiting.
-
-    threading.Thread(target=read, name="mybot-console", daemon=True).start()
-    try:
-        while not ready.done():
-            if stop.is_set():
-                raise AgentInterrupted("Interrupted while waiting for input")
-            await asyncio.wait({ready}, timeout=0.05)
-        line = ready.result()
-        return line.rstrip("\r\n") if line else None
-    finally:
-        ready.cancel()
-
-
-async def confirm_console(name, arguments, stop):
-    if not sys.stdin.isatty():
-        return False
-    if name == "prompt:update_prompt":
-        description = dumps(arguments)
-        if len(description.encode("utf-8")) > 128 * 1024:
-            print("Prompt approval denied: diff too large to display completely.", file=sys.stderr)
-            return False
-        print(_display_text(f"Layer {arguments['layer']} · {arguments['reason']}\n{arguments['diff']}"),
-              file=sys.stderr)
-        answer = await console_line("Approve prompt replacement and private backup? [y/N] ", stop)
-        return answer is not None and answer.strip().lower() in {"y", "yes"}
-    if name == "plan:approve":
-        goal = _display_text(str(arguments.get("goal") or ""))
-        print(f"Mission plan ({arguments.get('source') or 'operator'}):\n{goal}", file=sys.stderr)
-        answer = await console_line(
-            "Approve this mission plan and allow the worker to act? [y/N] ", stop)
-        return answer is not None and answer.strip().lower() in {"y", "yes"}
-    # Never approve hidden/truncated arguments. repr neutralizes terminal controls.
-    description = repr(dumps(arguments))
-    limit = 2000
-    if len(description) > limit:
-        print("Approval denied: arguments too long to display completely; reduce the request.", file=sys.stderr)
-        return False
-    if name.startswith("mcp:"):
-        warning = ("This calls an operator-configured MCP server with host-user permissions, "
-                   "NOT in a sandbox; it may act on the host or network.")
-    elif name == "shell":
-        warning = ("Host shell runs inside the configured sandbox; a workspace jail alone is not "
-                   "an OS boundary, and hardware access is not limited by --allow-hardware.")
-    elif name == "install_skill":
-        warning = "This installs trusted skill code and assets that may influence or execute in later requests."
-    elif name == "uninstall_skill":
-        warning = "This permanently removes an installed skill and its scripts, references and assets."
-    elif name in FILE_WRITE_TOOLS:
-        warning = "This changes workspace files, potentially including executable scripts or drivers."
-    else:
-        warning = "Activation may write to devices."
-    answer = await console_line(f"Approve {name} {description}? {warning} [y/N] ", stop)
-    return answer is not None and answer.strip().lower() in {"y", "yes"}
-
-
-class StreamRenderer:
-    """Live turn progress on stderr; stdout stays reserved for the final JSON line."""
-
-    def __init__(self, stream=None):
-        self.stream = stream if stream is not None else sys.stderr
-        self.mid_line = False
-        self.text_chars = 0
-
-    def __call__(self, event):
-        kind = event.get("type")
-        if kind == "text_delta":
-            remaining = MAX_TEXT - self.text_chars
-            if remaining <= 0:
-                return
-            text = _display_text(event["text"])[:remaining]
-            self.text_chars += len(text)
-            self.stream.write(text)
-            self.stream.flush()
-            self.mid_line = True
-        elif kind == "tool_call":
-            self._end_line()
-            # repr neutralizes terminal controls in model-authored arguments.
-            brief = repr(dumps(event["arguments"])) if event.get("arguments") is not None else ""
-            if len(brief) > 120:
-                brief = brief[:117] + "..."
-            self.stream.write(f"→ {_display_text(str(event['tool']))}({brief})\n")
-            self.stream.flush()
-        elif kind == "tool_result":
-            state = event.get("state")
-            tail = f" {_display_text(str(state))}" if state else ""
-            self.stream.write(f"⇦ {_display_text(str(event['tool']))}{tail}\n")
-            self.stream.flush()
-        elif kind == "team.message":
-            if event.get("agent") != "memory":
-                return  # The worker's text already streamed as text_delta.
-            self._end_line()
-            self.stream.write(f"[记忆体] {_display_text(str(event.get('text') or ''))}\n")
-            self.stream.flush()
-
-    def _end_line(self):
-        if self.mid_line:
-            self.stream.write("\n")
-            self.mid_line = False
-
-    def end_turn(self):
-        """Terminate the streamed line; True if any text streamed during this turn."""
-        self._end_line()
-        streamed = self.text_chars > 0
-        self.text_chars = 0
-        return streamed
-
-
-async def _conversation(session, args, stop, renderer=None):
-    """Run one seeded mission, or the self-directed loop when no seed is given."""
-    if args.task is not None:
-        result = await session.ask(args.task)
-        if renderer is not None:
-            renderer.end_turn()
-        return {"mode": "agent", **result, "tool_events": session.events}
-    await session.auto_start(max_missions=getattr(args, "max_missions", 20))
-    print("mybot autonomous run started; Ctrl+C to stop.", file=sys.stderr)
-    try:
-        while session.auto_status().get("running") and not stop.is_set():
-            await asyncio.sleep(0.5)
-    finally:
-        status = await session.auto_stop()
-    if stop.is_set():
-        raise AgentInterrupted("Interrupted; already dispatched actions are not rolled back")
-    return {"mode": "agent", "autonomous": True, "status": status,
-            "tool_events": session.events}
-
-
-async def run_cli_agent(args, stop):
-    executor = client = session = session_log = None
-    failure = result = None
-    cleanup_errors = []
-    try:
-        if getattr(args, "robot", None) and not Path(args.robot).is_file():
-            raise AgentConfigurationError(
-                f"Robot structure not found: {args.robot}; no model request was sent")
-        try:
-            from .roles import load_role
-            role = load_role(args.role) if getattr(args, "role", None) else None
-        except (OSError, SecurityError) as exc:
-            raise AgentConfigurationError(f"Cannot load role: {exc}; no model request was sent") from None
-        mcp_config = (str(role.mcp_config) if role is not None and role.mcp_config.is_file()
-                      else getattr(args, "mcp_config", None) if role is None else None)
-        config = AgentConfig(model=args.model or os.environ.get("MYBOT_MODEL", ""),
-                             base_url=args.base_url or os.environ.get("MYBOT_BASE_URL"),
-                             api_key_env=args.api_key_env, timeout=args.timeout,
-                             history_bytes=args.max_history_bytes,
-                             max_context_tokens=getattr(args, "max_context_tokens", None),
-                             context_reserve_tokens=getattr(args, "context_reserve_tokens", 2048),
-                             allow_actions=args.allow_actions,
-                             allow_file_writes=args.allow_file_writes,
-                             allow_shell=getattr(args, "allow_shell", False),
-                             mcp_config=mcp_config,
-                             allow_mcp_tools=getattr(args, "allow_mcp_tools", False),
-                             prompt_file=getattr(args, "prompt_file", None),
-                             context_bytes=getattr(args, "context_bytes", DEFAULT_CONTEXT_BYTES),
-                             intent_mode=getattr(args, "intent", "auto"),
-                             sandbox_mode=getattr(args, "sandbox", "auto"),
-                             enable_web=getattr(args, "web", False),
-                             allow_web=getattr(args, "allow_web", False),
-                             search_endpoint=getattr(args, "search_endpoint", "") or "",
-                             auto_stats=not getattr(args, "no_prompt_stats", False),
-                             hot_turns=getattr(args, "hot_turns", 3),
-                             warm_turns=getattr(args, "warm_turns", 10),
-                             max_requests=getattr(args, "max_requests", 64),
-                             max_tool_calls=getattr(args, "max_tool_calls", 128),
-                             turn_timeout=getattr(args, "turn_timeout", 0.0),
-                             model_retries=getattr(args, "model_retries", 0),
-                             fallback_models=tuple(getattr(args, "fallback_model", ()) or ()))
-        try:
-            from .mcp_client import load_servers
-            mcp_servers = load_servers(config.mcp_config)
-        except Exception as exc:
-            raise AgentConfigurationError(
-                f"Cannot load MCP configuration: {exc}; no model request was sent") from None
-        model, client = create_model(config)
-        session_log = create_session_log(enabled=not getattr(args, "no_session_log", False),
-                                         robot=args.robot or "", model=config.model, mode="cli",
-                                         role=role.name if role is not None else "")
-        try:
-            skills_dir = role.skills_dir if role is not None else (args.skills_dir or default_skills_root())
-            skills = SkillsLibrary(skills_dir, required=role is not None or args.skills_dir is not None)
-        except SecurityError as exc:
-            raise AgentConfigurationError(
-                f"Cannot load skills configuration: {exc}; no model request was sent") from None
-        workspace_dir = str(role.workspace_dir) if role is not None else args.workspace_dir
-        executor = RobotExecutor(args.robot, module_paths=args.module_path,
-                                 scripts_dir=args.scripts_dir, allow_hardware=args.allow_hardware,
-                                 stop_event=stop,
-                                 vars=getattr(args, "bindings", None),
-                                 skills=skills, workspace_dir=workspace_dir, enable_shell=args.enable_shell,
-                                 sandbox=config.sandbox_mode)
-        if args.enable_shell:
-            print(f"Shell enabled: {describe_backend(config.sandbox_mode)}; "
-                  f"approval is still separate.", file=sys.stderr)
-
-        async def confirm(name, arguments):
-            return await confirm_console(name, arguments, stop)
-
-        renderer = StreamRenderer()
-        worker = AgentSession(executor, model, config, confirm=confirm,
-                              skills=skills, session_log=session_log,
-                              workspace=workspace_dir is not None,
-                              enable_shell=args.enable_shell,
-                              mcp_servers=mcp_servers, role=role)
-        from .agent_team import TeamSession
-        session = TeamSession(worker, model, role=role, on_event=renderer,
-                              max_steps=getattr(args, "team_steps", 8),
-                              max_seconds=getattr(args, "mission_timeout", 1800.0),
-                              max_tokens=getattr(args, "mission_tokens", 400_000),
-                              confirm=confirm,
-                              require_plan_approval=getattr(args, "require_plan_approval", False))
-        result = await _conversation(session, args, stop, renderer)
-    except BaseException as exc:
-        failure = exc
-    finally:
-        # A live session owns the executor; closing both would run cleanup twice.
-        resources = (session, client) if session is not None else (executor, client)
-        for resource in resources:
-            if resource is not None:
-                try:
-                    await resource.close()
-                except BaseException as exc:
-                    cleanup_errors.append(type(exc).__name__)
-                    failure = failure or exc
-        if session is None and session_log is not None:
-            session_log.close()
-    # One exit after cleanup: cleanup cannot erase prior receipts or leak a raw
-    # client exception. Preserve the original reason if cleanup also failed.
-    if failure is not None:
-        if not isinstance(failure, (AgentError, AgentInterrupted, KeyboardInterrupt, asyncio.CancelledError)):
-            failure = AgentError(f"Agent failed ({describe_failure(failure, request_endpoint(client))}); check configuration or tool receipts. "
-                                 "Already dispatched actions are not rolled back or automatically retried")
-        failure.tool_events = session.events if session is not None else []
-        failure.cleanup_errors = cleanup_errors
-        raise failure from None
-    return result

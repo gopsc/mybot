@@ -1,4 +1,4 @@
-"""Bounded image-container validation shared by receipts and the Agent camera."""
+"""Bounded image-container validation for the Agent camera and image results."""
 from __future__ import annotations
 
 import importlib

@@ -322,7 +322,7 @@ def test_cli_rejects_skills_dir_because_the_role_owns_skills(tmp_path):
     from pymybot.cli import UsageError
 
     with pytest.raises(UsageError, match="--role owns its skills"):
-        parse_args(["agent", "--robot", "x.sql", "--task", "hi", "--role", "demo",
+        parse_args(["agent", "--task", "hi", "--role", "demo",
                     "--skills-dir", str(tmp_path)])
 
 

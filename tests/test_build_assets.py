@@ -22,6 +22,8 @@ def test_asset_plan_covers_all_runtime_roots():
     assert "pymybot/gui/assets" in destinations
     assert all(source.is_file() for source in sources)
     assert any(source.name == "SKILL.md" and "hardware-controller" in source.parts for source in sources)
+    assert any(source.name == "requirements.txt" and "hardware-controller" in source.parts
+               for source in sources)
 
     suffixes = {source.suffix for source in sources}
     assert {".py", ".lua", ".sql", ".mt", ".md", ".json", ".svg"} <= suffixes

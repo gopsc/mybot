@@ -120,8 +120,8 @@ def parser():
                     "Command-line results are JSON on stdout.",
         epilog="Use only trusted Lua modules: LuaJIT FFI is not malicious-code isolation. "
                "Activation itself may write to devices, including when sampling. "
-               "Examples: pymybot --robot robot.sql   (GUI) | "
-               "pymybot --no-gui --role NAME --robot robot.sql --task 'List hardware'   (terminal agent)")
+               "Examples: pymybot   (GUI) | "
+               "pymybot --no-gui --role NAME --task 'List hardware'   (terminal agent)")
     p.add_argument("--no-gui", action="store_true",
                    help="command-line interface instead of the GUI (the GUI is the default)")
     p.add_argument("--no-agent", action="store_true",
@@ -232,7 +232,6 @@ def parser():
                                  help="disable automatic host-generated prompt statistics")
         if name == "gui":
             # The window is always agent-centric: no agent/controller mode switch.
-            command.add_argument("--robot", metavar="FILE", help="structure SQL file to open with")
             command.add_argument("--task", help="pre-fill the prompt box (not sent automatically)")
             command.add_argument("--no-splash", action="store_true",
                                  help="skip the entry screen and open the main window immediately")
@@ -323,13 +322,13 @@ def parser():
         if name in {"serve", "doctor"}:
             continue
         command.add_argument("--robot", required=name != "agent", metavar="FILE",
-                             help="structure SQL file (optional for agent; at most 8 MiB)")
+                             help="structure SQL file (agent: only with --no-agent direct runs; at most 8 MiB)")
         command.add_argument("--module-path", action="append", metavar="DIR", help="trusted Lua module root; repeatable")
         if name in {"check", "run", "agent"}:
             command.add_argument("--input", required=name == "run", metavar="MT", help="direct action script (agent entry requires --no-agent)")
         if name in {"query", "apply-sql"}:
             command.add_argument("--sql", required=True, metavar="TEXT", help="SQL text (at most 8 MiB)")
-        if name in {"run", "sample", "apply-sql", "agent"}:
+        if name in {"run", "sample", "apply-sql"}:
             command.add_argument("--allow-hardware", action="store_true",
                                  help="permit physical devices for direct commands; trusted skills always receive hardware access")
         if name in {"run", "sample", "agent"}:
@@ -474,6 +473,10 @@ def parse_args(argv=None):
             raise UsageError("--no-agent requires --input MT; or use check/hardware/query/run/sample directly")
         args.command = "run"
         return args
+    if args.robot or args.module_path or args.var or args.var_env:
+        raise UsageError(
+            "The autonomous agent no longer loads a structure; let the model call the "
+            "hardware-controller skill, or use --no-agent --robot FILE --input MT for a direct run")
     if not args.role:
         raise UsageError("Agent conversations require --role NAME; create one with 'pymybot roles create NAME'")
     if args.role and args.workspace_dir:
@@ -851,7 +854,7 @@ def execute(args, stop):
     bindings = session_bindings(args)
     if args.command == "agent":
         try:
-            from .agent import run_cli_agent
+            from .agent_cli import run_cli_agent
         except ModuleNotFoundError as exc:
             raise RuntimeError(f"Agent dependencies unavailable ({exc}); install pymybot[agent] "
                                "(source checkout: pip install -e '.[agent]'), "

@@ -708,13 +708,10 @@ class Server:
     def _agent_key(self, params):
         return {
             "role": params.text("role", cap=64),
-            "robot": params.text("robot"), "modulePaths": params.strings("modulePaths"),
-            "scriptsDir": params.text("scriptsDir"),
             "skillsDir": params.text("skillsDir"), "model": params.text("model", "", cap=1024),
             "baseUrl": params.text("baseUrl", cap=2048), "apiKeyEnv": params.text("apiKeyEnv", cap=256),
-            "allowActions": params.flag("allowActions"), "allowHardware": params.flag("allowHardware"),
+            "allowActions": params.flag("allowActions"),
             "allowShell": params.flag("allowShell"),
-            "vars": params.bindings("vars"),
             "timeout": params.seconds("timeout", 180),
             "maxHistoryBytes": params.integer("maxHistoryBytes", 64 * 1024, 64 * 1024 * 1024,
                                               4 * 1024 * 1024),
@@ -918,9 +915,6 @@ class Server:
             raise AgentConfigurationError("Shell tools require a workspace; no model request was sent")
         if key["allowFileWrites"] and workspace is None:
             raise AgentConfigurationError("File writes require a workspace; no model request was sent")
-        if key["robot"] and not Path(key["robot"]).is_file():
-            raise AgentConfigurationError(
-                f"Robot structure not found: {key['robot']}; no model request was sent")
         config = AgentConfig(model=key["model"] or os.environ.get("MYBOT_MODEL", ""),
                              base_url=key["baseUrl"] or os.environ.get("MYBOT_BASE_URL"),
                              api_key_env=key["apiKeyEnv"], timeout=key["timeout"],
@@ -958,15 +952,14 @@ class Server:
         executor = None
         session_log = None
         try:
-            session_log = create_session_log(enabled=self.enable_session_log, robot=key["robot"] or "",
+            session_log = create_session_log(enabled=self.enable_session_log, robot="",
                                              model=config.model, mode="serve",
                                              role=role.name if role is not None else "")
             skills_dir = role.skills_dir if role is not None else (key["skillsDir"] or default_skills_root())
             skills = SkillsLibrary(skills_dir, required=role is not None or key["skillsDir"] is not None)
-            executor = RobotExecutor(key["robot"] or None, module_paths=key["modulePaths"] or None,
-                                     scripts_dir=key["scriptsDir"] or None,
-                                     allow_hardware=key["allowHardware"],
-                                     vars=key["vars"], skills=skills,
+            # Hardware structures belong to the hardware-controller skill; an agent
+            # conversation never loads one of its own.
+            executor = RobotExecutor(None, skills=skills,
                                      workspace_dir=workspace, enable_shell=key["enableShell"],
                                      sandbox=config.sandbox_mode)
 

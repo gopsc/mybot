@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 
 from PySide6.QtCore import (QEasingCurve, QFileSystemWatcher, QPropertyAnimation, QRunnable,
                             QThreadPool, QTimer, QUrl, Signal)
@@ -142,12 +143,14 @@ class PromptPanel(QWidget):
     A failed safety check must leave the repair controls available.
     """
 
-    def __init__(self, parent=None, *, auto_stats=True, home=None, operator_path=None):
+    def __init__(self, parent=None, *, auto_stats=True, home=None, operator_path=None,
+                 extra_layers=False):
         super().__init__(parent)
         self.library = None
         self.loaded = False
         self.home = home
         self.operator_path = operator_path
+        self.extra_layers = extra_layers is True
         self.layer = None
         self.loaded_hash = None
         self._row = -1
@@ -155,6 +158,7 @@ class PromptPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(_label(
             "0 / 10 / 100 在 GUI 中只读；97（SOUL）/ 98（USER）/ 99（STATS）可编辑。\n"
+            "角色目录里额外的 NNN_名称.md 层按编号排在 10 与 97 之间，对 Agent 只读。\n"
             "0 / 100 安全层必须保持默认校验值。保存层、补齐和恢复立即生效，设置取消不回滚。", secondary=True))
         self.auto_stats = QCheckBox("自动更新 STATS（仅统计数据，不记录 USER 内容）")
         self.auto_stats.setChecked(auto_stats)
@@ -226,7 +230,7 @@ class PromptPanel(QWidget):
     def _get_library(self):
         if self.library is None:
             from ..prompts import PromptLibrary
-            self.library = PromptLibrary(home=self.home)
+            self.library = PromptLibrary(home=self.home, extra_layers=self.extra_layers)
         return self.library
 
     def ensure_loaded(self):
@@ -1503,6 +1507,62 @@ def _likely_text(sample):
         return False
     control = sum(1 for byte in sample if byte < 9 or 11 <= byte <= 12 or 14 <= byte <= 31)
     return control / len(sample) < 0.05
+
+
+class SnapshotDialog(QDialog):
+    """Preview one camera snapshot; saving is an explicit operator action."""
+
+    def __init__(self, parent, pixmap, *, workspace="", width=None, height=None):
+        super().__init__(parent)
+        apply_theme(self)
+        self.setWindowTitle("摄像头抓拍")
+        self.setModal(True)
+        self.resize(720, 560)
+        self.pixmap = pixmap
+        self.workspace = Path(workspace).absolute() if workspace else None
+        layout = QVBoxLayout(self)
+        info = (f"{pixmap.width()}×{pixmap.height()}" if pixmap.width() else "")
+        if width and height:
+            info += f"（传感器 {width}×{height}）"
+        label = QLabel(f"抓拍成功 {info}".strip())
+        label.setObjectName("secondaryText")
+        layout.addWidget(label)
+        view = QLabel()
+        view.setPixmap(pixmap.scaled(680, 420, Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation))
+        view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(view, 1)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        save = QPushButton("保存到工作区")
+        save.setProperty("role", "primary")
+        save.clicked.connect(self.save_snapshot)
+        buttons.addWidget(save)
+        copy = QPushButton("复制到剪贴板")
+        copy.clicked.connect(self.copy_snapshot)
+        buttons.addWidget(copy)
+        close = QPushButton("关闭")
+        close.clicked.connect(self.accept)
+        buttons.addWidget(close)
+        layout.addLayout(buttons)
+        self.status = _label("", secondary=True)
+        layout.addWidget(self.status)
+
+    def save_snapshot(self):
+        if self.workspace is None:
+            self.status.setText("未设置工作区，无法保存")
+            return
+        target = self.workspace / "snapshots"
+        target.mkdir(parents=True, exist_ok=True)
+        path = target / time.strftime("snapshot-%Y%m%d-%H%M%S.jpg")
+        if not self.pixmap.save(str(path), "JPG", 92):
+            self.status.setText(f"保存失败：{path}")
+            return
+        self.status.setText(f"已保存：{path}")
+
+    def copy_snapshot(self):
+        QApplication.clipboard().setPixmap(self.pixmap)
+        self.status.setText("已复制到剪贴板")
 
 
 class ResourcePanel(QWidget):

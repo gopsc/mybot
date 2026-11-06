@@ -1,21 +1,19 @@
 # STATS
 
 此层由系统自动维护，记录累积统计数据。
-内容会随着对话自动更新，无需手动编辑。
+内容随对话自动更新，无需手动编辑。
 
 ---
-# STATS (Cumulative Statistics Layer)
+# STATS（累计统计层）
 
-This layer is automatically maintained by the system. It tracks:
-- **total_turns**: Number of conversation turns
-- **total_tool_calls**: Cumulative tool invocations
-- **total_input_tokens** / **total_output_tokens**: Token usage
-- **tool_usage**: Most frequently used tools (top 20)
-- **first_seen** / **last_seen**: Activity timestamps
-- **robot**: Last used robot configuration
-- **last_action**: Most recent action state
-- **recent_errors**: Last 5 errors encountered
-- **total_errors**: Cumulative error count
+本层由系统自动维护，用于记录：
+- **total_turns**：对话轮数
+- **total_tool_calls**：累计工具调用次数
+- **total_input_tokens** / **total_output_tokens**：Token 用量
+- **tool_usage**：最常使用的工具（前 20）
+- **first_seen** / **last_seen**：活跃时间
+- **last_action**：最近一次动作状态
+- **recent_errors**：最近 5 条错误
+- **total_errors**：累计错误数
 
-The system updates this layer after each conversation turn to maintain
-persistent operational statistics.
+系统在每轮对话后更新本层，维护持久的运行统计。
