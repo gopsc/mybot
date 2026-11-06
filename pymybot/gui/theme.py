@@ -76,6 +76,14 @@ QTabBar::tab {
 }
 QTabBar::tab:selected { background: #eff6ff; color: #1d4ed8; border-bottom-color: #2563eb; }
 QTabBar::tab:hover:!selected { background: #f1f5f9; color: #334155; }
+QToolBox { background: transparent; }
+QToolBox::tab {
+    background: #ffffff; color: #334155; border: 1px solid #e0e7ef;
+    border-radius: 8px; padding: 7px 12px; font-weight: 600;
+}
+QToolBox::tab:selected { background: #eff6ff; color: #1d4ed8; border-color: #2563eb; }
+QToolBox::tab:hover:!selected { background: #f1f5f9; }
+QToolBox::separator { height: 1px; background: transparent; margin: 3px 0; }
 QTreeWidget, QTableWidget { alternate-background-color: #f8fafc; gridline-color: #edf2f7; }
 QTreeWidget::item, QTableWidget::item { padding: 5px 2px; border: none; }
 QTreeWidget::item:selected, QTableWidget::item:selected { background: #dbeafe; color: #1e3a8a; }

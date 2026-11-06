@@ -588,6 +588,7 @@ def test_installed_skill_tools_refresh_inside_one_session(tmp_path):
 
 
 def test_skill_tool_names_are_provider_safe(tmp_path):
+    pytest.importorskip("langchain")  # pymybot.agent registers providers on import
     root = tmp_path / "skills"
     skill = root / "my.skill"
     (skill / "scripts").mkdir(parents=True)

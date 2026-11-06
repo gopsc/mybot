@@ -17,7 +17,7 @@ from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDataba
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog,
     QLabel,
-    QLineEdit, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar,
+    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar,
     QScrollArea, QSplitter, QTabWidget, QToolBox, QToolButton,
     QVBoxLayout, QWidget,
 )
@@ -206,33 +206,9 @@ class App(QMainWindow):
         toolbar.addWidget(self.create_role_button)
         self.delete_role_button = _button("删除", self.delete_role)
         toolbar.addWidget(self.delete_role_button)
-        self.refresh_button = _button("刷新", self.refresh_context)
-        toolbar.addWidget(self.refresh_button)
-        self.clear_button = _button("清空", self.clear_chat)
-        self.clear_button.setToolTip("清空窗口记录；模型上下文不受影响")
-        toolbar.addWidget(self.clear_button)
-        self.snapshot_button = _button("抓拍", self.capture_snapshot)
-        self.snapshot_button.setToolTip("用主机摄像头抓拍一张照片并预览（内置视觉工具）")
-        toolbar.addWidget(self.snapshot_button)
-        self.speech_button = QToolButton()
-        self.speech_button.setText("朗读")
-        self.speech_button.setCheckable(True)
-        self.speech_button.setToolTip("朗读助手的最新回复（Qt 文本转语音；不可用时禁用）")
-        self.speech_button.toggled.connect(self.toggle_speech)
-        toolbar.addWidget(self.speech_button)
-        self.web_button = QToolButton()
-        self.web_button.setText("联网")
-        self.web_button.setCheckable(True)
-        self.web_button.setToolTip("开启后智能体获得 web_fetch / web_search（搜索端点在设置中配置）；新会话生效")
-        self.web_button.toggled.connect(self.toggle_web)
-        toolbar.addWidget(self.web_button)
+        # Low-frequency and capability controls live in the menus and the
+        # sidebar's 能力 card; the toolbar keeps only the operator's daily path.
         toolbar.addStretch(1)
-        self.manage_button = QToolButton()
-        self.manage_button.setText("管理")
-        self.manage_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.manage_button.setMenu(self._manage_menu())
-        toolbar.addWidget(self.manage_button)
-        toolbar.addWidget(_button("命令", self.open_console))
         self.new_button = _button("新对话", self.new_conversation)
         self.stop_button = _button("停止", self.stop_autonomy, role="danger")
         self.abort_button = _button("急停", self.abort_all, role="danger")
@@ -313,19 +289,6 @@ class App(QMainWindow):
         action(help_menu, "使用文档", self.open_docs, "F1")
         action(help_menu, "关于", self.open_about)
 
-    def _manage_menu(self):
-        menu = QMenu(self)
-        for text, slot in (("命令面板…", self.open_console),
-                           ("MCP 配置…", self.open_mcp),
-                           ("会话管理…", self.open_sessions),
-                           ("长期记忆…", self.open_memory), ("任务历史…", self.open_missions),
-                           ("环境诊断…", self.open_doctor),
-                           ("资源预览", self.show_resources), ("清空对话", self.clear_chat)):
-            action = QAction(text, menu)
-            action.triggered.connect(lambda _checked=False, fn=slot: fn())
-            menu.addAction(action)
-        return menu
-
     def _set_workspace_label(self, text):
         self.workspace_label.setToolTip(text)
         self.workspace_label.setText(QFontMetrics(self.workspace_label.font()).elidedText(
@@ -336,10 +299,11 @@ class App(QMainWindow):
             self._sync_files_root()
 
     def _build_side(self, side):
-        """Collapsible card sidebar: status, robot context, model.
+        """Collapsible card sidebar: status, robot context, capabilities, model.
 
         QToolBox keeps one card open at a time so the window stays calm; the
-        status card offers a jump to the log instead of duplicating it.
+        status card offers a jump to the log instead of duplicating it, and the
+        capability card absorbs the toolbar's vision/voice/web controls.
         """
         layout = QVBoxLayout(side)
         layout.setContentsMargins(0, 0, 4, 0)
@@ -360,7 +324,7 @@ class App(QMainWindow):
         self.busy_progress.hide()
         status_layout.addWidget(self.busy_progress)
         status_layout.addWidget(_button("查看运行日志", lambda: self.notebook.setCurrentWidget(self.log)))
-        status_layout.addWidget(_label("联网与朗读开关在工具栏；搜索端点在设置中配置。", secondary=True))
+        status_layout.addWidget(_label("联网、朗读、抓拍在「能力」卡片；搜索端点在设置中配置。", secondary=True))
         status_layout.addStretch()
         self.side_box.addItem(status_page, "状态")
 
@@ -385,11 +349,39 @@ class App(QMainWindow):
             elif mode == "edit":
                 row.addWidget(_button("编辑", self.open_mcp))
             form.addRow(label, row)
+        self.refresh_button = _button("刷新上下文", self.refresh_context)
+        form.addRow(self.refresh_button)
         form.addRow(_label(
             "可信技能（run_skill）执行免审批并默认获得硬件权限；只安装你信任的技能。"
             "文件、Shell、联网和 MCP 工具默认开启并免审批；提示词更新仍逐次确认。",
             secondary=True))
         self.side_box.addItem(robot, "机器人上下文")
+
+        caps = QWidget()
+        caps_layout = QVBoxLayout(caps)
+        caps_layout.setContentsMargins(8, 8, 8, 8)
+        caps_layout.setSpacing(6)
+        self.web_button = QToolButton()
+        self.web_button.setText("联网搜索")
+        self.web_button.setCheckable(True)
+        self.web_button.setToolTip("开启后智能体获得 web_fetch / web_search（搜索端点在设置中配置）；新会话生效")
+        self.web_button.toggled.connect(self.toggle_web)
+        self.speech_button = QToolButton()
+        self.speech_button.setText("语音朗读")
+        self.speech_button.setCheckable(True)
+        self.speech_button.setToolTip("朗读助手的最新回复（Qt 文本转语音；不可用时禁用）")
+        self.speech_button.toggled.connect(self.toggle_speech)
+        self.snapshot_button = _button("摄像头抓拍", self.capture_snapshot)
+        self.snapshot_button.setToolTip("用主机摄像头抓拍一张照片并预览（内置视觉工具）")
+        for widget, hint in ((self.web_button, "web_fetch / web_search；开关对新会话生效"),
+                             (self.speech_button, "任务结束后自动朗读最新回复"),
+                             (self.snapshot_button, "抓拍一帧并预览，可存入工作区")):
+            row = QHBoxLayout()
+            row.addWidget(widget)
+            row.addWidget(_label(hint, secondary=True), 1)
+            caps_layout.addLayout(row)
+        caps_layout.addStretch()
+        self.side_box.addItem(caps, "能力")
 
         model = QWidget()
         model_layout = QVBoxLayout(model)
@@ -1275,7 +1267,12 @@ class App(QMainWindow):
             return
         self.snapshot_button.setEnabled(True)
         if error is not None:
-            self._notice(f"抓拍失败：{error}" if str(error) else f"抓拍失败：{type(error).__name__}")
+            from ..camera import CameraError
+            if isinstance(error, CameraError):
+                # Enumeration itself failed (missing extra, no device, driver).
+                self._notice(f"摄像头不可用：{error}")
+            else:
+                self._notice(f"抓拍失败：{error}" if str(error) else f"抓拍失败：{type(error).__name__}")
             return
         data = (result or {}).get("data") or b""
         pixmap = QPixmap()

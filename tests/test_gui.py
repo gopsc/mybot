@@ -1682,6 +1682,7 @@ def test_first_run_model_wizard_skips_when_model_comes_from_env(app_factory, mon
 
 
 def test_model_setup_dialog_builds_values_and_validates(qapp, monkeypatch):
+    pytest.importorskip("langchain")  # the wizard lists providers from pymybot.agent
     from pymybot.gui import dialogs as gui_dialogs
 
     warnings = []
@@ -1851,11 +1852,17 @@ def test_window_files_tab_tracks_the_workspace(ui):
 # -- toolbar toggles, status card, snapshot ----------------------------------
 def test_toolbar_toggles_wire_config_and_agent_params(ui, tmp_path):
     gui, app = ui
-    # The sidebar became a collapsible card set with a status card.
+    # The sidebar became a collapsible card set; capabilities live in their own
+    # card instead of crowding the toolbar.
     assert app.side_box.itemText(0) == "状态"
     assert app.side_box.itemText(1) == "机器人上下文"
-    assert app.side_box.itemText(2) == "模型"
+    assert app.side_box.itemText(2) == "能力"
+    assert app.side_box.itemText(3) == "模型"
     assert "服务：" in app.status_card.text()
+    capability_card = app.side_box.widget(2)
+    assert app.web_button.parentWidget() is capability_card
+    assert app.speech_button.parentWidget() is capability_card
+    assert app.snapshot_button.parentWidget() is capability_card
 
     # GUI defaults to web enabled (guards always on); the toggle flips it.
     assert app.web_button.isChecked() is True
