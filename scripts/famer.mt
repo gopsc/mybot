@@ -20,6 +20,9 @@ name value;
    T1    0;
  time_h  -1;
  time_m  -1;
+ temp    -1;
+ pa      -1;
+ humi    -1;
 @
 
 
@@ -53,6 +56,11 @@ adc0.read     adc1.read;
 $T=voltage  $T1=voltage;
 @
 
+# 阅读环境传感器BME280
+@Action
+bme280.T  bme280.P  bme280.H;
+ $temp=T     $pa=P   $humi=H;
+@
 
 # 通过网络继电器开关灯
 @Action
@@ -104,9 +112,12 @@ tcp0.close;
 #@
 
 @Action
-qs.op        qs.key           qs.value;
-$("push")    $("湿度(%)")   $(T*100/5);
+qs.op        qs.key                   qs.value;
+$("push")    $("湿度(%)")           $(T*100/5);
 $("push")    $("温度(°C)")      $(T1*120/5-40);
+$("push")    $("空气温度(°C)")        $(temp);
+$("push")    $("空气湿度(%)")         $(humi);
+$("push")    $("气压(Pa)")              $(pa);
 $("online")  -                -;
 #$("pull")    -               -;
 #$("ack")     

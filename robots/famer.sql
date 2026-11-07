@@ -29,6 +29,16 @@ CREATE TABLE I2C (
 /* 用于连接ADS1115的I2C总线 */
 INSERT INTO I2C (name, path) VALUES ('i2c-1', '/dev/i2c-1');
 
+
+/* BME280 环境传感器 */
+CREATE TABLE BME280 (
+	name	String,
+	I2C	String,
+	address	String
+);
+INSERT INTO BME280 (name, I2C, address) VALUES ('bme280', '$i2c-1', '0x76');
+
+
 /*
  * ADS1115：16 位 4 通道 ADC（I2C），土壤湿度探头接 AIN0 单端输入
  *   地址：ADDR 引脚接 GND=0x48（接 VDD=0x49、SDA=0x4A、SCL=0x4B）
