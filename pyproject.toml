@@ -40,7 +40,7 @@ test = ["pytest>=9.1.1,<10", "ruff>=0.17,<1", "PySide6>=6.10,<7"]
 camera = ["av>=19.0.2,<20"]
 web = ["httpx>=0.28,<1", "beautifulsoup4>=4.12,<5"]
 # MCP 2 renamed the low-level Server API; the server targets the 1.x contract.
-mcp = ["mcp>=1.30,<2"]
+mcp = ["mcp>=1.30,<3"]
 observability = ["opentelemetry-api>=1.30,<2", "opentelemetry-sdk>=1.30,<2"]
 agent = [
   "langchain>=1.4,<2",
@@ -48,7 +48,7 @@ agent = [
   "langchain-openai>=1.0,<2",
   "langchain-anthropic>=1.0,<2",
   "httpx2>=2.5,<3",
-  "mcp>=1.30,<2",
+  "mcp>=1.30,<3",
 ]
 # spidev publishes source-first releases for most Linux/Python combinations, so it
 # stays opt-in; smbus2 is pure Python and ships as a base Linux dependency.
