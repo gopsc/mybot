@@ -1,9 +1,10 @@
 # Architecture
 
-Source: This is the authoritative controller architecture document; the implementation lives in `scripts/pymybot/`.
+Source: This is the authoritative controller architecture document; the implementation lives in `skills/hardware-controller/scripts/pymybot/`.
 
 pymybot separates *what the robot is* from *how a part is driven* and *what
-should happen over time*.
+should happen over time*. One Runtime serves exactly two entry points: the
+Python CLI and the MCP stdio server.
 
 ## Three layers
 
@@ -73,9 +74,12 @@ different source.
 
 ## Runtime flow
 
+The CLI drives `Robot` directly; the MCP server submits the same operations to a
+`RobotExecutor` owner thread, which serialises them.
+
 ```mermaid
 sequenceDiagram
-    participant CLI as CLI / GUI / serve
+    participant CLI as CLI / MCP
     participant Robot
     participant Registry
     participant Driver as Python / Lua driver
@@ -102,12 +106,14 @@ sequenceDiagram
 
 Key invariants:
 
-- The whole command emits exactly **one JSON line** on stdout. Diagnostics go
-  to stderr; Lua `print` and the Python driver's default `print` are redirected.
+- The whole CLI command emits exactly **one JSON line** on stdout. The MCP
+  server instead reserves stdout for JSON-RPC. In both cases diagnostics go to
+  stderr; Lua `print` and the Python driver's default `print` are redirected.
   Trusted Python code must keep direct/imported-library output off stdout too.
-- `check`, `hardware`, `scripts` and `query` never activate drivers. Python
-  source is compiled without execution; imports, constructors and method
-  availability are not validated by this static check.
+- `check`, `discover`, `hardware`, `scripts`, `query`, `doctor`, `new` and
+  `assets` never activate drivers. Python source is compiled without execution;
+  imports, constructors and method availability are not validated by this
+  static check.
 - `run`, `sample` and `apply-sql` activate the robot; activation itself may
   write to hardware.
 - Driver calls are serialised per robot; daemon sampling uses dedicated worker
@@ -119,112 +125,67 @@ Key invariants:
 
 | Module | Responsibility |
 | --- | --- |
-| `pymybot/cli.py` | Argument parsing, JSON contract, command dispatch |
-| `pymybot/robot.py` | Structure loading, validation, activation, HMI |
+| `pymybot/cli.py` | Argument parsing, JSON contract, command dispatch, `doctor` and `assets` handlers |
+| `pymybot/robot.py` | Structure loading, validation, activation and action execution |
 | `pymybot/sql.py` | Strict in-memory SQL grammar and table operations |
 | `pymybot/matrix.py` | MT action matrix parser and validator |
 | `pymybot/actions.py` | Action runner: aliases, captures, control flow |
 | `pymybot/expr.py` | Expression parser/evaluator and numeric rendering |
+| `pymybot/include.py` | Include expansion and phase-based `.mt` matrix merging |
+| `pymybot/hardware.py` | Identifier checks, budgets, variables, registry and metadata |
 | `pymybot/runtime.py` | Shared HAL bridge, Lupa/LuaJIT (or standard-Lua) bootstrap and Python↔Lua conversion |
 | `pymybot/native.py` | Compile-only validation, per-row Python modules, Driver context and results |
 | `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Shell host operations |
 | `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
-| `pymybot/agent.py` | LangGraph worker agent, model configuration, tool loop |
-| `pymybot/agent_team.py` | memory agent, plan/act/reflect loop, mission persistence, unattended mode |
-| `pymybot/agent_memory_store.py` | long-term memory JSONL store and lexical BM25 retrieval |
-| `pymybot/camera.py` | Host camera enumeration and JPEG capture for the Agent tools |
-| `pymybot/images.py` | Bounded image-container validation for receipts and camera output |
-| `pymybot/agent_team.py` | Memory agent, plan/act/reflect loop, mission persistence and unattended mode |
-| `pymybot/agent_memory_store.py` | Long-term memory JSONL store and lexical BM25 retrieval |
-| `pymybot/camera.py` | Agent host camera enumeration and JPEG capture; cameras are not controller variables |
-| `pymybot/images.py` | Bounded image-container validation for Agent camera output and image results |
-| `pymybot/agent_skill_runner.py` | Trusted Skill entrypoint resolution (legacy manifest or `scripts/`), scoped arguments and bounded Skill subprocess |
-| `pymybot/prompts.py` | Manifest-ordered runtime prompt layers, trusted safety hashes, bounded composition, CAS/backups and private storage |
-| `pymybot/roles.py` | Role creation/loading, role-owned prompt/skills/MCP paths and bounded atomic model-history persistence |
-| `pymybot/agent_prompt.py` | Operator profile validation and legacy prompt composition compatibility |
-| `pymybot/agent_context.py` | Bounded, mtime-cached project inventory injected as untrusted data |
-| `pymybot/agent_memory.py` | Conservative request-token estimation across messages, instructions and tool schemas |
-| `pymybot/agent_intent.py` | Deterministic bilingual intent routing, tool allowlists and budgets |
-| `pymybot/agent_executor.py` | Approval-gated tool implementations |
-| `pymybot/agent_workspace.py` | Bounded, link-safe workspace file tools and shell |
-| `pymybot/sandbox.py` | Shell sandbox backend probe and bubblewrap command builder |
-| `pymybot/agent_web.py` | Bounded HTTPS fetch, SSRF guards and SearXNG search |
-| `pymybot/serve.py` | Long-lived stdio JSON-RPC 2.0 backend |
-| `pymybot/mcp_server.py` | Standard MCP stdio server over the same executor (read-only by default) |
-| `pymybot/mcp_client.py` | Operator `mcpServers` configuration for external agent tools |
-| `pymybot/gui/` | PySide6 front-end: protocol client, settings, approvals, command panel and read-only resource browser |
-| `pymybot/scaffold.py` | `pymybot new` SQL/MT/Python skeleton generator |
-| `pymybot/security.py` | Bounded reads and strict JSON output |
+| `pymybot/discover.py` | Read-only host UART/FTDI/I2C/SPI enumeration and structure-SQL hints |
 | `pymybot/paths.py` | Source/frozen asset resolution |
+| `pymybot/security.py` | Bounded input reads and strict one-line JSON output |
+| `pymybot/errors.py` | Controller exception hierarchy |
+| `pymybot/process.py` | Platform shell-command and process-tree helpers used by the HAL Shell driver |
+| `pymybot/scaffold.py` | `pymybot new` SQL/MT/Python skeleton generator |
+| `pymybot/executor.py` | Single-owner `Robot` runtime that serialises MCP work on one thread |
+| `pymybot/mcp_server.py` | Standard MCP stdio server over the executor (read-only by default) |
 
 ## Entry points
 
 ```mermaid
 flowchart TB
-    U[User] --> G[GUI]
-    U --> C[CLI]
-    U --> A[Agent loop]
-    U --> S[serve JSON-RPC]
-    M[MCP client] -->|stdio JSON-RPC| X[mcp server]
-    U --> M
-    G -->|spawn + stdio| S
+    U[Operator] --> C[CLI]
+    M[MCP client] -->|stdio JSON-RPC| X[MCP server]
     C --> R[Robot]
-    A --> E[Agent executor]
-    S --> E
-    X --> E
+    X --> E[RobotExecutor<br/>owner thread]
     E --> R
-    A -->|approved external tools| N[External MCP servers]
     R --> D[Python / Lua drivers]
     D --> H[HAL]
 ```
 
-- **GUI** never executes robot logic itself; it drives one `serve` child process
-  and marshals all callbacks onto the Qt GUI thread.
-- **Agent modes** run a dual-agent team by default: a tool-less **memory agent**
-  plans and reflects, and a **worker agent** owns the tool surface and talks to
-  `RobotExecutor`, which runs hardware work on a dedicated owner thread.
-  There is no single-agent conversation path. The team starts from the GUI
-  「启动」 button (`agent.start`) or `pymybot agent --role NAME`, proposes its own
-  goals when the queue is empty, and runs until stopped or its per-mission and
-  per-run caps are reached. `agent.ask` executes one mission for external
-  clients without starting the loop.
-  Host-gated tools ask for approval through a callback; trusted skill actions
-  execute without approval.
-  The selected role under `~/.mybot/roles` supplies the session's PromptLibrary,
-  Skills, MCP configuration and resumable model history, and is required for
-  agent conversations; it does not change hardware ownership or approval boundaries.
-  External MCP tools stay outside that owner thread and are surfaced by
-  LangGraph tools, but approval, result bounding and transcripts use the
-  same session rules.
-  `run_skill` executes a trusted Skill entrypoint: a legacy `skill.json` fixes
-  per-action argv, while an Anthropic-style skill forwards a documented CLI
-  subcommand and its arguments to the first top-level `scripts/*.py`. The model
-  never supplies an entrypoint. Trusted skills run without approval and receive
-  `--allow-hardware` automatically. The child process runs on the owner
-  thread, so Skill and native controller calls cannot activate hardware
-  concurrently.
-- **MCP server mode** is a protocol adapter over `RobotExecutor`: the model is
-  absent, the operator passes static and execution switches at launch, and
-  stdout carries only MCP JSON-RPC.
-- **CLI controller mode** skips the model entirely and is suitable for CI.
+- **CLI controller mode** loads `Robot` in-process, executes one command and
+  prints one JSON line; it never starts a server or a model. It is the CI entry
+  point and is also available from the skill directory as
+  `python scripts/hardware_controller.py`.
+- **MCP server mode** is a protocol adapter over `RobotExecutor`: a plain
+  owner-thread runtime with no model, no approval callback and no tool loop. The
+  operator fixes execution and hardware switches at launch, stdout carries only
+  MCP JSON-RPC, and each process controls one structure file. `--allow-hardware`
+  requires `--allow-execution`.
 
 ## Asset and path resolution
 
-Controller sources live in `scripts/pymybot/`; the root
-`pymybot` package extends its search path so existing `pymybot.*` imports and the
-Agent/GUI keep working. Default source assets live in
-`assets/{modules,robots,scripts}`. Packaged assets live in `pymybot/assets/{modules,robots,scripts,skills,prompts}`; module
-assets include both `.py` and `.lua`. Doctor counts both; agent inventory and
-GUI previews include both within their existing budgets, with Python syntax
-highlighting for `.py`. In a source checkout the code falls back to the
-repository directories. Frozen builds use `pymybot/paths.py` and `sys._MEIPASS`;
-never rely on the current working directory. See [`development.md`](../../../docs/development.md)
+Controller sources live in `skills/hardware-controller/scripts/pymybot/`; the
+skill's `scripts/hardware_controller.py` is the self-contained launcher, and the
+root `pymybot/__init__.py` extends its search path to the same modules so
+`python -m pymybot` works in a source checkout. Default source assets live in
+`skills/hardware-controller/assets/{modules,robots,scripts}`; the wheel build
+copies the modules and those three asset roots into `pymybot/` and
+`pymybot/assets/`. Module assets include both `.py` and `.lua`, and `doctor`
+counts both. Frozen builds use `pymybot/paths.py` and `sys._MEIPASS`; never rely
+on the current working directory. See [`development.md`](../../../docs/development.md)
 for the packaging flow.
 
 ## Further reading
 
 - [CLI reference](cli.md)
-- [GUI guide](../../../docs/gui.md)
+- [MCP server](mcp.md)
 - [Security model](security.md)
 - [Testing](testing.md)
 - [Scripting reference](../SKILL.md)

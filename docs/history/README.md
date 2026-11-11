@@ -39,6 +39,16 @@ live in `skills/hardware-controller/references/`; the same-named pages in
 `docs/` are redirect stubs. Older history entries below keep the paths they had
 when written.
 
+## 0.7.x controller-only cut
+
+The `gui-mybot` branch now carries only the hardware controller. The Agent and
+GUI implementation was removed in one cut, together with roles, runtime prompts,
+session transcripts and the web, camera and shell tool surface. The supported
+entry points are the Python CLI and the MCP stdio server, and the release
+artifacts are the sdist and the wheel. The controller Runtime, default assets and
+authority documents stay under `skills/hardware-controller/`; the branch name is
+kept because renaming it needs repository-owner/admin access.
+
 ## Completed migration notes
 
 - [Windows faulthandler](windows-faulthandler.md) — diagnosing LuaJIT SEH

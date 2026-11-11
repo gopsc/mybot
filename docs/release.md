@@ -21,7 +21,7 @@ the state of the repository.
 2. Version bumped in `pymybot/__init__.py`, `pyproject.toml` and `CITATION.cff`.
    The tag must equal all three version sources; the release workflow rejects
    a mismatch.
-3. `CHANGELOG.md` has a dated section; docs/screenshots are current.
+3. `CHANGELOG.md` has a dated section and the documentation links resolve.
 4. `python -I tools/ci_smoke.py wheel` passes locally.
 5. Commit, tag `vX.Y.Z`, push the tag. For a pre-release, use the same PEP 440
    version in all version files and the tag (for example `0.4.0rc1` / `v0.4.0rc1`);
@@ -29,11 +29,10 @@ the state of the repository.
 6. The release workflow builds:
    - `pymybot-X.Y.Z.tar.gz` (sdist);
    - `pymybot-X.Y.Z-py3-none-any.whl`;
-   - `pymybot-X.Y.Z-windows-x64.zip` (GUI + console, with PyAV camera support);
    - `SHA256SUMS`.
-7. Verify the published assets and the Windows `doctor` output, which must
-   report `av` as importable. If an asset is broken, follow the rollback steps
-   below rather than editing the release in place.
+7. Verify the published assets and run `pymybot doctor` from a clean install of
+   the wheel. If an asset is broken, follow the rollback steps below rather than
+   editing the release in place.
 8. Announce the release and close the milestone.
 
 ## Reproducibility rules
@@ -43,8 +42,6 @@ the state of the repository.
   SHA in the release notes.
 - No shared credentials, local config, editor state or `dist/` output may enter
   the artifact.
-- The Windows zip is built from `tools/mybot.spec`; the same spec is used for
-  local smoke builds.
 
 ## Branch and tag policy
 
@@ -62,6 +59,3 @@ If a release is broken:
 2. Publish a patch release with the fix.
 3. If a credential was included, rotate it immediately and document the
    incident in the release notes.
-
-The withdrawn `gui-v1` asset is the reference example: it was built from an
-unpublished tree and contained a shared key. It must not be redistributed.

@@ -14,9 +14,9 @@ def test_source_assets_fall_back_to_the_checkout(tmp_path, monkeypatch):
     skill_robots = package.parent.parent / "assets" / "robots"
     skill_robots.mkdir(parents=True)
     assert paths.asset_path("robots") == skill_robots
-    assert paths.asset_path("prompts") == tmp_path / "prompts"
-    (package / "assets" / "prompts").mkdir()
-    assert paths.asset_path("prompts") == package / "assets" / "prompts"
+    assert paths.asset_path("skills") == tmp_path / "skills"
+    (package / "assets" / "skills").mkdir()
+    assert paths.asset_path("skills") == package / "assets" / "skills"
 
 
 def test_frozen_assets_come_from_meipass(tmp_path, monkeypatch):
@@ -29,8 +29,8 @@ def test_frozen_assets_come_from_meipass(tmp_path, monkeypatch):
 
     assert paths.asset_dir() == expected
     assert paths.asset_path("skills") == expected / "skills"
-    # Missing frozen prompts must not silently fall back to a checkout.
-    assert paths.asset_path("prompts") == expected / "prompts"
+    # Missing frozen assets must not silently fall back to a checkout.
+    assert paths.asset_path("robots") == expected / "robots"
 
 
 def test_nuitka_assets_resolve_beside_executable(tmp_path, monkeypatch):
@@ -38,9 +38,9 @@ def test_nuitka_assets_resolve_beside_executable(tmp_path, monkeypatch):
     monkeypatch.delattr(sys, "_MEIPASS", raising=False)
     monkeypatch.setattr(paths, "__compiled__", object(), raising=False)
     monkeypatch.setattr(sys, "executable", str(tmp_path / "pymybot.exe"))
-    expected = tmp_path / "pymybot" / "assets" / "prompts"
+    expected = tmp_path / "pymybot" / "assets" / "skills"
     expected.mkdir(parents=True)
-    assert paths.asset_path("prompts") == expected
+    assert paths.asset_path("skills") == expected
 
 
 def test_nuitka_build_counts_as_frozen(monkeypatch):
@@ -54,4 +54,4 @@ def test_real_checkout_uses_skill_assets_and_shared_directories():
     assets = paths.source_root() / "skills" / "hardware-controller" / "assets"
     assert paths.asset_path("modules") == assets / "modules"
     assert paths.asset_path("scripts") == assets / "scripts"
-    assert paths.asset_path("prompts") == paths.source_root() / "prompts"
+    assert paths.asset_path("skills") == paths.source_root() / "skills"

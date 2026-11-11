@@ -13,9 +13,6 @@ updates:
     groups:
       python-runtime:
         patterns: ["*"]
-        exclude-patterns: ["langchain*", "langgraph*", "anthropic", "openai", "mcp", "fastmcp-*"]
-      agent:
-        patterns: ["langchain*", "langgraph*", "anthropic", "openai", "mcp", "fastmcp-*"]
 
   - package-ecosystem: github-actions
     directory: "/"

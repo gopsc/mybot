@@ -6,7 +6,6 @@ import types
 import pytest
 
 from pymybot import cli
-from pymybot.agent_skill_runner import _GENERIC_COMMANDS
 from pymybot.discover import BUSES, DiscoveryError, _enumerate_ftdi, _hints, _probe_uart_ports, \
     discover, parse_buses
 
@@ -166,10 +165,6 @@ def test_discover_ftdi_only_keeps_the_report_shape():
     assert report["buses"] == ["ftdi"] and "ftdi" in report
     for bus in ("i2c", "spi", "uart"):
         assert report[bus]["supported"] is False
-
-
-def test_discover_is_on_the_skill_surface():
-    assert "discover" in _GENERIC_COMMANDS
 
 
 def test_cli_discover_prints_json_and_validates_buses(capsys):

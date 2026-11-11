@@ -23,7 +23,6 @@
 - Running untrusted Lua or shell commands safely.
 - Hardware we do not have; we can help debug drivers, but cannot guarantee a
   device works without a maintainer or contributor test.
-- Model providers or endpoints we cannot reach.
 - Recovering a robot from an action that has already been dispatched; the
   runtime reports “result unknown” instead of pretending to roll back.
 

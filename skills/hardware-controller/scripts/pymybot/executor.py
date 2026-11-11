@@ -1,14 +1,15 @@
-"""Single-owner, framework-independent execution of operator-approved tools.
+"""Single-owner runtime that serialises robot work for the MCP server.
 
-Lua modules and robot declarations are trusted operator inputs, not a sandbox.
-Physical access requires allow_hardware at the existing runtime/HAL boundary;
-virtual devices remain available without it. Deadlines are cooperative: native
+Every start/execution request is submitted to one owner thread, so queued work
+cannot overtake an action that is still running. Lua modules and robot
+declarations are trusted operator inputs, not an isolation boundary. Physical
+access requires allow_hardware at the existing runtime/HAL boundary; virtual
+devices remain available without it. Deadlines are cooperative: native
 active/read/run calls cannot be forcibly interrupted.
 """
 from __future__ import annotations
 
 import asyncio
-import base64
 import copy
 import math
 import os
@@ -19,13 +20,8 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 
-from .agent_skills import SkillsLibrary
-from .agent_skill_runner import SkillRunner
-from .agent_workspace import WORKSPACE_TOOLS, Workspace
-from .sandbox import SANDBOX_MODES, describe_backend
 from .errors import BudgetExceeded
 from .hardware import Budget, ensure_ok, safe_ident
-from .images import image_header
 from .include import MAX_INCLUDE_BYTES, _Expander, expand_includes
 from .matrix import is_control, parse_matrices, reflex_name
 from .robot import MAX_BINDING_BYTES, Robot
@@ -34,8 +30,6 @@ from .sql import parse_sql
 
 MAX_LIST = 1000
 MAX_TEXT = 64 * 1024
-MAX_IMAGE_BASE64 = 2 * 1024 * 1024
-MAX_IMAGES = 16
 _UNKNOWN = "Execution outcome is unknown; do not retry. Executor is faulted; operator inspection is required."
 _NOT_EXECUTED = "Request was not executed. Check operator configuration and tool arguments."
 _TOOLS = {
@@ -45,12 +39,6 @@ _TOOLS = {
     "query_sql": ({"sql"}, {"sql"}),
     "run_action_script": ({"script"}, {"script", "vars"}),
     "read_variables": ({"names"}, {"names"}),
-    "list_skills": (set(), set()),
-    "read_skill": ({"name"}, {"name", "file"}),
-    "run_skill": ({"skill", "action"}, {"skill", "action", "arguments"}),
-    "install_skill": ({"path"}, {"path"}),
-    "uninstall_skill": ({"name"}, {"name"}),
-    **WORKSPACE_TOOLS,
 }
 EXECUTION_TOOLS = frozenset({"run_action_script", "read_variables"})
 
@@ -276,61 +264,6 @@ def _bounded(payload):
     return {**envelope, "output": content[:low]}
 
 
-def _image(value):
-    ensure_ok(value)
-    encoded = value.get("b64", value.get("base64"))
-    if not isinstance(encoded, str) or not 0 < len(encoded) <= MAX_IMAGE_BASE64:
-        raise SecurityError("Invalid image size or encoding")
-    if any(value[key] != encoded for key in ("b64", "base64") if key in value):
-        raise SecurityError("Conflicting image copies")
-    data = base64.b64decode(encoded, validate=True)
-    if base64.b64encode(data).decode("ascii") != encoded:
-        raise SecurityError("Noncanonical base64")
-    fmt, _ = image_header(data)
-    media_type = "image/" + fmt
-    if value.get("format") != fmt or value.get("mime") != media_type:
-        raise SecurityError("Image format/mime mismatch")
-
-    def strip(item):
-        if isinstance(item, dict):
-            return {key: strip(v) for key, v in item.items() if key not in {"b64", "base64"}}
-        if isinstance(item, list):
-            return [strip(v) for v in item]
-        return item
-
-    return strip(value), {"data": data, "media_type": media_type}
-
-
-def _lift_images(outputs):
-    """Move base64 image payloads out of action results into binary attachments.
-
-    An image left inline in a receipt would be cut mid-string by _bounded and burn
-    the whole tool-result budget, so the model would see base64 fragments rather
-    than a picture. Each lifted result keeps an index correlating it with the
-    attachment, and payloads past MAX_IMAGES are marked instead of dropped.
-    """
-    images, omitted = [], 0
-
-    def visit(value):
-        nonlocal omitted
-        if isinstance(value, dict):
-            if not isinstance(value.get("b64", value.get("base64")), str):
-                return {key: visit(item) for key, item in value.items()}
-            if len(images) >= MAX_IMAGES:
-                omitted += 1
-                rest = {key: visit(item) for key, item in value.items()
-                        if key not in {"b64", "base64"}}
-                return {**rest, "image_omitted": f"more than {MAX_IMAGES} images in one action"}
-            data, image = _image(value)
-            images.append(image)
-            return {**data, "image_index": len(images) - 1}
-        if isinstance(value, list):
-            return [visit(item) for item in value]
-        return value
-
-    return visit(outputs), images, omitted
-
-
 class RobotExecutor:
     """Own one Robot on one worker; use from a single asyncio event loop.
 
@@ -343,24 +276,12 @@ class RobotExecutor:
 
     def __init__(self, robot_path=None, *, module_paths=None,
                  scripts_dir=None, allow_hardware=False,
-                 stop_event=None, robot_factory=Robot, skills=None, workspace_dir=None, enable_shell=False,
-                 vars=None, sandbox="off"):
-        if enable_shell and workspace_dir is None:
-            raise ValueError("Shell tools require a workspace directory")
-        if sandbox not in SANDBOX_MODES:
-            raise ValueError("sandbox must be one of off, auto or bwrap")
-        self._sandbox = sandbox
+                 stop_event=None, robot_factory=Robot, vars=None):
         self._vars = _session_vars(vars)
-        self._workspace_dir = Path(workspace_dir).absolute() if workspace_dir is not None else None
-        self._enable_shell = enable_shell is True
-        self._workspace = None
-        self._protected_paths = ()
-        self._workspace_lock = threading.Lock()
         self._robot_path = Path(robot_path).absolute() if robot_path is not None else None
         self._scripts_dir = Path(scripts_dir).absolute() if scripts_dir is not None else None
         self._scripts = None
         self._rows = {}
-        self._skills = skills if isinstance(skills, SkillsLibrary) else None
         self._module_paths = module_paths
         self._allow_hardware = allow_hardware is True
         self._stop = stop_event if stop_event is not None else threading.Event()
@@ -378,19 +299,6 @@ class RobotExecutor:
         self.records: list = []
         self._records_lock = threading.Lock()
 
-    def protect_prompts(self, paths):
-        """Opt AgentSession into prompt protection before start()/call().
-
-        The caller ensures runtime/default roots exist, then supplies both (for
-        example library.home and library.defaults). Direct CLI/MCP callers retain
-        their existing behavior unless they explicitly opt in. This only protects
-        generic workspace tools, not external MCP servers or trusted drivers.
-        """
-        with self._workspace_lock:
-            if self._workspace is not None or self._owner_thread_id is not None or self._closing:
-                raise SecurityError("Prompt protection must be configured before executor startup")
-            self._protected_paths = tuple(Path(path).absolute() for path in paths)
-
     @property
     def owner_thread_id(self):
         return self._owner_thread_id
@@ -402,22 +310,6 @@ class RobotExecutor:
     @property
     def scripts_dir(self):
         return self._scripts_dir
-
-    @property
-    def workspace_dir(self):
-        return self._workspace_dir
-
-    @property
-    def sandbox_mode(self):
-        return self._sandbox
-
-    @property
-    def sandbox_label(self):
-        return describe_backend(self._sandbox)
-
-    @property
-    def skills(self):
-        return self._skills
 
     @property
     def module_paths(self):
@@ -513,11 +405,6 @@ class RobotExecutor:
         if self._ready:
             return
         scripts = _Scripts(self._scripts_dir) if self._scripts_dir is not None else None
-        with self._workspace_lock:
-            if self._workspace_dir is not None and self._workspace is None:
-                self._workspace = Workspace(
-                    self._workspace_dir, enable_shell=self._enable_shell,
-                    sandbox=self._sandbox, protected_paths=self._protected_paths)
         if self._robot_path is not None:
             sql = _read_stable(self._robot_path, lambda: _no_links(self._robot_path))
             self._check(deadline)
@@ -562,9 +449,6 @@ class RobotExecutor:
                        "truncated": hardware["truncated"] or scripts["truncated"]}
             if self._robot_path is not None:
                 context["robot"] = self._robot_path.stem
-            if self._workspace is not None:
-                context["workspace"] = {"root": str(self._workspace.path), "shell_enabled": self._enable_shell,
-                                        "shell_sandboxed": False}
             self._check(deadline)
             return _bounded(context)
         except Exception as exc:
@@ -645,9 +529,7 @@ class RobotExecutor:
         if not required <= arguments.keys() or not arguments.keys() <= allowed:
             raise SecurityError("Wrong tool arguments")
         checked_text(dumps(arguments))
-        if name in WORKSPACE_TOOLS:
-            Workspace.validate(name, arguments)
-        elif name == "read_action_script":
+        if name == "read_action_script":
             _relative(arguments["script"])
         elif name == "query_sql":
             checked_text(arguments["sql"])
@@ -669,23 +551,10 @@ class RobotExecutor:
                 safe_ident(item)
             if len(set(names)) != len(names):
                 raise SecurityError("Duplicate variables")
-        elif name == "read_skill":
-            checked_text(arguments["name"])
-            if "file" in arguments:
-                checked_text(arguments["file"])
-        elif name == "install_skill":
-            checked_text(arguments["path"])
-        elif name == "uninstall_skill":
-            checked_text(arguments["name"])
-        elif name == "run_skill":
-            checked_text(arguments["skill"], 64)
-            checked_text(arguments["action"], 64)
-            if "arguments" in arguments and type(arguments["arguments"]) is not dict:
-                raise SecurityError("Skill arguments must be an object")
 
     def _preflight_io(self, name, arguments):
-        # Host approval belongs to AgentSession. This flag is passed to Robot,
-        # which blocks actual physical opens while still allowing virtual/file IO.
+        # The operator's allow_hardware switch is enforced inside Robot, which
+        # blocks physical opens while still allowing virtual/file IO.
         if name == "read_variables":
             for variable in arguments["names"]:
                 if variable not in self._rows:
@@ -728,19 +597,12 @@ class RobotExecutor:
 
     def _call(self, name, arguments, deadline):
         executed = False
-
-        def started():
-            nonlocal executed
-            executed = True
-
         try:
             self._check(deadline)
             if self._faulted:
                 raise SecurityError("Executor faulted")
             self._arguments(name, arguments)
             self._load(deadline)
-            image = None
-            images = None
             if name == "list_hardware":
                 data = self._hardware()
             elif name == "list_action_scripts":
@@ -757,55 +619,6 @@ class RobotExecutor:
                 if self._robot is None:
                     raise SecurityError("Robot is not configured")
                 data = {"output": self._robot.query_sql(arguments["sql"])}
-            elif name == "list_skills":
-                if self._skills is None or self._skills.root is None:
-                    raise SecurityError("Skills are not configured")
-                data = self._skills.index()
-            elif name == "read_skill":
-                if self._skills is None or self._skills.root is None:
-                    raise SecurityError("Skills are not configured")
-                file = arguments.get("file", "SKILL.md")
-                data = {"name": arguments["name"], "file": file,
-                        "content": self._skills.read(arguments["name"], file)}
-            elif name == "install_skill":
-                if self._workspace is None:
-                    raise SecurityError("Workspace is not configured")
-                if self._skills is None or self._skills.root is None:
-                    raise SecurityError("Skills are not configured")
-                source = self._workspace.resolve_directory(
-                    arguments["path"], lambda: self._check(deadline))
-                # SkillsLibrary.install reports the first visible mutation through
-                # started(); a rejected manifest therefore stays not_executed.
-                data = self._skills.install(source, started=started)
-            elif name == "uninstall_skill":
-                if self._skills is None or self._skills.root is None:
-                    raise SecurityError("Skills are not configured")
-                # SkillsLibrary.uninstall reports the first visible mutation through
-                # started(); a rejected approval therefore stays not_executed.
-                data = self._skills.uninstall(arguments["name"], started=started)
-            elif name == "run_skill":
-                if self._skills is None or self._skills.root is None:
-                    raise SecurityError("Skills are not configured")
-                roots = {}
-                if self._robot_path is not None:
-                    roots["robots"] = self._robot_path.parent
-                if self._scripts_dir is not None:
-                    roots["scripts"] = self._scripts_dir
-                if self._workspace_dir is not None:
-                    roots["workspace"] = self._workspace_dir
-                    if "robots" not in roots and (self._workspace_dir / "robots").is_dir():
-                        roots["robots"] = self._workspace_dir / "robots"
-                    if "scripts" not in roots and (self._workspace_dir / "scripts").is_dir():
-                        roots["scripts"] = self._workspace_dir / "scripts"
-                data = SkillRunner(self._skills, roots=roots,
-                                   module_paths=self.module_paths).run(
-                    arguments["skill"], arguments["action"], arguments.get("arguments"),
-                    allow_hardware=True, bindings=self._vars, deadline=deadline,
-                    check=lambda: self._check(deadline), started=started)
-            elif name in WORKSPACE_TOOLS:
-                if self._workspace is None:
-                    raise SecurityError("Workspace tools are not configured")
-                data = self._workspace.call(name, arguments, lambda: self._check(deadline), started)
             else:
                 if self._robot is None:
                     raise SecurityError("Robot is not configured")
@@ -825,32 +638,19 @@ class RobotExecutor:
                     self._scripts.check()
                     # Operator-provided bindings win over model-supplied ones.
                     bindings = {**arguments.get("vars", {}), **self._vars}
-                    outputs, images, omitted = _lift_images(self._robot.run(
+                    data = {"outputs": self._robot.run(
                         script, base_dir=str(base), vars=bindings,
-                        timeout=self._remaining(deadline)))
-                    data = {"outputs": outputs}
-                    if omitted:
-                        data["images_omitted"] = omitted
-                elif name == "read_variables":
-                    data = self._read(arguments["names"], deadline)
+                        timeout=self._remaining(deadline))}
                 else:
-                    value = self._read([arguments["name"]], deadline)[arguments["name"]]
-                    data, image = _image(value)
+                    data = self._read(arguments["names"], deadline)
             self._check(deadline)
-            ok = (data["exit_code"] == 0 and not data.get("output_error")
-                  if name in {"shell", "run_skill"} else True)
-            result = _bounded({"ok": ok, "executed": executed, "state": "completed", "data": data})
-            self._check(deadline)
-            if image is not None:
-                result["image"] = image
-            if images:
-                result["images"] = images
+            result = _bounded({"ok": True, "executed": executed, "state": "completed", "data": data})
         except BaseException as exc:
             if executed:
                 # Operator-only diagnostics: the model still receives the
-                # deliberately vague unknown receipt, but the GUI log and
-                # terminal need the failure class. Never print str(exc):
-                # driver errors may contain secrets or user data.
+                # deliberately vague unknown receipt, but the terminal log
+                # needs the failure class. Never print str(exc): driver
+                # errors may contain secrets or user data.
                 print(f"pymybot: {name} failed after dispatch: {type(exc).__name__}", file=sys.stderr)
                 self._interrupted = self._stop.is_set()
                 self._faulted = True
@@ -869,9 +669,6 @@ class RobotExecutor:
                 except BaseException:
                     pass  # close will retry cleanup, never the action.
             result = self._failure(exc, executed)
-            if (isinstance(name, str) and (name in WORKSPACE_TOOLS or name in {"run_skill", "install_skill", "uninstall_skill"})
-                    and not executed and isinstance(exc, SecurityError)):
-                result["error"]["message"] = str(exc)
         return self._record(name, result)
 
     async def call(self, name, arguments: dict, *, timeout: float | None = 180) -> dict:

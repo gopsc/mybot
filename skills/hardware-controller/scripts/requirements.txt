@@ -13,20 +13,5 @@ smbus2>=0.5,<1; sys_platform == 'linux'
 # 可选：mcp 子命令（MCP 2 重命名了低层 Server API，服务端针对 1.x 契约）
 # mcp>=1.30,<2
 
-# 可选：agent 子命令（LangGraph Agent）
-# langchain>=1.4,<2
-# langgraph>=1.2,<2
-# langchain-openai>=1.0,<2
-# langchain-anthropic>=1.0,<2
-# httpx2>=2.5,<3
-# mcp>=1.30,<2
-
-# 可选：gui 子命令
-# PySide6>=6.10,<7
-
-# 可选：web 抓取
-# httpx>=0.28,<1
-# beautifulsoup4>=4.12,<5
-
 # 可选：Linux SPI（spidev 以源码分发为主，保持手动开启）
 # spidev>=3.6,<4; sys_platform == 'linux'

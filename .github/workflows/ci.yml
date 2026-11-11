@@ -38,9 +38,9 @@ jobs:
       - name: Release metadata
         run: python -I tools/check_release_metadata.py
 
-  # One authoritative full regression with the complete optional stack.
+  # One authoritative full regression with the optional MCP stack.
   test:
-    name: pytest / ubuntu / full extras
+    name: pytest / ubuntu / mcp extra
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -50,17 +50,15 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - name: Install Qt system dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libegl1 libopengl0
       - name: Install
-        run: python -m pip install -e ".[agent,mcp,web,test]"
-      - name: Agent and MCP import preflight
-        run: python -I tools/ci_smoke.py agent
+        run: python -m pip install -e ".[mcp,test]"
+      - name: MCP import preflight
+        run: python -I tools/ci_smoke.py mcp
       - name: Tests
         run: python -m pytest -q
 
   # Base install only: proves nothing outside pyproject's base/test deps is a
-  # hidden hard requirement (agent-dependent tests skip themselves).
+  # hidden hard requirement (MCP-dependent tests skip themselves).
   base:
     name: pytest / ubuntu / base install
     runs-on: ubuntu-latest
@@ -72,8 +70,6 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - name: Install Qt system dependencies
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq libegl1 libopengl0
       - name: Install
         run: python -m pip install -e ".[test]"
       - name: Base dependency preflight
@@ -82,7 +78,7 @@ jobs:
         run: python -m pytest -q
 
   windows:
-    name: pytest / windows / full extras
+    name: pytest / windows / mcp extra
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -93,7 +89,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Install
-        run: python -m pip install -e ".[agent,mcp,web,test]"
+        run: python -m pip install -e ".[mcp,test]"
       - name: Tests
         run: python -m pytest -q
 
@@ -169,6 +165,6 @@ jobs:
         run: docker build -t pymybot:ci .
       - name: Run doctor in the image
         run: docker run --rm pymybot:ci doctor
-      - name: Validate packaged prompts
+      - name: Validate packaged assets
         run: |
-          docker run --rm pymybot:ci doctor | python3 -c "import json,sys; r=json.load(sys.stdin); assert r['healthy'], r; p=r['assets']['prompts']; assert p['valid'] and p['files'] >= 7, r"
+          docker run --rm pymybot:ci doctor | python3 -c "import json,sys; r=json.load(sys.stdin); assert r['healthy'], r; assert r['assets']['modules']['files'] > 0, r"

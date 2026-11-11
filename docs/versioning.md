@@ -15,9 +15,7 @@ Within a minor line (`0.6.x`):
   releases remain accepted, except where a security fix requires a documented
   rejection.
 - Public Python module paths used by integrations (`pymybot.cli`,
-  `pymybot.robot`, `pymybot.serve`) keep their entry points.
-- The `serve` JSON-RPC protocol version is reported by `initialize`; new
-  optional members may be added.
+  `pymybot.robot`) keep their entry points.
 
 Breaking changes are allowed in a minor release before 1.0 but must be listed in
 `CHANGELOG.md` under **Changed** or **Removed**, with a migration note.

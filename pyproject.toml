@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pymybot"
 version = "0.6.0"
-description = "Cross-platform robot controller with LuaJIT drivers, SQL structures and an approval-gated AI agent"
+description = "Cross-platform robot controller with LuaJIT drivers, SQL structures and MT action scripts"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "pymybot contributors" }]
-keywords = ["robotics", "hardware", "luajit", "sql", "ai-agent"]
+keywords = ["robotics", "hardware", "luajit", "sql"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -35,25 +35,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = ["PySide6>=6.10,<7"]
-test = ["pytest>=9.1.1,<10", "ruff>=0.17,<1", "PySide6>=6.10,<7"]
-camera = ["av>=19.0.2,<20"]
-web = ["httpx>=0.28,<1", "beautifulsoup4>=4.12,<5"]
+test = ["pytest>=9.1.1,<10", "ruff>=0.17,<1"]
 # MCP 2 renamed the low-level Server API; the server targets the 1.x contract.
 mcp = ["mcp>=1.30,<2"]
-observability = ["opentelemetry-api>=1.30,<2", "opentelemetry-sdk>=1.30,<2"]
-agent = [
-  "langchain>=1.4,<2",
-  "langgraph>=1.2,<2",
-  "langchain-openai>=1.0,<2",
-  "langchain-anthropic>=1.0,<2",
-  "httpx2>=2.5,<3",
-  "mcp>=1.30,<2",
-]
-# spidev publishes source-first releases for most Linux/Python combinations, so it
-# stays opt-in; smbus2 is pure Python and ships as a base Linux dependency.
+# spidev publishes source-first releases for most Linux/Python combinations, so
+# it stays opt-in; smbus2 is pure Python and ships as a base Linux dependency.
 linux = ["spidev>=3.6,<4; sys_platform == 'linux'"]
-package = ["pyinstaller>=6.22,<7", "PySide6>=6.10,<7"]
 
 [project.urls]
 Homepage = "https://github.com/gopsc/mybot"
@@ -64,13 +51,12 @@ Security = "https://github.com/gopsc/mybot/security/advisories/new"
 
 [project.scripts]
 pymybot = "pymybot.cli:main"
-mybot-gui = "pymybot.gui.__main__:main"
 
 [tool.setuptools]
-packages = ["pymybot", "pymybot.gui"]
+packages = ["pymybot"]
 
 [tool.setuptools.package-data]
-pymybot = ["py.typed", "gui/assets/*.svg"]
+pymybot = ["py.typed"]
 
 [tool.setuptools.cmdclass]
 build_py = "build_support.BuildPy"

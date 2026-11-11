@@ -1,10 +1,9 @@
-"""Keep the agent-facing skills honest about their documented authority.
+"""Keep the skill references honest about their documented authority.
 
-The agent reads skills/ and never docs/, so a reference may only summarise and
-link to the docs page that owns a behaviour. Dead links, unregistered reference
-files and a missing Source: declaration are failures. Verbatim duplication is
-only reported: a shared code block or SQL example is legitimate, so a human
-decides whether a long identical run is drift.
+A reference may only summarise and link to the docs page that owns a behaviour.
+Dead links, unregistered reference files and a missing Source: declaration are
+failures. Verbatim duplication is only reported: a shared code block or SQL
+example is legitimate, so a human decides whether a long identical run is drift.
 """
 from __future__ import annotations
 

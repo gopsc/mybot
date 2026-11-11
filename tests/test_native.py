@@ -321,7 +321,7 @@ def test_native_uart_example_and_borrowed_handle():
 
 def test_executor_can_sample_and_run_native_drivers():
     import asyncio
-    from pymybot.agent_executor import RobotExecutor
+    from pymybot.executor import RobotExecutor
 
     async def scenario():
         executor = RobotExecutor(ASSETS / "robots" / "uart-loopback.sql",
@@ -366,71 +366,6 @@ class Driver:
         assert params == {"payload": {"items": [3]}}
         value["value"]["items"].append(99)
         assert robot.registry["dev"].runtime.driver.value == {"items": [1]}
-
-
-def test_python_inventory_and_preview_are_nonexecuting(tmp_path):
-    from pymybot.agent_context import ProjectContext
-    from pymybot.gui.resources import ResourceIndex
-
-    marker = tmp_path / "executed"
-    path = tmp_path / "Probe.py"
-    path.write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()")
-    (tmp_path / "Other.lua").write_text('error("must not execute")')
-    index = ResourceIndex(None, docs_root=tmp_path, module_paths=[tmp_path])
-    entries = {item.name: item for item in index.refresh()}
-    assert entries["Probe.py"].language == "python"
-    assert entries["Other.lua"].language == "lua"
-    assert index.read(entries["Probe.py"]) == path.read_bytes().decode("utf-8")
-    context = ProjectContext(module_paths=[tmp_path]).render().text
-    assert "Probe.py" in context and "Other.lua" in context
-    assert not marker.exists()
-
-
-def test_native_resource_panel_preview_and_filter(tmp_path, monkeypatch):
-    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
-    pytest.importorskip("PySide6")
-    from PySide6.QtCore import Qt
-    from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication
-    from pymybot.gui.dialogs import ResourcePanel
-    from pymybot.gui.highlight import COLORS
-
-    app = QApplication.instance() or QApplication([])
-    panel = ResourcePanel()
-    panel.resize(1100, 700)
-    panel.set_roots(ASSETS / "scripts", robots_root=ASSETS / "robots", module_paths=[MODULES])
-    panel.show()
-    panel.ensure_loaded()
-    QTest.qWait(100)
-    try:
-        items = [panel.tree.topLevelItem(i).child(j)
-                 for i in range(panel.tree.topLevelItemCount())
-                 for j in range(panel.tree.topLevelItem(i).childCount())]
-        native = next(item for item in items if item.text(0) == "LoopbackProbe.py")
-        lua = next(item for item in items if item.text(0) == "Relay.lua")
-        panel.tree.scrollToItem(native)
-        QTest.mouseClick(panel.tree.viewport(), Qt.MouseButton.LeftButton,
-                         pos=panel.tree.visualItemRect(native).center())
-        QTest.qWait(160)
-        assert panel.preview.currentWidget() is panel.code
-        assert panel.code.toPlainText() == (MODULES / "LoopbackProbe.py").read_text(encoding="utf-8")
-        formats = panel.code.document().firstBlock().layout().formats()
-        assert any(item.start == 0 and item.format.foreground().color().name() == COLORS["keyword"]
-                   for item in formats)
-        assert panel.grab().save(str(tmp_path / "preview.png"))
-        panel.filter.setFocus()
-        QTest.keyClicks(panel.filter, ".py")
-        assert not native.isHidden() and lua.isHidden()
-        panel.filter.setText("no-such-resource")
-        assert all(item.isHidden() for item in items)
-        panel.filter.clear()
-        panel.tree.scrollToItem(lua)
-        QTest.mouseClick(panel.tree.viewport(), Qt.MouseButton.LeftButton,
-                         pos=panel.tree.visualItemRect(lua).center())
-        assert panel.code.toPlainText() == (MODULES / "Relay.lua").read_text(encoding="utf-8")
-    finally:
-        panel.close()
-        app.processEvents()
 
 
 def test_native_build_observes_robot_stop_before_next_io(tmp_path, monkeypatch):

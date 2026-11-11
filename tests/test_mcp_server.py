@@ -63,7 +63,6 @@ def clean_environment(monkeypatch):
     for key in list(os.environ):
         if key != "MYBOT_HOME" and key.startswith(("BOT4CJ_", "MYBOT_")):
             monkeypatch.delenv(key)
-    monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
 
 
 def test_standard_discovery_and_static_resources(tmp_path):
@@ -89,10 +88,19 @@ def test_standard_discovery_and_static_resources(tmp_path):
             uri = next(item.uri for item in listed if str(item.uri).endswith("/relay-test.mt"))
             content = await session.read_resource(uri)
             assert "@Action" in content.contents[0].text
-            skill = next(item.uri for item in listed if str(item.uri).endswith("/references/action-mt.md"))
-            assert "@Action" in (await session.read_resource(skill)).contents[0].text
             status = data(await session.call_tool("get_status", {}))["data"]
             assert status["state"] == "loaded" and not status["active"] and not status["faulted"]
+    asyncio.run(scenario())
+
+
+def test_resources_contain_only_action_scripts(tmp_path):
+    async def scenario():
+        async with client(tmp_path) as session:
+            listed = (await session.list_resources()).resources
+            assert listed
+            assert all(str(item.uri).startswith("mybot://scripts/") for item in listed)
+            assert {item.name for item in listed} == {
+                path.name for path in (ASSETS / "scripts").glob("*.mt")}
     asyncio.run(scenario())
 
 

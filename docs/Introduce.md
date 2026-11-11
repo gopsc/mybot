@@ -1,39 +1,33 @@
 # pymybot 使用指南
 
-从安装到跑通第一个动作，再到 Agent、MCP 和自定义驱动。项目背景见 [README](../README.md)。
-
-![pymybot GUI](screenshots/gui.png)
-
-> 截图来自 PySide6 窗口和本地回环模型：Agent 列出硬件，再通过可信技能执行虚拟动作，把结果带回来。
+从安装到跑通第一个动作，再到 MCP 和自定义驱动。项目背景见 [README](../README.md)。
 
 ## 我们为什么做 pymybot
 
-做硬件项目时，最耗神的往往不是写业务逻辑，而是那些反复出现的琐事：这个传感器接在哪条总线、初始化要发哪几个字节、换一块板子之后脚本要不要重写、出错之后到底发没发出去。等你想让 AI 帮忙，又发现模型再聪明，也没有一层能解释“它到底动了什么”的控制面。
+做硬件项目时，最耗神的往往不是写业务逻辑，而是那些反复出现的琐事：这个传感器接在哪条总线、初始化要发哪几个字节、换一块板子之后脚本要不要重写、出错之后到底发没发出去。
 
-pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人身上有什么，用 Python 或 Lua 写器件怎么工作，再用 MT 动作脚本说明这一刻要做什么。总线、权限、审批、回执、日志，以及 GUI、CLI、Agent、MCP 这些入口，由同一套执行器负责。
+pymybot 想解决的就是这一段。我们用一张结构 SQL 描述机器人身上有什么，用 Python 或 Lua 写器件怎么工作，再用 MT 动作脚本说明这一刻要做什么。总线、权限、回执、日志，以及 CLI 和 MCP 两个入口，由同一套执行器负责。
 
 它不是要替代你的业务代码，而是把“软件怎么安全地碰硬件”这件事收拢到一处。
 
-## 四种入口
+## 两种入口
 
-同一套后端，四种用法。选一个顺手的就行，不必为桌面、CI 和模型各维护一套逻辑。
+同一套后端，两种用法。选一个顺手的就行，不必为 CI 和桌面客户端各维护一套逻辑。
 
 | 入口 | 适合谁 | 命令 |
 | --- | --- | --- |
-| **GUI** | 桌面调试、演示、查看逐次回执 | `pymybot` |
 | **CLI 控制器** | CI/CD、脚本、无模型环境 | `pymybot check / run / sample / ...` |
-| **AI Agent** | 通用任务；硬件经 skill 操作 | `pymybot --no-gui --role NAME --task "..."` |
 | **MCP** | Claude Desktop、Cursor、其他 MCP 客户端 | `pymybot mcp --robot ...` |
 
-另外还有一个长驻的 `serve` 入口，用 stdio JSON-RPC 2.0 给 IDE 或自研前端复用同一套会话。
-`mcp` 和 `serve` 共用同一个执行器：工具回执、故障锁存和串行化规则保持一致。
+两个入口共用同一个执行器：回执格式、故障锁存和串行化规则保持一致。不带子命令时会报
+用法错误（退出码 2）；用 `pymybot --help` 查看帮助。
 
-## 我们不想做又一个“聊天壳”
+## 我们刻意没有做的事
 
 - **三层各管各的**：结构、驱动、动作分开写。换传感器不用改剧本，换剧本也不用碰驱动。
 - **没有硬件也能跑**：虚拟总线、寄存器模型、`loop://` 串口回环和逐驱动夹具，让 CI 不用插板子。
 - **默认是关着的**：物理总线、非回环 HTTP/TCP 和 Shell 都要显式打开。HAL 管得住这些入口，但驱动本身不是沙箱。
-- **动作可回看**：动作脚本是矩阵数据，不是任意代码；每次派发、捕获和结果都有 JSON 回执。
+- **动作不是任意代码**：动作脚本是矩阵数据；每次派发、捕获和结果都有 JSON 回执。
 - **失败就说清楚**：动作已经派发后出异常，会锁存成“结果未知”。我们不假装回滚，也不把非零退出码说成“没执行”。
 
 ## 快速开始
@@ -71,70 +65,13 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 {"ok":true,"command":"run","outputs":[{"slept":1,"result":"OK"}]}
 ```
 
-### 2. 打开 GUI
+`new` 可以在当前目录生成可运行的 `robots/`、`scripts/`、`modules/` 骨架：
 
 ```sh
-.venv/bin/pip install -e ".[gui]"
-.venv/bin/python -m pymybot
+.venv/bin/python -m pymybot new mybot-arm
 ```
 
-GUI 用 PySide6（Qt 6）；只在命令行里用的话，不需要装 `gui` 可选依赖。
-
-第一次打开，在 **设置** 里选 workspace 和模型。如果你只想控制硬件，不配模型也能用；结构文件由 hardware-controller 技能自带，窗口不再配置。要启动自主智能体，先点工具栏的「新建」创建一个角色，再点「启动」；没有输入框，人类只负责启动、观察和停止。「删除」会在确认后移除整个角色目录。
-
-### 3. 启用 AI Agent
-
-```sh
-.venv/bin/pip install -e ".[agent,test]"
-export MYBOT_MODEL="deepseek:deepseek-chat"
-export DEEPSEEK_API_KEY="sk-..."
-.venv/bin/python -m pymybot roles create technician --description "Field technician"
-.venv/bin/python -m pymybot --no-gui \
-  --role technician \
-  --task "列出硬件并解释每个变量的作用"
-```
-
-**对话必须属于一个角色**：角色的提示词、技能、工作区和模型历史互相隔离，不再有全局默认对话。没有 `--role` 的 `pymybot agent`、未选角色的 GUI，以及缺少 `role` 的 `serve` `agent.ask` 都会被拒绝。角色可以随时用 `pymybot roles delete NAME --yes` 或 GUI 的「删除」移除（整个目录，不可恢复）。
-
-支持的模型提供商有 `openai`、`openai-chat`、`anthropic` 和 `deepseek`。密钥只从环境变量读；自托管端点用 `--base-url`，要求 HTTPS（回环地址除外）。其他 OpenAI 兼容提供商可用 `pymybot.agent.register_provider` 注册（复用内置的 HTTP 通道），或通过 `pymybot.model_providers` entry point 由第三方包自动注册。
-
-Agent 默认是双智能体：记忆体负责规划、反思与长期记忆，执行体负责工具与硬件。
-启动后记忆体自拟目标并持续派活，受步数、墙钟、token 与任务数上限约束；
-命令行用 `--task` 可以只跑一个种子任务。详见 [双智能体](team.md)。
-
-Agent 默认是双智能体：记忆体负责规划、反思与长期记忆，执行体负责工具与硬件。
-启动后记忆体自拟目标并持续派活，受步数、墙钟、token 与任务数上限约束；
-命令行用 `--task` 可以只跑一个种子任务。详见 [双智能体](team.md)。
-
-Agent 也能通过 `--mcp-config` 接外部 MCP 服务，把它们的工具放进同一套逐次审批里：
-
-```sh
-.venv/bin/pip install -e ".[agent,mcp]"
-.venv/bin/python -m pymybot roles create researcher --mcp-config ./mcp.json
-.venv/bin/python -m pymybot --no-gui \
-  --role researcher \
-  --task "列出硬件"
-```
-
-提示词和普通配置不太一样：它直接决定模型能做什么，所以不能随便改。Agent 对话使用所选角色自己的 `~/.mybot/roles/<角色>/prompts`；下面的全局库仍用于 `pymybot prompts` 管理和新建角色时的基线。`prompts/` 下的六层按 `manifest.json` 排顺序。0 和 100 是安全前后缀，校验的是打包时写死的哈希，改一个字节就会失败；10 是 core，只有操作员能改；97/98/99 是 SOUL、USER、STATS。Agent 想改这三层，每次都要单独确认（GUI 弹窗、CLI 终端提示），其它工具的自动批准管不到这里。
-
-第一次用到提示词时，默认文件会复制到 `$MYBOT_HOME/prompts`（默认 `~/.mybot/prompts`），你已经改过的文件不会被悄悄覆盖。整个组合上限 128 KiB。GUI 状态栏显示这一轮实际使用的提示词短哈希，设置里的「提示词」页可以查看、编辑 97/98/99，也能补齐缺失或整库恢复。
-
-```sh
-pymybot prompts list                         # 不需要机器人或模型，输出层状态和完整 SHA-256
-pymybot prompts restore --missing-only       # 只补缺失文件，保留你的修改
-pymybot prompts restore --all --yes          # 先备份，再恢复全部默认层
-```
-
-全量恢复不带 `--yes` 时只认终端确认，脚本里调用会直接拒绝，免得误清空。安全层或运行时 manifest 坏了，也用这条命令修。改 97/98/99 会先比对旧哈希，留备份；审计里记前后哈希和修改理由，不写提示词正文。自动 STATS 由宿主生成，只记脱敏后的统计，不含参数和密钥；`--no-prompt-stats`、设置里的开关或 serve 的 `autoStats: false` 都能关。`doctor` 只检查打包的 manifest 和安全哈希，不会创建你的运行目录。完整说明在 [CLI 提示词管理](../skills/hardware-controller/references/cli.md#runtime-prompts)。
-
-`--context-bytes` 控制工程上下文预算（0 关闭，默认 4096）。`--intent auto` 会先判断这次请求是查看、控制、编写还是诊断，只开放对应的工具；混合请求取工具并集，识别不出意图的消息回退到只读 `chat` 工具集，`--intent off` 才完全关闭路由限制。
-
-CLI 的联网工具仍默认关闭：`--web` 打开 HTTPS 抓取，配了 `--search-endpoint` 才有 SearXNG 搜索，每次请求还要审批（`--allow-web` 可预先批准）。GUI 则直接开启抓取和搜索并自动批准。无论入口如何，私网/回环地址、超长正文和重定向都会被拒绝。
-
-`mcp.json` 用 Claude Desktop/Cursor 的 `mcpServers` 格式。外部服务是以宿主用户权限运行的可信进程，不是沙箱；结果按 64 KiB 限界，异常回执标成“结果未知”，不会自动重试。
-
-### 4. 作为 MCP 服务端接入 Claude Desktop / Cursor
+### 2. 作为 MCP 服务端接入 Claude Desktop / Cursor
 
 ```sh
 .venv/bin/pip install -e ".[mcp]"
@@ -143,9 +80,11 @@ CLI 的联网工具仍默认关闭：`--web` 打开 HTTPS 抓取，配了 `--sea
   --scripts-dir skills/hardware-controller/assets/scripts
 ```
 
-默认只读：`list_hardware`、`query_sql`、`read_action_script` 这些静态工具可以直接用；执行脚本和读变量要显式加 `--allow-execution`，要碰物理硬件再加 `--allow-hardware`。完整工具表、资源 URI 和客户端配置见 [MCP 指南](../skills/hardware-controller/references/mcp.md)。
-
-对话默认转录到 `~/.mybot/sessions`，包含工具参数、受限结果和图片；环境变量里的密钥不会被主动读取。转录只用于回看，不能恢复会话。用 `--no-session-log` 或 `MYBOT_SESSION_LOG=0` 关闭，用 `pymybot sessions` 查看，或用 `pymybot sessions --prune --keep 20 --yes` 清理，详见 [CLI 会话转录](../skills/hardware-controller/references/cli.md#session-transcripts)。
+默认只读：`get_status`、`list_hardware`、`list_action_scripts`、`read_action_script`、
+`query_sql` 这些静态工具可以直接用；`run_action_script` 和 `read_variables` 要显式加
+`--allow-execution`，要碰物理硬件再加 `--allow-hardware`（它要求同时给出
+`--allow-execution`）。服务端只暴露 `mybot://scripts/...` 资源。完整工具表、回执信封和
+客户端配置见 [MCP 指南](../skills/hardware-controller/references/mcp.md)。
 
 ## 架构
 
@@ -173,35 +112,19 @@ flowchart LR
 | --- | --- | --- |
 | `new` | 生成可运行的 `robots/`、`scripts/`、`modules/` 骨架 | 否 |
 | `check` | 静态检查 SQL、模块、引用和 MT/Include 语法 | 否 |
+| `discover` | 只读枚举宿主 UART/FTDI/I2C/SPI 设备并建议结构 SQL | 否 |
 | `hardware` | 列出声明的硬件和元数据 | 否 |
 | `scripts` | 列出动作脚本 | 否 |
 | `query` | `SHOW TABLES` / `SELECT *` | 否 |
 | `run` | 激活、执行一个动作、清理 | 是 |
 | `sample` | 采样一个命名变量 | 是 |
-| `apply-sql` | 对临时会话应用受限 SQL | 是 |
-| `agent` | 双智能体自主循环（`--task` 只跑一个种子任务） | 经技能与宿主授权 |
-| `serve` | 长驻 JSON-RPC 服务 | 经请求 |
+| `apply-sql` | 对临时激活的机器人应用受限 SQL，不写入结构文件 | 是 |
 | `mcp` | 标准 MCP stdio 服务端 | 经 `--allow-execution` |
 | `doctor` | 环境、依赖、资产诊断 | 否 |
-| `sessions` | 列出或清理 `~/.mybot/sessions` 转录 | 否 |
+| `assets` | 列出、读取、写入、删除内置 robots/modules/scripts 资产 | 否 |
 
-退出码：`0` 成功，`1` 运行错误，`2` 用法错误，`130` 中断。完整参数、JSON 契约和 `serve` 协议见 [CLI 与 serve 协议](../skills/hardware-controller/references/cli.md)。
-
-## GUI
-
-GUI 是一个前端，不重复实现机器人逻辑：窗口只启动一个 `serve` 子进程，所有机器人和模型调用都走同一条链路。
-
-- 启动先显示复古风入口界面：SVG 机器人 logo、扫描线、真实的 serve 状态、`进入控制台` 按钮和淡入过渡；`--no-splash` 可以跳过。
-- 左侧是 workspace、技能/MCP 配置和模型摘要。
-- 摄像头不再出现在结构 SQL 或控制器驱动里。Agent 内置 `list_cameras` 和 `capture_camera` 两个基础工具，直接枚举宿主摄像头并把 JPEG 作为图片内容返回模型；运行时需要 `pip install "pymybot[camera]"`。
-- 右侧是对话、日志、资源三个标签页。资源页能预览结构 SQL、Python/Lua 驱动、脚本、技能和文档，支持 Markdown 渲染、语法高亮、按 mtime 缓存和文件变化自动刷新。
-- 菜单和工具栏里有命令面板（check/hardware/scripts/query/run/sample/apply-sql/doctor/sessions）、MCP 配置编辑器、会话管理、环境诊断、文档和关于。
-- 对话支持流式输出、忙碌指示、重试、清空和复制；提示词更新仍逐次弹窗确认。
-- **停止**只停止自主循环（当前任务协作式收尾）；**急停**不带确认弹窗，会发送 `abort`、调用驱动 `safe()` 并释放硬件，是尽力而为的软件停止，不是硬件急停。
-- GUI 不再提供任何权限勾选；文件、Shell、联网、MCP 和摄像头工具默认开启并免审批，可信技能也免审批并默认获得硬件权限，只安装你信任的技能。提示词更新仍逐次确认。
-- 重启、取消和崩溃恢复都有测试覆盖。
-
-详见 [docs/gui.md](gui.md)，里面有设置、资源预览、MCP 编辑器、会话管理和诊断截图。
+退出码：`0` 成功，`1` 运行错误，`2` 用法错误，`130` 中断。完整参数和 JSON 契约见
+[CLI 参考](../skills/hardware-controller/references/cli.md)。
 
 ## 写一个驱动
 
@@ -212,7 +135,7 @@ SQL 普通表名会选择 `modules/<表名>.py` 或 `.lua`（`Alias` / `Vars` / 
 - `context.call(operation, *args)` 调用已有的 HAL 操作，权限检查、句柄归属和取消检查都还在；`context.check()` 检查协作预算。`check` 只编译 Python 源码，不执行模块、构造器或驱动方法。
 - 内置的 I2C/SPI/UART/TCP/HTTP/Shell 普通表已经迁到 Python；HAL 总线句柄仍然可以给 Lua 器件驱动用。Python I2C/SPI/UART 会把显式 `proto=virt` 或 `virt-*` 路径的总线打开为纯内存 HAL 句柄，禁止物理访问；既有的 `proto=virt` 搭配 `/dev/...` 路径写法仍保持虚拟语义，不会悄悄回落到真实硬件。Lua 器件驱动继续复用现有 `virtbus` 模型与实例隔离。既有 Daemon chunk 仍只支持 Lua；如果选中 Python 驱动，静态检查会直接拒绝。
 
-仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件、模型或凭据。结构 [`skills/hardware-controller/assets/robots/uart-loopback.sql`](../skills/hardware-controller/assets/robots/uart-loopback.sql)：
+仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件和凭据。结构 [`skills/hardware-controller/assets/robots/uart-loopback.sql`](../skills/hardware-controller/assets/robots/uart-loopback.sql)：
 
 ```sql
 CREATE TABLE UART (name String, path String, baud Number);
@@ -259,9 +182,9 @@ class Driver:
 从仓库根检查并运行，结果依次含 `rx: 0`、`rx: 127`、`rx: 255`：
 
 ```sh
-.venv/bin/python -m pymybot check --module-path modules \
+.venv/bin/python -m pymybot check \
   --robot skills/hardware-controller/assets/robots/uart-loopback.sql --input skills/hardware-controller/assets/scripts/uart-loopback.mt
-.venv/bin/python -m pymybot run --module-path modules \
+.venv/bin/python -m pymybot run \
   --robot skills/hardware-controller/assets/robots/uart-loopback.sql --input skills/hardware-controller/assets/scripts/uart-loopback.mt --timeout 10
 ```
 
@@ -281,22 +204,20 @@ TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/assets
 | 物理 I2C/SPI/UART | 关闭 | `--allow-hardware` |
 | 非回环 HTTP/TCP | 关闭 | `--allow-hardware` |
 | Shell 驱动 | 关闭 | `--allow-hardware` |
-| Agent 硬件 Skill 动作 | 免审批，默认硬件权限 | 仅限已安装的可信技能；操作员承担执行风险 |
-| Agent 文件写入 | 关闭 | `--workspace-dir` + `--allow-file-writes` |
-| Agent Shell | 关闭 | `--enable-shell`（默认逐次审批；自动化可加 `--allow-shell` 预批准；提示词保护要求可用的 bubblewrap） |
 | MCP 服务端执行 | 关闭 | `--allow-execution`（物理硬件另需 `--allow-hardware`） |
-| Agent 外部 MCP 工具 | 逐次确认 | `--allow-mcp-tools`（外部服务不是沙箱） |
 
-**Agent Shell 必须显式启用，并使用可用的 bubblewrap 以只读方式保护运行时和打包提示词目录；不可用或 `--sandbox off` 时拒绝执行，不回退到无隔离 shell。** 通用工作区工具不能读写提示词根目录，须走专用提示词工具。只读挂载保护完整性，不代表宿主文件或提示词内容无法被 shell 读取。
+`check`、`hardware`、`scripts` 和 `query` 只做静态读取，从不激活驱动；`run`、`sample`
+和 `apply-sql` 会激活机器人。
+
 Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 import 和直接原生 I/O 不受限制，上表的 HAL 权限也管不到这类直接访问。Python 的预算/取消是协作式的：长循环应该调用 `context.check()`；阻塞的原生调用或不合作的 Python 循环没法被硬中断。只运行你审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [安全模型](../skills/hardware-controller/references/security.md)。
 
 ## 兼容性
 
-| 平台 | UART | I2C/SPI | Agent 摄像头 | GUI |
-| --- | --- | --- | --- | --- |
-| Linux | pyserial | pyftdi MPSSE / `smbus2` / `spidev` | PyAV V4L2 | PySide6 |
-| Windows | pyserial `COMn` | pyftdi MPSSE | PyAV DirectShow | PySide6 |
-| macOS | pyserial | pyftdi MPSSE | PyAV AVFoundation（14+） | PySide6 |
+| 平台 | UART | I2C/SPI |
+| --- | --- | --- |
+| Linux | pyserial | pyftdi MPSSE / `smbus2` / `spidev` |
+| Windows | pyserial `COMn` | pyftdi MPSSE |
+| macOS | pyserial | pyftdi MPSSE |
 
 macOS arm64 的 `lupa` wheel 可能不包含 LuaJIT；此时 `pymybot` 会回退到标准 Lua，
 Python 驱动仍可用，但依赖 LuaJIT FFI 的 Lua 驱动不可用。`doctor` 会报告
@@ -307,18 +228,16 @@ Python 驱动仍可用，但依赖 LuaJIT FFI 的 Lua 驱动不可用。`doctor`
 ## 目录结构
 
 ```text
-pymybot/                  Python 包：CLI、SQL、动作执行、HAL、Daemon、Agent、GUI、MCP
+pymybot/                  版本号与 import shim（把技能内 Runtime 加进 __path__）
 skills/hardware-controller/scripts/pymybot/  控制器与 MCP Python Runtime
 skills/hardware-controller/references/       控制器权威文档
 skills/hardware-controller/assets/modules/   Python 原生驱动、保留的 Lua 驱动和公共库
 skills/hardware-controller/assets/robots/    结构 SQL 示例（含虚拟设备）
 skills/hardware-controller/assets/scripts/   MT 动作示例
-skills/                   Agent 参考技能
-prompts/                  默认提示词层及 manifest（运行时副本位于 MYBOT_HOME/prompts）
 tests/                    pytest 与逐驱动虚拟夹具
-docs/                     架构、CLI、GUI、开发、测试、发布、安全文档
+docs/                     开发、发布、版本、FAQ 与历史文档
 docs/history/             已完成的迁移与调试记录
-tools/                    打包与 CI 辅助（PyInstaller spec、smoke 脚本、Nuitka 实验命令）
+tools/                    CI、文档检查与发布辅助脚本
 .github/                  CI、发布工作流、Issue/PR 模板、社区规范
 ```
 
@@ -328,9 +247,8 @@ tools/                    打包与 CI 辅助（PyInstaller spec、smoke 脚本�
 | --- | --- |
 | 全部文档 | [docs/README.md](README.md) |
 | 架构与数据流 | [架构与 Runtime flow](../skills/hardware-controller/references/architecture.md) |
-| CLI / JSON / serve | [CLI 与 serve 协议](../skills/hardware-controller/references/cli.md) |
+| CLI / JSON | [CLI 参考](../skills/hardware-controller/references/cli.md) |
 | MCP 服务端与客户端 | [MCP 指南](../skills/hardware-controller/references/mcp.md) |
-| GUI | [docs/gui.md](gui.md) |
 | 开发与打包 | [docs/development.md](development.md) |
 | 测试与 CI 通道 | [测试与虚拟设备](../skills/hardware-controller/references/testing.md) |
 | 版本与发布 | [docs/release.md](release.md) · [docs/versioning.md](versioning.md) |
@@ -343,15 +261,14 @@ tools/                    打包与 CI 辅助（PyInstaller spec、smoke 脚本�
 
 ```sh
 python -m pytest -q
-python -I tools/ci_smoke.py base
 python -I tools/ci_smoke.py wheel
 ```
 
-CI 覆盖 Python 3.11–3.14、Windows、Agent（离线模型）、wheel/sdist 干净安装和上文快速开始。发布由 tag 触发，产出 sdist、wheel、Windows GUI zip 和 `SHA256SUMS`。
+CI 覆盖 Python 3.11–3.14、Windows、wheel/sdist 干净安装和上文快速开始。发布由 tag 触发，产出 sdist、wheel 和 `SHA256SUMS`。
 
 ## 贡献
 
-欢迎驱动、文档、测试和前端贡献。动手前先读 [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md)：
+欢迎驱动、文档和测试贡献。动手前先读 [.github/CONTRIBUTING.md](../.github/CONTRIBUTING.md)：
 
 - Bug 或功能建议先开 Issue；小修可以直接提 PR。
 - 用 Conventional Commits；默认分支（`gui-mybot`，owner 之后可以改名为 `main`）是唯一长驻分支。

@@ -1,20 +1,14 @@
 # MCP
 
-Source: 本文件是 hardware-controller MCP 服务端与客户端配置的权威文档，实现位于 `scripts/pymybot/mcp_server.py`。
+Source: 本文件是 hardware-controller MCP 服务端的权威文档，实现位于 `skills/hardware-controller/scripts/pymybot/mcp_server.py`（协议适配层）和 `executor.py`（owner-thread 执行器）。
 
-MCP（Model Context Protocol）是模型客户端与工具服务之间的标准协议。本仓库有两个方向：
-
-| 方向 | 入口 | 说明 |
-| --- | --- | --- |
-| pymybot 作为 MCP 服务端 | `pymybot mcp` | 把同一个机器人会话暴露给 Claude Desktop、Cursor、IDE 或其他 MCP 客户端 |
-| Agent 作为 MCP 客户端 | `pymybot agent --mcp-config FILE` | 让内置 Agent 调用外部 MCP 服务提供的工具 |
-
-两端默认都按最小权限工作：服务端只读，客户端逐次审批。它们是可选依赖，不影响
-CLI、GUI 和既有 `serve` 协议。
+MCP（Model Context Protocol）是模型客户端与工具服务之间的标准协议。pymybot
+只作为 MCP 服务端：`pymybot mcp` 把同一台机器人的控制能力暴露给 Claude Desktop、
+Cursor、IDE 或其他 MCP 客户端。服务端默认按最小权限工作：只读，执行和物理硬件
+各由独立开关解锁。MCP 支持是可选依赖，不影响 CLI。
 
 ```sh
-pip install -e ".[mcp]"          # 仅 MCP 服务端
-pip install -e ".[agent,mcp]"    # Agent + MCP 客户端
+pip install -e ".[mcp]"
 ```
 
 ## 1. `pymybot mcp` — 标准 MCP stdio 服务端
@@ -28,6 +22,22 @@ pymybot mcp \
 stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。客户端断开 stdin
 后进程退出；启动失败只写 stderr 并以非零码退出，不会向协议通道写 CLI JSON。
 
+### 选项与权限
+
+| 选项 | 默认 | 效果 |
+| --- | --- | --- |
+| `--robot FILE` | 必填 | 结构 SQL 文件（最多 8 MiB）；一个进程只控制一个结构 |
+| `--module-path DIR` | 技能内置 `assets/modules` | 可信 Python/Lua 模块根，可重复 |
+| `--scripts-dir DIR` | 技能内置 `assets/scripts` | 可信 `.mt` 脚本根；脚本类工具与 `mybot://scripts/` 资源都限制在该根内 |
+| `--allow-execution` | 关 | 解锁 `run_action_script` 和 `read_variables`；静态工具始终可用 |
+| `--allow-hardware` | 关 | 打开物理总线、非回环 HTTP/TCP 和 Shell 驱动；要求同时给出 `--allow-execution` |
+| `--timeout SECONDS` | 180 | 协作式执行预算，>0 且 ≤3600；也是单个 MCP 请求的默认上限 |
+| `--var NAME=VALUE` | 空 | 激活前的结构 `Alias`/`Vars` 覆盖与动作绑定 |
+| `--var-env NAME=ENVVAR` | 空 | 同上，但运行时从环境变量读取值，值不进入 argv |
+
+`--allow-hardware` 是能力开关，不是安全认证。Lua/Python 驱动是可信代码；Shell
+驱动不是沙箱。
+
 ### 工具
 
 | 工具 | 作用 | 激活硬件 |
@@ -38,7 +48,7 @@ stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。�
 | `read_action_script` | 读取一个 `.mt` 原文，不执行 | 否 |
 | `query_sql` | `SHOW TABLES` / `SELECT *`，只读 | 否 |
 | `run_action_script` | 执行已有 `.mt`，需要 `--allow-execution` | 是 |
-| `read_variables` | 读取已声明变量 | 是 |
+| `read_variables` | 读取已声明变量，需要 `--allow-execution` | 是 |
 | `deactivate` | 释放空闲机器人；不是急停，也不清除故障锁存 | 否 |
 
 所有工具返回同一信封：
@@ -56,20 +66,9 @@ stdout 只承载 MCP JSON-RPC；诊断、Lua 输出和警告全部走 stderr。�
 | URI | 内容 |
 | --- | --- |
 | `mybot://scripts/<path>` | 可信脚本根内的 `.mt` 原文 |
-| `mybot://skills/<skill>/<file>` | 操作者技能目录中的 Markdown 参考 |
 
-资源只用于阅读，不授予执行权限。
-
-### 权限
-
-| 开关 | 默认 | 效果 |
-| --- | --- | --- |
-| — | 只读 | 静态工具可用；执行类工具返回 `not_executed` |
-| `--allow-execution` | 关 | 允许动作脚本和变量读取 |
-| `--allow-hardware` | 关 | 打开物理总线、非回环 HTTP 和 Shell 驱动；要求同时给出 `--allow-execution` |
-| `--var NAME=VALUE` / `--var-env NAME=ENVVAR` | 空 | 激活前的结构 `Alias`/`Vars` 覆盖与动作绑定 |
-
-`--allow-hardware` 是能力开关，不是安全认证。Lua 驱动是可信代码；Shell 驱动不是沙箱。
+资源列表来自 `list_action_scripts`，读取走 `read_action_script`。资源只用于阅读，
+不授予执行权限。
 
 ### 客户端配置
 
@@ -97,71 +96,20 @@ Source checkout 中可用 `python -m pymybot` 代替 `pymybot`，并用绝对路
 ### 限制
 
 - 仅 stdio；不提供 HTTP/SSE 监听，远程访问需要自行加传输层代理。
-- 不提供会话转录；`--no-session-log` 不适用于 `mcp`。
-- 协作者无法中断阻塞中的原生驱动调用；`deactivate` 也只释放空闲会话。
-- 取消请求由 MCP 客户端关闭连接实现，服务端随后清理已激活的驱动。
-
-## 2. Agent 调用外部 MCP 服务
-
-```sh
-pymybot --no-gui agent \
-  --robot assets/robots/relay-test.sql \
-  --scripts-dir assets/scripts \
-  --model deepseek:deepseek-chat \
-  --mcp-config ./mcp.json \
-  --task "先用外部检索工具查资料，再列出机器人硬件"
-```
-
-`--mcp-config` 使用与 Claude Desktop、Claude Code、Cursor 相同的 `mcpServers`
-结构，只支持本地 stdio 服务：
-
-```json
-{
-  "mcpServers": {
-    "search": {
-      "command": "uvx",
-      "args": ["mcp-server-fetch"],
-      "env": {"API_TOKEN": "${SEARCH_TOKEN}"},
-      "cwd": "."
-    }
-  }
-}
-```
-
-- 只支持 `command` + `args`；出现 `url` 或 `headers` 会被拒绝（远程 MCP 不在当前威胁模型内）。
-- `${VAR}` / `${VAR:-default}` 从环境展开；未定义即报错。
-- 服务名 1–32 个字符（字母、数字、`-`、`_`），工具名会加上 `<server>_` 前缀。
-- `env` 与宿主环境合并后传给子进程；`cwd` 相对配置文件解析。
-- 配置在创建模型前加载；配置错误不会发出任何模型请求。
-
-### 审批与回执
-
-外部工具默认逐次审批，控制台或 GUI 弹窗显示 `<server>_<tool>` 和完整参数；拒绝后
-本次调用不会执行。`--allow-mcp-tools` 可预批准本次会话，但仍需 `--mcp-config`。
-
-- 返回给模型的结果按 64 KiB / 单字符串 32 KiB / 单图 2 MiB 限界；
-- 传输或服务端异常返回 `state: "unknown"`，不自动重试；
-- 工具名、参数和结果写入会话转录（`tool_call`/`tool_result`），密钥不会从环境读取进转录。
-
-### `serve` 与 GUI
-
-`agent.ask` 新增两个可选参数（其余 agent 参数见 [cli.md](cli.md)）：
-
-| 参数 | 类型 | 说明 |
-| --- | --- | --- |
-| `mcpConfig` | string | 服务端的 `mcpServers` JSON 路径 |
-| `allowMcpTools` | boolean | 预批准外部 MCP 工具调用 |
-
-GUI 的 **设置 → MCP 配置** 和左侧 **MCP 配置（mcpServers JSON）** 字段可指定路径；
-未填写时不启用外部 MCP。
+- 不持久化任何状态；机器人状态只存在于进程内，进程退出即结束。
+- 协作者无法中断阻塞中的原生驱动调用；`deactivate` 也只释放空闲机器人。
+- MCP 请求取消会设置停止标志并尽力清理；客户端断开连接时服务端等待当前动作
+  结束后再清理。阻塞中的原生调用仍可能延迟清理。
+- 派发后失败会锁存为故障（faulted），只能由操作者重启进程清除；未知回执不要
+  重试。
 
 ## 安全边界
 
 | 边界 | 规则 |
 | --- | --- |
-| 模型 → 外部 MCP | 每次调用审批，除非操作者显式预批准；结果只作为不可信数据回给模型 |
-| 外部 MCP → 宿主 | stdio 服务以宿主用户权限运行，**不是沙箱**；只加载审阅过的配置 |
-| MCP 客户端 → pymybot | 只读默认；执行与物理硬件开关分离；变量/相机白名单独立 |
-| 回执 | 派发后异常一律 `unknown`，不声称回滚；超限结果被截断而不是整包送入模型 |
+| MCP 客户端 → pymybot | 请求是不可信输入：默认只读，`--allow-execution` 才解锁执行类工具；`--allow-hardware` 独立且要求 execution。工具参数、SQL 只读性和 `.mt` 路径都经过校验与限界；资源不授予执行权限 |
+| 回执 | 派发后异常一律 `unknown`，不声称回滚；`unknown` 不得自动重试 |
+| 驱动 | Python/Lua 驱动以宿主用户权限运行，不是沙箱；`--allow-hardware` 只控制 HAL 打开，不限制可信驱动代码的宿主权限 |
+| 传输 | 仅 stdio；stdout 只承载 JSON-RPC，诊断和驱动的输出被重定向到 stderr |
 
 完整威胁模型见 [security.md](security.md)。

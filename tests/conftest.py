@@ -19,9 +19,8 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
-def no_session_logs(monkeypatch, tmp_path):
-    """Keep persistent agent state out of the operator's home."""
-    monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
+def isolated_mybot_home(monkeypatch, tmp_path):
+    """Keep persistent controller state out of the operator's home."""
     monkeypatch.setenv("MYBOT_HOME", str(tmp_path / "mybot-home"))
 
 

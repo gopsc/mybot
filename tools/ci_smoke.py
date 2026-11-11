@@ -14,8 +14,7 @@ import sys
 import tempfile
 
 
-ASSET_SUFFIXES = {"modules": (".lua", ".py"), "robots": (".sql",), "scripts": (".mt",),
-                  "skills": (".md", ".json"), "prompts": (".md", ".json")}
+ASSET_SUFFIXES = {"modules": (".lua", ".py"), "robots": (".sql",), "scripts": (".mt",)}
 
 
 def require(condition, message):
@@ -25,50 +24,21 @@ def require(condition, message):
 
 def preflight(mode):
     if mode == "base":
-        for optional in ("pydantic_ai", "langchain", "langgraph"):
+        for optional in ("pydantic_ai", "langchain", "langgraph", "PySide6"):
             require(importlib.util.find_spec(optional) is None,
                     f"Base CI must not have {optional} installed")
         if sys.platform.startswith("linux"):
             require(importlib.util.find_spec("smbus2") is not None,
                     "Linux base install must include smbus2")
     else:
-        # Missing agent/MCP dependencies must fail rather than silently skip tests.
-        for name in ("langchain", "langgraph", "langchain_openai", "langchain_anthropic",
-                     "pymybot.agent", "pytest", "openai", "anthropic",
-                     "mcp", "pymybot.mcp_server", "pymybot.mcp_client",
-                     "httpx", "httpx2", "bs4", "pymybot.agent_web", "pymybot.camera"):
+        # Missing MCP dependencies must fail rather than silently skip tests.
+        for name in ("pytest", "mcp", "pymybot.mcp_server"):
             importlib.import_module(name)
     print(f"{mode} dependency preflight passed", flush=True)
 
 
 CONTROLLER_ASSETS = Path("skills/hardware-controller/assets")
 CONTROLLER_DIRECTORIES = frozenset({"modules", "robots", "scripts"})
-# Keep in sync with pymybot.agent_skills.CLI_SKILLS.
-CLI_SKILLS = frozenset({"hardware-controller"})
-
-
-def skill_script_files(root):
-    """Skill entrypoints shipped with the wheel; packaged controller Runtime is excluded."""
-    skills_dir = Path(root) / "skills"
-    for skill_dir in sorted(skills_dir.iterdir()):
-        if not skill_dir.is_dir():
-            continue
-        manifest = skill_dir / "skill.json"
-        if manifest.is_file():
-            try:
-                document = json.loads(manifest.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            run = document.get("run") if isinstance(document, dict) else None
-            if isinstance(run, dict) and run.get("packaged") == "cli":
-                continue
-        elif (skill_dir / "scripts" / "pymybot").is_dir():
-            continue
-        scripts_dir = skill_dir / "scripts"
-        if scripts_dir.is_dir():
-            for source in sorted(scripts_dir.rglob("*.py")):
-                if "__pycache__" not in source.parts:
-                    yield source
 
 
 def asset_manifest(root, *, source_tree=False):
@@ -81,17 +51,13 @@ def asset_manifest(root, *, source_tree=False):
         require(files, f"Missing or empty asset directory: {source_root / directory}")
         for path in files:
             result[path.relative_to(source_root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-    for path in skill_script_files(root):
-        result[path.relative_to(root).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
 
 
 def smoke_env():
     # Source-tree paths and application settings must not mask packaging failures.
     excluded = {"PYTHONPATH", "PYTHONHOME", "PIP_TARGET", "PIP_PREFIX", "PIP_USER", "PIP_ROOT"}
-    prefixes = ("MYBOT_", "BOT4CJ_", "OPENAI_", "ANTHROPIC_", "DEEPSEEK_")
-    env = {key: value for key, value in os.environ.items()
-           if key.upper() not in excluded and not key.upper().startswith(prefixes)}
+    env = {key: value for key, value in os.environ.items() if key.upper() not in excluded}
     env["PIP_CONFIG_FILE"] = os.devnull
     return env
 
@@ -99,46 +65,6 @@ def smoke_env():
 def run(command, *, cwd, env, timeout=600):
     print("+ " + subprocess.list2cmdline([str(arg) for arg in command]), flush=True)
     subprocess.run(command, cwd=cwd, env=env, check=True, timeout=timeout)
-
-
-def prompt_smoke(cli, *, cwd, bundle=None):
-    """Check bundled defaults and their first-use copy, never the real user home."""
-    with tempfile.TemporaryDirectory(prefix="pymybot-prompts-") as temporary:
-        home = Path(temporary).resolve() / "home"
-        env = smoke_env()
-        env["MYBOT_HOME"] = str(home)
-
-        def command(*arguments):
-            result = subprocess.run([*cli, *arguments], cwd=cwd, env=env, capture_output=True,
-                                    text=True, encoding="utf-8", timeout=60)
-            require(result.returncode == 0, f"Prompt smoke failed: {result.stdout}\n{result.stderr}")
-            payload = json.loads(result.stdout)
-            require(payload.get("ok") is True, f"Prompt command failed: {payload}")
-            return payload
-
-        diagnosis = command("doctor")
-        bundled = diagnosis["assets"]["prompts"]
-        require(bundled.get("valid") is True, f"Invalid bundled prompts: {bundled}")
-        require(not home.exists(), "doctor initialized the runtime home")
-        listed = command("prompts", "list")
-        root = Path(listed["root"]).resolve()
-        require(root == home / "prompts", "Prompt runtime ignored isolated MYBOT_HOME")
-        require(listed["layers"], "No prompt layers were installed")
-        defaults = Path(bundled["path"])
-        if bundle is not None:
-            require(defaults.resolve().is_relative_to(bundle.resolve()),
-                    f"Frozen prompts resolved outside the executable bundle: {defaults}")
-        for entry in listed["layers"]:
-            runtime = root / entry["file"]
-            require(runtime.read_bytes() == (defaults / entry["file"]).read_bytes(),
-                    f"First-use prompt differs from bundled default: {entry['id']}")
-            require(not entry["missing"] and not entry["modified"],
-                    f"Fresh prompt layer is missing or modified: {entry['id']}")
-            require(hashlib.sha256(runtime.read_bytes()).hexdigest() == entry["sha256"],
-                    f"Incorrect runtime prompt hash: {entry['id']}")
-        require((root / "manifest.json").read_bytes() == (defaults / "manifest.json").read_bytes(),
-                "First-use manifest differs from bundled defaults")
-        print(f"Verified {len(listed['layers'])} first-use prompt layers from {defaults}", flush=True)
 
 
 def wheel_smoke():
@@ -184,9 +110,7 @@ def installed_smoke(manifest_path):
     preflight("base")
 
     import pymybot
-    from pymybot.agent_skills import SkillsLibrary, default_skills_root
     from pymybot.cli import default_scripts_dir
-    from pymybot.paths import asset_path
     from pymybot.robot import module_roots
 
     package = Path(pymybot.__file__).resolve().parent
@@ -201,29 +125,6 @@ def installed_smoke(manifest_path):
             f"Wheel assets differ from source: missing={missing}, extra={extra}, changed={changed}")
     require(module_roots() == [assets / "modules"], "Default modules did not resolve to wheel assets")
     require(default_scripts_dir() == assets / "scripts", "Default scripts did not resolve to wheel assets")
-    require(default_skills_root() == assets / "skills", "Default skills did not resolve to wheel assets")
-    require(asset_path("prompts") == assets / "prompts", "Default prompts did not resolve to wheel assets")
-    skills = SkillsLibrary(default_skills_root(), required=True)
-    require(skills.enabled, "Packaged skills did not load")
-    for skill in skills.index()["skills"]:
-        for name in skill["files"]:
-            skills.read(skill["name"], name)
-        if skill["runnable"]:
-            skill_dir = skills.root / skill["name"]
-            manifest = skill_dir / "skill.json"
-            if manifest.is_file():
-                document = json.loads(manifest.read_text(encoding="utf-8"))
-                spec = document.get("run") if isinstance(document, dict) else None
-                entrypoint = spec.get("entrypoint") if isinstance(spec, dict) else None
-                if isinstance(entrypoint, str) and spec.get("packaged") != "cli":
-                    require((skill_dir / entrypoint).is_file(),
-                            f"Packaged skill entrypoint is missing: {skill['name']}/{entrypoint}")
-            else:
-                if skill["name"] in CLI_SKILLS:
-                    continue
-                scripts_dir = skill_dir / "scripts"
-                require(scripts_dir.is_dir() and any(scripts_dir.glob("*.py")),
-                        f"Anthropic skill {skill['name']} has no scripts/ directory")
 
     env = smoke_env()
     cli = [sys.executable, "-I", "-m", "pymybot"]
@@ -251,31 +152,23 @@ def installed_smoke(manifest_path):
     checked = command_json([*cli, "check", "--robot", robot, "--input", action])
     require(checked.get("valid") is True and checked.get("activated") is False,
             "Packaged quickstart check failed")
-    # Only Timer/Relay run; neither hardware permissions nor model access are enabled.
-    executed = command_json([*cli, "--no-agent", "--robot", robot, "--input", action, "--timeout", "10"])
-    require(executed.get("command") == "run" and executed.get("outputs"), "No-agent execution produced no outputs")
+    # Only Timer/Relay run; hardware permissions are not enabled.
+    executed = command_json([*cli, "run", "--robot", robot, "--input", action, "--timeout", "10"])
+    require(executed.get("command") == "run" and executed.get("outputs"), "Packaged run produced no outputs")
     native = command_json([*cli, "run", "--robot", str(assets / "robots" / "uart-loopback.sql"),
                            "--input", str(assets / "scripts" / "uart-loopback.mt"), "--timeout", "10"])
     require([item.get("rx") for item in native.get("outputs", [])] == [0, 127, 255],
             "Packaged Python drivers did not complete UART loopback")
-    prompt_smoke(cli, cwd=Path.cwd())
     preflight("base")
-    print(f"Verified {len(actual)} packaged assets and no-agent CLI from {package}", flush=True)
+    print(f"Verified {len(actual)} packaged assets and the CLI from {package}", flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("base", "agent", "wheel", "installed", "frozen"))
+    parser.add_argument("mode", choices=("base", "mcp", "wheel", "installed"))
     parser.add_argument("--manifest", type=Path, help="internal: expected assets for the installed verifier")
-    parser.add_argument("--executable", type=Path, help="frozen: path to the built pymybot executable")
     args = parser.parse_args()
-    if args.mode == "frozen":
-        if args.executable is None or not args.executable.is_file():
-            parser.error("frozen requires --executable pointing to a built pymybot executable")
-        with tempfile.TemporaryDirectory(prefix="pymybot-frozen-") as temporary:
-            executable = args.executable.resolve()
-            prompt_smoke([str(executable)], cwd=Path(temporary), bundle=executable.parent)
-    elif args.mode == "installed":
+    if args.mode == "installed":
         if args.manifest is None:
             parser.error("installed requires --manifest")
         installed_smoke(args.manifest.resolve())

@@ -16,7 +16,3 @@ class DriverNotReady(DriverError):
 
 class BudgetExceeded(ControllerError):
     pass
-
-
-class AgentInterrupted(ControllerError):
-    """Cooperative agent cancellation, distinct from a task timeout or failure."""

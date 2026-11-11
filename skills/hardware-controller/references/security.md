@@ -1,42 +1,40 @@
 # Security model
 
-Source: This is the authoritative controller security document; enforcement lives in `scripts/pymybot/`.
+Source: This is the authoritative controller security document; enforcement lives in `skills/hardware-controller/scripts/pymybot/`.
 
-pymybot is a local robot controller, not a multi-tenant service. This document
-describes the trust boundaries the code tries to enforce and the limits the
-operator must accept.
+pymybot is a local robot controller, not a multi-tenant service. It exposes two
+entry points: the Python CLI and the MCP stdio server. This document describes
+the trust boundaries the code tries to enforce and the limits the operator must
+accept.
 
 ## Assets
 
 - The robot and anything physically connected to it.
 - The host account: files, network, environment and credentials.
-- Model API keys and prompts.
-- The integrity of scripts and drivers.
+- The integrity of structure SQL, action scripts and drivers.
 
 ## Trust boundaries
 
 ```mermaid
 flowchart LR
-    MODEL["Model output<br/>(untrusted)"] --> AGENT["Agent loop"]
     SCRIPT["SQL / MT / Python / Lua<br/>(operator-authored)"] --> RUNTIME["Robot runtime"]
-    AGENT -->|approved tools| EXEC["Agent executor"]
-    EXEC --> RUNTIME
+    CLI["CLI operator"] --> RUNTIME
+    MCP["MCP client<br/>(untrusted requests)"] --> SERVER["pymybot mcp<br/>+ RobotExecutor"]
+    SERVER -->|"launch gates"| RUNTIME
     RUNTIME --> HAL
     HAL --> DEV[Devices / network / shell]
-    OPERATOR["Operator"] -->|approval| AGENT
+    OPERATOR["Operator"] -->|"launch flags"| CLI
+    OPERATOR -->|"launch flags"| SERVER
 ```
 
 | Boundary | Rule |
 | --- | --- |
-| Model → tools | File writes, shell, web and external MCP remain approval-gated. Trusted skill actions (`run_skill`) run without approval and receive hardware access by default. |
-| Model → files | Workspace tools reject traversal, links, special files and non-UTF-8; reads/writes are bounded, and directory creation requires an existing verified parent. Agent prompt roots (runtime and bundled) reject generic reads/writes; skill directories are writable through the normal file tools (still subject to the file-write approval gate). |
-| Model → shell | Agent shell is opt-in and requires usable bubblewrap with runtime/bundled prompt roots mounted read-only, including inside a writable workspace. Skill directories are no longer protected. If protection cannot be established, shell is refused; no unisolated fallback. Read-only mounts protect integrity, not confidentiality. |
-| Model → network | Non-loopback HTTP/TCP requires `--allow-hardware`; TCP accepts only IPv4/IPv6 literals and has no implicit reconnect or replay. HTTP redirects are refused; URL credentials/query/fragment are rejected. Agent web tools are separate and opt-in: HTTPS only, private/loopback/link-local targets refused, every redirect re-validated, text-only bodies bounded to 512 KiB, and SearXNG is the only search provider. |
-| MCP client → host | A stdio MCP server is operator-configured host code, not a sandbox. Every external tool call is approval-gated unless `--allow-mcp-tools`; results are bounded and failures are reported as unknown. |
-| MCP client → pymybot | `pymybot mcp` is read-only unless `--allow-execution`; `--allow-hardware` stays a separate gate. Resources never grant execution. |
+| Hardware gate | `--allow-hardware` is the only switch that opens physical I2C/SPI/UART devices, non-loopback HTTP/TCP and the Shell driver. Virtual buses (`proto='virt'`, `virt-*`), `loop://` UART and loopback HTTP/TCP stay available without it. |
+| MCP client → pymybot | Requests are untrusted input. `pymybot mcp` is read-only unless the operator passes `--allow-execution`; `--allow-hardware` is separate and requires `--allow-execution`. Tool arguments, read-only SQL and `.mt` paths are validated and bounded; resources never grant execution. |
+| Controller → network | TCP accepts only IPv4/IPv6 literals and has no implicit reconnect or replay. HTTP redirects are refused; URL credentials/query/fragment are rejected. |
+| Shell driver → host | The Shell ordinary-table driver runs commands with the host account's privileges and is not a sandbox; it requires `--allow-hardware`. Output is capped and the process tree is killed best-effort on timeout. |
 | Scripts → Python / Lua | Both are trusted in-process code. Python imports/direct native I/O are unrestricted; LuaJIT FFI is available when the `lupa` wheel includes LuaJIT (otherwise a standard-Lua fallback has no FFI). Neither is a security sandbox. |
 | Driver → device | `active`/`build`/`destroy`/`sample` may write hardware even when they appear read-only. |
-| Agent → logs | Final JSON excludes arguments, secrets and images; diagnostics are escaped. Session transcripts under `~/.mybot/sessions` do contain tool arguments, bounded results and images; API keys in environment variables are not read into them. See [`cli.md`](cli.md#session-transcripts). |
 
 ## Native driver trust
 
@@ -60,99 +58,42 @@ open virtual declarations as in-memory HAL handles with physical access disabled
 Lua device drivers retain their existing `virtbus` models and per-runtime isolation.
 Existing Daemon chunks remain Lua-only and reject Python-selected drivers.
 
-## System prompt ownership
-
-Bundled defaults and their manifest are distributed as `prompts/` assets. Runtime
-copies live in `$MYBOT_HOME/prompts` (default `~/.mybot/prompts`); initialization
-copies missing defaults without overwriting operator edits. Composition is bounded
-to 128 KiB, including generated context and guidance.
-
-- **0 / 100 (safety prefix/suffix):** immutable to the agent. Runtime bytes are
-  compared against trusted bundled hashes, not a runtime manifest supplied by the
-  model. A modified safety file fails closed; editing its runtime manifest cannot
-  authorize the change. Bundle validation also checks the trusted safety hashes.
-- **10 (core):** operator-editable only, never writable by a model tool.
-- **97 / 98 / 99 (SOUL / USER / STATS):** model-proposed changes use the dedicated
-  `prompt:update_prompt` approval flow. Every call requires fresh approval,
-  including its proposed diff; action, file, shell and MCP auto-approval never
-  approve a prompt update. Denial, missing approval and cancellation do not write.
-- Prompt updates use a hash-based compare-and-swap check, so an intervening edit
-  requires a new proposal/approval. Backups retain prior bytes; audit events retain
-  before/after hashes without copying prompt text into ordinary tool receipts.
-- Automatic STATS updates are a separate **host-only** path: bounded, sanitized
-  statistics, without tool arguments, prompt contents, credentials or secrets.
-  Disable them with `--no-prompt-stats`, the GUI setting, or `agent.ask`
-  `autoStats: false`. This does not grant model write authority.
-
-`pymybot prompts list` reports hashes and modifications without loading a robot
-or a model. `prompts restore --missing-only` preserves edits; `prompts restore
---all --yes` backs up and replaces runtime defaults, including a corrupt runtime
-manifest or safety layer. Without `--yes`, full restore requires a TTY confirmation
-and otherwise refuses. Protect backups like the originals: they can contain
-private operator text. On POSIX, runtime directories/files use `0700`/`0600`.
-`doctor` validates the bundle without creating a runtime home.
-
-The agent's workspace tools reject both bundled and runtime prompt roots, and
-reject writes to their ancestors. A workspace cannot itself be a prompt directory.
-With prompt protection active, shell requires usable bubblewrap; `--sandbox off`
-or an unavailable backend refuses execution, even after shell approval. Protected
-roots are read-only after the workspace's writable mount, and linked prompt assets
-are rejected. This is an integrity boundary: the shell's read-only host mount is
-not a promise that other host files or prompt text cannot be read. Standalone
-workspace APIs without protected roots retain the legacy non-OS-isolated fallback.
-
-These checks are application boundaries, **not host-filesystem isolation**.
-Trusted in-process Python/Lua drivers (including direct imports, native I/O and
-LuaJIT FFI) and operator-configured external MCP servers remain host-account code.
-They are not OS-sandboxed and can bypass application file APIs. Review them and
-keep module/MCP configuration under operator control. Arbitrary remote replacement
-of safety policy remains unsupported; editable memory layers do not supersede it.
-
 ## Credentials
 
-- API keys are read from environment variables named by `--api-key-env` or the
-  provider default; they are never accepted on the command line.
-- Settings files store only the *name* of the key variable.
-- A public binary cannot keep a secret. Do not ship a shared key; the withdrawn
-  `gui-v1` binary is an example of what not to do.
-- Rotate a key immediately if it was pasted into an issue, log or chat.
+pymybot is a hardware controller: it has no model or provider credentials and
+makes no model calls of its own. Driver credentials (device passwords, API
+tokens) are ordinary operator data.
+
+- Prefer `--var-env NAME=ENVVAR` over `--var NAME=VALUE` for a secret: the value
+  stays out of argv, process listings and shell history, and injected values are
+  never written back to the structure file.
+- The success envelope does not add bindings of its own, but driver errors and
+  device output are only as private as the data you give them. Do not paste
+  hardware or driver output containing secrets into issues, logs or chat.
+- A public binary cannot keep a secret. Do not ship a shared credential.
+- Rotate a credential immediately if it was pasted into an issue, log or chat.
 
 ## Denial of service and physical safety
 
-- Lua instruction budgets, wall-clock timeouts, bounded outputs and image limits
-  exist. Python drivers use cooperative `context.check()` / HAL checks; call
+- Lua instruction budgets, wall-clock timeouts, bounded outputs and list/sample
+  caps exist. Python drivers use cooperative `context.check()` / HAL checks; call
   these regularly in long loops. Timeouts/cancellation cannot forcibly interrupt
   a blocking native call **or an uncooperative Python loop**. They are not a hard
   execution limit or a safety stop.
-- `abort`, `session.abort`, `agent.abort` and the GUI **急停** button are
-  best-effort operator stops: they set the stop flag, call optional driver
-  `safe()`, then release handles. They are not a hardware emergency stop and must
-  not be used as a safety-rated interlock. A blocked native call can delay them
-  indefinitely; keep a physical E-stop and independent safety circuit for any
-  machine that needs one.
+- The CLI's SIGINT/SIGTERM stop and MCP request cancellation are best-effort
+  operator stops: they set the stop flag, call optional driver `safe()` in
+  reverse activation order, then release handles. The MCP `deactivate` tool is
+  ordinary cleanup and does not call `safe()`. None of these is a hardware
+  emergency stop and none must be used as a safety-rated interlock. A blocked
+  native call can delay them indefinitely; keep a physical E-stop and
+  independent safety circuit for any machine that needs one.
 - A dispatched action is never claimed to be rolled back. If an exception
   occurs after dispatch, the result is “unknown”; the operator must inspect the
-  robot.
+  robot. The MCP executor additionally latches a fault and refuses further work
+  until the operator restarts the process; nothing retries automatically.
 - Shell timeouts kill the process tree best-effort; descendants that escape to a
   new session are not guaranteed to be killed.
 - `--allow-hardware` is a capability switch, not a safety certification.
-
-## Skill execution
-
-`run_skill` executes a trusted Skill script. A legacy `skill.json` fixes the
-entrypoint and per-action argv; a manifest-free skill forwards a documented CLI
-subcommand and its arguments to the first top-level `scripts/*.py`. The model
-chooses only the skill, subcommand and arguments. Skills are operator-installed
-trusted code: `run_skill` is not approval-gated, path and parameter checks are
-removed, stdout/stderr and the skill subprocess timeout are unbounded, and
-`--allow-hardware` is appended automatically. The Agent turn deadline and stop
-checks still terminate a running skill.
-
-The child process still runs without a shell, with a minimal environment that
-excludes API keys and best-effort process-tree termination. Skill directories are
-writable through the ordinary file tools, subject to the file-write approval
-gate. Treat installing a skill as equivalent to installing and trusting host
-code that can operate real hardware.
 
 ## Reporting
 
@@ -164,12 +105,10 @@ a public issue for an exploitable problem.
 
 - Run as a dedicated unprivileged user; grant serial/FTDI/`i2c`/`spi` access
   explicitly.
-- Keep the workspace read-only for the agent unless file writes are required.
-- Leave `--enable-shell` off by default; when it is on, prompt protection
-  requires a usable bubblewrap so the shell cannot run unisolated.
-- Disable session transcripts (`MYBOT_SESSION_LOG=0`) when prompts, files or
-  tool images must not be kept on disk.
-- Use a private model endpoint or a local model for sensitive data.
+- Leave `--allow-hardware` off unless the run needs physical devices; run the MCP
+  server without `--allow-execution` unless a client must act on the robot.
+- Scope each `pymybot mcp` process to one robot and one scripts root; restart it
+  to clear a latched fault.
+- Review every Python/Lua driver and its imports before use; keep trusted module
+  roots (`--module-path`) out of untrusted-writable locations.
 - Pin releases by SHA-256; verify `SHA256SUMS`.
-- Review every Python/Lua driver, its imports and every skill before use; keep
-  trusted module roots out of agent-writable locations.

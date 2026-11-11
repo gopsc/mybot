@@ -42,12 +42,15 @@ def test_doctor_reports_dependencies_and_assets(capsys):
     checks = {item["name"]: item["status"] for item in payload["checks"]}
     assert checks["lupa"] == "ok"
     assert checks["sqlparse"] == "ok"
-    assert "PySide6.QtWidgets" in checks and "tkinter" not in checks
+    assert checks["mcp"] in {"ok", "warning"}
+    assert "PySide6.QtWidgets" not in checks and "tkinter" not in checks
     if sys.platform.startswith("linux"):
         # smbus2 is a base dependency; spidev stays an opt-in extra.
         assert checks["smbus2"] == "ok"
         assert checks["spidev"] in {"ok", "warning"}
+    assert set(payload["assets"]) == {"modules", "robots", "scripts"}
     assert payload["assets"]["modules"]["files"] > 0
+    assert payload["assets"]["robots"]["files"] > 0
     assert payload["assets"]["scripts"]["files"] > 0
 
 
@@ -57,7 +60,7 @@ def test_self_contained_skill_entrypoint_reports_healthy():
                             capture_output=True, text=True, timeout=60)
     payload = json.loads(result.stdout)
     assert result.returncode == 0 and payload["healthy"] is True
-    assert payload["assets"]["prompts"]["valid"] is True
+    assert payload["assets"]["scripts"]["files"] > 0
 
 
 def test_doctor_reports_standard_lua_fallback(monkeypatch, capsys):
@@ -72,8 +75,8 @@ def test_doctor_reports_standard_lua_fallback(monkeypatch, capsys):
     assert checks["lua.ffi"]["status"] == "warning"
 
 
-@pytest.mark.parametrize("module", ["av", "PySide6.QtWidgets"])
-def test_doctor_reports_import_failure(monkeypatch, capsys, module):
+@pytest.mark.parametrize("module, status", [("serial", "missing"), ("mcp", "warning")])
+def test_doctor_reports_import_failure(monkeypatch, capsys, module, status):
     real = cli.importlib.import_module
 
     def fake(name, package=None):
@@ -85,10 +88,10 @@ def test_doctor_reports_import_failure(monkeypatch, capsys, module):
     code = cli.main(["doctor"])
     payload = json.loads(capsys.readouterr().out)
     check = next(item for item in payload["checks"] if item["name"] == module)
-    assert code == 0 and check["status"] == "warning" and check["error"] == "ImportError"
-    assert payload["healthy"] is True
-    if module == "PySide6.QtWidgets":
-        assert "pymybot[gui]" in check["hint"]
+    assert code == 0 and check["status"] == status and check["error"] == "ImportError"
+    assert payload["healthy"] is (status == "warning")
+    if module == "mcp":
+        assert "pymybot[mcp]" in check["hint"]
 
 
 @pytest.mark.parametrize("module, required", [("smbus2", True), ("spidev", False)])
@@ -113,95 +116,11 @@ def test_doctor_checks_linux_bus_modules(monkeypatch, capsys, module, required):
     assert module in check["hint"]
 
 
-def test_cli_and_gui_diagnostic_without_qt():
-    script = r'''
-import importlib.abc
-import sys
-
-class NoQt(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if fullname == "PySide6" or fullname.startswith("PySide6."):
-            raise ModuleNotFoundError("PySide6 unavailable", name=fullname)
-
-sys.meta_path.insert(0, NoQt())
-from pymybot import cli
-from pymybot.gui.config import GuiConfig
-from pymybot.gui.protocol import ServeClient
-assert cli.main(["scripts"]) == 0
-assert not any(name.startswith("PySide6") for name in sys.modules)
-assert cli.main(["gui"]) == 1
-'''
-    result = subprocess.run([sys.executable, "-c", script], cwd=ROOT,
-                            capture_output=True, text=True, encoding="utf-8", timeout=30)
-    assert result.returncode == 0, result.stderr
-    listing, failure = [json.loads(line) for line in result.stdout.splitlines()]
-    assert listing["ok"] is True and listing["command"] == "scripts"
-    assert failure["ok"] is False
-    assert "pymybot[gui]" in failure["error"]["message"]
-    assert "--no-gui" in failure["error"]["message"]
-
-
 @pytest.fixture(autouse=True)
 def clean_environment(monkeypatch):
     for key in list(os.environ):
         if key != "MYBOT_HOME" and key.startswith(("BOT4CJ_", "PYMYBOT_", "MYBOT_")):
             monkeypatch.delenv(key)
-    monkeypatch.setenv("MYBOT_SESSION_LOG", "0")
-
-
-def test_sessions_lists_and_prunes(monkeypatch, tmp_path, capsys):
-    from pymybot.session_log import SessionLog
-
-    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
-    for _ in range(3):
-        log = SessionLog()
-        log.close()
-
-    code, result, _ = invoke(capsys, "sessions")
-    assert code == 0 and len(result["sessions"]) == 3
-
-    code, result, _ = invoke(capsys, "sessions", "--keep", "2")
-    assert code == 2 and result["error"]["type"] == "UsageError"
-
-    code, result, _ = invoke(capsys, "sessions", "--prune", "--keep", "1")
-    assert code == 2 and result["error"]["type"] == "UsageError"
-
-    code, result, _ = invoke(capsys, "sessions", "--prune", "--keep", "1", "--dry-run", "--yes")
-    assert code == 2 and result["error"]["type"] == "UsageError"
-
-    code, result, _ = invoke(capsys, "sessions", "--prune", "--keep", "1", "--dry-run")
-    assert code == 0 and result["dry_run"] is True and len(result["deleted"]) == 2
-
-    code, result, _ = invoke(capsys, "sessions", "--prune", "--keep", "1", "--yes")
-    assert code == 0 and result["kept"] == 1 and len(result["deleted"]) == 2
-
-    code, result, _ = invoke(capsys, "--no-agent", "sessions")
-    assert code == 0 and len(result["sessions"]) == 1
-
-
-def test_sessions_deletes_named_ids(monkeypatch, tmp_path, capsys):
-    from pymybot.session_log import SessionLog, list_sessions
-
-    monkeypatch.setenv("MYBOT_HOME", str(tmp_path))
-    created = []
-    for _ in range(2):
-        log = SessionLog()
-        log.close()
-        created.append(log.path.name)
-
-    code, result, _ = invoke(capsys, "sessions", "--delete", created[0])
-    assert code == 2 and result["error"]["type"] == "UsageError"
-
-    code, result, _ = invoke(capsys, "sessions", "--delete", created[0], "--dry-run")
-    assert code == 0 and result["deleted"] == [created[0]]
-
-    code, result, _ = invoke(capsys, "sessions", "--delete", created[0], "--yes")
-    assert code == 0 and result["deleted"] == [created[0]]
-    assert [item["id"] for item in list_sessions()] == [created[1]]
-
-    code, result, _ = invoke(capsys, "sessions", "--delete", created[1],
-                             "--prune", "--yes")
-    assert code == 2 and result["error"]["type"] == "UsageError"
 
 
 @pytest.fixture
@@ -269,8 +188,7 @@ def test_query_rejects_mutation_without_activation(workspace, monkeypatch, capsy
     assert code == 1 and "only SELECT" in result["error"]["message"]
 
 
-@pytest.mark.parametrize("command", ["run", "--no-agent"])
-def test_struct_real_cli_read_and_assignment(workspace, command):
+def test_struct_real_cli_read_and_assignment(workspace):
     (workspace / "struct.mt").write_text('''@Struct(state)
 {"count":0,"values":[2],"text":"a b # ; @"}
 @
@@ -285,7 +203,7 @@ dev.echo;
 $(state.text);
 @
 ''', encoding="utf-8")
-    result = run_cli(workspace, "--no-gui", command, "--robot", "robot.sql", "--input", "struct.mt")
+    result = run_cli(workspace, "run", "--robot", "robot.sql", "--input", "struct.mt")
     assert result.returncode == 0, result.stderr
     payload = json.loads(result.stdout)
     assert [v["echo"] for v in payload["outputs"]] == [2, 3, 4, "a b # ; @"]
@@ -859,13 +777,19 @@ def test_help_errors_and_module_entrypoint(workspace):
     help_result = run_cli(workspace, "--help")
     assert help_result.returncode == 0 and "FFI" in help_result.stdout
     assert "malicious-code isolation" in help_result.stdout
-    assert "--no-gui" in help_result.stdout
     assert "mcp" in help_result.stdout
+    assert "--no-gui" not in help_result.stdout and "--no-agent" not in help_result.stdout
     assert "--mcp-backend" not in help_result.stdout
     sample_help = run_cli(workspace, "sample", "--help")
     assert "activation itself may write" in sample_help.stdout
-    # The GUI is the default entry, so a bare invocation is not a usage error.
-    for args in [["--no-gui"], ["run"], ["check", "--robot", "absent.sql"]]:
+    # A bare invocation is an argparse error: JSON envelope on stdout, diagnosis on stderr.
+    bare = run_cli(workspace)
+    assert bare.returncode == 2
+    payload = json.loads(bare.stdout)
+    assert payload["ok"] is False and payload["error"]["type"] == "UsageError"
+    assert "required" in payload["error"]["message"]
+    assert bare.stderr
+    for args in [["run"], ["check", "--robot", "absent.sql"]]:
         result = run_cli(workspace, *args)
         assert result.returncode != 0 and json.loads(result.stdout)["ok"] is False
         assert result.stderr

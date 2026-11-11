@@ -6,10 +6,8 @@
 | --- | --- |
 | Python | 3.11–3.14 |
 | Lua runtime | provided by the `lupa` wheel; LuaJIT where available, otherwise standard Lua (FFI drivers require LuaJIT) |
-| PySide6 | 6.10–6.x, included in `gui`, `test` and `package` extras |
-| MCP SDK | 1.30–1.x, included in `mcp` and `agent` extras |
+| MCP SDK | 1.30–1.x, included in the `mcp` extra |
 | Node/npm | not required |
-| PyInstaller | 6.x, only for frozen builds |
 
 ## Setup
 
@@ -18,8 +16,8 @@ git clone https://github.com/gopsc/mybot.git
 cd mybot
 python -m venv .venv
 .venv/bin/pip install -e ".[test]"
-# agent, MCP and GUI:
-.venv/bin/pip install -e ".[agent,mcp,test]"
+# MCP server:
+.venv/bin/pip install -e ".[mcp,test]"
 ```
 
 Use the platform paths under Windows (`.venv\Scripts\pip`).
@@ -28,30 +26,27 @@ Use the platform paths under Windows (`.venv\Scripts\pip`).
 
 ```sh
 python -m pytest -q                       # full suite, no hardware
-python -m pytest tests/test_gui.py -q     # Qt widgets tested offscreen, including headless CI
 python -m pymybot check --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt
 python -m pymybot run --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt --timeout 10
-python -I tools/ci_smoke.py base        # fail if LangChain/LangGraph leaked into base env
-python -I tools/ci_smoke.py agent       # fail if agent imports are missing
 python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
-python -I tools/check_docs_skill_sync.py  # skill links/paths resolve, references declare a Source
+python -I tools/check_docs_skill_sync.py  # docs/skill links resolve, references declare a Source
 python -I tools/check_release_metadata.py # pyproject/__init__/CITATION/CHANGELOG agree
 ```
 
-`--no-gui` is required for the terminal agent when no subcommand is given;
-controller subcommands such as `check` and `run` always use the terminal.
+`pymybot` with no subcommand is a usage error (exit code 2); use `pymybot --help`
+for help. Each subcommand writes one JSON object to stdout.
 
 ## Code layout
 
 ```text
-pymybot/            Python compatibility package and Agent/GUI modules
+pymybot/                                     version and import shim (extends __path__ into the Skill Runtime)
 skills/hardware-controller/scripts/pymybot/  controller and MCP Runtime
 skills/hardware-controller/references/       controller authority documents
-skills/hardware-controller/assets/ default modules, robots and MT scripts
-skills/             operator-trusted agent reference skills
-tests/              pytest suite and virtual-device fixtures
-docs/               operator and maintainer documentation
-tools/              packaging helpers and PyInstaller spec
+skills/hardware-controller/assets/           default modules, robots and MT scripts
+skills/                                      operator-trusted reference material for the controller
+tests/                                       pytest suite and virtual-device fixtures
+docs/                                        operator and maintainer documentation
+tools/                                       CI, documentation checks and release helpers
 ```
 
 ## Style and quality
@@ -59,8 +54,8 @@ tools/              packaging helpers and PyInstaller spec
 - Python 3.11+, no mandatory third-party formatter. Keep imports grouped,
   functions focused and docstrings short and factual.
 - Comments should explain *why*, not restate *what*.
-- No duplicate JSON/path/process helpers: reuse `security.py`, `process.py`,
-  `agent_workspace.py` and `paths.py`.
+- No duplicate JSON/path/process helpers: reuse `security.py`, `process.py` and
+  `paths.py`.
 - Do not add a broad `except Exception: pass` unless it is cleanup that cannot
   affect the result; log or surface the failure instead.
 - Public operator-visible text is Chinese; code identifiers and commit messages
@@ -71,12 +66,12 @@ A narrow lint gate runs in CI (`ruff` with syntax/undefined-name rules). Full
 do not reformat unrelated files in a behaviour PR.
 
 Behaviour changes belong in the authority that owns the topic first. Controller
-architecture, CLI/serve, MCP, security and testing are authored under
-`skills/hardware-controller/references/`; operator topics (GUI, roles,
-development, release, versioning) stay in `docs/`, and the same-named controller
-pages there are redirect stubs. The agent-facing files under `skills/` then
-summarise and link instead of restating them. The same lint job
-runs [`tools/check_docs_skill_sync.py`](../tools/check_docs_skill_sync.py),
+architecture, CLI, MCP, security and testing are authored under
+`skills/hardware-controller/references/`; operator topics (development, release,
+versioning, FAQ) stay in `docs/`, and the same-named controller pages there are
+redirect stubs. The files under `skills/` then summarise and link instead of
+restating them. The same lint job runs
+[`tools/check_docs_skill_sync.py`](../tools/check_docs_skill_sync.py),
 which fails on dead skill links, missing repository paths, a reference without a
 `Source:` line and references that
 [`skills/README.md`](../skills/README.md) does not register.
@@ -90,80 +85,21 @@ which fails on dead skill links, missing repository paths, a reference without a
    `modules/lib/virtbus/regmap.lua` when applicable.
 3. Run `python -m pytest tests/test_migrated_drivers.py -q` and the fixture
    directly. Use `tests/test_virtual_drivers.py` for synthetic bus/protocol models.
-4. Document the device, address range, units and known limitations in
-   `docs/` or the driver header.
+4. Document the device, address range, units and known limitations in the driver
+   header or the relevant `skills/hardware-controller/references/` document.
 5. Never make a virtual result look like a real measurement; use clearly named
    files (`*_virt`).
 
 ## Frozen builds
 
-```sh
-python -m pip install -e ".[agent,camera,package]"
-python -m PyInstaller --noconfirm --clean tools/mybot.spec
-```
-
-Both `tools/mybot.spec` and the experimental onefile spec import
-`tools/bundle_assets.py`, the single source of truth for bundled modules, robots,
-scripts, skills, prompts, GUI assets and optional package metadata. Add a new
-asset root there rather than duplicating it in a spec.
-
-The spec produces `dist/mybot/` with:
-
-- `pymybot.exe` — console CLI; no arguments opens the GUI and hides its console;
-- `_internal/pymybot/assets/` — modules, robots, scripts, skills and prompts (Markdown plus manifest JSON);
-- `robots/`, `scripts/`, `README.md`, `LICENSE` next to the executable;
-- the GUI launches `pymybot.exe serve` with `CREATE_NO_WINDOW`, so no console
-  flashes behind the window.
-
-The `package` extra includes PySide6; PyInstaller's Qt hooks collect the
-Widgets libraries and platform plugins. The `camera` extra keeps PyAV and its
-FFmpeg libraries in the bundle; omit it only for a build that will never capture
-images.
-
-`pymybot/paths.py` resolves assets via `sys._MEIPASS` in frozen builds. Keep it
-as the only place that knows about frozen paths; other modules call
-`paths.frozen()` instead of reading `sys.frozen`.
-
-Nuitka standalone builds also work: Nuitka does not set `sys.frozen` but injects
-`__compiled__` into every compiled module, which `paths.frozen()` recognises.
-Place the data next to the executable as `pymybot/assets/` (the same layout
-`asset_dir()` probes when `_MEIPASS` is absent). An experimental Windows
-command lives in
-[`tools/nuitka_compile_test.ps1`](../tools/nuitka_compile_test.ps1); it is not
-part of release CI and is not a supported release artifact.
-
-### Prompt asset checks
-
-`paths.asset_path('prompts')` is the common source/wheel/PyInstaller/Nuitka lookup.
-The bundle must include every default Markdown layer and `manifest.json`:
-`BuildPy`, `MANIFEST.in`, the PyInstaller suffix table and Nuitka data-directory
-arguments all include them. Do not package a developer's `MYBOT_HOME` or backups.
-`doctor` validates the bundled manifest and trusted safety hashes without creating
-runtime files; first-use copies belong only in the selected `MYBOT_HOME/prompts`.
-
-Editing a bundled layer such as `010_core.md` changes its manifest hash: update
-`prompts/manifest.json` and `tests/test_prompts.py::CORE_SHA`, then run
-`pymybot doctor` plus `pytest tests/test_prompts.py`. Existing runtime copies are
-not overwritten. Back up and replace them with
-`pymybot prompts restore --all --yes`, or delete the runtime layer and run
-`pymybot prompts restore --missing-only` to refill it while preserving other edits.
-
-```sh
-python -I tools/ci_smoke.py wheel
-python -I tools/ci_smoke.py frozen --executable /absolute/path/to/pymybot
-```
-
-Wheel smoke uses fresh temporary dist/venv/work directories outside the checkout,
-compares all asset hashes, and exercises first-use copying with isolated
-`MYBOT_HOME`. Frozen smoke accepts an already-built executable (Windows:
-`pymybot.exe`), runs from a temporary working directory and checks the same prompt
-copy/manifest/hash contract. Use fresh explicit `--distpath`/`--workpath` directories
-for PyInstaller experiments; never point build cleanup at an operator's prompt home.
+Frozen executables are not a supported artifact. Releases publish an sdist and a
+wheel; install the wheel into a virtual environment, or use an editable checkout
+for development. `pymybot doctor` is the quickest way to check a fresh install.
 
 ## Dependency policy
 
 - Runtime dependencies use compatible ranges (`>=current,<next-major`).
-- Update ranges deliberately; run the full suite and the agent/wheel channels.
+- Update ranges deliberately; run the full suite and the wheel channel.
 - Do not add a dependency for something the standard library already does well
   (JSON, HTTP, paths) unless it materially improves safety or portability.
 - Dependabot opens weekly PRs; a human must review security-sensitive changes.

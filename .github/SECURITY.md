@@ -4,8 +4,8 @@
 
 | Version | Supported |
 | --- | --- |
-| 0.2.x | Yes |
-| < 0.2 | No |
+| current minor line | Yes |
+| older lines | No |
 
 Security fixes are released on the current minor line. Older releases may be
 asked to upgrade.
@@ -33,11 +33,11 @@ timeline, and credit reporters unless they prefer otherwise.
 
 In scope:
 
-- remote code execution, path traversal or sandbox escape in the Python agent
-  tools, workspace, `serve` backend or frozen GUI;
-- approval bypasses that let a model execute hardware, shell or file actions
-  without the operator's explicit consent;
-- credential leakage in logs, errors, transcripts, releases or packaged assets;
+- remote code execution, path traversal or sandbox escape in the controller
+  Runtime, the MCP server or the asset APIs;
+- ways to bypass the hardware or execution gates (`--allow-hardware`,
+  `--allow-execution`);
+- credential leakage in logs, errors, releases or packaged assets;
 - denial of service that survives cancellation/timeouts in a way that leaves
   hardware in an unsafe state;
 - SQL/MT/Lua parser bugs that cross the documented trust boundaries;
@@ -45,17 +45,15 @@ In scope:
 
 Out of scope by design:
 
-- **The workspace jail is not an OS sandbox.** The agent shell only runs inside
-  bubblewrap, with the runtime and bundled prompt roots mounted read-only. If
-  that cannot be set up — Windows included — it refuses to run instead of
-  falling back to the workspace jail. The `Shell` HAL driver is outside that
-  sandbox either way. This is documented, not a vulnerability.
-- **Lua is trusted code.** LuaJIT FFI is available to drivers; only run reviewed
-  drivers. This is documented.
+- **Drivers are trusted in-process code.** Python drivers can import arbitrary
+  modules and use native I/O directly; LuaJIT FFI is available to Lua drivers.
+  Only run reviewed drivers. The `Shell` HAL driver is gated by
+  `--allow-hardware`, but it is not a sandbox. This is documented, not a
+  vulnerability.
 - **Hardware can move.** `active`, `build`, `destroy`, `sample` and action
   scripts may write to devices even when they only appear to read.
-- **A public binary cannot keep a secret.** We do not ship shared API keys; use
-  your own endpoint/key or an operator-controlled proxy.
+- **A public binary cannot keep a secret.** We do not ship shared credentials;
+  a release asset must not contain one.
 - Missing hardening on a machine that is already fully compromised.
 
 ## Security model
@@ -64,14 +62,12 @@ pymybot follows these rules:
 
 1. Static commands never activate hardware.
 2. Physical devices, non-loopback HTTP and the host shell require an explicit
-   opt-in (`--allow-hardware` / GUI approval).
-3. Agent tools default to read-only; action, file-write and shell tools require
-   per-session pre-authorisation or a confirmation dialog.
-4. File tools stay inside an explicitly configured workspace, reject links,
-   traversal and special files, and bound reads/writes.
-5. Model prompts, tool arguments and tool results are untrusted data. They are
-   never executed as code and are sanitised before terminal output.
-6. Releases are built from a tagged public commit; artifacts publish SHA-256
+   opt-in (`--allow-hardware`).
+3. The MCP server is read-only by default; `--allow-execution` is a separate
+   opt-in, and `--allow-hardware` requires it.
+4. An exception after an action has been dispatched latches “result unknown”;
+   the command is never retried or rolled back automatically.
+5. Releases are built from a tagged public commit; artifacts publish SHA-256
    checksums.
 
 See [`../docs/security.md`](../docs/security.md) for the detailed threat model.
@@ -81,8 +77,8 @@ See [`../docs/security.md`](../docs/security.md) for the detailed threat model.
 - Dependencies are pinned to compatible ranges and updated through Dependabot.
 - CI runs the test suite on every pull request and release tag.
 - Release artifacts include a `SHA256SUMS` file.
-- Do not use the `gui-v1` asset from 2026-10-25; it was withdrawn because it
-  contained an unpublished source tree and a shared credential.
+- Do not redistribute withdrawn release assets; a withdrawn asset may contain an
+  unpublished source tree or a shared credential.
 
 ## Known limitations
 
@@ -90,5 +86,5 @@ See [`../docs/security.md`](../docs/security.md) for the detailed threat model.
   errors as SEH exceptions; see `docs/history/windows-faulthandler.md`.
 - Cancellation stops new work and kills known child trees, but it is not a
   physical emergency stop.
-- The agent's model context is not encrypted at rest in memory; do not send
-  secrets to a third-party model.
+- Python drivers are not a sandbox: imports and direct native I/O are
+  unrestricted, and budgets and cancellation are cooperative.

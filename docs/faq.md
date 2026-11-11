@@ -1,21 +1,10 @@
 # FAQ
 
-## Why does `pymybot` open a window instead of the terminal agent?
+## Why did `pymybot` fail with “the following arguments are required: command”?
 
-The GUI is the default entry point. Use `pymybot --no-gui ...` for the terminal
-agent or a controller command. `pymybot check|run|...` subcommands are always
-terminal.
-
-## The GUI says “智能体不可用”
-
-The selected interpreter does not have the agent extras. Install them into that
-interpreter:
-
-```sh
-python -m pip install -e ".[agent,test]"
-```
-
-Then choose the same interpreter in **设置**.
+`pymybot` has no default action. Run a subcommand such as `pymybot check ...` or
+`pymybot run ...`; `pymybot --help` lists them. A usage error exits with code 2
+and still writes one JSON object to stdout.
 
 ## `pymybot mcp` says MCP dependencies are unavailable
 
@@ -25,32 +14,20 @@ The MCP SDK is optional. Install it into the interpreter that starts the server:
 python -m pip install -e ".[mcp]"
 ```
 
-For the agent’s external MCP client, install `.[agent,mcp]`. Restart the client
-after upgrading so it launches the new process.
+Restart the client after upgrading so it launches the new process.
 
-## An external MCP tool was denied or reported `unknown`
+## An MCP tool returned `unknown`
 
-Denied means the operator (or the missing approval channel) rejected the call
-before it ran; do not retry or work around it. `unknown` means the call may
-already have had side effects; inspect the host and the MCP server before
-restarting. External MCP servers run with host-user permissions and are not a
-sandbox. See [the MCP guide](../skills/hardware-controller/references/mcp.md).
+`unknown` means the call may already have had side effects; inspect the robot
+before doing anything else, and do not retry automatically. A `not_executed`
+result means the call did not run: `run_action_script` and `read_variables` need
+`--allow-execution`, and physical hardware additionally needs `--allow-hardware`.
+See [the MCP guide](../skills/hardware-controller/references/mcp.md).
 
 ## Can I use pymybot without any API key?
 
-Yes. `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, the
-GUI's command panel and the virtual-bus tests need no model. Only the agent
-needs a provider key.
-
-## Can the GUI change the system prompt?
-
-Only the parts that are meant to be edited. Layers 0 and 100 (the safety prefix
-and suffix) are pinned to hashes shipped with the build; change a byte and
-validation fails, which blocks sending until you restore them. Layer 10 (core)
-is operator-only and stays out of the GUI editor. 设置 → 提示词 can edit 97, 98
-and 99 (SOUL/USER/STATS). When the model proposes a change to one of those, it
-opens a dedicated `prompt:update_prompt` approval with the full diff; approved
-actions or file writes do not cover it.
+Yes. Every command, including `run`, `sample`, `apply-sql` and `pymybot mcp`, works
+without a model or a key. pymybot is a hardware controller only.
 
 ## Hardware is not detected
 
@@ -62,10 +39,25 @@ actions or file writes do not cover it.
 - Linux `/dev/spidev*`: install `.[linux]` for `spidev` (it usually builds from
   source, so you may need gcc and kernel headers) and add the user to the `spi`
   group.
-- Agent camera tools: install `.[camera]`; use `list_cameras` to find the
-  correct index and close other apps using the device when capture fails.
-- Direct controller commands require `--allow-hardware`; the GUI command panel
-  asks for confirmation. Trusted agent skills receive hardware access automatically.
+- Direct commands that activate hardware (`run`, `sample`, `apply-sql`) require
+  `--allow-hardware`; `check`, `hardware`, `scripts` and `query` never activate a
+  driver.
+
+## `doctor` warns about LuaJIT FFI
+
+The `lupa` wheel sometimes ships standard Lua instead of LuaJIT, for example on
+macOS arm64. Python drivers still work, but Lua drivers that rely on the LuaJIT
+FFI are unavailable. Install a `lupa` build that includes LuaJIT if you need
+those drivers; `doctor` reports `LuaJIT FFI` when LuaJIT is unavailable.
+
+## A driver is not loaded
+
+Ordinary table names resolve to `modules/<Table>.py` or `.lua`, searched per root
+with Python before Lua; earlier roots win. `Alias`, `Vars` and `Daemon` do not
+resolve to a module. Use `--module-path DIR` (repeatable) to add roots, and
+`pymybot check` to see the resolution errors before activating anything. The
+driver contract is in
+[the driver reference](../skills/hardware-controller/references/driver-lua.md).
 
 ## Why did a virtual run write to a device?
 
@@ -73,57 +65,29 @@ actions or file writes do not cover it.
 real structure without `proto='virt'` activates the physical device. Use the
 provided `*_virt.sql` examples for hardware-free work.
 
-## A long conversation hits the model context limit
+## Where do logs go?
 
-pymybot keeps all complete turns and applies a byte budget. Use
-`--max-history-bytes` (64 KiB–64 MiB, default 4 MiB) or start a new
-conversation. The runtime does not guess a model’s context window; the byte
-budget is an explicit, provider-independent guard.
-
-For request-time protection, set `--max-context-tokens` to the model's context
-window. Before every model request, including requests inside a tool loop,
-mybot conservatively estimates message, instruction and tool-schema tokens,
-reserves 4096 output tokens plus `--context-reserve-tokens` (default 2048), and
-prunes oldest complete turns. If the current turn alone still exceeds the
-available input budget, the request stops with `AgentBudgetExceeded` before it
-reaches the provider. The estimator is provider-independent rather than an
-exact provider tokenizer, so keep a safety reserve appropriate for the model.
-
-## Where are logs and session history?
-
-Diagnostics go to stderr and the GUI “日志” tab. Agent conversations are also
-transcribed to `~/.mybot/sessions/` by default (tool arguments, bounded results
-and images). API keys in environment variables are not read into the
-transcript, but tool output may contain other sensitive data. Disable with
-`--no-session-log`, `MYBOT_SESSION_LOG=0`, or the GUI settings toggle; list and
-prune old transcripts with `pymybot sessions` and
-`pymybot sessions --prune --keep 20 --yes`. Transcripts are not resumable;
-the GUI's **工具 → 会话管理** provides filtering, preview, delete and prune
-controls; see
-[the CLI and transcript guide](../skills/hardware-controller/references/cli.md#session-transcripts).
+Diagnostics go to stderr; stdout carries exactly one JSON object per command.
+There is no separate log file to inspect, so redirect stderr if you need a
+record. See [the CLI reference](../skills/hardware-controller/references/cli.md)
+for the JSON envelope and exit codes.
 
 ## Should I document a change in `docs/` or in `skills/`?
 
-It depends on who owns the topic. Controller architecture, CLI/serve, MCP,
-security and testing are authored under `skills/hardware-controller/references/`;
-the same-named pages in `docs/` are redirect stubs. Operator-facing topics
-(GUI, roles, development, release, versioning, FAQ) are authored in `docs/`.
-The agent cannot read `docs/`, so a skill reference must keep the hard rules it
-needs — exact error strings, limits, worked examples — plus a link to the
-authority that owns the behaviour. The scripting grammars (structure SQL, MT
-actions) have no prose authority outside the implementation, so their reference
-*is* the written source.
+It depends on who owns the topic. Controller architecture, CLI, MCP, security and
+testing are authored under `skills/hardware-controller/references/`; the
+same-named pages in `docs/` are redirect stubs. Operator-facing topics
+(development, release, versioning, FAQ) are authored in `docs/`.
 
 Each `references/*.md` declares its authority in a `Source:` line and is
 registered in [`../skills/README.md`](../skills/README.md).
 `tools/check_docs_skill_sync.py` runs in the CI lint job and fails on dead
 links, missing repository paths, a missing `Source:` line or an unregistered
-reference; long verbatim runs shared with a docs page are reported as warnings,
-because a shared code block is legitimate. The agent cannot read `docs/` — only
-`read_skill` — so a reference that merely links must still leave the scripting
-rules usable on their own.
+reference. A reference should keep the hard rules it needs — exact error strings,
+limits, worked examples — and link to the authority that owns the behaviour
+instead of restating it.
 
-## Why is the Windows build unsigned?
+## How do I verify a release?
 
-Code signing requires a certificate owned by the maintainer. Verify the
-published SHA-256 checksum and build from source if your policy requires it.
+Releases publish SHA-256 checksums. Compare them against the downloaded
+artifacts, and build from the tagged source if your policy requires it.

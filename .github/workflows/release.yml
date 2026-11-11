@@ -64,60 +64,9 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  windows:
-    name: Windows GUI bundle
-    runs-on: windows-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-      - name: Install agent, camera, web and packaging dependencies
-        run: python -m pip install -e ".[agent,camera,package,web]"
-      - name: Doctor
-        run: python -m pymybot doctor
-      - name: Build bundle
-        run: python -m PyInstaller --noconfirm --clean tools/mybot.spec
-      - name: Smoke the bundle
-        run: |
-          dist\mybot\pymybot.exe --version
-          dist\mybot\pymybot.exe doctor
-          dist\mybot\pymybot.exe check --robot dist\mybot\robots\relay-test.sql --input dist\mybot\scripts\relay-test.mt
-          dist\mybot\pymybot.exe run --robot dist\mybot\robots\relay-test.sql --input dist\mybot\scripts\relay-test.mt --timeout 10
-          dist\mybot\pymybot.exe prompts list
-      - name: Verify camera support in the bundle
-        shell: pwsh
-        run: |
-          $doctor = & dist\mybot\pymybot.exe doctor | ConvertFrom-Json
-          $av = $doctor.checks | Where-Object { $_.name -eq "av" }
-          if ($null -eq $av -or $av.status -ne "ok") {
-            throw "PyAV is not importable in the Windows bundle (status: $($av.status))"
-          }
-      - name: Package
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          if (-not $version) { $version = "dev" }
-          $name = "pymybot-$version-windows-x64"
-          Compress-Archive -Path dist/mybot -DestinationPath "dist/$name.zip"
-          Get-FileHash "dist/$name.zip" -Algorithm SHA256 |
-            ForEach-Object { "$($_.Hash.ToLower())  $name.zip" } |
-            Out-File "dist/SHA256SUMS" -Encoding ascii
-          Get-Content "dist/SHA256SUMS"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-bundle
-          path: dist/*.zip
-          if-no-files-found: error
-
   publish:
     name: Publish GitHub release
-    needs: [source, windows]
+    needs: [source]
     if: startsWith(github.ref, 'refs/tags/') && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15

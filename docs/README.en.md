@@ -1,57 +1,37 @@
 # pymybot
 
 **A three-layer robot controller — structure SQL, Python/Lua drivers and MT action  
-scripts — with one backend for the GUI, CLI, AI agent and MCP.**
+scripts — with one backend for the CLI and MCP.**
 
 [中文 README](../README.md) · [中文使用指南](Introduce.md) · [Documentation](README.md) · [Roadmap](roadmap.md) · [Security](../.github/SECURITY.md)
-
-![pymybot GUI](screenshots/gui.png)
-
-<p>
-  <img src="screenshots/gui-files.png" alt="Workspace file manager with code preview" width="49%">
-  <img src="screenshots/gui-wizard.png" alt="First-run model setup wizard" width="49%">
-</p>
-
-> Every screenshot is generated from the real window against the real serve
-> backend by `python tools/gui_screenshots.py` (offscreen display, disposable
-> demo workspace). See the [GUI guide](gui.md#screenshots) for all views.
-
-> The screenshot shows the PySide6 window and the local loopback model: the agent
-> lists hardware, runs a virtual action through a trusted skill, and brings the
-> result back.
 
 ## Why we built it
 
 Hardware projects rarely fail on the interesting part. They fail on the last mile:  
 which bus a sensor is on, which bytes initialize it, which script changes when the  
-board changes, and whether an action actually went out. Once you want an AI agent  
-in the loop, there is another question: what exactly did it touch, and what happens  
-if it fails halfway through?
+board changes, and whether an action actually went out.
 
 pymybot puts that last mile in one place. You describe the robot in structure SQL,  
 write how one device works in Python or Lua, and describe what should happen in an  
-MT action script. Buses, permissions, approvals, receipts, logs, and the GUI, CLI,  
-agent and MCP front-ends all go through the same executor.
+MT action script. Buses, permissions, receipts, logs, and the CLI and MCP entry  
+points all go through the same executor.
 
 It is not meant to replace your application code. It is meant to own the part where  
 software has to touch real hardware safely.
 
-## Four entry points
+## Two entry points
 
-One backend, four ways in. Pick the one that fits the job; you do not need a  
-separate implementation for the desktop, CI and the model.
+One backend, two ways in. Pick the one that fits the job; you do not need a  
+separate implementation for CI and the model client.
 
 | Entry | Use it for | Command |
 | --- | --- | --- |
-| GUI | Desktop debugging, demos, live tool receipts | `pymybot` |
 | CLI controller | CI/CD, scripts, no model required | `pymybot check / run / sample / ...` |
-| AI agent | Natural-language robot control | `pymybot --no-gui --role NAME --task "..."` |
 | MCP | Claude Desktop, Cursor and other MCP clients | `pymybot mcp --robot ...` |
 
-A long-lived `serve` backend exposes the same session over stdio JSON-RPC 2.0 for  
-IDEs and custom front-ends. The MCP server is a read-only-by-default protocol  
-adapter over the same executor, so tool receipts, fault latching and serialization  
-rules do not change with the entry point. See  
+Both entry points share one executor, so receipts, fault latching and serialization  
+rules do not change with the entry point. Running `pymybot` with no subcommand is a  
+usage error (exit code 2); use `pymybot --help` for help. See
 [the MCP guide](../skills/hardware-controller/references/mcp.md).
 
 ## What we deliberately did not build
@@ -65,10 +45,6 @@ rules do not change with the entry point. See
 -   **An open-by-default bridge.** Physical buses, non-loopback HTTP/TCP and the Shell  
     driver require an explicit opt-in. HAL gates those entry points; the driver  
     itself is trusted code, not a sandbox.
--   **A shell that quietly drops its isolation.** Agent shell needs a usable  
-    bubblewrap with the prompt directories mounted read-only. If that cannot be set  
-    up — Windows included — it refuses to run instead of falling back to an  
-    unisolated workspace.
 -   **Actions as arbitrary code.** An action script is matrix data. Every dispatch,  
     capture and result has a JSON receipt.
 -   **Pretending failures are clean.** If an exception happens after an action has  
@@ -97,75 +73,31 @@ python -m venv .venv
   --robot skills/hardware-controller/assets/robots/relay-test.sql \
   --input skills/hardware-controller/assets/scripts/relay-test.mt --timeout 10
 
-# GUI (PySide6 / Qt 6; optional for headless CLI use):
-.venv/bin/pip install -e ".[gui]"
-.venv/bin/python -m pymybot
-# The window offers the command panel (check/hardware/scripts/query/run/sample/
-# apply-sql/doctor/sessions) and a read-only resource browser for scripts, drivers,
-# skills and docs. It does not execute an action outside the agent.
-
-# Agent:
-.venv/bin/pip install -e ".[agent,test]"
-export MYBOT_MODEL="deepseek:deepseek-chat"
-export DEEPSEEK_API_KEY="sk-..."
-.venv/bin/python -m pymybot roles create technician --description "Field technician"
-.venv/bin/python -m pymybot --no-gui --role technician --task "List the hardware"
-# Agent conversations require a role; create one first, delete it with
-# `pymybot roles delete technician --yes` when it is no longer needed.
-
 # Generate a runnable SQL/MT/driver skeleton:
 .venv/bin/python -m pymybot new mybot-arm
 
+# MCP server (install the optional SDK first):
+.venv/bin/pip install -e ".[mcp]"
+.venv/bin/python -m pymybot mcp \
+  --robot skills/hardware-controller/assets/robots/relay-test.sql \
+  --scripts-dir skills/hardware-controller/assets/scripts
 ```
 
 On Windows, use `.venv\Scripts\pip` and `.venv\Scripts\python`.
 
-`abort` and the GUI **急停** button are best-effort software stops: they call an  
-optional driver `safe()` hook before releasing hardware. They are not a hardware  
-emergency stop.
-
-Agent conversations are transcribed to `~/.mybot/sessions` by default (tool  
-arguments, bounded results and images; API keys in environment variables are  
-never read into the transcript). Disable with `--no-session-log`,  
-`MYBOT_SESSION_LOG=0`, or the GUI settings toggle; list and prune with  
-`pymybot sessions [--prune --keep N --yes]`; see  
-[the CLI and transcript guide](../skills/hardware-controller/references/cli.md#session-transcripts).
-
-## Prompt layers
-
-The agent's instructions live in `prompts/`: six Markdown layers ordered by  
-`manifest.json`. Layers 0 and 100 are the safety prefix and suffix, pinned to  
-hashes baked into the build — change one byte and validation fails. 10 is the  
-operator's core. 97, 98 and 99 are SOUL, USER and STATS, and those are the only  
-layers the model may touch, each time through a dedicated `prompt:update_prompt`  
-approval. Auto-approved actions or file writes do not cover it.
-
-First use copies the defaults to `$MYBOT_HOME/prompts` (default  
-`~/.mybot/prompts`) without overwriting files you already changed. The composed  
-prompt is capped at 128 KiB. The status bar shows a short hash of the snapshot  
-actually used for the turn; 设置 → 提示词 lets you read the layers, edit 97/98/99,  
-refill missing files, or restore everything.
-
-```sh
-pymybot prompts list                     # no robot, no model
-pymybot prompts restore --missing-only   # keep edits, fill gaps
-pymybot prompts restore --all --yes      # back up first, then reset all layers
-
-```
-
-Without `--yes`, a full restore only asks on a terminal; scripts get a refusal.  
-Updates compare the previous hash, keep a backup, and record before/after hashes  
-and the reason in the audit trail — not the prompt text.  
-STATS is host-generated and sanitized — no arguments or secrets — and can be  
-turned off with `--no-prompt-stats`, the GUI toggle, or `autoStats: false` on  
-serve. `doctor` validates the bundled manifest and safety hashes without creating  
-your runtime directory.
+The MCP server is read-only by default: `get_status`, `list_hardware`,
+`list_action_scripts`, `read_action_script` and `query_sql` work without extra
+flags. Add `--allow-execution` to unlock `run_action_script` and `read_variables`,
+and `--allow-hardware` (which requires `--allow-execution`) to permit physical
+devices. The server exposes `mybot://scripts/...` resources only. See
+[the MCP guide](../skills/hardware-controller/references/mcp.md) for the tool table,
+the result envelope and client configuration.
 
 ## Design
 
 Think of the three layers as a wiring diagram, a device manual and a run sheet.
 
-```
+```mermaid
 flowchart LR
     SQL["Structure SQL<br/>robots/*.sql"] --> ROBOT["Robot<br/>variables + buses"]
     DRIVER["Python / Lua driver<br/>modules/*.py / *.lua"] --> ROBOT
@@ -173,7 +105,6 @@ flowchart LR
     ROBOT --> RUNNER
     RUNNER --> HAL["HAL"]
     HAL --> DEV["I2C · SPI · UART · TCP · HTTP · Shell"]
-
 ```
 
 -   **Structure SQL** declares variables, buses, addresses and references.
@@ -184,11 +115,11 @@ flowchart LR
     to add roots.
 -   **MT actions** describe frames of parameters, captures and control flow.
 
-Static commands never activate hardware. Physical devices, non-loopback HTTP/TCP and  
-the Shell driver require an explicit opt-in. HAL-backed drivers share the same  
-permission, handle-ownership and cancellation checks as Lua. Python drivers are  
-still trusted in-process code: imports and direct native I/O are unrestricted, and  
-budgets and cancellation are cooperative. See  
+`check`, `hardware`, `scripts` and `query` never activate hardware. Physical devices,  
+non-loopback HTTP/TCP and the Shell driver require an explicit opt-in. HAL-backed  
+drivers share the same permission, handle-ownership and cancellation checks as Lua.  
+Python drivers are still trusted in-process code: imports and direct native I/O are  
+unrestricted, and budgets and cancellation are cooperative. See  
 [the security model](../skills/hardware-controller/references/security.md).
 
 TCP also has a direct MT interface: [robots/tcp.sql](../skills/hardware-controller/assets/robots/tcp.sql) declares only  
@@ -206,9 +137,9 @@ a board. The driver contract is documented in
 
 Architecture, CLI, MCP, testing and security for the controller are authored in  
 [`skills/hardware-controller/references/`](../skills/hardware-controller/references/architecture.md);  
-the same-named pages in [`docs/`](README.md) are redirects. GUI, development,  
-roles, release and versioning guides live in [`docs/`](README.md). Scripting  
-references live in [`skills/hardware-controller/`](../skills/hardware-controller/SKILL.md).
+the same-named pages in [`docs/`](README.md) are redirects. Development, release,  
+versioning and FAQ documents live in [`docs/`](README.md). Scripting references live  
+in [`skills/hardware-controller/`](../skills/hardware-controller/SKILL.md).
 
 ## Contributing
 

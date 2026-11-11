@@ -1,11 +1,11 @@
 """Standard MCP over stdio; one operator-configured robot per process.
 
 The server is a thin protocol adapter over RobotExecutor, so it inherits the
-same owner-thread serialization, bounded receipts and fault latching as agent
-mode. It is read-only by default: execution tools answer ``not_executed``
-unless ``--allow-execution`` was passed, and physical hardware still requires
-the separate ``--allow-hardware`` switch. The config file, trusted .mt scripts
-and Lua drivers are operator-owned inputs, not a sandbox.
+same owner-thread serialization, bounded receipts and fault latching. It is
+read-only by default: execution tools answer ``not_executed`` unless
+``--allow-execution`` was passed, and physical hardware still requires the
+separate ``--allow-hardware`` switch. The config file, trusted .mt scripts and
+Lua drivers are operator-owned inputs, not an isolation boundary.
 
 stdout is reserved for MCP JSON-RPC; fd 1 is redirected to stderr while
 serving, so Lua or native output cannot corrupt the protocol stream.
@@ -13,7 +13,6 @@ serving, so Lua or native output cannot corrupt the protocol stream.
 from __future__ import annotations
 
 import asyncio
-import base64
 from contextlib import contextmanager
 import math
 import os
@@ -33,7 +32,7 @@ except ImportError:  # MCP SDK 2.x renamed the class.
     from mcp.shared.exceptions import MCPError as McpError
 
 from . import __version__
-from .agent_executor import EXECUTION_TOOLS, MAX_LIST, RobotExecutor
+from .executor import EXECUTION_TOOLS, MAX_LIST, RobotExecutor
 from .security import MAX_BODY, dumps
 
 MAX_LINE = MAX_BODY + 1024 * 1024
@@ -42,7 +41,7 @@ INSTRUCTIONS = (
     "Static queries do not activate hardware. Execution, reads and teardown can have physical effects. "
     "An unknown outcome is not a rollback: do not retry it. Check get_status after cancellation or failure. "
     "Only the operator may change launch permissions or restart a faulted process. "
-    "Reference resources describe SQL, MT and Lua; they do not grant execution permission."
+    "Script resources expose trusted .mt actions; reading one does not grant execution permission."
 )
 RESULT_SCHEMA = {
     "type": "object",
@@ -100,14 +99,7 @@ def _not_executed(message):
 
 def tool_result(receipt):
     receipt = dict(receipt)
-    images = list(receipt.pop("images", ()))
-    image = receipt.pop("image", None)
-    if image is not None:
-        images.append(image)
     content = [types.TextContent(type="text", text=dumps(receipt))]
-    content.extend(types.ImageContent(type="image", mimeType=image["media_type"],
-                                      data=base64.b64encode(image["data"]).decode("ascii"))
-                   for image in images)
     return types.CallToolResult(content=content, structuredContent=receipt, isError=not receipt["ok"])
 
 
@@ -163,18 +155,6 @@ def create_server(executor, *, timeout=180, allow_execution=False):
             uri = "mybot://scripts/" + quote(script, safe="/")
             entries.append(types.Resource(uri=uri, name=script, mimeType="text/plain"))
             mapping[uri] = ("read_action_script", {"script": script})
-        skills = await executor.call("list_skills", {}, timeout=timeout)
-        await anyio.lowlevel.checkpoint()
-        if skills["ok"]:
-            for skill in skills["data"]["skills"]:
-                for reference in skill["files"]:
-                    if len(entries) >= MAX_LIST:
-                        raise _resource_error("Too many reference resources")
-                    uri = ("mybot://skills/" + quote(skill["name"], safe="")
-                           + "/" + quote(reference, safe="/"))
-                    entries.append(types.Resource(uri=uri, name=f"{skill['name']}/{reference}",
-                                                  description=skill["description"], mimeType="text/markdown"))
-                    mapping[uri] = ("read_skill", {"name": skill["name"], "file": reference})
         resource_map.clear()
         resource_map.update(mapping)
         return entries
@@ -188,8 +168,7 @@ def create_server(executor, *, timeout=180, allow_execution=False):
             raise _resource_error("Unknown resource")
         name, arguments = entry
         data = await resource_data(name, arguments)
-        return [ReadResourceContents(content=data["content"],
-                                     mime_type="text/markdown" if name == "read_skill" else "text/plain")]
+        return [ReadResourceContents(content=data["content"], mime_type="text/plain")]
 
     return server
 
@@ -282,7 +261,7 @@ async def _run(out, stop, *, timeout, allow_execution, **config):
     try:
         context = await executor.start(deadline=time.monotonic() + timeout)
         if context.get("ok") is False:
-            raise RuntimeError("Cannot load robot, scripts or reference skills; check local configuration")
+            raise RuntimeError("Cannot load robot or action scripts; check local configuration")
         async with anyio.create_task_group() as group:
             async def watch_stop():
                 while not stop.is_set():
@@ -304,24 +283,16 @@ async def _run(out, stop, *, timeout, allow_execution, **config):
 
 def run_server(stop, *, robot_path, scripts_dir, module_paths=None,
                vars=None, allow_execution=False, allow_hardware=False,
-               timeout=180, skills_dir=None):
+               timeout=180):
     """Serve MCP on stdout; exits with a stderr diagnostic instead of JSON."""
     if allow_hardware and not allow_execution:
         raise ValueError("--allow-hardware requires --allow-execution")
-    from .agent_skills import SkillsLibrary, default_skills_root
-    try:
-        skills = SkillsLibrary(skills_dir if skills_dir is not None else default_skills_root(),
-                               required=skills_dir is not None)
-    except Exception as exc:
-        print(f"pymybot mcp: cannot load skills: {exc}", file=sys.stderr)
-        raise SystemExit(1) from None
     try:
         with _protocol_output() as out:
             asyncio.run(_run(out, stop, timeout=timeout, allow_execution=allow_execution,
                              robot_path=robot_path, scripts_dir=scripts_dir,
                              module_paths=module_paths,
-                             vars=vars, allow_hardware=allow_hardware,
-                             skills=skills))
+                             vars=vars, allow_hardware=allow_hardware))
     except KeyboardInterrupt:
         # The CLI installs SIGINT/SIGTERM handlers that set stop; a direct or
         # embedded Ctrl+C still reaches this branch after asyncio has cleaned up.

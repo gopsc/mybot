@@ -9,8 +9,8 @@
 ## Changes
 
 - [ ] Behaviour change is covered by a test that fails before the fix
-- [ ] Operator-facing docs updated (README/docs/CLI help/GUI text)
-- [ ] Security/privacy impact reviewed (shell, files, network, hardware, prompts, credentials)
+- [ ] Operator-facing docs updated (README/docs/CLI help)
+- [ ] Security/privacy impact reviewed (shell, network, hardware, credentials)
 - [ ] No secrets, generated artifacts or unrelated formatting changes
 
 ## Verification
@@ -21,7 +21,3 @@
 python -m pytest -q
 python -I tools/ci_smoke.py wheel
 ```
-
-## Screenshots / recordings
-
-<!-- For GUI or CLI output changes, attach before/after images. -->

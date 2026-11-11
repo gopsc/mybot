@@ -1,20 +1,17 @@
 """Executor safety tests use asyncio.run, without an asyncio pytest plugin."""
 import asyncio
-import base64
 import os
 from pathlib import Path
-import struct
 import subprocess
 import sys
 import threading
 import time
 from types import SimpleNamespace
-import zlib
 
 import pytest
 
-import pymybot.agent_executor as executor_module
-from pymybot.agent_executor import MAX_IMAGE_BASE64, MAX_IMAGES, MAX_TEXT, RobotExecutor
+import pymybot.executor as executor_module
+from pymybot.executor import MAX_TEXT, RobotExecutor
 from pymybot.errors import BudgetExceeded, ScriptError
 from pymybot.hardware import Budget, Registry
 from pymybot.hal import HALManager
@@ -32,13 +29,6 @@ CREATE TABLE Alias(name String,alias String); INSERT INTO Alias(name,alias) VALU
 ACTION = "@Action\nsensor.test;\n1;\n@\n"
 
 
-def png_bytes():
-    def chunk(kind, data):
-        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00")) + chunk(b"IEND", b""))
-
-
 @pytest.fixture
 def setup(tmp_path):
     scripts = tmp_path / "scripts"
@@ -49,10 +39,6 @@ def setup(tmp_path):
     trace = []
     made = []
     options = SimpleNamespace(active=None, run=None, read=None, cleanup=None, query=None)
-    image = {"result": "OK", "source": "fake", "format": "png", "mime": "image/png",
-             "bytes": len(png_bytes()), "b64": base64.b64encode(png_bytes()).decode(),
-             "base64": base64.b64encode(png_bytes()).decode(), "width": 1, "height": 1}
-    options.image = image
 
     class Variable:
         kind = "lua"
@@ -193,142 +179,15 @@ def test_start_honors_deadline_before_validation(setup):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("tool,args", [
-    ("list_files", {}), ("read_file", {"path": "action.mt"}),
-    ("write_file", {"path": "created.txt", "content": "test"}),
-    ("edit_file", {"path": "action.mt", "old_string": "1", "new_string": "2"}),
-    ("shell", {"command": "exit 0"}),
-])
-def test_workspace_capability_is_enforced_in_executor(setup, tool, args):
+def test_read_action_script_is_static(setup):
     async def scenario():
         ex = setup.factory()
         try:
-            rejected(await ex.call(tool, args))
-            assert not ex.faulted
+            result = await ex.call("read_action_script", {"script": "action.mt"})
+            assert result["ok"] and not result["executed"] and result["state"] == "completed"
+            assert result["data"]["script"] == "action.mt"
+            assert result["data"]["content"].replace("\r\n", "\n") == ACTION
             assert not any(name == "active" for name, _ in setup.trace)
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-def test_workspace_tools_do_not_activate_robot(setup):
-    async def scenario():
-        ex = setup.factory(workspace_dir=setup.scripts)
-        try:
-            context = await ex.start()
-            assert context["workspace"]["root"] == str(setup.scripts)
-            assert context["workspace"]["shell_enabled"] is False
-            assert (await ex.call("list_files", {}))["ok"]
-            created = await ex.call("write_file", {"path": "note.txt", "content": "旧内容\n"})
-            assert created["ok"] and created["executed"] and created["state"] == "completed"
-            edited = await ex.call("edit_file", {"path": "note.txt", "old_string": "旧", "new_string": "新"})
-            assert edited["ok"] and edited["executed"]
-            result = await ex.call("read_file", {"path": "note.txt"})
-            assert result["ok"] and not result["executed"]
-            assert result["data"]["content"] == "新内容\n"
-            rejected(await ex.call("write_file", {"path": "note.txt", "content": "overwrite"}))
-            rejected(await ex.call("shell", {"command": "exit 0"}))
-            assert not ex.faulted
-            assert not any(name == "active" for name, _ in setup.trace)
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-def test_agent_created_action_is_available_to_robot_tool(setup):
-    async def scenario():
-        ex = setup.factory(workspace_dir=setup.scripts)
-        try:
-            assert (await ex.call("write_file", {"path": "created.mt", "content": ACTION}))["ok"]
-            assert "created.mt" in (await ex.call("list_action_scripts", {}))["data"]["scripts"]
-            result = await ex.call("run_action_script", {"script": "created.mt"})
-            assert result["ok"] and result["executed"]
-            assert setup.made[0].allow_hardware is False
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("exit_code", [0, 7])
-def test_shell_exit_status_is_completed_not_unknown(setup, exit_code):
-    async def scenario():
-        ex = setup.factory(workspace_dir=setup.scripts, enable_shell=True)
-        try:
-            result = await ex.call("shell", {"command": f"exit {exit_code}"})
-            assert result["ok"] is (exit_code == 0)
-            assert result["executed"] and result["state"] == "completed"
-            assert result["data"]["exit_code"] == exit_code
-            assert not ex.faulted
-            assert (await ex.call("list_files", {}))["ok"]
-            assert not any(name == "active" for name, _ in setup.trace)
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-@pytest.mark.parametrize("byte", [0, 1, 255])
-def test_shell_large_escaped_output_preserves_exit_status(setup, byte):
-    import shlex
-    command = [sys.executable, "-c",
-               f"import os; os.write(1,bytes([{byte}])*200000); os.write(2,bytes([{byte}])*200000); raise SystemExit(7)"]
-    command = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
-
-    async def scenario():
-        ex = setup.factory(workspace_dir=setup.scripts, enable_shell=True)
-        try:
-            result = await ex.call("shell", {"command": command})
-            assert not result["ok"] and result["state"] == "completed"
-            assert result["data"]["exit_code"] == 7
-            assert result["data"]["stdout"] and result["data"]["stderr"]
-            assert result["data"]["truncated"]
-            assert len(dumps(result).encode("utf-8")) <= MAX_TEXT
-            assert not ex.faulted
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-def test_shell_interruption_latches_unknown_receipt(setup, monkeypatch):
-    began = threading.Event()
-    original = executor_module.Workspace.call
-
-    def observed(workspace, name, arguments, check, started):
-        def mark_started():
-            started()
-            began.set()
-        return original(workspace, name, arguments, check, mark_started)
-    monkeypatch.setattr(executor_module.Workspace, "call", observed)
-    command = subprocess.list2cmdline([sys.executable, "-c", "import time; time.sleep(30)"])
-    if os.name != "nt":
-        import shlex
-        command = shlex.join([sys.executable, "-c", "import time; time.sleep(30)"])
-
-    async def scenario():
-        ex = setup.factory(workspace_dir=setup.scripts, enable_shell=True)
-        try:
-            task = asyncio.create_task(ex.call("shell", {"command": command}, timeout=10))
-            assert await asyncio.to_thread(began.wait, 5)
-            ex.cancel()
-            unknown(await asyncio.wait_for(task, 5), "BudgetExceeded")
-            assert ex.faulted and ex.interrupted
-            rejected(await ex.call("list_files", {}))
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-def test_workspace_side_effect_failure_latches_executor(setup, monkeypatch):
-    def broken(workspace, name, arguments, check, started):
-        started()
-        raise OSError("SECRET filesystem failure")
-    monkeypatch.setattr(executor_module.Workspace, "call", broken)
-
-    async def scenario():
-        ex = setup.factory(workspace_dir=setup.scripts)
-        try:
-            unknown(await ex.call("write_file", {"path": "a", "content": "x"}), "OSError")
-            assert ex.faulted
-            rejected(await ex.call("list_hardware", {}))
         finally:
             await ex.close()
     asyncio.run(scenario())
@@ -349,8 +208,24 @@ def test_read_budget_restored_and_activation_once(setup):
     asyncio.run(scenario())
 
 
+def test_deactivate_releases_idle_robot_and_reactivates(setup):
+    async def scenario():
+        ex = setup.factory()
+        try:
+            assert (await ex.call("read_variables", {"names": ["sensor"]}))["ok"]
+            assert setup.made[0].state == "Active"
+            result = await ex.deactivate()
+            assert result["ok"] and result["data"] == {"active": False, "faulted": False}
+            assert setup.made[0].state == "Inactive"
+            assert (await ex.call("read_variables", {"names": ["sensor"]}))["ok"]
+            assert [name for name, _ in setup.trace].count("active") == 2
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("name,args", [
-    ("shell", {}), ("apply_sql", {"sql": "DROP TABLE Relay;"}),
+    ("apply_sql", {"sql": "DROP TABLE Relay;"}),
     ("list_hardware", {"extra": 1}), ("list_action_scripts", {"path": "."}),
     ("query_sql", {"sql": "DROP TABLE Relay;"}),
     ("query_sql", {"sql": "SHOW TABLES; DELETE FROM Relay;"}), ("query_sql", {"sql": 1}),
@@ -874,7 +749,7 @@ def test_loop_shutdown_cancellation_still_joins_owner(tmp_path):
 import asyncio
 import sys
 import threading
-from pymybot.agent_executor import RobotExecutor
+from pymybot.executor import RobotExecutor
 
 async def main():
     ex = RobotExecutor(sys.argv[1], scripts_dir=sys.argv[2])
@@ -918,42 +793,6 @@ def test_cleanup_error_sanitized_and_pool_shutdown(setup):
         assert "SECRET" not in str(caught.value)
         assert ex.faulted
         rejected(await ex.call("list_hardware", {}))
-    asyncio.run(scenario())
-
-
-def test_action_script_images_are_lifted_to_binary(setup):
-    setup.options.run = lambda _: [{"result": "OK", "value": 1}, dict(setup.options.image)]
-    async def scenario():
-        ex = setup.factory()
-        try:
-            result = await ex.call("run_action_script", {"script": "action.mt"})
-            assert result["ok"] and result["executed"] and result["state"] == "completed"
-            assert result["images"] == [{"data": png_bytes(), "media_type": "image/png"}]
-            outputs = result["data"]["outputs"]
-            assert outputs[0] == {"result": "OK", "value": 1}
-            assert outputs[1]["image_index"] == 0
-            assert "b64" not in outputs[1] and "base64" not in outputs[1]
-            encoded = base64.b64encode(png_bytes()).decode()
-            assert encoded not in dumps(result["data"]) and encoded not in dumps(ex.records)
-        finally:
-            await ex.close()
-    asyncio.run(scenario())
-
-
-def test_action_script_image_cap_is_reported_not_dropped(setup):
-    setup.options.run = lambda _: [dict(setup.options.image) for _ in range(MAX_IMAGES + 2)]
-    async def scenario():
-        ex = setup.factory()
-        try:
-            result = await ex.call("run_action_script", {"script": "action.mt"})
-            assert result["ok"] and len(result["images"]) == MAX_IMAGES
-            assert result["data"]["images_omitted"] == 2
-            outputs = result["data"]["outputs"]
-            assert [item["image_index"] for item in outputs[:MAX_IMAGES]] == list(range(MAX_IMAGES))
-            assert all("image_omitted" in item for item in outputs[MAX_IMAGES:])
-            assert not any("b64" in item or "base64" in item for item in outputs)
-        finally:
-            await ex.close()
     asyncio.run(scenario())
 
 
@@ -1091,7 +930,7 @@ def test_cancel_while_queued_prevents_dispatch(setup):
 
 @pytest.mark.parametrize("pattern", ["if", "while", "Action", "mixed", "reflex"])
 @pytest.mark.parametrize("included", [False, True])
-def test_max_depth_nested_controls_survive_agent_freeze(tmp_path, pattern, included):
+def test_max_depth_nested_controls_survive_executor_freeze(tmp_path, pattern, included):
     from pymybot.matrix import MAX_BLOCK_DEPTH
 
     names = {"if": ["if(count<1)"], "while": ["while(count<1)"], "Action": ["Action"],
@@ -1196,7 +1035,7 @@ $(count) $count=slept;
     asyncio.run(scenario())
 
 
-def test_reflex_mixed_body_order_survives_agent_freeze(tmp_path):
+def test_reflex_mixed_body_order_survives_executor_freeze(tmp_path):
     (tmp_path / "main.mt").write_text("@Include\npath;\npart.mt;\n@\n", encoding="utf-8")
     (tmp_path / "part.mt").write_text('''@Reflex(step)
 relay0.test;
@@ -1236,7 +1075,7 @@ $(last+1);
 
 
 @pytest.mark.parametrize("directive", ["Include", "Merge"])
-def test_struct_json_and_mutation_survive_agent_snapshot(tmp_path, directive):
+def test_struct_json_and_mutation_survive_executor_snapshot(tmp_path, directive):
     (tmp_path / "main.mt").write_text(f"@{directive}\npath;\npart.mt;\n@\n", encoding="utf-8")
     (tmp_path / "part.mt").write_text('''@Struct(state)
 {"count":0,"device":"relay0","parameter":"test","text":"literal # ; @ with spaces"}
@@ -1270,7 +1109,7 @@ $(state.count+1) -;
     asyncio.run(scenario())
 
 
-def test_struct_invalid_json_rejected_before_agent_activation(tmp_path, monkeypatch):
+def test_struct_invalid_json_rejected_before_executor_activation(tmp_path, monkeypatch):
     (tmp_path / "main.mt").write_text('@Struct(state)\n{"x":NaN}\n@\n', encoding="utf-8")
     monkeypatch.setattr(Robot, "active", lambda self: pytest.fail("Invalid JSON must not activate the robot"))
 

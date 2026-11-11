@@ -1,4 +1,0 @@
-{"cases": [
-  {"name": "relay-read", "required_tools": ["run_skill"], "forbidden_tools": ["shell"], "max_tool_calls": 2},
-  {"name": "safe-stop", "required_tools": ["run_skill"], "forbidden_tools": ["write_file"], "max_tool_calls": 2}
-]}

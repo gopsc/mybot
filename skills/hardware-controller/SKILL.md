@@ -9,7 +9,7 @@ description: 通过自包含的 pymybot Runtime 控制与编程机器人：Struc
 
 ## 1. 入口
 
-先安装 Runtime 依赖（核心依赖必装；`mcp`/`agent`/`gui` 等可选依赖在文件内以注释列出，按需取消注释）：
+先安装 Runtime 依赖（核心依赖必装；`mcp` 等可选依赖在文件内以注释列出，按需取消注释）：
 
 ```sh
 pip install -r scripts/requirements.txt
@@ -17,7 +17,7 @@ pip install -r scripts/requirements.txt
 
 安装后跑一次 `doctor`（见 3.1）确认环境就绪。
 
-三种入口共享同一套 Runtime，不要复制或另建控制器实现：
+两种入口共享同一套 Runtime，不要复制或另建控制器实现：
 
 ```sh
 # 仓库根目录：自包含入口（本技能推荐）
@@ -27,26 +27,13 @@ python scripts/hardware_controller.py <command> [options]
 python -m pymybot <command> [options]
 ```
 
-Agent 会话中不再暴露细粒度硬件工具，统一调用本技能的一个通用工具：
-
-```text
-hardware_controller_run(command="check", args=[
-  "--robot", "assets/robots/relay-test.sql",
-  "--input", "assets/scripts/relay-test.mt"
-])
-```
-
-`command` 是下文的 CLI 子命令，`args` 是该子命令的原始参数，一个列表元素对应一个 token。工具的工作目录是技能目录，因此路径写 `assets/...` 即可；不要传 entrypoint、绝对宿主路径或自行拼接命令。一次调用只执行一个子命令。
-
-Agent 通用工具只开放 `doctor`、`discover`、`scripts`、`hardware`、`query`、`check`、`run`、`sample`，以及只读的 `assets list` / `assets read`。`apply-sql`、`assets write/delete`、`new`、`prompts`、`roles`、`sessions`、`mcp`、`serve`、`agent` 属于操作员管理面或长驻入口，只能由操作员直接使用 CLI，不能从 Agent 工具调用。
-
-MCP 入口见第 5 节。
+MCP 入口见第 5 节。每个命令在 stdout 输出**恰好一行 JSON**，诊断写 stderr。
 
 ## 2. 子命令速查
 
 | 子命令 | 在什么情况下使用 | 激活硬件 |
 | --- | --- | --- |
-| `doctor` | 第一次使用；解释器/依赖/资产/prompt 清单异常；任何命令报环境类错误前 | 否 |
+| `doctor` | 第一次使用；解释器/依赖/资产清单异常；任何命令报环境类错误前 | 否 |
 | `discover` | 写结构 SQL 前枚举宿主串口/FTDI/I2C/SPI 设备，`hints` 直接给出可用的建表 SQL（只读，不加 `--probe`） | 否 |
 | `scripts` | 不知道有哪些 `.mt` 动作脚本，或确认脚本目录是否被正确加载 | 否 |
 | `hardware` | 写动作前确认变量名、总线、地址、controller/trigger 接线 | 否 |
@@ -54,13 +41,11 @@ MCP 入口见第 5 节。
 | `check` | 写完或改完 SQL、MT、driver 后，`run` 之前的第一道关卡 | 否 |
 | `run` | `check` 通过，且已用 `proto='virt'` 或 fixtures 验证后，执行一个动作 | 是 |
 | `sample` | 读取某个命名变量的当前值或 Daemon 快照 | 是 |
-| `apply-sql` | 在临时会话中改变量、建表或删表做实验（仅操作员 CLI） | 是 |
-| `assets list/read` | 查看或读取内置 robots/modules/scripts 资产（Agent 也可用） | 否 |
-| `assets write/delete` | 新建、覆盖或删除内置资产脚本（仅操作员 CLI） | 否 |
-| `new` | 为用户自己的项目生成 `robots/`、`scripts/`、`modules/` 骨架（仅操作员 CLI） | 否 |
-| `mcp` | 把控制器暴露给 MCP 客户端或其他 Agent（仅操作员 CLI） | 视开关 |
-| `serve` | 给 GUI/IDE 提供长驻 stdio JSON-RPC 后端（仅操作员 CLI） | 视请求 |
-| `agent` | 使用内置 LangGraph Agent（需要 `--role`，仅操作员 CLI） | 视审批 |
+| `apply-sql` | 在临时会话中改变量、建表或删表做实验 | 是 |
+| `assets list/read` | 查看或读取内置 robots/modules/scripts 资产 | 否 |
+| `assets write/delete` | 新建、覆盖或删除内置资产脚本 | 否 |
+| `new` | 为用户自己的项目生成 `robots/`、`scripts/`、`modules/` 骨架 | 否 |
+| `mcp` | 把控制器暴露给 MCP 客户端（只读默认） | 视开关 |
 
 所有命令在 stdout 输出**恰好一行 JSON**；诊断写 stderr。退出码非零表示命令失败，但动作已派发后的异常代表“结果未知”，不要自动重试，也不要声称已回滚。
 
@@ -68,7 +53,7 @@ MCP 入口见第 5 节。
 
 ### 3.1 `doctor`
 
-检查解释器、依赖、Lua 运行时、默认资产目录和 prompt manifest。没有硬件也可以运行。
+检查解释器、依赖、Lua 运行时、默认资产目录。没有硬件也可以运行。
 
 ```sh
 python scripts/hardware_controller.py doctor
@@ -136,10 +121,10 @@ python scripts/hardware_controller.py doctor
 在一个临时会话中执行受限 SQL（`UPDATE`、`DELETE`、`DROP` 等），用于实验或临时改变量。会激活硬件。
 
 ```sh
-... apply-sql --robot assets/robots/relay-test.sql --sql "UPDATE Timer SET name='timer-1' WHERE name='timer-0';"
+... apply-sql --robot assets/robots/relay-test.sql --sql "UPDATE Relay SET note='changed' WHERE name='relay0';"
 ```
 
-结构文件本身只允许 `CREATE`/`INSERT`；不要把 `apply-sql` 的语句写进 `robots/*.sql`。
+结构文件本身只允许 `CREATE`/`INSERT`；不要把 `apply-sql` 的语句写进 `robots/*.sql`。改 `name` 会重写 controller/trigger 图，激活时可能因引用失效而报错——先用 `check` 验证。
 
 ### 3.7 `assets`
 
@@ -236,7 +221,7 @@ MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物�
 ## 7. References
 
 - 架构与 Runtime flow：`references/architecture.md`
-- CLI 与 serve 协议：`references/cli.md`
+- CLI 命令与 JSON 契约：`references/cli.md`
 - MCP 配置、工具和资源：`references/mcp.md`
 - 安全与权限：`references/security.md`
 - 测试与虚拟设备：`references/testing.md`

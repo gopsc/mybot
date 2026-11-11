@@ -7,8 +7,8 @@ body:
     attributes:
       value: |
         Start with the problem, not the implementation. A feature that touches
-        shell, files, network, hardware, prompts or credentials needs an
-        explicit security/privacy section.
+        shell, network, hardware or credentials needs an explicit
+        security/privacy section.
 
   - type: textarea
     id: problem
@@ -30,8 +30,8 @@ body:
     id: security
     attributes:
       label: Security and privacy impact
-      description: New trust boundaries, approvals, secrets, network or hardware access
-      placeholder: "No new capability; or: requires an explicit new approval because ..."
+      description: New trust boundaries, gates, secrets, network or hardware access
+      placeholder: "No new capability; or: requires an explicit new opt-in because ..."
     validations:
       required: true
 
