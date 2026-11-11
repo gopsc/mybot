@@ -131,6 +131,17 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `hardware-controller`'s `scripts/requirements.txt` now includes Pillow,
+  matching `doctor`'s required `PIL` check and the base package dependencies;
+  following the skill's install command no longer leaves `doctor` unhealthy.
+- Docs no longer describe a removed terminal agent REPL: `--task` runs one
+  seeded mission, while the default command starts the self-directed dual-agent
+  loop. History erasure is documented as `roles clear-history` / `agent.reset`.
+- Role docs now state that a role may carry a self-contained copy of the
+  controller Runtime and that `roles repair` only fills missing files, so
+  upgrading pymybot does not upgrade a copied Runtime automatically.
+- Removed the unused `PythonState` virtual-delegation hooks; Python virtual
+  buses continue to use HAL-backed in-memory handles.
 - GUI `agent.start` sent `turnTimeout` as a JSON float, which the serve-side
   integer validation rejected (`'turnTimeout' has the wrong type`), so the GUI
   could never start the autonomous loop; the field is an integer end-to-end now

@@ -73,7 +73,7 @@ def closed_states(monkeypatch):
 def test_synthetic_direct_actions_and_instance_isolation(protocol, synthetic_modules, closed_states):
     with Robot(direct_sql(protocol), module_paths=synthetic_modules) as robot:
         bus_runtime = robot.registry["bus"].runtime
-        assert isinstance(bus_runtime, PythonState) and bus_runtime._virtual is None
+        assert isinstance(bus_runtime, PythonState)
         bus_fd = robot.registry["bus"].read()["fd"]
         assert robot.hal._handles[bus_fd].backend == "virtual"
         outputs = robot.run("@Action\na.read b.read;\n1 1;\n@")

@@ -312,7 +312,7 @@ INSERT INTO Probe(name, initial, controller) VALUES('dev', 2, '-');
 def test_native_uart_example_and_borrowed_handle():
     with Robot.from_file(ASSETS / "robots" / "uart-loopback.sql") as robot:
         assert {var.kind for var in robot.registry.values()} == {"python"}
-        assert robot.registry["bus"].runtime._virtual is None
+        assert isinstance(robot.registry["bus"].runtime, PythonState)
         action = (ASSETS / "scripts" / "uart-loopback.mt").read_text()
         assert [item["rx"] for item in robot.run(action)] == [0, 127, 255]
         assert len(robot.hal._handles) == 1

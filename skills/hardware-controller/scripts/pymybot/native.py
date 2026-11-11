@@ -58,7 +58,6 @@ class PythonState(DriverRuntime):
         super().__init__(module_paths, hal, stop_event, allow_hardware=allow_hardware)
         self.module = None
         self.driver = None
-        self._virtual = None
         self.context = DriverContext(self)
 
     @staticmethod
@@ -93,8 +92,6 @@ class PythonState(DriverRuntime):
             self.budget = previous
 
     def has_function(self, name):
-        if self._virtual is not None:
-            return self._virtual.has_function(name)
         return not self._closed and callable(getattr(self.driver, name, None))
 
     def call(self, name, data=None, *, budget=None):
@@ -102,8 +99,6 @@ class PythonState(DriverRuntime):
             raise DriverError(f"Python function '{name}' is not available")
         if budget is None:
             budget = Budget(timeout=30) if name == "destroy" else Budget(self.stop_event, 30)
-        if self._virtual is not None:
-            return self._virtual.call(name, data, budget=budget)
         previous = self.budget
         self.budget = budget
         try:
@@ -124,9 +119,6 @@ class PythonState(DriverRuntime):
         if self._closed:
             return
         self._closed = True
-        if self._virtual is not None:
-            self._virtual.close()
-            self._virtual = None
         self.driver = None
         if self.module is not None:
             sys.modules.pop(self.module.__name__, None)

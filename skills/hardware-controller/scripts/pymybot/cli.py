@@ -116,7 +116,7 @@ def parser():
     p = ArgumentParser(
         prog="pymybot", allow_abbrev=False,
         description="GUI-first robot controller. Without a command it opens the PySide6 agent window; "
-                    "use --no-gui for the command-line interface (agent REPL or direct controller commands). "
+                    "use --no-gui for the command-line interface (dual-agent loop or direct controller commands). "
                     "Command-line results are JSON on stdout.",
         epilog="Use only trusted Lua modules: LuaJIT FFI is not malicious-code isolation. "
                "Activation itself may write to devices, including when sampling. "

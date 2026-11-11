@@ -117,7 +117,6 @@ INSERT INTO Shell(name) VALUES('sh');
 '''
     with Robot(sql, allow_hardware=True) as robot:
         assert {variable.kind for variable in robot.registry.values()} == {"python"}
-        assert all(variable.runtime._virtual is None for variable in robot.registry.values())
         assert len(robot.hal._handles) == 5
         i2c = robot.registry["i"]
         spi = robot.registry["s"]

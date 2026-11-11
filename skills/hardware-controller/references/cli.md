@@ -290,7 +290,7 @@ Agent mode is documented in the README. The important flags are:
 | `--model PROVIDER:MODEL` | `openai`, `openai-chat`, `anthropic` or `deepseek` plus any registered provider; defaults to `MYBOT_MODEL`. |
 | `--base-url URL` | Custom OpenAI-compatible endpoint; HTTPS required except loopback. |
 | `--api-key-env NAME` | Environment variable holding the key; never pass the key itself. |
-| `--task TEXT` | One-shot task; without it, start the REPL. `/clear` explicitly clears the current role history. |
+| `--task TEXT` | Run exactly one seeded mission; without it, start the self-directed dual-agent loop and stop with Ctrl+C or `agent.stop`. Clear a role's history with `pymybot roles clear-history NAME --yes` or `agent.reset` with `clearHistory=true`. |
 | `--role NAME` | Load role-owned prompts, skills, MCP and resumable model history from `~/.mybot/roles/NAME`. Required for agent conversations. |
 | `--workspace-dir DIR` | Enable bounded file tools inside `DIR`. |
 | `--enable-shell` | Enable the shell tool inside the workspace; protected prompts require usable bubblewrap, with no unisolated fallback. |

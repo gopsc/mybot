@@ -163,7 +163,7 @@ Key invariants:
 flowchart TB
     U[User] --> G[GUI]
     U --> C[CLI]
-    U --> A[Agent REPL]
+    U --> A[Agent loop]
     U --> S[serve JSON-RPC]
     M[MCP client] -->|stdio JSON-RPC| X[mcp server]
     U --> M

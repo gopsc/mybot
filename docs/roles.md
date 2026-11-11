@@ -31,6 +31,15 @@ the Agent authored under that workspace. Editing a role does not change the glob
 `~/.mybot/prompts` library or another role. Safety layers 0/100 remain immutable;
 SOUL/USER/STATS retain the existing ownership and approval rules.
 
+A role copies the bundled skill tree as it exists when the role is created.
+In a source checkout the `hardware-controller` skill is self-contained, so the
+role also carries its own `scripts/pymybot` Runtime and `assets/`; in an
+installed wheel the Runtime stays in the package and the skill uses the
+packaged CLI. `roles repair` only fills missing files and never overwrites
+existing ones, so upgrading pymybot does not upgrade controller code already
+copied into a role. Recreate the role, or deliberately sync its
+`skills/hardware-controller/` tree, when it must move to a newer Runtime.
+
 Role names contain 1–64 letters, numbers (including Unicode letters), `_`, `-`
 or `.`, and cannot start with `.`. Role directories and their prompt, skill,
 MCP and history inputs reject links/junctions. On POSIX, created role content
@@ -137,8 +146,8 @@ explicitly if it alone exceeds the remaining input budget.
 Failed, cancelled or partially executed turns are not appended. Version 1
 (PydanticAI) history is recognized and ignored so the role starts a fresh
 conversation. Corrupt or otherwise unsupported history blocks the model
-request instead of silently starting with amnesia. `/clear` in the terminal
-REPL and `agent.reset` with
+request instead of silently starting with amnesia.
+`pymybot roles clear-history NAME --yes` and `agent.reset` with
 `clearHistory=true` provide explicit erasure.
 
 `history.json` is different from `~/.mybot/sessions`: session transcripts are

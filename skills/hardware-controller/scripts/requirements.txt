@@ -7,6 +7,7 @@ lupa>=2.8,<3
 sqlparse>=0.6,<0.7
 pyserial>=3.5,<4
 pyftdi>=0.57.2,<1
+pillow>=13,<14
 smbus2>=0.5,<1; sys_platform == 'linux'
 
 # 可选：mcp 子命令（MCP 2 重命名了低层 Server API，服务端针对 1.x 契约）
