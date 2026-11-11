@@ -25,10 +25,10 @@ def package_dir() -> Path:
 
 
 def source_root() -> Path:
-    """Repository root for a source checkout, including from the Skill runtime."""
+    """Repository root for a source checkout (first ancestor with pyproject.toml)."""
     package = package_dir()
     for candidate in (package.parent, *package.parents):
-        if (candidate / "pyproject.toml").is_file() and (candidate / "pymybot").is_dir():
+        if (candidate / "pyproject.toml").is_file():
             return candidate
     return package.parent
 

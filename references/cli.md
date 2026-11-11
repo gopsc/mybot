@@ -1,6 +1,6 @@
 # CLI reference
 
-Source: This is the authoritative controller CLI document; the implementation lives in `pymybot/cli.py`.
+Source: This is the authoritative controller CLI document; the implementation lives in `scripts/pymybot/cli.py`.
 
 The CLI is the automation-friendly control surface. Every controller command
 prints exactly one JSON object on stdout per invocation; diagnostics go to

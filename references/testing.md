@@ -19,8 +19,7 @@ Source: This is the authoritative controller testing document; fixtures and test
 The suite must run without physical hardware: virtual fixtures, `proto='virt'`
 and `loop://` transports cover device paths. The only optional runtime dependency
 the suite needs is the MCP SDK; `tests/test_mcp_server.py` skips itself when the
-`mcp` extra is absent, and the CI `test`/`windows` jobs install `.[mcp,test]` so
-it runs there.
+`mcp` extra is absent, so install `.[mcp,test]` to run the full suite.
 
 ## General commands
 
@@ -28,20 +27,9 @@ it runs there.
 python -m pytest -q
 python -m pytest tests/test_hal.py -q
 python -m pytest --durations=10 -q
+python -I tools/check_docs_skill_sync.py   # references, links and Source lines
+python -I tools/ci_smoke.py wheel          # sdist -> wheel -> clean venv
 ```
-
-## CI channels
-
-| Channel | OS / Python | Purpose |
-| --- | --- | --- |
-| base | Ubuntu / 3.12 | Base install only; MCP-dependent tests skip themselves |
-| test | Ubuntu / 3.12 | Full regression with `.[mcp,test]` |
-| windows | Windows / 3.13 | `.[mcp,test]`, faulthandler, UTF-8 and Windows behaviour |
-| macos | macOS / 3.13 | Base install, `doctor`, and the Python-only `time` `check`/`run` smoke |
-| wheel | Ubuntu / 3.12 | Build from sdist, install into a clean venv |
-| quickstart | Ubuntu / 3.14 | README commands actually run |
-| lint | Ubuntu / 3.12 | Ruff, docs/skill sync and release metadata |
-| docker | Ubuntu | Headless image build and `doctor` runs inside it |
 
 ## Virtual device fixtures
 
@@ -53,7 +41,7 @@ timeout) when the driver supports it.
 ## Windows notes
 
 - LuaJIT raises Lua errors as SEH `0xE24C4A02`; the CLI disables
-  `faulthandler`. See [`windows-faulthandler.md`](../docs/history/windows-faulthandler.md).
+  `faulthandler`. See [`windows-faulthandler.md`](windows-faulthandler.md).
 - stdout/stderr are forced to UTF-8. Tests assert JSON survives non-ASCII output
   on a GBK console.
 - Symlink creation may be unavailable; `tests/conftest.py` converts that into a

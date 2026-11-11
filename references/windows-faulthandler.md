@@ -1,8 +1,10 @@
 # Windows 上 faulthandler 与 LuaJIT 冲突导致的间歇性崩溃
 
+Source: 实现见 `scripts/pymybot/cli.py` 的 `disable_windows_faulthandler()` 与 `tests/conftest.py`；本文是这次排查的历史记录。
+
 记录日期：2026-10-18
 影响平台：Windows（x64）；Linux / macOS 不受影响
-状态：已修复（`pymybot/cli.py`、`tests/conftest.py`）
+状态：已修复（`scripts/pymybot/cli.py`、`tests/conftest.py`）
 
 ## 现象
 
@@ -68,7 +70,7 @@ LuaJIT 的 SEH 展开方式无法从 pymybot 侧改变，CPython 的白名单也
 | `modules/lib/mpath.lua:16` | `mpath.paths` 解析搜索路径 | 否，pymybot 注入了自己的 `__mpath` |
 | 各驱动/库开头 `(__mpath or dofile(...:match("[^:]+") ...))` | 加载 mpath | 否，`__mpath` 短路 |
 
-而 pymybot（`pymybot/runtime.py` 的 `_getenv`）用 `os.pathsep` 拼接该变量，在 Windows 上是 `;`，
+而 pymybot（`scripts/pymybot/runtime.py` 的 `_getenv`）用 `os.pathsep` 拼接该变量，在 Windows 上是 `;`，
 且盘符本身含 `:`。于是 `C:\...\work\modules;C:\...\mybot\modules` 被切成如下假路径：
 
 ```
@@ -137,7 +139,7 @@ kalman、ema、json、pthread 以及 drv_common 的参数校验中都有显式 `
 
 ## 修复
 
-### CLI：`pymybot/cli.py`
+### CLI：`scripts/pymybot/cli.py`
 
 新增 `disable_windows_faulthandler()`，在 `main()` 入口调用：
 
@@ -271,7 +273,7 @@ Windows 上 stdout/stderr 接管道时，Python 用 ANSI 代码页（中文系�
 或回读值里的 emoji），stdout 的 `print` 直接抛 `UnicodeEncodeError`，一条 JSON 都输出不了，
 违反单条 JSON 约定。
 
-### 修法（`pymybot/cli.py` 的 `utf8_streams()`）
+### 修法（`scripts/pymybot/cli.py` 的 `utf8_streams()`）
 
 `main()` 入口把 stdout 与 stderr 都 `reconfigure(encoding="utf-8")`，stdout 用 `strict`，stderr
 保留 Python 默认的 `backslashreplace`。已经是 UTF-8 的流不处理（如 Windows 控制台、pytest

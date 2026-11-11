@@ -1,6 +1,6 @@
 # Architecture
 
-Source: This is the authoritative controller architecture document; the implementation lives in `pymybot/`.
+Source: This is the authoritative controller architecture document; the implementation lives in `scripts/pymybot/`.
 
 pymybot separates *what the robot is* from *how a part is driven* and *what
 should happen over time*. One Runtime serves exactly two entry points: the
@@ -125,26 +125,26 @@ Key invariants:
 
 | Module | Responsibility |
 | --- | --- |
-| `pymybot/cli.py` | Argument parsing, JSON contract, command dispatch, `doctor` and `assets` handlers |
-| `pymybot/robot.py` | Structure loading, validation, activation and action execution |
-| `pymybot/sql.py` | Strict in-memory SQL grammar and table operations |
-| `pymybot/matrix.py` | MT action matrix parser and validator |
-| `pymybot/actions.py` | Action runner: aliases, captures, control flow |
-| `pymybot/expr.py` | Expression parser/evaluator and numeric rendering |
-| `pymybot/include.py` | Include expansion and phase-based `.mt` matrix merging |
-| `pymybot/hardware.py` | Identifier checks, budgets, variables, registry and metadata |
-| `pymybot/runtime.py` | Shared HAL bridge, Lupa/LuaJIT (or standard-Lua) bootstrap and Python↔Lua conversion |
-| `pymybot/native.py` | Compile-only validation, per-row Python modules, Driver context and results |
-| `pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Shell host operations |
-| `pymybot/daemon.py` | Background Lua sampling workers and snapshots |
-| `pymybot/discover.py` | Read-only host UART/FTDI/I2C/SPI enumeration and structure-SQL hints |
-| `pymybot/paths.py` | Source/frozen asset resolution |
-| `pymybot/security.py` | Bounded input reads and strict one-line JSON output |
-| `pymybot/errors.py` | Controller exception hierarchy |
-| `pymybot/process.py` | Platform shell-command and process-tree helpers used by the HAL Shell driver |
-| `pymybot/scaffold.py` | `pymybot new` SQL/MT/Python skeleton generator |
-| `pymybot/executor.py` | Single-owner `Robot` runtime that serialises MCP work on one thread |
-| `pymybot/mcp_server.py` | Standard MCP stdio server over the executor (read-only by default) |
+| `scripts/pymybot/cli.py` | Argument parsing, JSON contract, command dispatch, `doctor` and `assets` handlers |
+| `scripts/pymybot/robot.py` | Structure loading, validation, activation and action execution |
+| `scripts/pymybot/sql.py` | Strict in-memory SQL grammar and table operations |
+| `scripts/pymybot/matrix.py` | MT action matrix parser and validator |
+| `scripts/pymybot/actions.py` | Action runner: aliases, captures, control flow |
+| `scripts/pymybot/expr.py` | Expression parser/evaluator and numeric rendering |
+| `scripts/pymybot/include.py` | Include expansion and phase-based `.mt` matrix merging |
+| `scripts/pymybot/hardware.py` | Identifier checks, budgets, variables, registry and metadata |
+| `scripts/pymybot/runtime.py` | Shared HAL bridge, Lupa/LuaJIT (or standard-Lua) bootstrap and Python↔Lua conversion |
+| `scripts/pymybot/native.py` | Compile-only validation, per-row Python modules, Driver context and results |
+| `scripts/pymybot/hal.py` | I2C/SPI/UART/TCP/HTTP/Shell host operations |
+| `scripts/pymybot/daemon.py` | Background Lua sampling workers and snapshots |
+| `scripts/pymybot/discover.py` | Read-only host UART/FTDI/I2C/SPI enumeration and structure-SQL hints |
+| `scripts/pymybot/paths.py` | Source/frozen asset resolution |
+| `scripts/pymybot/security.py` | Bounded input reads and strict one-line JSON output |
+| `scripts/pymybot/errors.py` | Controller exception hierarchy |
+| `scripts/pymybot/process.py` | Platform shell-command and process-tree helpers used by the HAL Shell driver |
+| `scripts/pymybot/scaffold.py` | `pymybot new` SQL/MT/Python skeleton generator |
+| `scripts/pymybot/executor.py` | Single-owner `Robot` runtime that serialises MCP work on one thread |
+| `scripts/pymybot/mcp_server.py` | Standard MCP stdio server over the executor (read-only by default) |
 
 ## Entry points
 
@@ -160,8 +160,8 @@ flowchart TB
 ```
 
 - **CLI controller mode** loads `Robot` in-process, executes one command and
-  prints one JSON line; it never starts a server or a model. It is the CI entry
-  point and is also available from the repository root as
+  prints one JSON line; it never starts a server or a model. It is the automation
+  entry point and is also available from the repository root as
   `python scripts/hardware_controller.py`.
 - **MCP server mode** is a protocol adapter over `RobotExecutor`: a plain
   owner-thread runtime with no model, no approval callback and no tool loop. The
@@ -171,14 +171,14 @@ flowchart TB
 
 ## Asset and path resolution
 
-Controller sources live in `pymybot/` at the repository root, so
-`python -m pymybot` works from a checkout; `scripts/hardware_controller.py` is
-the self-contained launcher. Default source assets live in
-`assets/{modules,robots,scripts}`; the wheel packages `pymybot/` and copies those
-three asset roots into `pymybot/assets/`. Module assets include both `.py` and
-`.lua`, and `doctor` counts both. Frozen builds use `pymybot/paths.py` and
-`sys._MEIPASS`; never rely on the current working directory. See
-[`development.md`](../docs/development.md) for the packaging flow.
+Controller sources live in `scripts/pymybot/`; `scripts/hardware_controller.py`
+adds that directory to `sys.path` and is the self-contained launcher, and the
+installed wheel exposes the same modules as the `pymybot` package. Default source
+assets live in `assets/{modules,robots,scripts}`; the wheel copies those three
+roots into `pymybot/assets/`. Module assets include both `.py` and `.lua`, and
+`doctor` counts both. Frozen builds use `paths.py` and `sys._MEIPASS`; never rely
+on the current working directory. Packaging is described by `pyproject.toml` and
+`build_support.py`.
 
 ## Further reading
 

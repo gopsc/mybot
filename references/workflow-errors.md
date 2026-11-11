@@ -1,8 +1,7 @@
 # 开发工作流、常见错误与速查表
 
-Source: 命令与开关的权威是 [controller CLI](cli.md)，测试与 CI 见
-[controller testing](testing.md)，环境排查见
-[docs/faq.md](../docs/faq.md)。
+Source: 命令与开关的权威是 [controller CLI](cli.md)，测试见
+[controller testing](testing.md)，本文收排错流程与常见错误对照。
 
 ## 1. 推荐路径：从虚拟到真机
 

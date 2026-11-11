@@ -36,7 +36,8 @@ def _expand(value):
 
 def _candidate_paths(text):
     for raw in INLINE_CODE.findall(text):
-        value = raw.strip().rstrip("/")
+        # pytest node ids (`tests/test_x.py::test_y`) name a file plus a selector.
+        value = raw.strip().split("::", 1)[0].rstrip("/")
         if PLACEHOLDERS & set(value) or not value.startswith(tuple(name + "/" for name in CHECKED_ROOTS)):
             continue
         yield from _expand(value)
@@ -72,13 +73,13 @@ def audit(root):
     root = Path(root).resolve()
     docs, references = root / "docs", root / "references"
     problems, warnings = [], []
-    if not references.is_dir() or not docs.is_dir():
-        return [f"{root}: expected both references/ and docs/ directories"], warnings
+    if not references.is_dir():
+        return [f"{root}: expected a references/ directory"], warnings
 
     index = root / "SKILL.md"
     reference_files = sorted(path for path in references.rglob("*.md") if path.is_file())
     skill_files = ([index] if index.is_file() else []) + reference_files
-    docs_files = sorted(path for path in docs.rglob("*.md") if path.is_file())
+    docs_files = sorted(path for path in docs.rglob("*.md") if path.is_file()) if docs.is_dir() else []
 
     for path in skill_files:
         relative = path.relative_to(root).as_posix()

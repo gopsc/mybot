@@ -2,8 +2,8 @@
 
 Source: 驱动契约与信任边界的权威是
 [controller architecture](architecture.md) 与
-[controller security](security.md)；实现见 `pymybot/native.py`、`pymybot/runtime.py`、
-`pymybot/hardware.py` 与 `assets/modules/lib/`，本文件只留写驱动的硬规则与 HAL 接口表。
+[controller security](security.md)；实现见 `scripts/pymybot/native.py`、`scripts/pymybot/runtime.py`、
+`scripts/pymybot/hardware.py` 与 `assets/modules/lib/`，本文件只留写驱动的硬规则与 HAL 接口表。
 
 ## Python 原生入口与 SQL 选择
 
@@ -32,7 +32,8 @@ Source: 驱动契约与信任边界的权威是
   **Daemon chunk 仍只加载 Lua 驱动**，按根顺序选中 Python 时静态检查报
   `Lua daemon requires a Lua driver, not Python: <驱动>`。
 
-可运行的 Python + SQL + MT 回环示例见 [使用指南：写一个驱动](../docs/Introduce.md#写一个驱动)。
+可运行的 Python + SQL + MT 回环示例见 `assets/robots/uart-loopback.sql`、
+`assets/scripts/uart-loopback.mt` 与 `assets/modules/LoopbackProbe.py`。
 
 ## TCP 的 MT 接口
 

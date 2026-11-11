@@ -7,8 +7,8 @@ from setuptools.command.build_py import build_py
 class BuildPy(build_py):
     """Ship the default robots, modules and action scripts inside the wheel.
 
-    The sources already live in the package (``pymybot/``); only the assets at
-    the repository root need copying into ``pymybot/assets``.
+    The Runtime package is built from ``scripts/pymybot`` (``package-dir``); only
+    the repository-root ``assets/`` tree is copied into ``pymybot/assets``.
     """
 
     def run(self):

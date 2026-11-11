@@ -44,7 +44,7 @@ def command(robot=None, scripts=None, extra=()):
 @asynccontextmanager
 async def client(tmp_path, *, robot=None, scripts=None, extra=(), env=None):
     params = StdioServerParameters(command=sys.executable, args=command(robot, scripts, extra),
-                                   cwd=tmp_path, env={"PYTHONPATH": str(ROOT), **(env or {})})
+                                   cwd=tmp_path, env={"PYTHONPATH": str(ROOT / "scripts"), **(env or {})})
     with tempfile.TemporaryFile(mode="w+t") as errors:
         async with stdio_client(params, errlog=errors) as streams:
             async with ClientSession(*streams, read_timeout_seconds=_read_timeout(20)) as session:
@@ -158,7 +158,7 @@ def test_paths_reads_and_unknown_tools_are_validated(tmp_path):
 
 def test_allow_hardware_requires_execution(tmp_path):
     result = subprocess.run([sys.executable, *command(extra=("--allow-hardware",))],
-                            cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(ROOT)),
+                            cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(ROOT / "scripts")),
                             capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert result.returncode == 2
     assert "--allow-hardware requires --allow-execution" in result.stderr

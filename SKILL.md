@@ -5,7 +5,7 @@ description: 通过自包含的 pymybot Runtime 控制与编程机器人：Struc
 
 # Hardware Controller
 
-使用仓库根目录 `pymybot/` 的 Python Runtime 控制机器人（`scripts/hardware_controller.py` 是自包含入口）。Structure SQL 声明硬件，Python/Lua driver 实现设备行为，MT action 描述时序动作。默认 robots、scripts 和 modules 位于 `assets/`。
+使用 `scripts/pymybot/` 的 Python Runtime 控制机器人（`scripts/hardware_controller.py` 是自包含入口）。Structure SQL 声明硬件，Python/Lua driver 实现设备行为，MT action 描述时序动作。默认 robots、scripts 和 modules 位于 `assets/`。
 
 ## 1. 入口
 
@@ -23,7 +23,7 @@ pip install -r scripts/requirements.txt
 # 仓库根目录：自包含入口（本技能推荐）
 python scripts/hardware_controller.py <command> [options]
 
-# 兼容入口：同一 Runtime
+# 兼容入口：安装后（或源码树里 PYTHONPATH=scripts）的同一 Runtime
 python -m pymybot <command> [options]
 ```
 
@@ -231,5 +231,6 @@ MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物�
 - 虚拟器件模型：[virt-model.md](references/virt-model.md)
 - Daemon 采样：[daemon.md](references/daemon.md)
 - 验证流程与报错对照：[workflow-errors.md](references/workflow-errors.md)
+- Windows faulthandler 与 LuaJIT：[windows-faulthandler.md](references/windows-faulthandler.md)
 
 详细规则以对应 reference 和 Runtime 实现为准。

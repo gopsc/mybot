@@ -777,7 +777,8 @@ assert cleaned == [ex.owner_thread_id]
 assert all(not thread.is_alive() for thread in ex._pool._threads)
 '''
     result = subprocess.run([sys.executable, "-c", code, str(path), str(tmp_path)],
-                            cwd=ROOT, capture_output=True, text=True, timeout=10)
+                            cwd=ROOT, env=dict(os.environ, PYTHONPATH=str(ROOT / "scripts")),
+                            capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
 
 

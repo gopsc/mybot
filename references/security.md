@@ -1,6 +1,6 @@
 # Security model
 
-Source: This is the authoritative controller security document; enforcement lives in `pymybot/`.
+Source: This is the authoritative controller security document; enforcement lives in `scripts/pymybot/`.
 
 pymybot is a local robot controller, not a multi-tenant service. It exposes two
 entry points: the Python CLI and the MCP stdio server. This document describes
@@ -97,9 +97,9 @@ tokens) are ordinary operator data.
 
 ## Reporting
 
-Use the private advisory link in [`../.github/SECURITY.md`](../.github/SECURITY.md). Include the
-affected version, commit, preconditions and a minimal reproduction. Do not open
-a public issue for an exploitable problem.
+Use the repository's private security advisory channel (GitHub: Security →
+Report a vulnerability). Include the affected version, commit, preconditions and
+a minimal reproduction. Do not open a public issue for an exploitable problem.
 
 ## Hardening checklist for deployments
 
@@ -111,4 +111,4 @@ a public issue for an exploitable problem.
   to clear a latched fault.
 - Review every Python/Lua driver and its imports before use; keep trusted module
   roots (`--module-path`) out of untrusted-writable locations.
-- Pin releases by SHA-256; verify `SHA256SUMS`.
+- Install from a pinned artifact and verify its SHA-256 when one is published.

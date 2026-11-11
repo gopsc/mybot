@@ -133,7 +133,7 @@ def workspace(tmp_path):
 
 def run_cli(workspace, *args):
     return subprocess.run([sys.executable, "-m", "pymybot", *map(str, args)], cwd=workspace,
-                          env=dict(os.environ, PYTHONPATH=str(ROOT)), input="", encoding="utf-8",
+                          env=dict(os.environ, PYTHONPATH=str(ROOT / "scripts")), input="", encoding="utf-8",
                           capture_output=True, timeout=10)
 
 
@@ -371,7 +371,7 @@ def test_scripts_default_source_and_installed_package(workspace, capsys):
     install = workspace / "installed"
     package = install / "pymybot"
     package.mkdir(parents=True)
-    for file in (ROOT / "pymybot").glob("*.py"):
+    for file in (ROOT / "scripts" / "pymybot").glob("*.py"):
         shutil.copyfile(file, package / file.name)
     scripts = package / "assets" / "scripts"
     scripts.mkdir(parents=True)
@@ -479,7 +479,7 @@ def test_faulthandler_cannot_break_json_on_lua_errors(workspace):
     result = subprocess.run(
         [sys.executable, "-X", "faulthandler", "-m", "pymybot", "sample", "--robot", "boom.sql",
          "--name", "b", "--module-path", str(modules), "--module-path", str(ASSETS / "modules")],
-        cwd=workspace, env=dict(os.environ, PYTHONPATH=str(ROOT)), input="", encoding="utf-8",
+        cwd=workspace, env=dict(os.environ, PYTHONPATH=str(ROOT / "scripts")), input="", encoding="utf-8",
         capture_output=True, timeout=10)
     assert result.returncode == 1, result.stderr
     assert len(result.stdout.splitlines()) == 1
@@ -494,7 +494,7 @@ def test_output_streams_are_utf8_whatever_the_locale(workspace):
     # print() before any JSON was written. PYTHONIOENCODING reproduces that on every
     # platform; both streams must still be UTF-8.
     env = {k: v for k, v in os.environ.items() if k != "PYTHONUTF8"}
-    env.update(PYTHONPATH=str(ROOT), PYTHONIOENCODING="gbk")
+    env.update(PYTHONPATH=str(ROOT / "scripts"), PYTHONIOENCODING="gbk")
     (workspace / "emoji.sql").write_text(
         "CREATE TABLE Timer(name String); INSERT INTO Timer(name) VALUES('timer-0');"
         "CREATE TABLE Relay(name String, controller String, note String);"

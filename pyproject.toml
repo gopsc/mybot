@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "pymybot"
 version = "0.6.0"
 description = "Cross-platform robot controller with LuaJIT drivers, SQL structures and MT action scripts"
-readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "pymybot contributors" }]
@@ -44,8 +43,6 @@ linux = ["spidev>=3.6,<4; sys_platform == 'linux'"]
 
 [project.urls]
 Homepage = "https://github.com/gopsc/mybot"
-Documentation = "https://github.com/gopsc/mybot/tree/gui-mybot/docs"
-Changelog = "https://github.com/gopsc/mybot/blob/gui-mybot/CHANGELOG.md"
 Issues = "https://github.com/gopsc/mybot/issues"
 Security = "https://github.com/gopsc/mybot/security/advisories/new"
 
@@ -54,6 +51,7 @@ pymybot = "pymybot.cli:main"
 
 [tool.setuptools]
 packages = ["pymybot"]
+package-dir = { "" = "scripts" }
 
 [tool.setuptools.package-data]
 pymybot = ["py.typed"]
@@ -63,6 +61,7 @@ build_py = "build_support.BuildPy"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["scripts"]
 addopts = "-ra"
 
 [tool.ruff]
