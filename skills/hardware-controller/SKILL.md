@@ -221,14 +221,14 @@ MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物�
 ### 硬纪律（高频翻车点）
 
 1. SQL 每条语句必须 `;` 结尾；结构文件只允许 CREATE/INSERT。
-2. MT 数据格裸文本直接报错——文本必须写 `$("...")`；单元格以空白分隔、`;` 结行，行格数须等于表头列数。
+2. MT 数据格裸文本直接报错——文本必须写 `$("...")`；双引号内的空格/Tab/`;`/`#` 不分格（引号须同行闭合，字符串内换行写 `\n`），引号外仍按空白分格、`;` 结行；行格数须等于表头列数。
 3. SQL 的 `$变量`、controller/trigger 引用须先声明。MT 顶层声明在动作前统一注册，Reflex 可先调用后定义；表达式求值时名字必须可见，捕获可创建数值/文本标量，不能隐式创建 Struct。
 4. 驱动返回值必须是非空表，含 `result` 键时必须恰为 `"OK"`；失败返回 `err("原因")`。
 5. 数值入参一律过 `finite_of`/`int_or`/`num_or`——NaN 是 truthy，`tonumber(v) or def` 挡不住。
 6. 普通表对应 `modules/<表名>.py` 或 `.lua`：逐根查找，同根 Python 优先；原生入口是 `Driver(context)`。表名不带连字符。
 7. `proto='virt'` 找不到内嵌 `*_VIRT` 模型会响亮报错，**绝不静默回落真机**；虚拟与真机用分别命名的 SQL。
 8. `destroy` 是尽力释放：资源不可用就跳过动作、仍返回 OK。可选 `safe(data)` 在 abort 时、`destroy` 之前按激活逆序调用；它拿到 `mode="safe"`，但仍是协作式软件停止，不是硬件急停。
-9. `@if`/`@while` 条件写在块名内且中间无空格：`@if(x>0)`；Action、控制块和 Reflex body 均可混排矩阵与嵌套块。Include 只在最外层，body 内 Merge 只合并其后的纯矩阵。
+9. `@if`/`@while` 条件写在块名内且括号紧贴：`@if(x>0)`；引号外的空格仍会结束块名，字符串内的空格用双引号保护（如 `@if(cfg.tag=="a b")`）。Action、控制块和 Reflex body 均可混排矩阵与嵌套块。Include 只在最外层，body 内 Merge 只合并其后的纯矩阵。
 10. 默认拒绝物理设备、非回环网络与宿主命令执行（`--allow-hardware` 才放开）；virt 总线、`loop://` 与回环 HTTP 不需要该开关。
 11. 使用顶层 `@Reflex(name)` 命名块，无 `name` 列，可声明多个但不得重名或嵌套声明；仅由 `reflexName.varName` 表头调用。MT `@Trigger` 和旧无名 `@Reflex` 在解析时拒绝；SQL trigger 完全保留。
 12. Reflex 根 body 可声明 Alias/Vars 局部默认值，实参按类型覆盖；Action/控制块内不可声明，Struct 仍仅顶层。默认值、参数及内部捕获逐次调用隔离，退出即恢复；完整规则见 `references/action-mt.md` 第 7 节。

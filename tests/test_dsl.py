@@ -108,6 +108,31 @@ def test_matrix_comments_crlf_and_eof():
     assert parse_matrices("@Action\na b;\n50# split\n60;\n@\n")[0].data == [["50", "60"]]
 
 
+def test_matrix_quoted_cells_keep_delimiters_and_reach_driver():
+    def callback(params):
+        return {"result": "OK", "value": params["p"]}
+
+    device = Driver("d", callback)
+    _, outputs = run('@Action\nd.p;\n$("a b;c#d");\n@\n', device)
+    assert outputs == [{"result": "OK", "value": "a b;c#d"}]
+
+    _, outputs = run('@Action\nd.p;\n$("a\\"b c");\n@\n', device)
+    assert outputs == [{"result": "OK", "value": 'a"b c'}]
+
+
+def test_matrix_quoted_strings_group_condition_names():
+    matrix = parse_matrices('@if(cfg.tag=="a b")\n@Action\nd.p;1;\n@\n@\n')[0]
+    assert matrix.name == 'if(cfg.tag=="a b")'
+    assert matrix.children[0].data == [["1"]]
+
+
+def test_matrix_rejects_unterminated_quoted_cell():
+    with pytest.raises(ScriptError, match="unterminated quoted string"):
+        parse_matrices('@Action\nd.p;\n$("a b);\n@\n')
+    with pytest.raises(ScriptError, match="unterminated quoted string"):
+        parse_matrices('@Action\nd.p;\n$("a b)')
+
+
 def test_matrix_nested_interleaved_implicit_actions():
     text = "@if(1>0)\na.p;1;\n@while(0>1)\n@Action\nb.p;2;\n@\n@\nc.p;3;\n@"
     matrix = parse_matrices(text)[0]

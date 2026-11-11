@@ -176,8 +176,8 @@ INSERT INTO Shell (name, timeout) VALUES ('sh', 10000);  -- timeout 毫秒，缺
 ```mt
 @Action
 sh.cmd;
-$("echo\thello");     # 词间用 \t 转义（shell 视 TAB 为参数分隔）
-$("exit\t3");         # → result="OK", code=3
+$("echo hello");      # 双引号内的空格不分格
+$("exit 3");          # → result="OK", code=3
 @
 ```
 
@@ -185,8 +185,9 @@ $("exit\t3");         # → result="OK", code=3
 
 - **整个能力默认拒绝，激活需要 `--allow-hardware`**（与物理设备、非回环 HTTP 同门）；
   命令以宿主用户权限与环境在当前目录执行，不是沙箱，边界见 docs/security.md。
-- MT 单元格按空白切分、不接受字面空格——命令词间用 `$("a\tb")` 的 `\t`
-  转义；含字面空格的复杂命令用 `--var CMD="..."` 传入后写 `$(CMD)`。
+- MT 双引号内的空格、Tab、`;`、`#` 不分格，命令可以直接写 `$("a b c")`；引号外的
+  空格仍是单元格分隔符。需要从外部注入含空格文本时，也可以用 `--var CMD="..."` 后写
+  `$(CMD)`。
 - 上限：命令 64 KiB、单流输出 1 MiB（超限截断并 `truncated=true`）、
   超时 1..60000 ms（逐次可用 `timeout` 参数覆盖 build 缺省）。
 - 超时/取消**尽力**击杀进程树（POSIX 进程组、Windows `taskkill /T`）；

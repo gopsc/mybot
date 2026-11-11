@@ -187,7 +187,12 @@ class _Frame:
 
 
 def parse_matrices(text: str) -> list[Matrix]:
-    """Parse all top-level blocks; whitespace never quotes an expression cell."""
+    """Parse all top-level blocks.
+
+    Whitespace, ``;`` and ``#`` delimit cells only outside a double-quoted
+    segment. A quoted segment is kept verbatim (quotes included) and must close
+    on the same line; use ``\\n`` inside an expression string for a newline.
+    """
     if len(text.encode("utf-8")) > MAX_SCRIPT_BYTES:
         raise ScriptError(f"Script exceeds the {MAX_SCRIPT_BYTES} byte limit")
     # CRLF and LF have identical semantics on every host.
@@ -198,6 +203,7 @@ def parse_matrices(text: str) -> list[Matrix]:
     header: list[str] = []
     line = 1
     at_start, comment, naming = True, False, False
+    quoted, escaped = False, False
 
     def builder() -> _Frame:
         return stack[-1] if stack else scratch
@@ -262,6 +268,20 @@ def parse_matrices(text: str) -> list[Matrix]:
                 if char == "\n":
                     line += 1
             continue
+        if quoted:
+            if char == "\n":
+                raise ScriptError(
+                    f"Line {line}: unterminated quoted string; close it before the "
+                    "line ends (use \\n inside an expression string for a newline)")
+            target = header if naming else builder().token
+            target.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
+            continue
         if not comment and char == "#":
             comment = True
             if naming:
@@ -273,6 +293,10 @@ def parse_matrices(text: str) -> list[Matrix]:
             if char == "\n":
                 at_start, comment = True, False
                 line += 1
+        elif char == '"':
+            at_start = False
+            quoted, escaped = True, False
+            (header if naming else builder().token).append(char)
         elif at_start and char in " \t\r":
             continue
         elif at_start and char == "\n":
@@ -303,6 +327,8 @@ def parse_matrices(text: str) -> list[Matrix]:
             at_start = True
         else:
             builder().token.append(char)
+    if quoted:
+        raise ScriptError(f"EOF at line {line}: unterminated quoted string")
     if naming:
         commit_header()
     if stack:

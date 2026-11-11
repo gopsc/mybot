@@ -160,6 +160,12 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- MT double-quoted strings now protect spaces, tabs, `;` and `#` from cell, row and
+  comment splitting, so `$("hello world")` and shell commands with literal spaces
+  stay one cell. Quotes must close on the same line (use `\n` inside an expression
+  string for a newline); an unclosed quote is a `ScriptError`. Whitespace outside
+  quotes still separates cells, so `$(n + 1)` must remain `$(n+1)`, and
+  `@Struct` JSON handling is unchanged.
 - 记忆体提案提示词（`_PROPOSE_SYSTEM`）规则 3 扩充：上一轮 `blocked` 且修复确实
   不可行时，改为提出另一个有价值、可执行的目标——执行体可以改变环境（安装缺失
   依赖、编写结构 SQL、维护技能），"环境不会自行变化"不等于无事可做。

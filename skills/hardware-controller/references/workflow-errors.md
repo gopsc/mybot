@@ -62,11 +62,12 @@ HTTP/TCP 的回环主机（`127.0.0.1` / `localhost` / `[::1]`）默认可用，
 | `command timed out after N ms`（Shell call） | 命令超时被击杀；调大 `timeout` 列/参数，或检查命令是否等待输入 |
 | `HTTP path must be relative to the declared base URL` | http_request 的 path 写了绝对/scheme-relative URL |
 | `Cannot parse matrix cell ... as Float64` | MT 数据格写了裸文本；文本要写成 `$("...")` |
+| `Line N: unterminated quoted string ...` | 双引号未在同一行闭合；补 `"`，字符串内需要换行时写 `\n` |
 | `@Action cell $(...) cannot produce a boolean result` | 参数表达式算出布尔；布尔只用于 `@if/@while` |
 | `expression '==' cannot compare a number with a text` | 跨类型比较；先统一类型 |
 | `Hardware 'x' returned a non-table or empty table` | 驱动返回 nil/空表；返回 `{result="OK", ...}` |
 | `Hardware 'x' failed: '...'` | 驱动返回 `result≠"OK"`；`'...'` 是 message |
-| `@if requires a closed condition without spaces` | 写成 `@if (x>0)` 了；条件须紧跟 `@if(` |
+| `@if requires a closed condition without spaces` | 写成 `@if (x>0)` 了；条件须紧跟 `@if(`；字符串内的空格用双引号保护 |
 | `proto=virt setup failed: ... no embedded <DRIVER>_VIRT model` | 驱动没内嵌虚拟模型 |
 | `Include path must be a relative .mt path ...` | 绝对路径/穿越/反斜杠/冒号 |
 | `Matrix line N: got M cells, expected K` | 数据行单元格数与表头不符 |
