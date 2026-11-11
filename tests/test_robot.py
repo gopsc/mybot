@@ -10,7 +10,7 @@ from pymybot.errors import BudgetExceeded, ControllerError, DriverError, ScriptE
 from pymybot.robot import Robot
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
+ASSETS = ROOT / "assets"
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@
 
 Source: 命令与开关的权威是 [controller CLI](cli.md)，测试与 CI 见
 [controller testing](testing.md)，环境排查见
-[docs/faq.md](../../../docs/faq.md)。
+[docs/faq.md](../docs/faq.md)。
 
 ## 1. 推荐路径：从虚拟到真机
 
@@ -118,12 +118,12 @@ HTTP/TCP 的回环主机（`127.0.0.1` / `localhost` / `[::1]`）默认可用，
 
 | 想看什么 | 位置 |
 | --- | --- |
-| 纯软件模块 + controller 转发 | `modules/Relay.lua` + `robots/relay-test.sql` + `scripts/relay-test.mt` |
-| 软件定时器（参数校验范本） | `modules/Timer.lua` |
-| 声明式 I2C 驱动 + 内嵌 VIRT 模型 | `modules/CHT8305.lua` |
+| 纯软件模块 + controller 转发 | `assets/modules/Relay.lua` + `assets/robots/relay-test.sql` + `assets/scripts/relay-test.mt` |
+| 软件定时器（参数校验范本） | `assets/modules/Timer.lua` |
+| 声明式 I2C 驱动 + 内嵌 VIRT 模型 | `assets/modules/CHT8305.lua` |
 | 守护采样 + 滤波 + 监视全链路 | `tests/fixtures/virt/cht8305_virt.sql` + `.mt` |
-| 驱动框架源码 | `modules/lib/drv_common.lua` |
-| HAL 桥接 | `modules/lib/HAL.lua`、`modules/lib/hal/{i2c,spi}.lua` |
-| 虚拟总线 | `modules/lib/virtbus.lua`、`modules/lib/virtbus/regmap.lua` |
-| 采样 chunk | `modules/lib/sensor_daemon.lua`、`modules/lib/sensor_aggregate.lua` |
+| 驱动框架源码 | `assets/modules/lib/drv_common.lua` |
+| HAL 桥接 | `assets/modules/lib/HAL.lua`、`assets/modules/lib/hal/{i2c,spi}.lua` |
+| 虚拟总线 | `assets/modules/lib/virtbus.lua`、`assets/modules/lib/virtbus/regmap.lua` |
+| 采样 chunk | `assets/modules/lib/sensor_daemon.lua`、`assets/modules/lib/sensor_aggregate.lua` |
 | 逐驱动无硬件夹具（40 对） | `tests/fixtures/virt/`（机制见 `tests/test_migrated_drivers.py`） |

@@ -60,8 +60,7 @@ def asset_path(name: str) -> Path:
     packaged = asset_dir() / name
     if frozen() or packaged.exists():
         return packaged
-    if name in {"modules", "robots", "scripts"}:
-        skill_asset = package_dir().parent.parent / "assets" / name
-        if skill_asset.is_dir():
-            return skill_asset
+    source_asset = source_root() / "assets" / name
+    if source_asset.is_dir():
+        return source_asset
     return source_root() / name

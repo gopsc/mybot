@@ -1,6 +1,6 @@
 # Architecture
 
-Source: This is the authoritative controller architecture document; the implementation lives in `skills/hardware-controller/scripts/pymybot/`.
+Source: This is the authoritative controller architecture document; the implementation lives in `pymybot/`.
 
 pymybot separates *what the robot is* from *how a part is driven* and *what
 should happen over time*. One Runtime serves exactly two entry points: the
@@ -161,7 +161,7 @@ flowchart TB
 
 - **CLI controller mode** loads `Robot` in-process, executes one command and
   prints one JSON line; it never starts a server or a model. It is the CI entry
-  point and is also available from the skill directory as
+  point and is also available from the repository root as
   `python scripts/hardware_controller.py`.
 - **MCP server mode** is a protocol adapter over `RobotExecutor`: a plain
   owner-thread runtime with no model, no approval callback and no tool loop. The
@@ -171,16 +171,14 @@ flowchart TB
 
 ## Asset and path resolution
 
-Controller sources live in `skills/hardware-controller/scripts/pymybot/`; the
-skill's `scripts/hardware_controller.py` is the self-contained launcher, and the
-root `pymybot/__init__.py` extends its search path to the same modules so
-`python -m pymybot` works in a source checkout. Default source assets live in
-`skills/hardware-controller/assets/{modules,robots,scripts}`; the wheel build
-copies the modules and those three asset roots into `pymybot/` and
-`pymybot/assets/`. Module assets include both `.py` and `.lua`, and `doctor`
-counts both. Frozen builds use `pymybot/paths.py` and `sys._MEIPASS`; never rely
-on the current working directory. See [`development.md`](../../../docs/development.md)
-for the packaging flow.
+Controller sources live in `pymybot/` at the repository root, so
+`python -m pymybot` works from a checkout; `scripts/hardware_controller.py` is
+the self-contained launcher. Default source assets live in
+`assets/{modules,robots,scripts}`; the wheel packages `pymybot/` and copies those
+three asset roots into `pymybot/assets/`. Module assets include both `.py` and
+`.lua`, and `doctor` counts both. Frozen builds use `pymybot/paths.py` and
+`sys._MEIPASS`; never rely on the current working directory. See
+[`development.md`](../docs/development.md) for the packaging flow.
 
 ## Further reading
 

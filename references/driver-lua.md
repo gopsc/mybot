@@ -3,7 +3,7 @@
 Source: 驱动契约与信任边界的权威是
 [controller architecture](architecture.md) 与
 [controller security](security.md)；实现见 `pymybot/native.py`、`pymybot/runtime.py`、
-`pymybot/hardware.py` 与 `modules/lib/`，本文件只留写驱动的硬规则与 HAL 接口表。
+`pymybot/hardware.py` 与 `assets/modules/lib/`，本文件只留写驱动的硬规则与 HAL 接口表。
 
 ## Python 原生入口与 SQL 选择
 
@@ -32,11 +32,11 @@ Source: 驱动契约与信任边界的权威是
   **Daemon chunk 仍只加载 Lua 驱动**，按根顺序选中 Python 时静态检查报
   `Lua daemon requires a Lua driver, not Python: <驱动>`。
 
-可运行的 Python + SQL + MT 回环示例见 [使用指南：写一个驱动](../../../docs/Introduce.md#写一个驱动)。
+可运行的 Python + SQL + MT 回环示例见 [使用指南：写一个驱动](../docs/Introduce.md#写一个驱动)。
 
 ## TCP 的 MT 接口
 
-`modules/TCP.py` 使用标准库 socket，经宿主 HAL 管理连接。SQL 只配置三个字段：
+`assets/modules/TCP.py` 使用标准库 socket，经宿主 HAL 管理连接。SQL 只配置三个字段：
 
 ```sql
 CREATE TABLE TCP (name String, host String, port Number);
@@ -98,7 +98,7 @@ UTF-8 跨次接收的未完整字符会暂存，切换到 `recv_hex` 时先返�
 
 ## 2. 声明式写法（推荐）：require_driver
 
-`modules/CHT8305.lua` 是标准范本。骨架：
+`assets/modules/CHT8305.lua` 是标准范本。骨架：
 
 ```lua
 -- 1 行前导：加载驱动框架（require_driver 由它定义；HAL/print_table 由框架代劳）
@@ -135,11 +135,11 @@ require_driver("i2c", {                -- 总线四选一："i2c" / "spi" / "uar
 （i2c：fd/address 存在性 + `i2c_set_addr`；spi：fd；uart/http：fd ≥ 0），
 然后以 `ctx` 调用用户函数。用户函数内可直接使用 HAL 全局与驱动文件里的 local
 （闭包链保留）。http 总线的 `fd` 来自 `HTTP` 列的 `$会话` 引用
-（总线驱动见 `modules/HTTP.py`）。
+（总线驱动见 `assets/modules/HTTP.py`）。
 
 ## 3. 传统写法：全局函数
 
-`modules/Timer.lua` / `modules/Relay.lua` 是范本。要点：
+`assets/modules/Timer.lua` / `assets/modules/Relay.lua` 是范本。要点：
 
 ```lua
 local mpath = (__mpath or dofile(...))
@@ -177,7 +177,7 @@ UART（pyserial）：
 | `uart_write(fd, byte_table)` | 字节表（1-based），返回写入数 |
 | `uart_read(fd, n, timeout_ms)` | 返回字节表或 nil；单次上限 `UART_IO_MAX_BYTES`、超时上限 `UART_READ_MAX_MS` |
 
-I2C（pyftdi MPSSE / Linux smbus2；详见 `modules/lib/hal/i2c.lua`）：
+I2C（pyftdi MPSSE / Linux smbus2；详见 `assets/modules/lib/hal/i2c.lua`）：
 
 | 函数 | 说明 |
 | --- | --- |
@@ -190,7 +190,7 @@ I2C（pyftdi MPSSE / Linux smbus2；详见 `modules/lib/hal/i2c.lua`）：
 | `i2c_read_multi_bytes(fd, reg, n)` / `i2c_read_bytes(fd, n)` | 字节表版本 |
 | `i2c_write_reg16` / `i2c_read_reg16` | 16 位寄存器地址变体 |
 
-SPI（pyftdi / Linux spidev；详见 `modules/lib/hal/spi.lua`）：
+SPI（pyftdi / Linux spidev；详见 `assets/modules/lib/hal/spi.lua`）：
 
 | 函数 | 说明 |
 | --- | --- |
@@ -199,7 +199,7 @@ SPI（pyftdi / Linux spidev；详见 `modules/lib/hal/spi.lua`）：
 | `spi_write(fd, val [, delay_us])` / `spi_read(fd [, delay_us])` | 单字节 |
 | `spi_write3` / `spi_write_multi(fd, data [, delay])` / `spi_read_multi(fd, n)` / `spi_xfer_full(fd, data)` | 多字节与全双工 |
 
-HTTP（标准库 urllib；`modules/HTTP.py` 是总线范本）：
+HTTP（标准库 urllib；`assets/modules/HTTP.py` 是总线范本）：
 
 | 函数 | 说明 |
 | --- | --- |

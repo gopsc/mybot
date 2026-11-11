@@ -20,7 +20,7 @@ from pymybot.runtime import LuaState
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
+ASSETS = ROOT / "assets"
 MODULES = ASSETS / "modules"
 WAIT = 3
 TCP_IO = {"tcp_open", "tcp_read", "tcp_write", "close_handle"}

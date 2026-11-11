@@ -70,7 +70,7 @@ pymybot follows these rules:
 5. Releases are built from a tagged public commit; artifacts publish SHA-256
    checksums.
 
-See [`../docs/security.md`](../docs/security.md) for the detailed threat model.
+See [`../references/security.md`](../references/security.md) for the detailed threat model.
 
 ## Dependency and release hygiene
 

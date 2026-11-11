@@ -20,6 +20,12 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The repository root is now the hardware-controller project: `SKILL.md`,
+  `assets/`, `references/` and `scripts/` sit beside `pymybot/`, which holds the
+  Runtime itself. The `skills/` directory, the version-only root package shim and
+  the five `docs/` redirect stubs are gone; `scripts/hardware_controller.py`
+  stays the self-contained launcher and `scripts/requirements.txt` the dependency
+  list.
 - `pymybot/agent_executor.py` became `pymybot/executor.py`: the owner-thread
   Robot runtime the MCP server drives, with the agent-only surfaces removed.
 - The MCP server exposes `mybot://scripts/...` resources only; the

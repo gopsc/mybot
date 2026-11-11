@@ -12,13 +12,11 @@ SHARED = "\n".join(f"a documented sentence number {index} that is long enough to
 def build(root, *, body="", source=True, register=True, skill="# Skill\n", docs="# Architecture\n"):
     (root / "docs").mkdir()
     (root / "docs" / "architecture.md").write_text(docs, encoding="utf-8")
-    skills = root / "skills"
-    references = skills / "pymybot-scripting" / "references"
-    references.mkdir(parents=True)
-    (skills / "README.md").write_text(
-        "# Skills\n\n" + ("[sql](pymybot-scripting/references/sql.md)\n" if register else ""), encoding="utf-8")
-    (skills / "pymybot-scripting" / "SKILL.md").write_text(skill, encoding="utf-8")
-    header = "Source: [docs/architecture.md](../../../docs/architecture.md)\n" if source else "# sql\n"
+    references = root / "references"
+    references.mkdir()
+    (root / "SKILL.md").write_text(
+        skill + ("[sql](references/sql.md)\n" if register else ""), encoding="utf-8")
+    header = "Source: [docs/architecture.md](../docs/architecture.md)\n" if source else "# sql\n"
     (references / "sql.md").write_text(header + body, encoding="utf-8")
     return references / "sql.md"
 
@@ -29,34 +27,34 @@ def test_repository_is_in_sync():
 
 
 def test_dead_link_is_a_problem(tmp_path):
-    build(tmp_path, body="见 [docs/missing.md](../../../docs/missing.md)\n")
+    build(tmp_path, body="见 [docs/missing.md](../docs/missing.md)\n")
     problems, _ = sync.audit(tmp_path)
-    assert problems == ["skills/pymybot-scripting/references/sql.md: link target does not exist: ../../../docs/missing.md"]
+    assert problems == ["references/sql.md: link target does not exist: ../docs/missing.md"]
 
 
 def test_missing_repository_path_is_a_problem(tmp_path):
-    build(tmp_path, body="驱动 `modules/NoSuchDriver.lua` 与占位符 `modules/<表名>.py`\n")
+    build(tmp_path, body="驱动 `assets/modules/NoSuchDriver.lua` 与占位符 `assets/modules/<表名>.py`\n")
     problems, _ = sync.audit(tmp_path)
-    assert problems == ["skills/pymybot-scripting/references/sql.md:"
-                        " referenced path does not exist: modules/NoSuchDriver.lua"]
+    assert problems == ["references/sql.md:"
+                        " referenced path does not exist: assets/modules/NoSuchDriver.lua"]
 
 
 def test_brace_groups_are_expanded(tmp_path):
     build(tmp_path, body="实现 `docs/{architecture,missing}.md`\n")
     problems, _ = sync.audit(tmp_path)
-    assert problems == ["skills/pymybot-scripting/references/sql.md: referenced path does not exist: docs/missing.md"]
+    assert problems == ["references/sql.md: referenced path does not exist: docs/missing.md"]
 
 
 def test_reference_needs_a_source_declaration(tmp_path):
     build(tmp_path, source=False)
     problems, _ = sync.audit(tmp_path)
-    assert any("needs a 'Source:' line" in problem for problem in problems)
+    assert problems == ["references/sql.md: needs a 'Source:' line naming the authority it summarises"]
 
 
 def test_reference_must_be_registered_in_the_index(tmp_path):
     build(tmp_path, register=False)
     problems, _ = sync.audit(tmp_path)
-    assert any("not registered in the skills/README.md mapping table" in problem for problem in problems)
+    assert problems == ["references/sql.md: not linked from SKILL.md, which maps references to authorities"]
 
 
 def test_oversized_skill_md_is_a_problem(tmp_path):

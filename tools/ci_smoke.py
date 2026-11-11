@@ -37,15 +37,14 @@ def preflight(mode):
     print(f"{mode} dependency preflight passed", flush=True)
 
 
-CONTROLLER_ASSETS = Path("skills/hardware-controller/assets")
-CONTROLLER_DIRECTORIES = frozenset({"modules", "robots", "scripts"})
+CONTROLLER_ASSETS = Path("assets")
 
 
 def asset_manifest(root, *, source_tree=False):
     result = {}
     root = Path(root)
     for directory, suffixes in ASSET_SUFFIXES.items():
-        source_root = root / CONTROLLER_ASSETS if source_tree and directory in CONTROLLER_DIRECTORIES else root
+        source_root = root / CONTROLLER_ASSETS if source_tree else root
         files = sorted(path for path in (source_root / directory).rglob("*")
                        if path.is_file() and path.suffix in suffixes)
         require(files, f"Missing or empty asset directory: {source_root / directory}")

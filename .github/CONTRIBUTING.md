@@ -1,8 +1,10 @@
 # Contributing
 
-Thanks for improving pymybot. The controller Runtime lives in
-`skills/hardware-controller/scripts/pymybot/`; the root `pymybot/` package is a
-version and import shim. Read the relevant docs before changing code.
+Thanks for improving pymybot. The controller Runtime lives in `pymybot/`; the
+skill is documented by [`../SKILL.md`](../SKILL.md) and the authority documents
+in [`../references/`](../references/), with the default modules, robots and
+action scripts in [`../assets/`](../assets/). Read the relevant docs before
+changing code.
 
 ## Before you start
 

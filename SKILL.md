@@ -5,7 +5,7 @@ description: 通过自包含的 pymybot Runtime 控制与编程机器人：Struc
 
 # Hardware Controller
 
-使用 `scripts/` 内的 Python Runtime 控制机器人。Structure SQL 声明硬件，Python/Lua driver 实现设备行为，MT action 描述时序动作。默认 robots、scripts 和 modules 位于 `assets/`。
+使用仓库根目录 `pymybot/` 的 Python Runtime 控制机器人（`scripts/hardware_controller.py` 是自包含入口）。Structure SQL 声明硬件，Python/Lua driver 实现设备行为，MT action 描述时序动作。默认 robots、scripts 和 modules 位于 `assets/`。
 
 ## 1. 入口
 
@@ -164,7 +164,7 @@ python scripts/hardware_controller.py doctor
 
 ## 5. MCP
 
-把 `scripts/` 加入 Python 模块搜索路径后，使用标准模块入口：
+在仓库根目录（或已安装的环境）直接使用标准模块入口：
 
 ```sh
 python -m pymybot mcp --robot assets/robots/relay-test.sql --scripts-dir assets/scripts
@@ -220,16 +220,16 @@ MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物�
 
 ## 7. References
 
-- 架构与 Runtime flow：`references/architecture.md`
-- CLI 命令与 JSON 契约：`references/cli.md`
-- MCP 配置、工具和资源：`references/mcp.md`
-- 安全与权限：`references/security.md`
-- 测试与虚拟设备：`references/testing.md`
-- 结构 SQL 文法：`references/structure-sql.md`
-- MT 动作文法：`references/action-mt.md`
-- Python/Lua 驱动契约：`references/driver-lua.md`
-- 虚拟器件模型：`references/virt-model.md`
-- Daemon 采样：`references/daemon.md`
-- 验证流程与报错对照：`references/workflow-errors.md`
+- 架构与 Runtime flow：[architecture.md](references/architecture.md)
+- CLI 命令与 JSON 契约：[cli.md](references/cli.md)
+- MCP 配置、工具和资源：[mcp.md](references/mcp.md)
+- 安全与权限：[security.md](references/security.md)
+- 测试与虚拟设备：[testing.md](references/testing.md)
+- 结构 SQL 文法：[structure-sql.md](references/structure-sql.md)
+- MT 动作文法：[action-mt.md](references/action-mt.md)
+- Python/Lua 驱动契约：[driver-lua.md](references/driver-lua.md)
+- 虚拟器件模型：[virt-model.md](references/virt-model.md)
+- Daemon 采样：[daemon.md](references/daemon.md)
+- 验证流程与报错对照：[workflow-errors.md](references/workflow-errors.md)
 
 详细规则以对应 reference 和 Runtime 实现为准。

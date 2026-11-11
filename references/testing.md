@@ -53,7 +53,7 @@ timeout) when the driver supports it.
 ## Windows notes
 
 - LuaJIT raises Lua errors as SEH `0xE24C4A02`; the CLI disables
-  `faulthandler`. See [`windows-faulthandler.md`](../../../docs/history/windows-faulthandler.md).
+  `faulthandler`. See [`windows-faulthandler.md`](../docs/history/windows-faulthandler.md).
 - stdout/stderr are forced to UTF-8. Tests assert JSON survives non-ASCII output
   on a GBK console.
 - Symlink creation may be unavailable; `tests/conftest.py` converts that into a

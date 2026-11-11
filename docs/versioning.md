@@ -25,11 +25,11 @@ Breaking changes are allowed in a minor release before 1.0 but must be listed in
 The three script layers are data, not code:
 
 - Structure SQL uses the strict grammar documented in
-  `skills/hardware-controller/references/structure-sql.md`.
+  `references/structure-sql.md`.
 - MT actions use the grammar in
-  `skills/hardware-controller/references/action-mt.md`.
+  `references/action-mt.md`.
 - Lua drivers target the HAL contract in
-  `skills/hardware-controller/references/driver-lua.md`.
+  `references/driver-lua.md`.
 
 The implementation may add optional columns/keys; unknown keys must fail loudly
 rather than be silently ignored.

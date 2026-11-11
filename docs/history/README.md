@@ -30,14 +30,16 @@ deleted after merge. See [`../development.md`](../development.md) and
 
 ## 0.6.0 layout note
 
-0.6.0 moved the controller Runtime to
-`skills/hardware-controller/scripts/pymybot/` so the hardware-controller skill is
-self-contained. The root `pymybot` package still exposes the same `pymybot.*`
-imports by extending its `__path__`, and the wheel bundles the Runtime under the
-package. Controller architecture, CLI, MCP, security and testing documents now
-live in `skills/hardware-controller/references/`; the same-named pages in
-`docs/` are redirect stubs. Older history entries below keep the paths they had
-when written.
+0.6.0 first moved the controller Runtime into the bundled skill directory so
+the hardware-controller skill was self-contained, and the wheel bundled the
+Runtime under the package. A later restructure hoisted the bundled skill to the
+repository root: `SKILL.md` is the manifest and topic index, `references/` holds
+the authority documents, `assets/` holds the default modules, robots and action
+scripts, `scripts/` holds the launcher and requirements, and `pymybot/` is the
+controller and MCP Runtime itself. The separate skill directory and the redirect
+stubs in `docs/` were removed, so controller architecture, CLI, MCP, security and
+testing now live directly in `references/`. Older history entries below keep the
+paths they had when written.
 
 ## 0.7.x controller-only cut
 
@@ -45,9 +47,10 @@ The `gui-mybot` branch now carries only the hardware controller. The Agent and
 GUI implementation was removed in one cut, together with roles, runtime prompts,
 session transcripts and the web, camera and shell tool surface. The supported
 entry points are the Python CLI and the MCP stdio server, and the release
-artifacts are the sdist and the wheel. The controller Runtime, default assets and
-authority documents stay under `skills/hardware-controller/`; the branch name is
-kept because renaming it needs repository-owner/admin access.
+artifacts are the sdist and the wheel. The controller Runtime lives in `pymybot/`
+at the repository root, with the default assets in `assets/` and the authority
+documents in `references/`; the branch name is kept because renaming it needs
+repository-owner/admin access.
 
 ## Completed migration notes
 

@@ -1,6 +1,6 @@
 # Security model
 
-Source: This is the authoritative controller security document; enforcement lives in `skills/hardware-controller/scripts/pymybot/`.
+Source: This is the authoritative controller security document; enforcement lives in `pymybot/`.
 
 pymybot is a local robot controller, not a multi-tenant service. It exposes two
 entry points: the Python CLI and the MCP stdio server. This document describes
@@ -97,7 +97,7 @@ tokens) are ordinary operator data.
 
 ## Reporting
 
-Use the private advisory link in [`../.github/SECURITY.md`](../../../.github/SECURITY.md). Include the
+Use the private advisory link in [`../.github/SECURITY.md`](../.github/SECURITY.md). Include the
 affected version, commit, preconditions and a minimal reproduction. Do not open
 a public issue for an exploitable problem.
 

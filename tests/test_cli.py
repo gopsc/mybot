@@ -16,7 +16,7 @@ from pymybot.robot import Robot
 from pymybot.security import MAX_BODY, SecurityError, checked_text, dumps, read_file
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
+ASSETS = ROOT / "assets"
 VIRTUAL_SQL = """
 CREATE TABLE Relay(name String);
 INSERT INTO Relay(name) VALUES('relay0');
@@ -55,7 +55,7 @@ def test_doctor_reports_dependencies_and_assets(capsys):
 
 
 def test_self_contained_skill_entrypoint_reports_healthy():
-    script = ROOT / "skills" / "hardware-controller" / "scripts" / "hardware_controller.py"
+    script = ROOT / "scripts" / "hardware_controller.py"
     result = subprocess.run([sys.executable, "-I", str(script), "doctor"], cwd=ROOT,
                             capture_output=True, text=True, timeout=60)
     payload = json.loads(result.stdout)
@@ -372,8 +372,6 @@ def test_scripts_default_source_and_installed_package(workspace, capsys):
     package = install / "pymybot"
     package.mkdir(parents=True)
     for file in (ROOT / "pymybot").glob("*.py"):
-        shutil.copyfile(file, package / file.name)
-    for file in (ROOT / "skills" / "hardware-controller" / "scripts" / "pymybot").glob("*.py"):
         shutil.copyfile(file, package / file.name)
     scripts = package / "assets" / "scripts"
     scripts.mkdir(parents=True)

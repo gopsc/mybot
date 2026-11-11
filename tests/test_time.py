@@ -11,7 +11,7 @@ from pymybot.errors import DriverError
 from pymybot.robot import Robot
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
+ASSETS = ROOT / "assets"
 MODULES = ASSETS / "modules"
 SQL = "CREATE TABLE Time (name String); INSERT INTO Time (name) VALUES ('clock');"
 

@@ -1,4 +1,4 @@
-"""Keep the skill references honest about their documented authority.
+"""Keep the controller references honest about their documented authority.
 
 A reference may only summarise and link to the docs page that owns a behaviour.
 Dead links, unregistered reference files and a missing Source: declaration are
@@ -17,7 +17,7 @@ MAX_SKILL_LINES = 300
 MAX_SKILL_BYTES = 16 * 1024
 DUPLICATE_RUN = 6
 MIN_DUPLICATE_LENGTH = 24
-CHECKED_ROOTS = ("docs", "modules", "pymybot", "robots", "scripts", "skills", "tests", "tools")
+CHECKED_ROOTS = ("assets", "docs", "pymybot", "references", "scripts", "tests", "tools")
 PLACEHOLDERS = set("<>*?|$~ ")
 
 LINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
@@ -70,63 +70,47 @@ def _duplication(skill_file, docs_file):
 
 def audit(root):
     root = Path(root).resolve()
-    skills, docs = root / "skills", root / "docs"
+    docs, references = root / "docs", root / "references"
     problems, warnings = [], []
-    if not skills.is_dir() or not docs.is_dir():
-        return [f"{root}: expected both skills/ and docs/ directories"], warnings
+    if not references.is_dir() or not docs.is_dir():
+        return [f"{root}: expected both references/ and docs/ directories"], warnings
 
-    skill_files = sorted(path for path in skills.rglob("*.md") if path.is_file())
+    index = root / "SKILL.md"
+    reference_files = sorted(path for path in references.rglob("*.md") if path.is_file())
+    skill_files = ([index] if index.is_file() else []) + reference_files
     docs_files = sorted(path for path in docs.rglob("*.md") if path.is_file())
 
     for path in skill_files:
         relative = path.relative_to(root).as_posix()
-        skill_parts = path.relative_to(skills).parts
         text = path.read_text(encoding="utf-8")
         for target in _links(text):
             if not (path.parent / target).resolve().exists():
                 problems.append(f"{relative}: link target does not exist: {target}")
         for candidate in _candidate_paths(text):
-            candidates = [root / candidate]
-            # The agent's cwd is the skill directory, so a reference may also be
-            # written relative to it (`scripts/pymybot/cli.py`, `scripts/requirements.txt`).
-            if len(skill_parts) > 1:
-                candidates.append(skills / skill_parts[0] / candidate)
             if candidate == "pymybot/assets":
                 continue  # Normalised package layout, not a source-tree directory.
-            if candidate.startswith("pymybot/assets/"):
-                suffix = candidate.removeprefix("pymybot/assets/")
-                candidates.append(root / suffix)
-                if suffix.split("/", 1)[0] in {"modules", "robots", "scripts"}:
-                    candidates.append(root / "skills" / "hardware-controller" / "assets" / suffix)
-            elif candidate.startswith("pymybot/"):
-                candidates.append(root / "skills" / "hardware-controller" / "scripts" / candidate)
-            elif candidate.split("/", 1)[0] in {"modules", "robots", "scripts"}:
-                candidates.append(root / "skills" / "hardware-controller" / "assets" / candidate)
-            if not any(path.exists() for path in candidates):
+            if not (root / candidate).exists():
                 problems.append(f"{relative}: referenced path does not exist: {candidate}")
-        if path.name == "SKILL.md":
+        if path == index:
             lines = text.count("\n") + 1
             size = len(text.encode("utf-8"))
             if lines > MAX_SKILL_LINES or size > MAX_SKILL_BYTES:
                 problems.append(f"{relative}: {lines} lines / {size} bytes exceeds"
                                 f" {MAX_SKILL_LINES} lines / {MAX_SKILL_BYTES} bytes; split or trim it")
 
-    index = skills / "README.md"
     registered = set()
     if index.is_file():
         for target in _links(index.read_text(encoding="utf-8")):
             registered.add((index.parent / target).resolve())
     else:
-        problems.append("skills/README.md is missing; it maps every topic to its authority")
+        problems.append("SKILL.md is missing; it maps every reference to its authority")
 
-    for path in skill_files:
-        if path.parent.name != "references":
-            continue
+    for path in reference_files:
         relative = path.relative_to(root).as_posix()
         if not any(line.startswith("Source:") for line in path.read_text(encoding="utf-8").split("\n")):
             problems.append(f"{relative}: needs a 'Source:' line naming the authority it summarises")
         if path.resolve() not in registered:
-            problems.append(f"{relative}: not registered in the skills/README.md mapping table")
+            problems.append(f"{relative}: not linked from SKILL.md, which maps references to authorities")
 
     for skill_file in skill_files:
         for docs_file in docs_files:
@@ -139,7 +123,7 @@ def audit(root):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--root", default=Path(__file__).resolve().parent.parent,
-                        help="repository root holding docs/ and skills/")
+                        help="repository root holding SKILL.md, references/ and docs/")
     options = parser.parse_args(argv)
     problems, warnings = audit(options.root)
     for warning in warnings:

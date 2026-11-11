@@ -1,6 +1,6 @@
 # MCP
 
-Source: 本文件是 hardware-controller MCP 服务端的权威文档，实现位于 `skills/hardware-controller/scripts/pymybot/mcp_server.py`（协议适配层）和 `executor.py`（owner-thread 执行器）。
+Source: 本文件是 hardware-controller MCP 服务端的权威文档，实现位于 `pymybot/mcp_server.py`（协议适配层）和 `executor.py`（owner-thread 执行器）。
 
 MCP（Model Context Protocol）是模型客户端与工具服务之间的标准协议。pymybot
 只作为 MCP 服务端：`pymybot mcp` 把同一台机器人的控制能力暴露给 Claude Desktop、

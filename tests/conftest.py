@@ -4,7 +4,7 @@ import sys
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
+ASSETS = ROOT / "assets"
 
 
 @pytest.hookimpl(trylast=True)

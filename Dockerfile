@@ -9,7 +9,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE MANIFEST.in build_support.py ./
 COPY pymybot ./pymybot
-COPY skills ./skills
+COPY assets ./assets
 
 RUN pip install .
 

@@ -50,12 +50,12 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 
 ```sh
 .venv/bin/python -m pymybot check \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/assets/scripts/relay-test.mt
+  --robot assets/robots/relay-test.sql \
+  --input assets/scripts/relay-test.mt
 
 .venv/bin/python -m pymybot run \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/assets/scripts/relay-test.mt \
+  --robot assets/robots/relay-test.sql \
+  --input assets/scripts/relay-test.mt \
   --timeout 10
 ```
 
@@ -76,15 +76,15 @@ Windows 使用 `.venv\Scripts\pip` 和 `.venv\Scripts\python`。
 ```sh
 .venv/bin/pip install -e ".[mcp]"
 .venv/bin/python -m pymybot mcp \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --scripts-dir skills/hardware-controller/assets/scripts
+  --robot assets/robots/relay-test.sql \
+  --scripts-dir assets/scripts
 ```
 
 默认只读：`get_status`、`list_hardware`、`list_action_scripts`、`read_action_script`、
 `query_sql` 这些静态工具可以直接用；`run_action_script` 和 `read_variables` 要显式加
 `--allow-execution`，要碰物理硬件再加 `--allow-hardware`（它要求同时给出
 `--allow-execution`）。服务端只暴露 `mybot://scripts/...` 资源。完整工具表、回执信封和
-客户端配置见 [MCP 指南](../skills/hardware-controller/references/mcp.md)。
+客户端配置见 [MCP 指南](../references/mcp.md)。
 
 ## 架构
 
@@ -104,7 +104,7 @@ flowchart LR
 - **Python / Lua 驱动** 只负责一个器件的 `build / call`，需要时加 `read / destroy`。
 - **MT 动作** 用矩阵描述“第几行对哪个变量发什么参数”，支持捕获、条件、循环和结构 JSON。
 
-完整分层、线程模型和包结构见 [架构与 Runtime flow](../skills/hardware-controller/references/architecture.md)。
+完整分层、线程模型和包结构见 [架构与 Runtime flow](../references/architecture.md)。
 
 ## CLI 一览
 
@@ -124,7 +124,7 @@ flowchart LR
 | `assets` | 列出、读取、写入、删除内置 robots/modules/scripts 资产 | 否 |
 
 退出码：`0` 成功，`1` 运行错误，`2` 用法错误，`130` 中断。完整参数和 JSON 契约见
-[CLI 参考](../skills/hardware-controller/references/cli.md)。
+[CLI 参考](../references/cli.md)。
 
 ## 写一个驱动
 
@@ -135,7 +135,7 @@ SQL 普通表名会选择 `modules/<表名>.py` 或 `.lua`（`Alias` / `Vars` / 
 - `context.call(operation, *args)` 调用已有的 HAL 操作，权限检查、句柄归属和取消检查都还在；`context.check()` 检查协作预算。`check` 只编译 Python 源码，不执行模块、构造器或驱动方法。
 - 内置的 I2C/SPI/UART/TCP/HTTP/Shell 普通表已经迁到 Python；HAL 总线句柄仍然可以给 Lua 器件驱动用。Python I2C/SPI/UART 会把显式 `proto=virt` 或 `virt-*` 路径的总线打开为纯内存 HAL 句柄，禁止物理访问；既有的 `proto=virt` 搭配 `/dev/...` 路径写法仍保持虚拟语义，不会悄悄回落到真实硬件。Lua 器件驱动继续复用现有 `virtbus` 模型与实例隔离。既有 Daemon chunk 仍只支持 Lua；如果选中 Python 驱动，静态检查会直接拒绝。
 
-仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件和凭据。结构 [`skills/hardware-controller/assets/robots/uart-loopback.sql`](../skills/hardware-controller/assets/robots/uart-loopback.sql)：
+仓库自带一个 pyserial `loop://` 回环示例，不需要物理硬件和凭据。结构 [`assets/robots/uart-loopback.sql`](../assets/robots/uart-loopback.sql)：
 
 ```sql
 CREATE TABLE UART (name String, path String, baud Number);
@@ -144,7 +144,7 @@ CREATE TABLE LoopbackProbe (name String, UART String);
 INSERT INTO LoopbackProbe (name, UART) VALUES ('echo', '$bus');
 ```
 
-动作 [`skills/hardware-controller/assets/scripts/uart-loopback.mt`](../skills/hardware-controller/assets/scripts/uart-loopback.mt)：
+动作 [`assets/scripts/uart-loopback.mt`](../assets/scripts/uart-loopback.mt)：
 
 ```mt
 @Action
@@ -155,7 +155,7 @@ echo.value;
 @
 ```
 
-自定义驱动 [`modules/LoopbackProbe.py`](../skills/hardware-controller/assets/modules/LoopbackProbe.py)（`$bus` 合并出的 `fd` 由 UART 行拥有并释放）：
+自定义驱动 [`assets/modules/LoopbackProbe.py`](../assets/modules/LoopbackProbe.py)（`$bus` 合并出的 `fd` 由 UART 行拥有并释放）：
 
 ```python
 from pymybot.errors import DriverError
@@ -183,17 +183,17 @@ class Driver:
 
 ```sh
 .venv/bin/python -m pymybot check \
-  --robot skills/hardware-controller/assets/robots/uart-loopback.sql --input skills/hardware-controller/assets/scripts/uart-loopback.mt
+  --robot assets/robots/uart-loopback.sql --input assets/scripts/uart-loopback.mt
 .venv/bin/python -m pymybot run \
-  --robot skills/hardware-controller/assets/robots/uart-loopback.sql --input skills/hardware-controller/assets/scripts/uart-loopback.mt --timeout 10
+  --robot assets/robots/uart-loopback.sql --input assets/scripts/uart-loopback.mt --timeout 10
 ```
 
-TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/assets/robots/tcp.sql) 只配置 `name`、`host`、`port`，
-[动作示例](../skills/hardware-controller/assets/scripts/tcp.mt) 使用 `connect`、`close`、`timeout`、`num_recv`、`send_hex`、
+TCP 可直接由 MT 控制：[结构示例](../assets/robots/tcp.sql) 只配置 `name`、`host`、`port`，
+[动作示例](../assets/scripts/tcp.mt) 使用 `connect`、`close`、`timeout`、`num_recv`、`send_hex`、
 `send_str`、`recv_hex`、`recv_str`。激活不自动连接；需要先启动本地 TCP 回显服务，
 再显式执行 `net.connect`。发送文本用 MT 字符串表达式，如 `$("你好")`。
 
-完整规则见 [驱动参考](../skills/hardware-controller/references/driver-lua.md)。
+完整规则见 [驱动参考](../references/driver-lua.md)。
 
 ## 安全边界
 
@@ -209,7 +209,7 @@ TCP 可直接由 MT 控制：[结构示例](../skills/hardware-controller/assets
 `check`、`hardware`、`scripts` 和 `query` 只做静态读取，从不激活驱动；`run`、`sample`
 和 `apply-sql` 会激活机器人。
 
-Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 import 和直接原生 I/O 不受限制，上表的 HAL 权限也管不到这类直接访问。Python 的预算/取消是协作式的：长循环应该调用 `context.check()`；阻塞的原生调用或不合作的 Python 循环没法被硬中断。只运行你审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [安全模型](../skills/hardware-controller/references/security.md)。
+Python / Lua 驱动是可信的进程内代码，**不是沙箱**。Python 的 import 和直接原生 I/O 不受限制，上表的 HAL 权限也管不到这类直接访问。Python 的预算/取消是协作式的：长循环应该调用 `context.check()`；阻塞的原生调用或不合作的 Python 循环没法被硬中断。只运行你审阅过的驱动；动作派发后不保证物理回滚。完整威胁模型见 [安全模型](../references/security.md)。
 
 ## 兼容性
 
@@ -228,17 +228,16 @@ Python 驱动仍可用，但依赖 LuaJIT FFI 的 Lua 驱动不可用。`doctor`
 ## 目录结构
 
 ```text
-pymybot/                  版本号与 import shim（把技能内 Runtime 加进 __path__）
-skills/hardware-controller/scripts/pymybot/  控制器与 MCP Python Runtime
-skills/hardware-controller/references/       控制器权威文档
-skills/hardware-controller/assets/modules/   Python 原生驱动、保留的 Lua 驱动和公共库
-skills/hardware-controller/assets/robots/    结构 SQL 示例（含虚拟设备）
-skills/hardware-controller/assets/scripts/   MT 动作示例
-tests/                    pytest 与逐驱动虚拟夹具
-docs/                     开发、发布、版本、FAQ 与历史文档
-docs/history/             已完成的迁移与调试记录
-tools/                    CI、文档检查与发布辅助脚本
-.github/                  CI、发布工作流、Issue/PR 模板、社区规范
+SKILL.md                     技能清单与主题索引（技能入口）
+assets/                      默认驱动、结构 SQL 与 MT 动作示例
+references/                  控制器权威文档
+scripts/                     自包含启动器与依赖清单
+pymybot/                     控制器与 MCP Python Runtime
+tests/                       pytest 与逐驱动虚拟夹具
+docs/                        开发、发布、版本、FAQ 与历史文档
+docs/history/                已完成的迁移与调试记录
+tools/                       CI、文档检查与发布辅助脚本
+.github/                     CI、发布工作流、Issue/PR 模板、社区规范
 ```
 
 ## 更多文档
@@ -246,13 +245,13 @@ tools/                    CI、文档检查与发布辅助脚本
 | 想了解 | 从这里开始 |
 | --- | --- |
 | 全部文档 | [docs/README.md](README.md) |
-| 架构与数据流 | [架构与 Runtime flow](../skills/hardware-controller/references/architecture.md) |
-| CLI / JSON | [CLI 参考](../skills/hardware-controller/references/cli.md) |
-| MCP 服务端与客户端 | [MCP 指南](../skills/hardware-controller/references/mcp.md) |
+| 架构与数据流 | [架构与 Runtime flow](../references/architecture.md) |
+| CLI / JSON | [CLI 参考](../references/cli.md) |
+| MCP 服务端与客户端 | [MCP 指南](../references/mcp.md) |
 | 开发与打包 | [docs/development.md](development.md) |
-| 测试与 CI 通道 | [测试与虚拟设备](../skills/hardware-controller/references/testing.md) |
+| 测试与 CI 通道 | [测试与虚拟设备](../references/testing.md) |
 | 版本与发布 | [docs/release.md](release.md) · [docs/versioning.md](versioning.md) |
-| 安全模型 | [安全模型](../skills/hardware-controller/references/security.md) · [.github/SECURITY.md](../.github/SECURITY.md) |
+| 安全模型 | [安全模型](../references/security.md) · [.github/SECURITY.md](../.github/SECURITY.md) |
 | 常见问题 | [docs/faq.md](faq.md) |
 | 分支迁移历史 | [docs/history/README.md](history/README.md) |
 | 路线图 | [docs/roadmap.md](roadmap.md) |

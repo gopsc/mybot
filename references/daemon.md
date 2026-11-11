@@ -2,8 +2,8 @@
 
 Source: 线程模型与分层的权威是
 [controller architecture](architecture.md)；本文件只写
-Daemon 表字段与消费者写法，实现见 `pymybot/daemon.py`、`modules/lib/sensor_daemon.lua`（采样
-chunk）与 `modules/lib/sensor_aggregate.lua`（聚合）。
+Daemon 表字段与消费者写法，实现见 `pymybot/daemon.py`、`assets/modules/lib/sensor_daemon.lua`（采样
+chunk）与 `assets/modules/lib/sensor_aggregate.lua`（聚合）。
 
 ## 1. Daemon 表（结构 SQL）
 

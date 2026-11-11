@@ -9,7 +9,7 @@ import pytest
 from pymybot.robot import Robot
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
+ASSETS = ROOT / "assets"
 MODULES = ASSETS / "modules"
 
 

@@ -69,5 +69,5 @@ smoke:quickstart:
     - python -I tools/ci_smoke.py base
     - python -m pymybot --version
     - python -m pymybot doctor
-    - python -m pymybot check --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt
-    - python -m pymybot run --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt --timeout 10
+    - python -m pymybot check --robot assets/robots/relay-test.sql --input assets/scripts/relay-test.mt
+    - python -m pymybot run --robot assets/robots/relay-test.sql --input assets/scripts/relay-test.mt --timeout 10

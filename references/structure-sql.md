@@ -148,7 +148,7 @@ INSERT INTO Daemon (name, chunk, driver, proto, path, addr, interval, fields, si
 `HTTP` 表与 I2C/SPI/UART 同级：每行声明一个服务端点会话（`base` 为无凭据的
 `http(s)://` URL，`timeout` 毫秒缺省 10000）。**回环主机（`127.0.0.1` /
 `localhost` / `[::1]`）默认可用，其余主机需要 `--allow-hardware`**——与串口
-`loop://` 同一安全口径。总线驱动见 `modules/HTTP.py`。
+`loop://` 同一安全口径。总线驱动见 `assets/modules/HTTP.py`。
 
 ```sql
 CREATE TABLE HTTP (name String, base String, timeout Number);
@@ -193,13 +193,13 @@ $("exit 3");          # → result="OK", code=3
 - 超时/取消**尽力**击杀进程树（POSIX 进程组、Windows `taskkill /T`）；
   逃到新会话的子孙进程不保证被杀。
 - 无 virt 模型：`proto='virt'` 写在 Shell 行上会因找不到 `SHELL_VIRT`
-  响亮报错。范本：`robots/shell.sql` + `scripts/shell.mt`。
+  响亮报错。范本：`assets/robots/shell.sql` + `assets/scripts/shell.mt`。
 
 ## 10. query 与 apply-sql
 
 **`query --sql`** 只接受 `SHOW TABLES;` 和 `SELECT * FROM 表 [WHERE 列=值 AND ...];`——
 WHERE 只支持字符串等值匹配，配合 `-` 继承语义；命令形态见
-[docs/cli.md](../../../docs/cli.md)。
+[cli.md](cli.md)。
 
 **`apply-sql --sql`** 热应用（对已激活会话；不改磁盘文件）：
 

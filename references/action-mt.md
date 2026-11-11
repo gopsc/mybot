@@ -134,7 +134,7 @@ $count=reading;
   字段写回 `count`，下一轮条件立即用新值（捕获从下一行/下一块起可见，见第 5 节）。
 - 嵌套不会重置超时、取消或输出预算，空体死循环也会被预算打断；块嵌套仍最多 32 层。
 
-以下可配合 `robots/relay-test.sql` 运行，仅调用软件 Timer，不访问物理硬件。
+以下可配合 `assets/robots/relay-test.sql` 运行，仅调用软件 Timer，不访问物理硬件。
 它展示 `if → while → if/Action → Reflex 调用`，回执中的 `slept` 依次为 `1、2、3`：
 
 ```mt
@@ -236,7 +236,7 @@ output relay0;
 **BREAKING**：MT `@Trigger` 的解析与执行已移除，旧的无名 `@Reflex` 定义表也不兼容，均在 parse 阶段拒绝。
 SQL 结构中的 `trigger` 列、引用保护及触发机制完全保留，与此变更无关。
 
-以下可配合 `robots/relay-test.sql` 使用，由 Relay 转发给 Timer：
+以下可配合 `assets/robots/relay-test.sql` 使用，由 Relay 转发给 Timer：
 
 ```mt
 @Reflex(alarm)
@@ -359,7 +359,7 @@ frag/beep.mt  5;
 ## 9. JSON 结构变量 @Struct(name)
 
 `@Struct(name)` 声明本次运行内可变的 JSON 变量，块体是一个完整 JSON 值，**不是矩阵**。
-以下完整示例可配合 `robots/relay-test.sql` 运行，无需物理设备：
+以下完整示例可配合 `assets/robots/relay-test.sql` 运行，无需物理设备：
 
 ```mt
 @Struct(state)

@@ -28,7 +28,7 @@ lint:
 	$(PY) -m ruff check pymybot tests tools build_support.py
 
 check:
-	$(PY) -m pymybot check --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt
+	$(PY) -m pymybot check --robot assets/robots/relay-test.sql --input assets/scripts/relay-test.mt
 
 wheel:
 	$(PY) -I tools/ci_smoke.py wheel

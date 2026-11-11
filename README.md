@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%E2%80%933.14-3776AB)](pyproject.toml)
 
-[Controller Skill](skills/hardware-controller/SKILL.md) · [中文使用指南](docs/Introduce.md) · [English](docs/README.en.md) · [文档索引](docs/README.md) · [路线图](docs/roadmap.md) · [安全模型](skills/hardware-controller/references/security.md)
+[Controller Skill](SKILL.md) · [中文使用指南](docs/Introduce.md) · [English](docs/README.en.md) · [文档索引](docs/README.md) · [路线图](docs/roadmap.md) · [安全模型](references/security.md)
 
 ## 发起人自白
 
@@ -33,10 +33,10 @@
 pip install -e ".[test]"     # 或 pip install -e ".[test,mcp]"
 
 # 内置示例：Timer/Relay 纯软件模块，不需要任何硬件
-python -m pymybot check --robot skills/hardware-controller/assets/robots/relay-test.sql \
-                        --input skills/hardware-controller/assets/scripts/relay-test.mt
-python -m pymybot run   --robot skills/hardware-controller/assets/robots/relay-test.sql \
-                        --input skills/hardware-controller/assets/scripts/relay-test.mt --timeout 10
+python -m pymybot check --robot assets/robots/relay-test.sql \
+                        --input assets/scripts/relay-test.mt
+python -m pymybot run   --robot assets/robots/relay-test.sql \
+                        --input assets/scripts/relay-test.mt --timeout 10
 ```
 
 每个命令在 stdout 输出恰好一行 JSON；`check`/`hardware`/`scripts`/`query` 不激活驱动，`run`/`sample`/`apply-sql` 会写硬件。物理设备必须显式加 `--allow-hardware`。
@@ -57,13 +57,16 @@ pymybot mcp --robot assets/robots/relay-test.sql --scripts-dir assets/scripts
 MCP 工具为 `get_status`、`list_hardware`、`list_action_scripts`、`read_action_script`、
 `query_sql`、`run_action_script`、`read_variables`、`deactivate`；默认只读，
 `--allow-execution` 才放行执行与变量读取，物理硬件另需 `--allow-hardware`。
-细节见 [MCP 指南](skills/hardware-controller/references/mcp.md)。
+细节见 [MCP 指南](references/mcp.md)。
 
 ## 目录
 
 ```text
-skills/hardware-controller/  自包含控制器：Runtime、资产与权威文档
-pymybot/                     安装入口包（版本与 import shim）
+SKILL.md                     技能清单与主题索引
+assets/                      默认驱动、结构 SQL 与 MT 动作示例
+references/                  11 份控制器权威文档
+scripts/                     自包含启动器与依赖清单
+pymybot/                     控制器与 MCP Python Runtime
 tests/                       pytest 套件与虚拟设备夹具，全程无硬件
 docs/                        运维与维护文档
 tools/                       打包与 CI 自检

@@ -5,27 +5,21 @@
 | Document | Read it when you want to… |
 | --- | --- |
 | [使用指南 (Chinese)](Introduce.md) | install, run a first action, and use the CLI and MCP entries |
-| [Controller architecture](../skills/hardware-controller/references/architecture.md) | understand the layers, runtime flow and package map |
-| [Controller CLI](../skills/hardware-controller/references/cli.md) | run commands and parse the JSON result |
-| [Controller MCP](../skills/hardware-controller/references/mcp.md) | expose pymybot to MCP clients |
+| [English README](README.en.md) | read the short English introduction and quick start |
+| [Controller architecture](../references/architecture.md) | understand the layers, runtime flow and package map |
+| [Controller CLI](../references/cli.md) | run commands and parse the JSON result |
+| [Controller MCP](../references/mcp.md) | expose pymybot to MCP clients |
 | [Development](development.md) | set up, test, lint and package |
-| [Controller testing](../skills/hardware-controller/references/testing.md) | understand the test layers and CI channels |
+| [Controller testing](../references/testing.md) | understand the test layers and CI channels |
 | [Release](release.md) | cut a reproducible release |
 | [Versioning](versioning.md) | know which version means what |
 | [Roadmap](roadmap.md) | see what is next and what is explicitly out of scope |
-| [Controller security](../skills/hardware-controller/references/security.md) | understand trust boundaries and reporting |
+| [Controller security](../references/security.md) | understand trust boundaries and reporting |
 | [FAQ](faq.md) | troubleshoot installation, hardware, Lua and CLI issues |
 | [History](history/README.md) | understand the branch consolidation |
 | [Windows faulthandler](history/windows-faulthandler.md) | debug LuaJIT SEH errors on Windows |
 
-Scripting references live under
-[`../skills/hardware-controller/references/`](../skills/hardware-controller/references).
-They are the written source of truth for the structure SQL and MT grammars;
-[`../skills/README.md`](../skills/README.md) maps every other topic back to the
-document that owns it.
-
-`architecture.md`, `cli.md`, `mcp.md`, `security.md` and `testing.md` in this
-directory are redirect stubs kept for old links. The controller authority
-documents live under
-[`../skills/hardware-controller/references/`](../skills/hardware-controller/references/),
-which is also what the skills and `Source:` lines cite.
+Scripting references live under [`../references/`](../references). They are the
+written source of truth for the structure SQL and MT grammars; [`../SKILL.md`](../SKILL.md)
+is the skill manifest and index that maps every topic back to the document that
+owns it.

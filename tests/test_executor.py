@@ -20,7 +20,7 @@ from pymybot.robot import Robot
 from pymybot.security import dumps
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSETS = ROOT / "skills" / "hardware-controller" / "assets"
+ASSETS = ROOT / "assets"
 SQL = """
 CREATE TABLE Relay(name String); INSERT INTO Relay(name) VALUES('sensor');
 CREATE TABLE Vars(name String,value Number); INSERT INTO Vars(name,value) VALUES('number',1);

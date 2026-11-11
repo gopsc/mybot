@@ -32,7 +32,7 @@ separate implementation for CI and the model client.
 Both entry points share one executor, so receipts, fault latching and serialization  
 rules do not change with the entry point. Running `pymybot` with no subcommand is a  
 usage error (exit code 2); use `pymybot --help` for help. See
-[the MCP guide](../skills/hardware-controller/references/mcp.md).
+[the MCP guide](../references/mcp.md).
 
 ## What we deliberately did not build
 
@@ -67,11 +67,11 @@ python -m venv .venv
 
 # No hardware required:
 .venv/bin/python -m pymybot check \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/assets/scripts/relay-test.mt
+  --robot assets/robots/relay-test.sql \
+  --input assets/scripts/relay-test.mt
 .venv/bin/python -m pymybot run \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --input skills/hardware-controller/assets/scripts/relay-test.mt --timeout 10
+  --robot assets/robots/relay-test.sql \
+  --input assets/scripts/relay-test.mt --timeout 10
 
 # Generate a runnable SQL/MT/driver skeleton:
 .venv/bin/python -m pymybot new mybot-arm
@@ -79,8 +79,8 @@ python -m venv .venv
 # MCP server (install the optional SDK first):
 .venv/bin/pip install -e ".[mcp]"
 .venv/bin/python -m pymybot mcp \
-  --robot skills/hardware-controller/assets/robots/relay-test.sql \
-  --scripts-dir skills/hardware-controller/assets/scripts
+  --robot assets/robots/relay-test.sql \
+  --scripts-dir assets/scripts
 ```
 
 On Windows, use `.venv\Scripts\pip` and `.venv\Scripts\python`.
@@ -90,7 +90,7 @@ The MCP server is read-only by default: `get_status`, `list_hardware`,
 flags. Add `--allow-execution` to unlock `run_action_script` and `read_variables`,
 and `--allow-hardware` (which requires `--allow-execution`) to permit physical
 devices. The server exposes `mybot://scripts/...` resources only. See
-[the MCP guide](../skills/hardware-controller/references/mcp.md) for the tool table,
+[the MCP guide](../references/mcp.md) for the tool table,
 the result envelope and client configuration.
 
 ## Design
@@ -120,10 +120,10 @@ non-loopback HTTP/TCP and the Shell driver require an explicit opt-in. HAL-backe
 drivers share the same permission, handle-ownership and cancellation checks as Lua.  
 Python drivers are still trusted in-process code: imports and direct native I/O are  
 unrestricted, and budgets and cancellation are cooperative. See  
-[the security model](../skills/hardware-controller/references/security.md).
+[the security model](../references/security.md).
 
-TCP also has a direct MT interface: [robots/tcp.sql](../skills/hardware-controller/assets/robots/tcp.sql) declares only  
-`name`, `host` and `port`; [scripts/tcp.mt](../skills/hardware-controller/assets/scripts/tcp.mt) uses `connect`, `close`,  
+TCP also has a direct MT interface: [robots/tcp.sql](../assets/robots/tcp.sql) declares only  
+`name`, `host` and `port`; [scripts/tcp.mt](../assets/scripts/tcp.mt) uses `connect`, `close`,  
 `timeout`, `num_recv`, `send_hex`, `send_str`, `recv_hex` and `recv_str`. Activation  
 does not connect. Start a local TCP echo server before running the example;  
 text arguments use MT string expressions such as `$("hello")`.
@@ -131,15 +131,14 @@ text arguments use MT string expressions such as `$("hello")`.
 For a complete runnable example, the [Chinese usage guide](Introduce.md#%E5%86%99%E4%B8%80%E4%B8%AA%E9%A9%B1%E5%8A%A8)  
 has a Python UART loopback driver, structure SQL and action script that run without  
 a board. The driver contract is documented in  
-[`skills/hardware-controller/references/driver-lua.md`](../skills/hardware-controller/references/driver-lua.md).
+[`references/driver-lua.md`](../references/driver-lua.md).
 
 ## Documentation
 
 Architecture, CLI, MCP, testing and security for the controller are authored in  
-[`skills/hardware-controller/references/`](../skills/hardware-controller/references/architecture.md);  
-the same-named pages in [`docs/`](README.md) are redirects. Development, release,  
-versioning and FAQ documents live in [`docs/`](README.md). Scripting references live  
-in [`skills/hardware-controller/`](../skills/hardware-controller/SKILL.md).
+[`references/`](../references); the skill manifest [`SKILL.md`](../SKILL.md) maps  
+every topic to the document that owns it. Development, release, versioning and  
+FAQ documents live in [`docs/`](README.md).
 
 ## Contributing
 

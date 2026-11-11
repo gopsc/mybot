@@ -26,8 +26,8 @@ Use the platform paths under Windows (`.venv\Scripts\pip`).
 
 ```sh
 python -m pytest -q                       # full suite, no hardware
-python -m pymybot check --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt
-python -m pymybot run --robot skills/hardware-controller/assets/robots/relay-test.sql --input skills/hardware-controller/assets/scripts/relay-test.mt --timeout 10
+python -m pymybot check --robot assets/robots/relay-test.sql --input assets/scripts/relay-test.mt
+python -m pymybot run --robot assets/robots/relay-test.sql --input assets/scripts/relay-test.mt --timeout 10
 python -I tools/ci_smoke.py wheel       # sdist -> wheel -> clean venv
 python -I tools/check_docs_skill_sync.py  # docs/skill links resolve, references declare a Source
 python -I tools/check_release_metadata.py # pyproject/__init__/CITATION/CHANGELOG agree
@@ -39,14 +39,14 @@ for help. Each subcommand writes one JSON object to stdout.
 ## Code layout
 
 ```text
-pymybot/                                     version and import shim (extends __path__ into the Skill Runtime)
-skills/hardware-controller/scripts/pymybot/  controller and MCP Runtime
-skills/hardware-controller/references/       controller authority documents
-skills/hardware-controller/assets/           default modules, robots and MT scripts
-skills/                                      operator-trusted reference material for the controller
-tests/                                       pytest suite and virtual-device fixtures
-docs/                                        operator and maintainer documentation
-tools/                                       CI, documentation checks and release helpers
+SKILL.md                        skill manifest and topic index; links every reference
+assets/                         default modules, robots and MT scripts
+references/                     controller authority documents
+scripts/                        self-contained launcher and requirements
+pymybot/                        controller and MCP Runtime
+tests/                          pytest suite and virtual-device fixtures
+docs/                           operator and maintainer documentation
+tools/                          CI, documentation checks and release helpers
 ```
 
 ## Style and quality
@@ -67,26 +67,26 @@ do not reformat unrelated files in a behaviour PR.
 
 Behaviour changes belong in the authority that owns the topic first. Controller
 architecture, CLI, MCP, security and testing are authored under
-`skills/hardware-controller/references/`; operator topics (development, release,
-versioning, FAQ) stay in `docs/`, and the same-named controller pages there are
-redirect stubs. The files under `skills/` then summarise and link instead of
-restating them. The same lint job runs
+[`references/`](../references/); operator topics (development, release,
+versioning, FAQ) stay in `docs/`. The skill manifest [`SKILL.md`](../SKILL.md)
+maps every topic to the document that owns it instead of restating it. The same
+lint job runs
 [`tools/check_docs_skill_sync.py`](../tools/check_docs_skill_sync.py),
 which fails on dead skill links, missing repository paths, a reference without a
-`Source:` line and references that
-[`skills/README.md`](../skills/README.md) does not register.
+`Source:` line and references that [`SKILL.md`](../SKILL.md) does not register.
 
 ## Adding a driver
 
-1. Add `modules/<Name>.py` implementing `Driver(context)`, or `modules/<Name>.lua`
-   using `lib/drv_common.lua` and `lib/bus_contract.lua`.
+1. Add `assets/modules/<Name>.py` implementing `Driver(context)`, or
+   `assets/modules/<Name>.lua` using `assets/modules/lib/drv_common.lua` and
+   `assets/modules/lib/bus_contract.lua`.
 2. Add `tests/fixtures/virt/<name>_virt.sql` and
    `tests/fixtures/virt/<name>_virt.mt`; register the virtual device model in
-   `modules/lib/virtbus/regmap.lua` when applicable.
+   `assets/modules/lib/virtbus/regmap.lua` when applicable.
 3. Run `python -m pytest tests/test_migrated_drivers.py -q` and the fixture
    directly. Use `tests/test_virtual_drivers.py` for synthetic bus/protocol models.
 4. Document the device, address range, units and known limitations in the driver
-   header or the relevant `skills/hardware-controller/references/` document.
+   header or the relevant `references/` document.
 5. Never make a virtual result look like a real measurement; use clearly named
    files (`*_virt`).
 
@@ -94,7 +94,10 @@ which fails on dead skill links, missing repository paths, a reference without a
 
 Frozen executables are not a supported artifact. Releases publish an sdist and a
 wheel; install the wheel into a virtual environment, or use an editable checkout
-for development. `pymybot doctor` is the quickest way to check a fresh install.
+for development. The wheel packages the Runtime from `pymybot/` and copies the
+repository-root `assets/` tree into `pymybot/assets/` at build time, so there is
+no skill-directory copy step. `pymybot doctor` is the quickest way to check a
+fresh install.
 
 ## Dependency policy
 
