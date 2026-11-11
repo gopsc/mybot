@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pymybot"
 version = "0.6.0"
 description = "Cross-platform robot controller with LuaJIT drivers, SQL structures and MT action scripts"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "pymybot contributors" }]

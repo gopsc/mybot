@@ -1,5 +1,6 @@
 include build_support.py
 include LICENSE
+include README.md
 include SKILL.md
 recursive-include assets *.py *.lua *.sql *.mt
 recursive-include references *.md
