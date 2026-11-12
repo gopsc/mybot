@@ -2,6 +2,8 @@
 
 > 本文是 `test/run_all.sh` 全量回归编排脚本的说明。[README](../README.md) 中只保留命令入口。
 > 完整门禁还覆盖 `test/run_all_selftest.sh`、构建配置和 CI job。
+>
+> **2026-11 状态**：本分支是 controller-only 版本，已移除 agent/MCP、Web SSH、sim 与 TCP 动作源。本文中带这些名字的分段、脚本与计数属于历史内容；当前可执行入口以 `./build/mybot_tests`、Lua 单测和按名过滤的 `test/run_all.sh <filter>` 为准。
 > CI（`.gitlab-ci.yml`，F-22）在每次推送后自动跑 Release 全量守门 + ASan/UBSan 单跑
 > （`run_san.sh --asan-only`：Release 全量已由 `gate:release` 跑过，不重复），
 > 构建步带 `-DMYBOT_WERROR=ON`（README 声称的「零告警」由此成为门禁而非约定）；
@@ -356,10 +358,10 @@ mybot-agent 新鲜度取材面、`run_all.sh` 里 `harness_selftest` 的路径�
 
 | 套件 | 怎么跑 | 计数（2026-10-13 快照） |
 | --- | --- | --- |
-| `mybot_tests` | `bash test/run_all.sh` 的 cpp-unit 段 | 808 通过 / 0 失败 |
+| `mybot_tests` | `bash test/run_all.sh` 的 cpp-unit 段 | 568 通过 / 0 失败 |
 | `harness_selftest` | `bash test/run_all.sh` 的 harness-selftest 段 | 8 通过 / 0 失败 |
-| `sim_tests` | `bash scripts/build_sim.sh` 后 `./sim/build/sim_tests`（**不在 CI**） | 442 通过（**运行时数**）/ 0 失败（8 个 TU） |
-| Rust agent | `cd agent && cargo test --release` | 188 passed |
+| `sim_tests` | 本分支无 `sim/` 工程（历史值 442） | — |
+| Rust agent | 本分支无 `agent/` 工程（历史值 188） | — |
 
 除 `sim_tests` 的 442 外，表里每个数字都由 `scripts/check_doc_paths.py` 的第六组
 **从仓库实况派生后比对**（进 `test/run_all_selftest.sh`）——加/删用例而忘了改这张表，
@@ -367,9 +369,9 @@ mybot-agent 新鲜度取材面、`run_all.sh` 里 `harness_selftest` 的路径�
 
 两个容易对不上的数字，出处写在这里省得每次重推：
 
-- `mybot_tests` 的 808 **不等于** `test/cpp/` 里 `TH_TEST(` 的出现次数（822）。差值有
-  出处：822 − 1 处宏定义（`test/cpp/harness.hpp`）− 13 个属于 `harness_selftest`
-  （独立可执行文件）= 808。拿这个式子复核，别把两个数字硬对齐。
+- `mybot_tests` 的 568 **不等于** `test/cpp/` 里 `TH_TEST(` 的出现次数（582）。差值有
+  出处：582 − 1 处宏定义（`test/cpp/harness.hpp`）− 13 个属于 `harness_selftest`
+  （独立可执行文件）= 568。拿这个式子复核，别把两个数字硬对齐。
 - `harness_selftest` 那个文件里有 13 个 `TH_TEST`，二进制只报 8 通过：另外 5 个 `meta_*`
   是**故意含失败形态的例句**，只作被测对象（由自证用例内部的 `judge(filter)` →
   `runAllOutcome(filter, quiet=true)` 调到），不进缺省全量跑——否则主输出里会混进一串

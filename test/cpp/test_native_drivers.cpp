@@ -1,7 +1,12 @@
 /* test_native_drivers.cpp —— C++ 原生驱动的直接单测（不经过 Lua/MatrixRunner） */
 
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <stdexcept>
 #include <string>
 
+#include "fixtures.hpp"
 #include "hal.hpp"
 #include "harness.hpp"
 #include "native_driver.hpp"
@@ -13,6 +18,19 @@ bot::Json callData(std::initializer_list<std::pair<const char*, bot::Json>> item
 	bot::Json data = bot::JsonObject();
 	for (const auto& item : items) { data.put(item.first, item.second); }
 	return data;
+}
+
+void writeText(const std::filesystem::path& path, const std::string& text) {
+	std::ofstream out(path, std::ios::binary | std::ios::trunc);
+	if (!out) { throw std::runtime_error("cannot write " + path.string()); }
+	out << text;
+}
+
+std::string readText(const std::filesystem::path& path) {
+	std::ifstream in(path, std::ios::binary);
+	if (!in) { return std::string(); }
+	return std::string(std::istreambuf_iterator<char>(in),
+		std::istreambuf_iterator<char>());
 }
 
 } // namespace
@@ -85,4 +103,68 @@ TH_TEST(native_dev_enum_reports_linux_buses) {
 	TH_CHECK(result.find("i2c") != nullptr);
 	TH_CHECK(result.find("spi") != nullptr);
 	TH_CHECK(result.find("uart") != nullptr);
+}
+
+TH_TEST(hal_gpio_rejects_bad_chip_and_invalid_handles) {
+	bot::HALManager hal;
+	bot::Json badPath = hal.call("gpio_request_line",
+		{bot::JsonString("/tmp/not-a-gpiochip"), bot::JsonInt(0),
+		 bot::JsonString("out"), bot::JsonInt(0), bot::JsonBool(false)});
+	TH_CHECK(badPath.isInt() && badPath.getInt() == -1);
+
+	bot::Json missingChip = hal.call("gpio_request_line",
+		{bot::JsonString("/dev/gpiochip9999"), bot::JsonInt(0),
+		 bot::JsonString("out"), bot::JsonInt(0), bot::JsonBool(false)});
+	TH_CHECK(missingChip.isInt() && missingChip.getInt() == -1);
+
+	bot::Json setResult = hal.call("gpio_set_value",
+		{bot::JsonInt(999), bot::JsonInt(1)});
+	TH_CHECK(setResult.isBool() && !setResult.getBool());
+	bot::Json getResult = hal.call("gpio_get_value", {bot::JsonInt(999)});
+	TH_CHECK(getResult.isInt() && getResult.getInt() == -1);
+}
+
+TH_TEST(hal_pwm_uses_the_configured_sysfs_root) {
+	fx::TempDir dir("hal_pwm");
+	const std::filesystem::path chip = dir.path() / "pwmchip0";
+	const std::filesystem::path channel = chip / "pwm1";
+	std::filesystem::create_directories(channel);
+	writeText(chip / "npwm", "2");
+	writeText(chip / "unexport", "");
+	writeText(channel / "enable", "1");
+	writeText(channel / "period", "0");
+	writeText(channel / "duty_cycle", "0");
+	writeText(channel / "polarity", "normal");
+	fx::EnvVar root("BOT4CJ_PWM_SYSFS_ROOT", dir.path().c_str());
+
+	bot::HALManager hal;
+	bot::Json npwm = hal.call("pwm_npwm", {bot::JsonInt(0)});
+	TH_CHECK(npwm.isInt() && npwm.getInt() == 2);
+	TH_CHECK(hal.call("pwm_exported", {bot::JsonInt(0), bot::JsonInt(1)}).getBool());
+	TH_CHECK(hal.call("pwm_export", {bot::JsonInt(0), bot::JsonInt(1)}).getBool());
+
+	bot::Json config = hal.call("pwm_config",
+		{bot::JsonInt(0), bot::JsonInt(1), bot::JsonInt(1000), bot::JsonInt(25)});
+	TH_CHECK(config.isArr() && config.size() == 3);
+	TH_CHECK(config.at(0).isBool() && config.at(0).getBool());
+	TH_CHECK(config.at(1).getInt() == 1000000);
+	TH_CHECK(config.at(2).getInt() == 250000);
+	TH_CHECK(readText(channel / "period") == "1000000");
+	TH_CHECK(readText(channel / "duty_cycle") == "250000");
+
+	TH_CHECK(hal.call("pwm_set_polarity",
+		{bot::JsonInt(0), bot::JsonInt(1), bot::JsonBool(true)}).getBool());
+	TH_CHECK(readText(channel / "polarity") == "inversed");
+	TH_CHECK(hal.call("pwm_enable",
+		{bot::JsonInt(0), bot::JsonInt(1), bot::JsonBool(true)}).getBool());
+	TH_CHECK(readText(channel / "enable") == "1");
+	TH_CHECK(hal.call("pwm_unexport",
+		{bot::JsonInt(0), bot::JsonInt(1)}).getBool());
+	TH_CHECK(readText(chip / "unexport") == "1");
+
+	bot::Json outOfRange = hal.call("pwm_export",
+		{bot::JsonInt(0), bot::JsonInt(2)});
+	TH_CHECK(outOfRange.isBool() && !outOfRange.getBool());
+	bot::Json missingChip = hal.call("pwm_npwm", {bot::JsonInt(7)});
+	TH_CHECK(missingChip.isNull());
 }

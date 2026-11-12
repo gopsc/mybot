@@ -126,9 +126,11 @@ int main(int argc, char** argv) {
 	CliOptions& options = args.opts;
 	if (validateOptions(options) != 0) { return 2; }
 
+	/* --robot 已是 CLI11 required()：正常路径到不了这里。保留防御性判据，
+	 * 但绝不再把“缺必选参数”降级成 0（调用方会误以为执行成功）。 */
 	if (!options.robot) {
-		std::cout << helpText();
-		return 0;
+		std::cerr << "参数错误：--robot 是必选参数；用 --help 查看支持的参数" << std::endl;
+		return 2;
 	}
 
 	std::unique_ptr<RobotStruct> robot = loadStructure(*options.robot);

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <fcntl.h>
+#include <linux/gpio.h>
 #include <linux/i2c-dev.h>
 #include <linux/i2c.h>
 #include <linux/spi/spidev.h>
@@ -92,6 +93,106 @@ int asInt(const Json& value, int low, int high, const char* what) {
 std::string asStr(const Json& value, const char* what) {
 	if (!value.isStr()) { throw std::runtime_error(std::string(what) + " must be text"); }
 	return value.getValue();
+}
+
+/* 数值入口：接受 Int/Float/数字字符串，拒绝非有限值。GPIO 默认电平与
+ * PWM 频率/占空比都需要它——asInt 只收整数，而这些参数可以是小数。 */
+double asFiniteNumber(const Json& value, const char* what) {
+	double number = 0;
+	if (value.isInt()) {
+		number = static_cast<double>(value.getInt());
+	} else if (value.isFloat()) {
+		number = value.getFloat();
+	} else if (value.isStr()) {
+		try {
+			std::size_t used = 0;
+			number = std::stod(value.getValue(), &used);
+			if (used != value.getValue().size()) {
+				throw std::runtime_error(std::string(what) + " must be a number");
+			}
+		} catch (const std::exception&) {
+			throw std::runtime_error(std::string(what) + " must be a number");
+		}
+	} else {
+		throw std::runtime_error(std::string(what) + " must be a number");
+	}
+	if (!std::isfinite(number)) {
+		throw std::runtime_error(std::string(what) + " must be finite");
+	}
+	return number;
+}
+
+/* GPIO/PWM 的“非有限值回落安全侧”语义：默认电平/使能位等非关键参数
+ * 解析失败时按 0 处理，与 Lua 侧 bus.finite_of / byte_of 的口径一致。 */
+double numberOrZero(const Json& value) {
+	try {
+		return asFiniteNumber(value, "value");
+	} catch (const std::exception&) {
+		return 0;
+	}
+}
+
+bool boolish(const Json& value) {
+	if (value.isBool()) { return value.getBool(); }
+	if (value.isInt()) { return value.getInt() != 0; }
+	if (value.isFloat()) { return value.getFloat() != 0; }
+	if (value.isStr()) {
+		const std::string& text = value.getValue();
+		return text == "1" || text == "true" || text == "on";
+	}
+	return false;
+}
+
+std::string pwmRoot() {
+	auto env = getEnvVar("BOT4CJ_PWM_SYSFS_ROOT");
+	std::string root = (env && !env->empty()) ? *env : "/sys/class/pwm";
+	while (root.size() > 1 && root.back() == '/') { root.pop_back(); }
+	return root;
+}
+
+std::string pwmChipPath(int chip, const char* attribute) {
+	return pwmRoot() + "/pwmchip" + std::to_string(chip) + "/" + attribute;
+}
+
+std::string pwmAttrPath(int chip, int channel, const char* attribute) {
+	return pwmRoot() + "/pwmchip" + std::to_string(chip)
+		+ "/pwm" + std::to_string(channel) + "/" + attribute;
+}
+
+bool readSysfs(const std::string& path, std::string& out) {
+	const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+	if (fd < 0) { return false; }
+	char buffer[64];
+	const ssize_t n = ::read(fd, buffer, sizeof buffer);
+	const int saved = errno;
+	::close(fd);
+	if (n < 0) {
+		errno = saved;
+		return false;
+	}
+	out.assign(buffer, static_cast<std::size_t>(n));
+	return true;
+}
+
+bool writeSysfs(const std::string& path, const std::string& value, std::string& error) {
+	const int fd = ::open(path.c_str(), O_WRONLY | O_CLOEXEC);
+	if (fd < 0) {
+		error = "open " + path + ": " + errText(errno);
+		return false;
+	}
+	const ssize_t n = ::write(fd, value.data(), value.size());
+	const int saved = errno;
+	::close(fd);
+	if (n != static_cast<ssize_t>(value.size())) {
+		error = "write " + path + ": " + errText(n < 0 ? saved : EIO);
+		return false;
+	}
+	return true;
+}
+
+bool pwmExportedPath(int chip, int channel) {
+	const std::string path = pwmAttrPath(chip, channel, "enable");
+	return ::access(path.c_str(), F_OK) == 0;
 }
 
 std::vector<std::uint8_t> asBytes(const Json& value, std::size_t maximum,
@@ -412,6 +513,9 @@ Json HALManager::call(const std::string& operation, const std::vector<Json>& arg
 	};
 	static const char* const known[] = {
 		"i2c_open", "i2c_transfer", "spi_open", "spi_setup", "spi_transfer",
+		"gpio_request_line", "gpio_set_value", "gpio_get_value", "gpio_free_line",
+		"pwm_npwm", "pwm_exported", "pwm_export", "pwm_config",
+		"pwm_set_polarity", "pwm_enable", "pwm_unexport",
 		"uart_open", "uart_write", "uart_read", "uart_flush", "virt_attach",
 		"tcp_open", "tcp_write", "tcp_read", "http_open", "http_request",
 		"shell_open", "shell_run", "close_handle", "sleep_ms",
@@ -439,6 +543,27 @@ Json HALManager::call(const std::string& operation, const std::vector<Json>& arg
 		if (operation == "spi_transfer") {
 			return opSpiTransfer(arg(0), arg(1), args.size() > 2 ? arg(2) : JsonInt(0));
 		}
+		if (operation == "gpio_request_line") {
+			return opGpioRequestLine(arg(0), arg(1), arg(2),
+				args.size() > 3 ? arg(3) : JsonInt(0),
+				args.size() > 4 ? arg(4) : JsonBool(false), owner);
+		}
+		if (operation == "gpio_set_value") {
+			return opGpioSetValue(arg(0), args.size() > 1 ? arg(1) : JsonInt(0));
+		}
+		if (operation == "gpio_get_value") { return opGpioGetValue(arg(0)); }
+		if (operation == "gpio_free_line") { return opGpioFreeLine(arg(0)); }
+		if (operation == "pwm_npwm") { return opPwmNpwm(arg(0)); }
+		if (operation == "pwm_exported") { return opPwmExported(arg(0), arg(1)); }
+		if (operation == "pwm_export") { return opPwmExport(arg(0), arg(1)); }
+		if (operation == "pwm_config") {
+			return opPwmConfig(arg(0), arg(1), arg(2), arg(3));
+		}
+		if (operation == "pwm_set_polarity") {
+			return opPwmSetPolarity(arg(0), arg(1), arg(2));
+		}
+		if (operation == "pwm_enable") { return opPwmEnable(arg(0), arg(1), arg(2)); }
+		if (operation == "pwm_unexport") { return opPwmUnexport(arg(0), arg(1)); }
 		if (operation == "uart_open") {
 			return opUartOpen(arg(0), arg(1),
 				args.size() > 2 ? arg(2) : JsonBool(false), owner);
@@ -488,8 +613,14 @@ Json HALManager::call(const std::string& operation, const std::vector<Json>& arg
 			return errorObject(message);
 		}
 		if (operation == "i2c_transfer" || operation == "spi_transfer"
-				|| operation == "uart_read") {
+				|| operation == "uart_read" || operation == "pwm_npwm") {
 			return JsonNull();
+		}
+		if (operation == "gpio_set_value" || operation == "pwm_exported"
+				|| operation == "pwm_export" || operation == "pwm_config"
+				|| operation == "pwm_set_polarity" || operation == "pwm_enable"
+				|| operation == "pwm_unexport") {
+			return JsonBool(false);
 		}
 		return JsonInt(-1);
 	}
@@ -649,6 +780,218 @@ Json HALManager::opSpiTransfer(const Json& handleValue, const Json& dataValue,
 		throw std::runtime_error("SPI transfer failed: " + errText(errno));
 	}
 	return bytesJson(rx);
+}
+
+/* ---------------- GPIO（gpiod uAPI v1） ---------------- */
+
+Json HALManager::opGpioRequestLine(const Json& chipValue, const Json& offsetValue,
+		const Json& directionValue, const Json& defaultValue,
+		const Json& activeLowValue, int owner) {
+	const std::string chip = asStr(chipValue, "GPIO chip path");
+	const std::string prefix = "/dev/gpiochip";
+	if (chip.size() <= prefix.size() || chip.compare(0, prefix.size(), prefix) != 0) {
+		throw std::runtime_error("GPIO requires /dev/gpiochipN, got '" + chip + "'");
+	}
+	for (std::size_t i = prefix.size(); i < chip.size(); ++i) {
+		if (!std::isdigit(static_cast<unsigned char>(chip[i]))) {
+			throw std::runtime_error("GPIO requires /dev/gpiochipN, got '" + chip + "'");
+		}
+	}
+	const int offset = asInt(offsetValue, 0, 0x7FFFFFFF, "GPIO offset");
+	const std::string direction = asStr(directionValue, "GPIO direction");
+	if (direction != "in" && direction != "out") {
+		throw std::runtime_error("GPIO direction must be 'in' or 'out'");
+	}
+	const int chipFd = ::open(chip.c_str(), O_RDWR | O_CLOEXEC);
+	if (chipFd < 0) {
+		throw std::runtime_error("cannot open " + chip + ": " + errText(errno));
+	}
+	struct gpiohandle_request request{};
+	request.lineoffsets[0] = static_cast<std::uint32_t>(offset);
+	request.flags = (direction == "out")
+		? GPIOHANDLE_REQUEST_OUTPUT : GPIOHANDLE_REQUEST_INPUT;
+	if (boolish(activeLowValue)) { request.flags |= GPIOHANDLE_REQUEST_ACTIVE_LOW; }
+	if (direction == "out") {
+		request.default_values[0] = numberOrZero(defaultValue) != 0 ? 1 : 0;
+	}
+	std::strncpy(request.consumer_label, "bot4cj", sizeof(request.consumer_label) - 1);
+	request.lines = 1;
+	if (::ioctl(chipFd, GPIO_GET_LINEHANDLE_IOCTL, &request) < 0 || request.fd < 0) {
+		const int saved = errno;
+		::close(chipFd);
+		g_lastError = "GPIO request line " + std::to_string(offset)
+			+ " on " + chip + " failed: " + errText(saved);
+		return JsonInt(-1);
+	}
+	::close(chipFd);
+	auto resource = std::make_unique<Resource>();
+	resource->kind = "gpio";
+	resource->backend = "gpiod";
+	resource->path = chip;
+	resource->fd = request.fd;
+	return JsonInt(add(std::move(resource), owner));
+}
+
+Json HALManager::opGpioSetValue(const Json& handleValue, const Json& valueValue) {
+	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
+	Resource& resource = get(handle, "gpio");
+	struct gpiohandle_data data{};
+	data.values[0] = numberOrZero(valueValue) != 0 ? 1 : 0;
+	if (::ioctl(resource.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data) < 0) {
+		g_lastError = "GPIO set value failed: " + errText(errno);
+		return JsonBool(false);
+	}
+	return JsonBool(true);
+}
+
+Json HALManager::opGpioGetValue(const Json& handleValue) {
+	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
+	Resource& resource = get(handle, "gpio");
+	struct gpiohandle_data data{};
+	if (::ioctl(resource.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data) < 0) {
+		g_lastError = "GPIO get value failed: " + errText(errno);
+		return JsonInt(-1);
+	}
+	return JsonInt(data.values[0]);
+}
+
+Json HALManager::opGpioFreeLine(const Json& handleValue) {
+	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
+	(void)get(handle, "gpio");
+	return opCloseHandle(handleValue);
+}
+
+/* ---------------- PWM（Linux sysfs） ---------------- */
+
+Json HALManager::opPwmNpwm(const Json& chipValue) {
+	const int chip = asInt(chipValue, 0, kPwmMaxId, "PWM chip");
+	std::string text;
+	if (!readSysfs(pwmChipPath(chip, "npwm"), text)) {
+		g_lastError = "PWM npwm read failed: " + errText(errno);
+		return JsonNull();
+	}
+	try {
+		const long value = std::stol(text);
+		if (value < 0) { return JsonNull(); }
+		return JsonInt(value);
+	} catch (const std::exception&) {
+		g_lastError = "PWM npwm is not an integer";
+		return JsonNull();
+	}
+}
+
+Json HALManager::opPwmExported(const Json& chipValue, const Json& channelValue) {
+	const int chip = asInt(chipValue, 0, kPwmMaxId, "PWM chip");
+	const int channel = asInt(channelValue, 0, kPwmMaxId, "PWM channel");
+	return JsonBool(pwmExportedPath(chip, channel));
+}
+
+Json HALManager::opPwmExport(const Json& chipValue, const Json& channelValue) {
+	const int chip = asInt(chipValue, 0, kPwmMaxId, "PWM chip");
+	const int channel = asInt(channelValue, 0, kPwmMaxId, "PWM channel");
+	if (pwmExportedPath(chip, channel)) { return JsonBool(true); }
+	std::string npwmText;
+	if (readSysfs(pwmChipPath(chip, "npwm"), npwmText)) {
+		try {
+			const long npwm = std::stol(npwmText);
+			if (npwm >= 0 && channel >= npwm) {
+				g_lastError = "PWM channel " + std::to_string(channel)
+					+ " out of range on pwmchip" + std::to_string(chip)
+					+ " (npwm=" + std::to_string(npwm) + ")";
+				return JsonBool(false);
+			}
+		} catch (const std::exception&) {
+			/* npwm 不可解析时不阻断 export：内核会给出最终判定。 */
+		}
+	}
+	std::string error;
+	if (!writeSysfs(pwmChipPath(chip, "export"), std::to_string(channel), error)) {
+		g_lastError = "PWM export failed: " + error;
+		return JsonBool(false);
+	}
+	if (!pwmExportedPath(chip, channel)) {
+		g_lastError = "PWM export did not take effect: pwmchip" + std::to_string(chip)
+			+ " pwm" + std::to_string(channel);
+		return JsonBool(false);
+	}
+	return JsonBool(true);
+}
+
+Json HALManager::opPwmConfig(const Json& chipValue, const Json& channelValue,
+		const Json& frequencyValue, const Json& dutyValue) {
+	const int chip = asInt(chipValue, 0, kPwmMaxId, "PWM chip");
+	const int channel = asInt(channelValue, 0, kPwmMaxId, "PWM channel");
+	const double frequency = asFiniteNumber(frequencyValue, "PWM frequency");
+	const double duty = asFiniteNumber(dutyValue, "PWM duty");
+	if (frequency <= 0) {
+		throw std::runtime_error("PWM frequency must be > 0");
+	}
+	if (duty < 0 || duty > 100) {
+		throw std::runtime_error("PWM duty must be 0..100");
+	}
+	const double period = 1e9 / frequency;
+	if (!std::isfinite(period) || period > 9.0e18) {
+		throw std::runtime_error("PWM frequency is too small (period overflow)");
+	}
+	const std::int64_t periodNs = std::max<std::int64_t>(
+		1, static_cast<std::int64_t>(std::llround(period)));
+	const std::int64_t dutyNs = std::min<std::int64_t>(periodNs,
+		static_cast<std::int64_t>(std::llround(periodNs * duty / 100.0)));
+
+	std::string error;
+	/* 写序与 Lua HAL 一致：先 duty=0 再改 period，否则降频会被 EINVAL 拒绝。 */
+	if (!writeSysfs(pwmAttrPath(chip, channel, "duty_cycle"), "0", error)
+			|| !writeSysfs(pwmAttrPath(chip, channel, "period"),
+				std::to_string(periodNs), error)
+			|| !writeSysfs(pwmAttrPath(chip, channel, "duty_cycle"),
+				std::to_string(dutyNs), error)) {
+		g_lastError = "PWM config failed: " + error;
+		return JsonBool(false);
+	}
+	Json result = JsonArray();
+	result.add(JsonBool(true));
+	result.add(JsonInt(periodNs));
+	result.add(JsonInt(dutyNs));
+	return result;
+}
+
+Json HALManager::opPwmSetPolarity(const Json& chipValue, const Json& channelValue,
+		const Json& inversedValue) {
+	const int chip = asInt(chipValue, 0, kPwmMaxId, "PWM chip");
+	const int channel = asInt(channelValue, 0, kPwmMaxId, "PWM channel");
+	std::string error;
+	if (!writeSysfs(pwmAttrPath(chip, channel, "polarity"),
+			boolish(inversedValue) ? "inversed" : "normal", error)) {
+		g_lastError = "PWM polarity failed: " + error;
+		return JsonBool(false);
+	}
+	return JsonBool(true);
+}
+
+Json HALManager::opPwmEnable(const Json& chipValue, const Json& channelValue,
+		const Json& onValue) {
+	const int chip = asInt(chipValue, 0, kPwmMaxId, "PWM chip");
+	const int channel = asInt(channelValue, 0, kPwmMaxId, "PWM channel");
+	std::string error;
+	if (!writeSysfs(pwmAttrPath(chip, channel, "enable"),
+			boolish(onValue) ? "1" : "0", error)) {
+		g_lastError = "PWM enable failed: " + error;
+		return JsonBool(false);
+	}
+	return JsonBool(true);
+}
+
+Json HALManager::opPwmUnexport(const Json& chipValue, const Json& channelValue) {
+	const int chip = asInt(chipValue, 0, kPwmMaxId, "PWM chip");
+	const int channel = asInt(channelValue, 0, kPwmMaxId, "PWM channel");
+	/* 先停输出再取消导出；disable 失败不阻断 unexport（可能本就未导出）。 */
+	(void)opPwmEnable(chipValue, channelValue, JsonBool(false));
+	std::string error;
+	if (!writeSysfs(pwmChipPath(chip, "unexport"), std::to_string(channel), error)) {
+		g_lastError = "PWM unexport failed: " + error;
+		return JsonBool(false);
+	}
+	return JsonBool(true);
 }
 
 Json HALManager::opUartOpen(const Json& pathValue, const Json& baudValue,

@@ -45,13 +45,20 @@ ParsedArgs parseArgs(int argc, char** argv) {
 	ParsedArgs parsed;
 	CliOptions& opts = parsed.opts;
 
+	/* 无参数是“看帮助”的常见入口；--robot 本身是必选（见下方 required()），
+	 * 但单独 `mybot` 不应报用法错误。 */
+	if (argc <= 1) {
+		parsed.help = true;
+		return parsed;
+	}
+
 	CLI::App app{"mybot robot controller (Linux, LuaJIT drivers)"};
 	app.allow_extras(false);
 	app.set_help_flag("--help,-h", "打印帮助");
 
 	std::string robot;
 	std::string input;
-	app.add_option("--robot", robot, "结构脚本 .sql 路径（必选）");
+	app.add_option("--robot", robot, "结构脚本 .sql 路径（必选）")->required();
 	app.add_option("--input", input, "动作脚本 .mt 路径；不给则读 stdin");
 	app.add_option("--timeout", opts.actionTimeoutSec,
 		"动作脚本墙钟预算（秒，>0 且 <=3600，缺省 180）")

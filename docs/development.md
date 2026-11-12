@@ -1,11 +1,13 @@
 # 开发与贡献
 
 > 本文是贡献者指南。[README](../README.md) 中只保留入口链接。
+>
+> **2026-11 状态**：本分支是 controller-only 版本。文中 pre-push 的 `mybot-agent` 新鲜度门、`agent/`/`sim/` 跨源检查与 `--llm-config` 示例属于历史全仓流程；当前仓库没有这些目录，相关检查会失败或跳过。提交前请以 `./build/mybot_tests`、Lua 单测和 `bash test/run_all.sh <filter>` 的实际结果为准。
 
 ## 起步
 
 ```bash
-git clone <本仓库> && cd bot4cj
+git clone <本仓库> && cd mybot-cpp
 bash scripts/install-hooks.sh                 # 装 pre-push 守门钩子（一次性）
 cmake -S . -B build && cmake --build build
 bash test/run_all.sh                          # 离线回归（无硬件）
@@ -25,7 +27,7 @@ cd build && ctest --output-on-failure -R cpp_unit
 
 | 路径 | 放什么 | 注意 |
 | ---- | ------ | ---- |
-| `src/` | C++17 宿主（解析、注册、派发、守护、agent） | 全量 `-Wall -Wextra -Wpedantic` 零告警 |
+| `src/` | C++17 宿主（解析、注册、派发、守护、HAL） | 全量 `-Wall -Wextra -Wpedantic` 零告警 |
 | `modules/` | 驱动 `<矩阵名>.lua` 与库 `lib/` | 驱动契约见 [drivers.md](drivers.md) |
 | `modules/lib/` | HAL、virtbus、mpath、JSON、滤波等共享库 | 纯算法库不依赖 HAL，可被 lua5.4 复用 |
 | `robots/`、`scripts/` | 结构脚本与动作脚本；`test/` 子目录为回归夹具 | 夹具必须登记进用例表，否则被孤儿检测判失败 |
@@ -306,4 +308,4 @@ cmake -S . -B build -DMYBOT_WERROR=ON && cmake --build build
 - **代码路径要跟着重构走**：文件被拆分/改名时同步更新引用（历史上 `src/luaend.cpp`
   拆成 `luabridge.cpp` + `luasandbox.cpp`，文档因此滞后过）。
 - **命令要能直接跑**：文档里的命令按仓库根为 CWD 书写，且必须是当前真实可用的形式
-  （如 `--llm-config none`）。改脚本时回头核对文档。
+  （如 `--var mode=auto`）。改脚本时回头核对文档。

@@ -23,8 +23,9 @@ struct ParsedArgs {
 /* 解析 argv；CLI11 的 ParseError 在此折成 errorCode（2）、help 折成 help=true。 */
 ParsedArgs parseArgs(int argc, char** argv);
 
-/* 组合校验/取值归一：--var/--var-env、--timeout、--daemon-grace-ms、TCP 端口。
- * 违规时向 stderr 打印并返回 2；通过返回 0。 */
+/* 组合校验/取值归一：--var/--var-env、--timeout、--daemon-grace-ms。
+ * 违规时向 stderr 打印并返回 2；通过返回 0。--robot 的必选性由 CLI11
+ * required() 在解析期强制（无参数调用除外，按帮助处理）。 */
 int validateOptions(CliOptions& opts);
 
 /* 帮助全文（单一字符串来源，便于单测锚定）。 */

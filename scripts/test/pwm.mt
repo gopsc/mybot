@@ -6,7 +6,7 @@
 # duty 为百分比 0~100，每行用 t0.delay 保持 300ms。
 # 列序决定执行顺序：先改占空比，再延时。
 @Action
-pwm0.duty  t0.delay;
+pwm0.value t0.delay;
          0       300;
         25       300;
         50       300;

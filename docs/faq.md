@@ -22,7 +22,7 @@
   总线事务、器件侧是否留有地址/握手相位**。HAL 的每次 I2C 访问都是单次 `I2C_RDWR`
   ioctl（寄存器指针写 + 数据读合并成一个内核事务，`i2c_read_reg` /
   `i2c_read_multi_bytes` 皆然），内核在 adapter 层串行化，所以「主线程直连 + 守护
-  同址采样」对绝大多数器件是安全的——`robots/test/` 下 20 个夹具正是刻意这么写的。
+  同址采样」对绝大多数器件是安全的——`robots/test/` 下的夹具正是刻意这么写的（数量以目录为准）。
   真正需要单消费者的是**一次访问跨多个总线事务、器件侧留有相位/状态**的驱动。
   当前声明者与各自的失效形态（`grep -l '^SINGLE_CONSUMER' modules/*.lua` 即最新名单）：
 
@@ -67,7 +67,7 @@
 
 ### Q: 不接硬件也能开发吗？
 
-A: 可以。`bash test/run_all.sh` 用内存仿真（virtbus）与桩替身跑全部离线回归；`relay-test` 链路不需要任何硬件，先跑通它即可验证环境。详见 [virtbus.md](virtbus.md) 与 [testing.md](testing.md)。
+A: 可以。`./build/mybot_tests` 与 Lua/virtbus 单测不需要硬件；`relay-test` 链路也不需要，先跑通它即可验证环境。注意 `test/run_all.sh` 仍保留已移除的 TCP/agent 分段，当前整段可能不绿；开发时优先用 C++ 单测与按名过滤的 Lua 用例。详见 [virtbus.md](virtbus.md) 与 [testing.md](testing.md)。
 
 ### Q: 守护线程 publishes=0？
 
@@ -103,11 +103,6 @@ luajit scripts/scscl_scan.lua --raw             # 附原始字节 dump，用来�
 2. 在 `.mt` 里单开一行写 `set_id=N`（解锁 EPROM → 广播写号，断电重启生效；真机烧号只接目标舵机）
 3. 重启后把 `.sql` 的 `id` 改成 N
 
-### Q: agent 体系（`mybot-agent` + `--mcp-backend`）有什么限制？
+### Q: agent / MCP / Web SSH 还能用吗？
 
-A: 完整清单在 [agent.md](agent.md) 的「已知限制」与「安全说明」，这里只说两件最容易绊到的：
-
-- **`run_command`（任意 shell）缺省不注册**，只能由命令行 `--agent-shell` 显式开启——配置文件里写 `allow_shell: true` 会被**拒绝加载**（防「未经审查的落地文件同时改 endpoint 与开 shell」）；`capture_image` 也只有当 `--camera-var` 在结构脚本里解析到一个 **Lua 驱动**时才提供（没接摄像头就不提供，不拖累上电）。
-- **轮次上限**：单次任务受 `--llm-max-turns`（缺省 8，mybot-agent 选项）约束，到顶会报错而不是继续转圈。到顶时本轮历史**原样保留**——那些动作脚本已经真跑过、硬件不会倒回去，所以模型看得见自己做过什么；把任务拆小比调大上限更管用。模型输出缺省**流式**逐段打印（2026-09-25 起），`--llm-no-stream` 退回整段输出。
-
-接口超时用 `--llm-timeout`（1~600 秒，mybot-agent 选项），会话历史按字节预算裁剪（缺省 4 MiB，单张图另有 2 MiB 上限）。
+A: 不能。本分支是 controller-only 版本，`--mcp-backend`、`mybot-agent`、Web SSH、sim 与相关环境变量均已移除；相关文档（[agent.md](agent.md)、[webssh.md](webssh.md)、[sim.md](sim.md)、[ica.md](ica.md)）仅作历史存档。当前控制器只接受 `--robot` + 文件/stdin 动作脚本。

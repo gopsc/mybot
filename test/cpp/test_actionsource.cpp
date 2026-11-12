@@ -13,6 +13,7 @@
 #include <string>
 
 #include "actionsource.hpp"
+#include "cliargs.hpp"
 #include "harness.hpp"
 #include "matrix.hpp"
 #include "util_except.hpp"
@@ -73,6 +74,42 @@ TH_TEST(open_action_source_rejects_missing_input_file) {
 	bot::CliOptions opts;
 	opts.input = "./definitely-not-here-9f3a1c.mt";
 	TH_CHECK(bot::openActionSource(opts) == nullptr);
+}
+
+TH_TEST(cli_no_arguments_requests_help) {
+	char arg0[] = "mybot";
+	char* argv[] = {arg0};
+	bot::ParsedArgs parsed = bot::parseArgs(1, argv);
+	TH_CHECK(parsed.help);
+	TH_CHECK(parsed.errorCode == 0);
+}
+
+TH_TEST(cli_help_flag_works_without_robot) {
+	char arg0[] = "mybot";
+	char arg1[] = "--help";
+	char* argv[] = {arg0, arg1};
+	bot::ParsedArgs parsed = bot::parseArgs(2, argv);
+	TH_CHECK(parsed.help);
+}
+
+TH_TEST(cli_missing_robot_is_a_usage_error) {
+	char arg0[] = "mybot";
+	char arg1[] = "--input";
+	char arg2[] = "scripts/relay-test.mt";
+	char* argv[] = {arg0, arg1, arg2};
+	bot::ParsedArgs parsed = bot::parseArgs(3, argv);
+	TH_CHECK(parsed.errorCode == 2);
+	TH_CHECK(!parsed.help);
+}
+
+TH_TEST(cli_robot_is_parsed) {
+	char arg0[] = "mybot";
+	char arg1[] = "--robot=robots/relay-test.sql";
+	char* argv[] = {arg0, arg1};
+	bot::ParsedArgs parsed = bot::parseArgs(2, argv);
+	TH_CHECK(parsed.errorCode == 0);
+	TH_CHECK(parsed.opts.robot.has_value());
+	TH_CHECK(*parsed.opts.robot == "robots/relay-test.sql");
 }
 
 TH_TEST(safe_equals_matches_identical_strings) {

@@ -23,9 +23,10 @@ local ffi = require("ffi")
 local mpath = load_mpath()
 local bus = dofile(mpath.resolve("lib/bus_contract.lua"))
 local HAL = {
-    backend = "python", backend_name = "pyserial/pyftdi/urllib",
-    platform = { name = "portable", gpio_prefix = false, pwm_sysfs_root = false },
-    PWM_SYSFS_ROOT = false, i2c_addr = {}, uart_baud = {}, uart_orig = {}, pwm_state = {},
+    backend = "host", backend_name = "C++ HALManager (__hal_call)",
+    platform = { name = "linux", gpio_prefix = "/dev/gpiochip", pwm_sysfs_root = "/sys/class/pwm" },
+    PWM_SYSFS_ROOT = "/sys/class/pwm",
+    i2c_addr = {}, uart_baud = {}, uart_orig = {}, pwm_state = {},
     UART_READ_MAX_MS = bus.UART_READ_MAX_MS,
 }
 -- Compatibility tokens only: never used for native OS calls.
@@ -199,9 +200,71 @@ end
 function shell_run(fd, command, timeout_ms)
     return bridge("shell_run", tonumber(fd), command, timeout_ms)
 end
-for _, name in ipairs({ "gpio_request_line", "gpio_set_value", "gpio_get_value", "gpio_free_line",
-    "pwm_npwm", "pwm_exported", "pwm_export", "pwm_config", "pwm_set_polarity", "pwm_enable", "pwm_unexport",
-    "speaker_open", "speaker_write", "speaker_close" }) do
+-- GPIO/PWM 走宿主 C++ HAL（gpiod uAPI / sysfs），与 i2c/spi/uart 同一条
+-- __hal_call 桥。返回码按 FFI 后端契约归一：失败 -1/false，成功 int/bool。
+function gpio_request_line(chip, offset, direction, default_value, active_low)
+    return report(bridge("gpio_request_line", chip, offset, direction,
+        default_value == nil and 0 or default_value, active_low == true))
+end
+function gpio_set_value(hfd, v)
+    return bridge("gpio_set_value", tonumber(hfd), v) == true
+end
+function gpio_get_value(hfd)
+    local v = bridge("gpio_get_value", tonumber(hfd))
+    if v == nil or v == -1 then return -1 end
+    return tonumber(v)
+end
+function gpio_free_line(hfd)
+    bridge("gpio_free_line", tonumber(hfd))
+end
+
+local function pwm_key(chip, channel)
+    return tostring(chip) .. "/" .. tostring(channel)
+end
+function pwm_npwm(chip)
+    local v = bridge("pwm_npwm", tonumber(chip))
+    if v == nil or v == -1 then return nil end
+    return tonumber(v)
+end
+function pwm_exported(chip, channel)
+    return bridge("pwm_exported", tonumber(chip), tonumber(channel)) == true
+end
+function pwm_export(chip, channel)
+    return bridge("pwm_export", tonumber(chip), tonumber(channel)) == true
+end
+function pwm_config(chip, channel, freq_hz, duty_pct)
+    local r = bridge("pwm_config", tonumber(chip), tonumber(channel), freq_hz, duty_pct)
+    if type(r) ~= "table" or r[1] ~= true then return false end
+    local key = pwm_key(chip, channel)
+    local st = HAL.pwm_state[key] or {}
+    local f, d = bus.finite_of(freq_hz), bus.finite_of(duty_pct)
+    if f ~= nil then st.freq = f end
+    if d ~= nil then st.duty = d end
+    st.period_ns, st.duty_ns = tonumber(r[2]), tonumber(r[3])
+    HAL.pwm_state[key] = st
+    return true, st.period_ns, st.duty_ns
+end
+function pwm_set_polarity(chip, channel, inversed)
+    return bridge("pwm_set_polarity", tonumber(chip), tonumber(channel),
+        inversed == true) == true
+end
+function pwm_enable(chip, channel, on)
+    local ok = bridge("pwm_enable", tonumber(chip), tonumber(channel), on == true) == true
+    if ok then
+        local key = pwm_key(chip, channel)
+        local st = HAL.pwm_state[key] or {}
+        st.enabled = on == true
+        HAL.pwm_state[key] = st
+    end
+    return ok
+end
+function pwm_unexport(chip, channel)
+    local ok = bridge("pwm_unexport", tonumber(chip), tonumber(channel)) == true
+    if ok then HAL.pwm_state[pwm_key(chip, channel)] = nil end
+    return ok
+end
+
+for _, name in ipairs({ "speaker_open", "speaker_write", "speaker_close" }) do
     _G[name] = unsupported(name)
 end
 for _, name in ipairs({ "open", "ioctl_i", "ioctl_p", "read", "write", "errno",

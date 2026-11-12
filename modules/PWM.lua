@@ -28,8 +28,9 @@
 --           不给（'-'）则只配频率、保持关闭，等第一帧 call 再输出
 -- invert    '1' = 输出反相（低电平有效的驱动板）；缺省 normal
 --
--- call 参数：duty（0~100，优先）；也接受 value 作别名（与 GPIO 的列风格一致）；
---           frequency 可逐帧改频率；两者都省略时沿用上一次配置。
+-- call 参数：value（0~100，优先；动作脚本只能引入新键，不能覆盖结构列 duty）；
+--           duty 列由结构脚本提供、作为未给 value 时的缺省；frequency 可逐帧
+--           改频率；两者都省略时沿用上一次配置。
 -- 返回 { result, frequency, duty, period_ns, duty_ns, enabled }
 --
 -- 【引脚在哪里选】sysfs 没有"选引脚"这个属性——引脚由设备树静态绑定：
@@ -218,8 +219,10 @@ function call(data)
 	-- 都没有则沿用上一次配置（controller 转发场景可能不带 duty）
 	-- 审计 2026-09-20（中）：call 路径与 build 同款——非有限值必须拒绝，
 	-- 否则 pwm_config 的 `d < 0 or d > 100` 对 NaN 恒假、inf 亦放行。
-	local duty = finite_of(data.duty)
-	if duty == nil then duty = finite_of(data.value) end
+	-- 动作脚本不能覆盖结构元数据列 duty，故 data.duty 恒为结构缺省值；
+	-- 要让逐帧 duty 生效必须让 value（动作脚本可引入的新键）优先。
+	local duty = finite_of(data.value)
+	if duty == nil then duty = finite_of(data.duty) end
 	if duty == nil then duty = cur_duty end
 	if duty < 0 or duty > 100 then
 		return err("Invalid Argument: duty (expect 0~100, got " .. tostring(duty) .. ")")

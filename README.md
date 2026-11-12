@@ -24,11 +24,11 @@ sudo apt install cmake g++ ninja-build luajit libluajit-5.1-dev \
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j4
-ctest --test-dir build --output-on-failure
+(cd build && ctest --output-on-failure)
 ./build/mybot --help
 ```
 
-当前基线：**562 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
+当前基线：**568 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
 
 ## 快速开始
 
@@ -64,7 +64,7 @@ cat action.mt | mybot --robot <结构脚本.sql> [选项]
 | `--var-env NAME=ENVVAR` | 从环境变量读取会话别名（可重复） |
 | `--help, -h` | 帮助 |
 
-所有诊断写 stderr；退出码 `0` 成功、`1` 运行错误、`2` 用法错误。
+所有诊断写 stderr；退出码 `0` 成功、`1` 运行错误、`2` 用法错误；第二次 SIGINT/SIGTERM 为强杀逃生口，以信号退出。
 
 ## FTDI
 
@@ -133,6 +133,7 @@ Structure SQL (SQLite3 + DSL 归一化) → MatrixObject 表
 - `@Struct(name)` JSON 声明：字段/数组下标选择（`$(cfg.field)`、`$(cfg.items[0])`）与结构字段捕获
 - MT 带引号单元格（引号内空格、`;`、`#` 不分格）
 - 原生 Time/LoopbackProbe/Shell/HTTP/TCP/Dev_enum/I2C_scan 驱动
+- GPIO（gpiod uAPI v1）与 PWM（Linux sysfs）经宿主 C++ HAL
 - FTDI `ftdi://` I2C/SPI（libftdi1 MPSSE GPIO 位操作；SPI 支持 8 位字、mode 0..3、`?cs=0..4`）
 
 尚未提供：

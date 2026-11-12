@@ -4,6 +4,10 @@
  * 所有操作名与当前 Python HAL 保持一致，Lua 驱动通过宿主注入的 __hal_call
  * 调用这里。物理设备、非回环网络和宿主 Shell 默认允许；virt-* / loop://
  * 与回环地址照常可用。
+ *
+ * GPIO/PWM 自 2026-11 起也走本层：GPIO 用 gpiod uAPI v1（/dev/gpiochipN
+ * ioctl），PWM 用 Linux sysfs（/sys/class/pwm）。两者此前只在独立 luajit
+ * 测试的 HAL_ffi 回退后端里可用，宿主运行期会报 unsupported。
  */
 
 #include <cstdint>
@@ -24,11 +28,13 @@ public:
 	HALManager& operator=(const HALManager&) = delete;
 
 	/* 返回值约定：
-	 *   open/setup/close/sleep → JSON int
+	 *   open/setup/close/sleep、gpio_request_line、pwm_npwm → JSON int/null
 	 *   i2c/spi/uart 读 → JSON array 或 null
+	 *   gpio_set_value、pwm_export/exported/enable/set_polarity/unexport → JSON bool
+	 *   pwm_config → [true, period_ns, duty_ns] 或 false
 	 *   tcp_write/tcp_read/http_request/shell_run → JSON object
 	 *   last_error → JSON string
-	 * 异常在内部折成与 Python HAL 相同的失败形态。 */
+	 * 异常在内部折成与 Lua HAL 相同的失败形态。 */
 	Json call(const std::string& operation, const std::vector<Json>& args,
 		int owner = 0);
 
@@ -49,6 +55,7 @@ public:
 	static constexpr int kShellMaxCmdBytes = 64 * 1024;
 	static constexpr int kShellMaxOutBytes = 1024 * 1024;
 	static constexpr int kShellTimeoutMs = 60000;
+	static constexpr int kPwmMaxId = 65535;
 
 private:
 	struct Resource;
@@ -60,6 +67,20 @@ private:
 	Json opSpiSetup(const Json& handle, const Json& mode,
 		const Json& bits, const Json& speed);
 	Json opSpiTransfer(const Json& handle, const Json& data, const Json& delayUs);
+	Json opGpioRequestLine(const Json& chip, const Json& offset,
+		const Json& direction, const Json& defaultValue, const Json& activeLow,
+		int owner);
+	Json opGpioSetValue(const Json& handle, const Json& value);
+	Json opGpioGetValue(const Json& handle);
+	Json opGpioFreeLine(const Json& handle);
+	Json opPwmNpwm(const Json& chip);
+	Json opPwmExported(const Json& chip, const Json& channel);
+	Json opPwmExport(const Json& chip, const Json& channel);
+	Json opPwmConfig(const Json& chip, const Json& channel,
+		const Json& frequency, const Json& duty);
+	Json opPwmSetPolarity(const Json& chip, const Json& channel, const Json& inversed);
+	Json opPwmEnable(const Json& chip, const Json& channel, const Json& on);
+	Json opPwmUnexport(const Json& chip, const Json& channel);
 	Json opUartOpen(const Json& path, const Json& baud, const Json& virtualFlag,
 		int owner);
 	Json opUartWrite(const Json& handle, const Json& data);

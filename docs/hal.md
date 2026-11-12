@@ -1,6 +1,11 @@
 # HAL：基层硬件抽象
 
-> 本文介绍 bot4cj 硬件抽象层 `modules/lib/HAL.lua` 的实现原理、接口契约与驱动沙箱。[README](../README.md) 只留入口链接，实现细节以本文为准。
+> 本文介绍 mybot 硬件抽象层的实现原理、接口契约与驱动沙箱。[README](../README.md) 只留入口链接，实现细节以本文为准。
+
+## 两条运行路径（2026-11 起）
+
+- **`mybot` 宿主运行期**：`modules/lib/HAL.lua` 在加载时捕获宿主注入的 `__hal_call`，随后所有物理操作进入 C++ `HALManager`（`src/hal.cpp`）。I2C/SPI/UART/TCP/HTTP/Shell/GPIO/PWM 都走这条路径；Lua 侧只保留参数归一化与驱动契约。
+- **独立 `luajit test/*.lua`**：没有宿主桥时 `HAL.lua` 回退到 `modules/lib/HAL_ffi.lua`。下文关于 ffi 直调 glibc、`BOT4CJ_HAL_BACKEND`、ioctl 常量与 ABI 尺寸断言的细节，**只适用于这条回退路径**；宿主运行期的 GPIO/PWM 已由 C++ HAL 提供。
 
 ## 概述
 
@@ -19,9 +24,11 @@
 - 参数先归一化（字节 0~255、非负整数）再进 ioctl/缓冲区，设备路径走白名单正则；非法参数打印诊断并显式失败，不静默钳制
 - 结构体尺寸与 ioctl 常量经 `test_ioctl_nums.c` / `test_uart_consts.c` 与系统头文件实证；尺寸断言在加载期执行（spi_ioc_transfer=32、i2c_msg=16、gpiohandle_request=364、termios=60），ABI 漂移立即失败
 
-**文件布局（26.2 按域拆分）**：`modules/lib/HAL.lua` 是**聚合门面**——只留加载期接线
-（LuaJIT/ffi 环境检查、重入口守卫、后端派发、常量重导出、`bus_contract` 接线、
-`milli_sleep`、停机灭火判定 `bus_quiesced`），五个总线域各一文件：
+**文件布局（26.2 按域拆分）**：`modules/lib/HAL_ffi.lua` 是**独立回退路径的聚合门面**——
+只留加载期接线（LuaJIT/ffi 环境检查、重入口守卫、后端派发、常量重导出、
+`bus_contract` 接线、`milli_sleep`、停机灭火判定 `bus_quiesced`），五个总线域各一文件。
+宿主运行期的 `modules/lib/HAL.lua` 只加载 `hal/i2c.lua` 与 `hal/spi.lua`，
+UART 在门面内直接实现，GPIO/PWM 经 `__hal_call` 转 C++ HAL：
 
 | 文件 | 域 | 段内私有 helper |
 | ---- | -- | -------------- |
@@ -48,12 +55,12 @@
 | SPI | spidev ioctl；mode/bits/speed 经 ioctl 持久化在 fd，`delay_us` 无 per-fd 持久化途径、由驱动在每次传输显式传入（`spi_write*`/`spi_read*`/`spi_xfer_full` 尾参） |
 | GPIO | 内核 gpiod uAPI v1（`/dev/gpiochipN` ioctl，deprecated 但全内核支持）；offset 必须为非负整数（小数会被 uint32 静默截断成另一个线号，显式拒绝） |
 | UART | termios raw 8N1 + 非阻塞（VMIN=0/VTIME=1）；另有多条易踩坑约束，见下方要点 |
-| PWM | sysfs（`/sys/class/pwm/pwmchipN/pwmM`，ffi 直写、不经 io 库）；写序固定 duty=0 → period → duty_cycle（否则降频被 EINVAL 拒绝）；export 前置校验 npwm 范围，errno 给人话提示 |
+| PWM | sysfs（`/sys/class/pwm/pwmchipN/pwmM`）；宿主 C++ HAL 与 `HAL_ffi` 回退共用同一路径与写序：duty=0 → period → duty_cycle（否则降频被 EINVAL 拒绝）；export 前置校验 npwm 范围 |
 
 UART 的易踩坑约束：
 
 - open 时快照原始 termios，close 先恢复再关闭——板载 UART 的配置跨 close 保留在 tty 上
-- 波特率必须传 glibc `B*` 常量（`UART_B_CONST` 映射）：缺失/非法即失败，数值 Hz 会被 EINVAL 静默忽略
+- `HAL_ffi` 回退路径的波特率必须传 glibc `B*` 常量（`UART_B_CONST` 映射）：缺失/非法即失败，数值 Hz 会被 EINVAL 静默忽略；宿主 C++ HAL 的 `uart_open` 收数值 Hz，由 `src/hal.cpp` 的 `baudToSpeed` 映射
 - 读取按 1ms 步进轮询，`timeout_ms` 超 `UART_READ_MAX_MS`（60000）显式失败
 
 **合并读长度上限**：`i2c_read` / `i2c_read_multi` / `i2c_read_reg16` / `spi_read_multi` 的大端合并值受 2^53 精度限制，n 有效范围 **1~6**，越界显式失败（静默钳制会被调用方的拆字节数学放大成错误数据）；更长块读取用字节表族 `i2c_read_bytes` / `i2c_read_multi_bytes`（n 钳 1~16，表长对调用方可见）或 `spi_xfer_full`（全双工帧，返回等长字节表）。
@@ -72,15 +79,17 @@ UART 的易踩坑约束：
 
 ## 驱动沙箱
 
-加载驱动**前**先中和 `os.execute`/`io.popen`（shell）、`os.exit`、`io.open`/`io.lines`/`io.input`/`io.output`/`os.remove`/`os.rename`（任意文件读写）、`os.tmpname`（可预测临时路径，符号链接竞争面；全仓驱动无一使用）——沙箱态统一由 `src/luasandbox.cpp` 的 `openSandboxedState()` 建立（`luaL_newstate` + `luaL_openlibs` + `sandbox_lua`；N-17 由原 `luaend.cpp` 拆出），`luavar.cpp` / `daemonvar.cpp` 都取它，调用方随后 `luaL_loadfile` + `lua_pcall`。这是**防误用护栏，不是安全边界**——驱动可经 `require("ffi")` 直调任意 libc，脚本均为可信输入；接入 `--tcp` 外部数据源时需另行建立信任边界。
+加载驱动**前**先中和 `os.execute`/`io.popen`（shell）、`os.exit`、`io.open`/`io.lines`/`io.input`/`io.output`/`os.remove`/`os.rename`（任意文件读写）、`os.tmpname`（可预测临时路径，符号链接竞争面；全仓驱动无一使用）——沙箱态统一由 `src/luasandbox.cpp` 的 `openSandboxedState()` 建立（`luaL_newstate` + `luaL_openlibs` + `sandbox_lua`；N-17 由原 `luaend.cpp` 拆出），`luavar.cpp` / `daemonvar.cpp` 都取它，调用方随后 `luaL_loadfile` + `lua_pcall`。这是**防误用护栏，不是安全边界**——驱动可经 `require("ffi")` 直调任意 libc，脚本均为可信输入；接入任何不可信外部输入源时需另行建立信任边界。
 
 **信任边界（S1）**：`ffi.C` 即整个 libc——`ffi.C.system("...")`、`ffi.C.open(path, 0)` 一行即可绕过上述全部中和，`ffi.cast` 更可任意地址读写。因此**驱动脚本必须视为完全信任的代码**，沙箱仅防误写。
 
 **信任前提体检（BQ-2，2026-09-29 审计 P2-2 收口）**：既然「驱动文件可信」是沙箱唯一的前提，前提被削弱就必须看得见——三个 C++ 加载点（`luavar.cpp` 的驱动加载、`daemonvar.cpp` 的守护 chunk 加载、`luasandbox.cpp` 的白名单 dofile/loadfile）在加载前经 `util_file.hpp` 的 `auditTrustedFilePath` 体检：文件**组或其他人可写**（mode 含 `0022`）即响亮告警一次（不阻断——umask 002 的共享组开发属操作者自担，但必须看见）。告警意味着任何本机用户都能改写「等效于宿主进程本身」的代码。`os.getenv` / `io.read` / `io.write` 等 Lua 级入口**有意保留**不动：ffi 面前包一层 Lua 白名单只防误用不防恶意（`ffi.C.getenv` 一样直达），化了装反而误导；运行时开关类变量（`BOT4CJ_DEBUG` / `BOT4CJ_CAMERA_SRC_DIR` 等）本就是它们的正当用途。
 
-**总线并发边界与停机灭火（BQ-1，2026-09-29 审计 P2-3 收口）**：主线程驱动与守护线程对同一 `/dev/i2c-*` 的**单次传输**由内核 adapter 锁串行；不同器件的传输交错（各自带从地址）不构成破坏，**同一器件被两线程并发访问不是受支持的配置**——唯一的既定场景是停机序列：弃管守护与硬件销毁并发。对此的收口是**灭火协议**：守护共享槽新增 `quiesce` 位（`daemonvar.hpp`，offset 592；与 `stop` 分离——`stop` 是「请退出」，宽限内退场的守护还要跑 `daemon_cleanup` 做去初始化，传输必须放行；`quiesce` 是「物理隔离」，只给确定要与硬件销毁并发的那批）。`DaemonRunner` 停机序列重排为「requestStopAndWait 等待（不弃管）→ finishTeardown 宽限 → 仍未退场才灭火弃管」，灭火后该守护 lua_State 里 HAL 的一切真实总线传输（`i2c_rdwr` / `spi_xfer` / `uart_read/write`，持槽锁读）在进内核前被拒绝；`open/close` 不受约束（退出路径要能关 fd）。竞态窗口从「无界」收敛到「灭火时刻的在途单次传输」；已进入 D 态 ioctl 的那一笔是用户态无法收回的残余。virt 仿真路径不受 `quiesce` 约束（无物理副作用）。回归：`test/test_hal_quiesce.lua`（mock 三族传输 + 零内核调用断言）、`test/cpp/test_daemon.cpp` 的 `finishTeardown` 两态用例。
+**总线并发边界与停机灭火（BQ-1，2026-09-29 审计 P2-3 收口）**：主线程驱动与守护线程对同一 `/dev/i2c-*` 的**单次传输**由内核 adapter 锁串行；不同器件的传输交错（各自带从地址）不构成破坏，**同一器件被两线程并发访问不是受支持的配置**——唯一的既定场景是停机序列：弃管守护与硬件销毁并发。对此的收口是**灭火协议**：守护共享槽新增 `quiesce` 位（`daemonvar.hpp`，ABI v2 offset 92；与 `stop` 分离——`stop` 是「请退出」，宽限内退场的守护还要跑 `daemon_cleanup` 做去初始化，传输必须放行；`quiesce` 是「物理隔离」，只给确定要与硬件销毁并发的那批）。`DaemonRunner` 停机序列重排为「requestStopAndWait 等待（不弃管）→ finishTeardown 宽限 → 仍未退场才灭火弃管」，灭火后该守护 lua_State 里 HAL 的一切真实总线传输（`i2c_rdwr` / `spi_xfer` / `uart_read/write`，持槽锁读）在进内核前被拒绝；`open/close` 不受约束（退出路径要能关 fd）。竞态窗口从「无界」收敛到「灭火时刻的在途单次传输」；已进入 D 态 ioctl 的那一笔是用户态无法收回的残余。virt 仿真路径不受 `quiesce` 约束（无物理副作用）。回归：`test/test_hal_quiesce.lua`（mock 三族传输 + 零内核调用断言）、`test/cpp/test_daemon.cpp` 的 `finishTeardown` 两态用例。
 
-- 当前威胁模型下成立：驱动/chunk 文件名只取自本地 `.sql`/`.mt` 表名，远程 TCP 下发的动作数据无法注入 Lua 加载路径
+> **实现边界（2026-11 核对）**：上述“灭火后拒绝真实总线传输”目前由 `HAL_ffi.lua` 回退路径实现（`bus_quiesced` 检查）；宿主 `HAL.lua` 的 portable 分支仍把 `bus_quiesced` 固定为 `false`，C++ `HALManager` 也尚未读取槽位。宿主运行期该条防线目前**未生效**，弃管守护的超时告警仍会打印，但后续总线调用不会被 quiesce 拦截。要把这条安全保证扩展到宿主，需要在 C++ HAL 的 i2c/spi/uart 传输入口接入槽位检查。
+
+- 当前威胁模型下成立：驱动/chunk 文件名只取自本地 `.sql`/`.mt` 表名，动作数据无法注入 Lua 加载路径
 - 两个失效条件（引入任何一条前须先补回归测试钉死）：`BOT4CJ_MODULE_PATH` 指向不可信目录；未来新增远程选择驱动文件的入口
 - 另注：白名单前缀匹配不解析 symlink
 

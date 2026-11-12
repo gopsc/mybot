@@ -2,7 +2,7 @@
 
 > **清单与计数以 `modules/` 目录为准**（本页是速查索引，可能滞后于代码；`ls modules/*.lua` 即权威清单）。结构脚本里每张 `CREATE TABLE <矩阵名>` 对应加载 `modules/<矩阵名>.lua`。各驱动的协议细节与其内嵌 `<矩阵名>_VIRT` 仿真模型见 [virtbus.md](virtbus.md)。
 >
-> **计数口径**（README 与架构页引用的数字按此推导，可复算）：`ls modules/*.lua` = 60 = **49 款器件/执行器/系统接口驱动**（本页前六节：舵机/输出 13 + IMU 6 + 气压/环境/光 11 + 测距/闪电 3 + ADC/电源 11 + 气体/医疗/其他 5）+ **3 条总线**（`I2C`/`SPI`/`UART`）+ **8 个框架/工具驱动**（`Relay`/`dummy`/`Monitor`/`Kalman`/`Ema`/`bitcompat`/`Camera`/`Sim`，即最后一节；2026-09-25 #8 起 Lua 协议驱动轨道已删，`LlmOpenAI`/`LlmDeepSeek`/`LlmAnthropic` 不再有对应 `.lua` 文件）。注意 `GPIO`/`PWM`/`Speaker` 是**系统接口/执行器驱动**、归在 49 里（不是总线）；`bitcompat` 是纯 Lua 兼容库、不在 `lib/` 下。`modules/lib/` 另有 29 个共享库（`find modules/lib -name '*.lua' | wc -l`，含 `asound`、`virtbus/regmap.lua` 与 `hal/` 下 5 个总线域分块），不计入 60。本页各节点名的模块集合与 `ls modules/*.lua` **双向**相等、以及上面这串分项数字，都由 `scripts/check_doc_paths.py` 逐次核对（漏登记一个新驱动、留着一个已删驱动、或分项加起来对不上总数，都判失败；见 [testing.md](testing.md)「跨源一致性校验」）。
+> **计数口径**（README 与架构页引用的数字按此推导，可复算）：`ls modules/*.lua` = 61 = **49 款器件/执行器/系统接口驱动**（本页前六节：舵机/输出 13 + IMU 6 + 气压/环境/光 11 + 测距/闪电 3 + ADC/电源 11 + 气体/医疗/其他 5）+ **3 条总线**（`I2C`/`SPI`/`UART`）+ **9 个框架/工具驱动**（`Relay`/`dummy`/`Monitor`/`Kalman`/`Ema`/`bitcompat`/`Camera`/`Sim`/`SpiProbe`，即最后一节；2026-09-25 #8 起 Lua 协议驱动轨道已删，`LlmOpenAI`/`LlmDeepSeek`/`LlmAnthropic` 不再有对应 `.lua` 文件）。注意 `GPIO`/`PWM`/`Speaker` 是**系统接口/执行器驱动**、归在 49 里（不是总线）；`bitcompat` 是纯 Lua 兼容库、不在 `lib/` 下。`modules/lib/` 另有 30 个共享库（`find modules/lib -name '*.lua' | wc -l`，含 `asound`、`virtbus/regmap.lua` 与 `hal/` 下 5 个总线域分块），不计入 61。本页各节点名的模块集合与 `ls modules/*.lua` 双向核对（`scripts/check_doc_paths.py` 当前仍按旧版全仓路径检查，controller-only 分支需先修脚本才能作为守门证据）。
 
 ## 舵机 / 输出执行器
 
@@ -17,8 +17,8 @@
 | `TPL0501` | 256 抽头数字电位器（SPI，写-only） |
 | `PCF8574` | 8 位准双向 IO 扩展器（I2C） |
 | `LCD1206` | 16x2 字符液晶（HD44780 + PCF8574 I2C 背包，4 位模式）：清屏 / 背光 / 分行文本 |
-| `GPIO` | Linux GPIO |
-| `PWM` | Linux PWM |
+| `GPIO` | Linux GPIO（gpiod uAPI v1，宿主 C++ HAL 提供 `/dev/gpiochipN` ioctl） |
+| `PWM` | Linux PWM（sysfs `/sys/class/pwm`，宿主 C++ HAL 提供；根目录可用 `BOT4CJ_PWM_SYSFS_ROOT` 覆盖） |
 | `H03ARR` | H03A 电机驱动 |
 | `Speaker` | 声卡音频输出（ALSA ffi 直驱，经 `lib/asound.lua`）：预设波形（sine/square/triangle/sawtooth/noise/silence）+ 音调 + 时长阻塞播放；`simulate='1'` 为仿真模式 |
 
@@ -88,18 +88,17 @@
 | 模块 | 说明 |
 | --- | --- |
 | `I2C` / `SPI` / `UART` | 总线变量，器件行以 `$` 引用挂载 |
+| `SpiProbe` | SPI 回环/诊断探针：向 `SPI` 总线发一个字节并读回 `rx`；MOSI/MISO 短接即回环验证 |
 | `Relay` | 参数转换转发（无硬件自检链路的一端） |
 | `dummy` | 桩替身，打印参数即返回 |
 | `Kalman` | 一维卡尔曼滤波（虚拟传感器，配 `Q`/`R`） |
 | `Ema` | 指数移动平均（配 `alpha`∈(0,1]） |
 | `Monitor` | 消费 `$` 引用快照的观察/决策变量 |
 | `bitcompat` | Lua 5.1/5.3 位运算兼容库（非驱动） |
-| `Camera` | **摄像头驱动**：V4L2 mmap 取帧、只取硬件编码的 MJPEG（ffi，无第三方库）；`src=<图片>` 为仿真模式。agent 模式的 `capture_image` 工具用它。调用参数可带 `width`/`height`（正整数，须同给同缺）：与上次请求不同即重开设备重协商 `VIDIOC_S_FMT`，返回表报**实际协商尺寸**（设备可能就近调档） |
-| `Sim` | **仿真器桥接驱动**：把语义动作以行文本发到 `mybot-sim`（`sim/` 下的 GLFW 蜘蛛仿真器）的 AF_UNIX socket，只传「动作 + 速度」不传关节角。`range` 走独立 sensor socket；**仿真器缺席＝静默成功**（可视化从端不该打断动作脚本），感知侧相反。协议、动作码 0–10 与场景持久化见 [sim.md](sim.md) |
+| `Camera` | **摄像头驱动**：V4L2 mmap 取帧、只取硬件编码的 MJPEG（ffi，无第三方库）；`src=<图片>` 为仿真模式。调用参数可带 `width`/`height`（正整数，须同给同缺）：与上次请求不同即重开设备重协商 `VIDIOC_S_FMT`，返回表报**实际协商尺寸**（设备可能就近调档） |
+| `Sim` | **仿真器桥接驱动**：把语义动作以行文本发到外部 `mybot-sim` 的 AF_UNIX socket，只传「动作 + 速度」不传关节角。`range` 走独立 sensor socket；**仿真器缺席＝静默成功**（可视化从端不该打断动作脚本），感知侧相反。协议、动作码 0–10 与场景持久化见历史文档 [sim.md](sim.md)；本仓不包含仿真器服务端 |
 
 > 不依赖 HAL 的模块（如滤波器、virtbus 底座）可用 `luajit`/`lua5.4` 独立调试。
-> 模型协议族（OpenAI 兼容 / DeepSeek / Anthropic）由 Rust agent 内建（`agent/src/provider.rs`），
-> 2026-09-25 #8 起不再有 Lua 协议驱动；切换方式与安全边界见 [agent.md](agent.md)。
 
 ## 驱动契约
 
@@ -271,7 +270,7 @@ end
 ```
 
 收尾不是校验：器件可能因 build 失败或总线先行释放而拿不到 `fd`，此时报 ERR
-会把正常收尾变成失败（`--tcp` 会话下即退出码非零）。
+会把正常收尾变成失败（进程退出码非零）。
 
 **例外**：下列驱动的 `destroy` 在**器件状态收尾失败**时会返回 ERR（不适用「静默 OK」）——
 改动它们前先确认对应回归用例与器件语义：
