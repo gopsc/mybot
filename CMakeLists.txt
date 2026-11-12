@@ -234,6 +234,7 @@ add_executable(mybot_tests
   test/cpp/test_daemon_concurrency.cpp
   test/cpp/test_mtmerge.cpp
   test/cpp/test_mtinclude.cpp
+  test/cpp/test_sql_engine.cpp
   src/mtmerge_core.cpp
   ${MYBOT_CORE_SOURCES}
 )
