@@ -72,7 +72,7 @@ class HwFactory {
 	 * fromRow 是**首个待装配的行号**（1 = 全量；热插表的增量装配传旧行数），
 	 * 行 0 恒为列头。 */
 	void registerScalarMatrix(const mt::MatrixObject& matrix, std::set<std::string>* session,
-			ScalarKind kind, std::int64_t fromRow);
+			ScalarKind kind, std::int64_t fromRow, bool local = false);
 
 public:
 	/* 守护侧缺省值（2026-09-21 第七轮审计）。单消费者判据遇到 Daemon 行**缺列**时
@@ -112,13 +112,15 @@ public:
 	static void precheckStructure(const std::deque<mt::MatrixObject>& matrices);
 
 	/* 注册 @Alias 别名矩阵 */
-	void registerAliasMatrix(const mt::MatrixObject& matrix, std::set<std::string>* session) {
-		registerScalarMatrix(matrix, session, ScalarKind::Alias, 1);
+	void registerAliasMatrix(const mt::MatrixObject& matrix, std::set<std::string>* session,
+			bool local = false) {
+		registerScalarMatrix(matrix, session, ScalarKind::Alias, 1, local);
 	}
 
 	/* 注册 @Vars 命名数值矩阵 */
-	void registerVarsMatrix(const mt::MatrixObject& matrix, std::set<std::string>* session) {
-		registerScalarMatrix(matrix, session, ScalarKind::Vars, 1);
+	void registerVarsMatrix(const mt::MatrixObject& matrix, std::set<std::string>* session,
+			bool local = false) {
+		registerScalarMatrix(matrix, session, ScalarKind::Vars, 1, local);
 	}
 };
 

@@ -211,8 +211,11 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 	else if (!nl_ && c == ';') {
 		dataBuilder().submitItem();
 		dataBuilder().submitLine(count);
-		/* 控制帧的直接行落进 pendingAction：标记有行，供 flushPending 合成隐式 @Action */
-		if (!stack_.empty() && stack_.back().isControl) { stack_.back().pendingHasRows = true; }
+		/* 控制/compound 帧的直接行落进 pendingAction：标记有行，供 flushPending
+		 * 合成隐式 @Action。 */
+		if (!stack_.empty() && (stack_.back().isControl || stack_.back().compound)) {
+			stack_.back().pendingHasRows = true;
+		}
 		nl_ = true;
 	}
 	else if (!nl_) {
@@ -226,13 +229,13 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 MatrixBuilder& MatrixParser::dataBuilder() {
 	if (stack_.empty()) { return scratch_; }
 	Frame& f = stack_.back();
-	return f.isControl ? f.pendingAction : f.self;
+	return (f.isControl || f.compound) ? f.pendingAction : f.self;
 }
 
 /* 控制帧：把当前直接行run冲刷成一个隐式 @Action 子块（名字已在开帧时置 "Action"），
  * 并复位 pendingAction 以接收下一段行run（子块之后的直接行 → 下一个隐式 @Action）。 */
 void MatrixParser::flushPending(Frame& f) {
-	if (f.isControl && f.pendingHasRows) {
+	if ((f.isControl || f.compound) && f.pendingHasRows) {
 		f.children.push_back(f.pendingAction.take());
 		f.pendingAction = MatrixBuilder();
 		f.pendingAction.name("Action");
@@ -254,16 +257,27 @@ void MatrixParser::commitHeader(const std::string& hdr) {
 	}
 	/* 开块 */
 	if (!stack_.empty()) {
-		if (!stack_.back().isControl) {
-			throw bot::IllegalArgumentException("叶子块 @" + stack_.back().name
-				+ " 内不能嵌套 @" + hdr + "：只有 @if/@while 能含子块，"
-				+ "@Action/@Alias/@Vars 等叶子块的体只能是数据行");
+		Frame& parent = stack_.back();
+		if (!parent.isControl && parent.name != "Action") {
+			throw bot::IllegalArgumentException("叶子块 @" + parent.name
+				+ " 内不能嵌套 @" + hdr + "：只有 @Action/@if/@while 能含子块，"
+				+ "@Alias/@Vars 等叶子块的体只能是数据行");
 		}
 		if (stack_.size() + 1 > kMaxBlockDepth) {
 			throw bot::IllegalArgumentException("@块嵌套深度超过上限 "
 				+ std::to_string(kMaxBlockDepth) + "（在 @" + hdr + "）");
 		}
-		flushPending(stack_.back());	/* 子块打断父控制帧当前的直接行run */
+		/* 当前 Python 文法：@Action 体内可混排直接矩阵与嵌套块。首次遇到子块
+		 * 时把已写入的网格落成一个隐式 @Action 子块，之后直接行进入
+		 * pendingAction，从而保持「直接行与子块按书写序交错」。 */
+		if (parent.name == "Action" && !parent.compound) {
+			if (parent.self.hasRows()) {
+				parent.children.push_back(parent.self.take());
+			}
+			parent.compound = true;
+			parent.pendingAction.name("Action");
+		}
+		flushPending(parent);	/* 子块打断父控制/compound 帧当前的直接行run */
 	}
 	Frame f;
 	f.name = hdr;
@@ -279,7 +293,7 @@ void MatrixParser::closeFrame() {
 	Frame f = std::move(stack_.back());
 	stack_.pop_back();
 	MatrixObject m;
-	if (f.isControl) {
+	if (f.isControl || f.compound) {
 		flushPending(f);	/* 收尾：尾部直接行run → 最后一个隐式 @Action 子块 */
 		MatrixBuilder b;
 		b.name(f.name);

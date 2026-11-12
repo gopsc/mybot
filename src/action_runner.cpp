@@ -12,6 +12,7 @@
 #include <string_view>
 #include <utility>
 
+#include "hw_factory.hpp"
 #include "util_env.hpp"
 #include "util_num.hpp"
 
@@ -359,14 +360,53 @@ std::size_t countActionRows(const std::vector<mt::MatrixObject>& seq) {
  *     覆盖层的新值——「捕获改 @Vars → 条件转假」是收敛的 idiomatic 手段。
  *     无迭代上限（仅 Ctrl-C 终止）：静态真条件且块体不推进即热循环。
  * 返回本层是否遇到可执行块（Action/if/while）——仅顶层用于 "No @Action" 判定。 */
-bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq) {
+bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool scoped) {
+	/* 块级词法作用域（对齐当前 Python）：本层直接子块里的 @Alias/@Vars 在
+	 * 进入时统一注册，退出（含异常）只恢复这些名字的旧覆盖；未列出的捕获
+	 * 写入保留。顶层 false——顶层声明由 RobotStruct::run 预注册。 */
+	std::unique_ptr<HwRegistry::ScopedNames> declarationScope;
+	std::set<std::string> localSession;
+	if (scoped) {
+		std::vector<const mt::MatrixObject*> declarations;
+		std::vector<std::string> names;
+		std::set<std::string> uniqueNames;
+		for (const mt::MatrixObject& m : seq) {
+			const std::string blockName = bot::trim(m.getName());
+			if (blockName != "Alias" && blockName != "Vars") { continue; }
+			declarations.push_back(&m);
+			const std::int64_t idx = m.indexOfCol(0, "name");
+			if (idx < 0) { continue; }
+			for (std::int64_t i = 1; i < static_cast<std::int64_t>(m.rows()); ++i) {
+				const std::string name = m(i, idx);
+				if (uniqueNames.insert(name).second) { names.push_back(name); }
+			}
+		}
+		if (!declarations.empty()) {
+			if (factory_ == nullptr) {
+				throw IllegalArgumentException(
+					"Block-scoped @Alias/@Vars requires a hardware factory");
+			}
+			declarationScope = std::make_unique<HwRegistry::ScopedNames>(registry_, names);
+			for (const mt::MatrixObject* matrix : declarations) {
+				if (bot::trim(matrix->getName()) == "Alias") {
+					factory_->registerAliasMatrix(*matrix, &localSession, true);
+				} else {
+					factory_->registerVarsMatrix(*matrix, &localSession, true);
+				}
+			}
+		}
+	}
 	bool sawActionable = false;
 	for (const mt::MatrixObject& m : seq) {
 		if (stopRequested()) { break; }	/* Ctrl-C：逐层及时跳出，不再进后续块 */
 		const std::string name = bot::trim(m.getName());
+		if (name == "Alias" || name == "Vars") { continue; }	/* 本层声明已提升注册 */
 		if (name == "Action") {
-			dispatchMatrix(m);
 			sawActionable = true;
+			/* 普通 @Action：自身网格即一段动作。compound @Action（体内混排了
+			 * @Alias/@Vars/@if/@while 等子块）：网格为空，按书写序执行 children。 */
+			if (m.rows() > 1) { dispatchMatrix(m); }
+			if (m.hasChildren()) { execSequence(m.children()); }
 			continue;
 		}
 		if (auto cond = parseIfBlockName(m.getName())) {
@@ -411,7 +451,7 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq) {
  * 整棵顶层序列没有任何可执行块（Action/if/while）时，若有 @Trigger 则反射
  * 独立成立（直接返回，runReflex 接手），否则响亮报错。 */
 void ActionRunner::runAction(std::vector<mt::MatrixObject>& actionMatrices) {
-	bool sawActionable = execSequence(actionMatrices);
+	bool sawActionable = execSequence(actionMatrices, false);
 	if (!sawActionable) {
 		if (mt::findByName(actionMatrices, "Trigger") != nullptr) { return; }
 		throw IllegalArgumentException("No @Action matrix found in the script. Please define @Action in your .mt file.");

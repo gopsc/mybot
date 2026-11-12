@@ -196,4 +196,28 @@ double resolveVarsNumber(const HwRegistry* reg, const std::string& name) {
 }
 } // namespace
 
+HwRegistry::ScopedNames::ScopedNames(HwRegistry& reg, const std::vector<std::string>& names)
+	: reg_(&reg) {
+	for (const std::string& name : names) {
+		Saved saved;
+		saved.name = name;
+		auto found = reg_->session_.find(name);
+		if (found != reg_->session_.end()) {
+			saved.value = std::move(found->second);
+			reg_->session_.erase(found);
+		}
+		saved_.push_back(std::move(saved));
+	}
+}
+
+HwRegistry::ScopedNames::~ScopedNames() {
+	for (Saved& saved : saved_) {
+		if (saved.value != nullptr) {
+			reg_->session_[saved.name] = std::move(saved.value);
+		} else {
+			reg_->session_.erase(saved.name);
+		}
+	}
+}
+
 } // namespace bot

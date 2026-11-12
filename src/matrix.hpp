@@ -208,6 +208,8 @@ public:
 	 * 显式子块按书写顺序入列）。Stage 1 惰性加入，尚无调用方。 */
 	void addChild(MatrixObject child) { obj_.children_.push_back(std::move(child)); }
 
+	bool hasRows() const { return !obj_.values_.empty(); }
+
 	MatrixObject take() { return std::move(obj_); }
 };
 
@@ -237,9 +239,12 @@ class MatrixParser {
 	struct Frame {
 		std::string name;		/* 块名（"Action" / "if(x>0)" / "while(c<3)"） */
 		bool isControl = false;
+		/* @Action 在首次遇到嵌套子块时转为 compound：已有网格先落成一个隐式
+		 * @Action 子块，之后直接行进入 pendingAction，与子块按书写序交错。 */
+		bool compound = false;
 		MatrixBuilder self;		/* 叶子：网格（名字已置） */
-		std::vector<MatrixObject> children;	/* 控制：按书写顺序的子块 */
-		MatrixBuilder pendingAction;	/* 控制：当前隐式 @Action（名字已置 "Action"） */
+		std::vector<MatrixObject> children;	/* 控制/compound：按书写顺序的子块 */
+		MatrixBuilder pendingAction;	/* 控制/compound：当前隐式 @Action */
 		bool pendingHasRows = false;
 	};
 	std::vector<Frame> stack_;

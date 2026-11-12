@@ -76,6 +76,25 @@ public:
 		SessionScope& operator=(const SessionScope&) = delete;
 	};
 
+	/* 块级声明作用域（对齐当前 Python 的 @Alias/@Vars 词法作用域）：
+	 * 进入时只保存并移除指定名字的会话覆盖，退出时逐名恢复；未列出的捕获
+	 * 写入保留。与 SessionScope 的「整体清空」不同，本类只回滚本块声明，
+	 * 因此嵌套块可以遮蔽外层标量而不吞掉块内捕获。 */
+	class ScopedNames {
+		struct Saved {
+			std::string name;
+			std::unique_ptr<MatrixVars_Hardware> value;	/* nullptr = 原本不存在 */
+		};
+		HwRegistry* reg_;
+		std::vector<Saved> saved_;
+
+	public:
+		ScopedNames(HwRegistry& reg, const std::vector<std::string>& names);
+		~ScopedNames();
+		ScopedNames(const ScopedNames&) = delete;
+		ScopedNames& operator=(const ScopedNames&) = delete;
+	};
+
 	/* 会话层规模（只读）。测试与诊断用：结构清单 byName() 不得因会话而增长。 */
 	std::size_t sessionSize() const { return session_.size(); }
 

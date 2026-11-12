@@ -221,6 +221,7 @@ add_executable(mybot_tests
   test/cpp/test_action_if.cpp
   test/cpp/test_action_while.cpp
   test/cpp/test_action_nesting.cpp
+  test/cpp/test_action_scope.cpp
   test/cpp/test_action_capture.cpp
   test/cpp/test_robot_lifecycle.cpp
   test/cpp/test_robot_hotsql_plan.cpp
@@ -235,6 +236,7 @@ add_executable(mybot_tests
   test/cpp/test_mtmerge.cpp
   test/cpp/test_mtinclude.cpp
   test/cpp/test_sql_engine.cpp
+  test/cpp/test_native_drivers.cpp
   src/mtmerge_core.cpp
   ${MYBOT_CORE_SOURCES}
 )

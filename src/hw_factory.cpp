@@ -32,7 +32,7 @@ namespace bot {
  * 两者共用一条注册路径：结构期重名即抛；动作脚本内重名报错、@Alias 同名覆盖结构定义，
  * @Vars 则拒绝覆盖（见 session 分支内的防线注释）。 */
 void HwFactory::registerScalarMatrix(const mt::MatrixObject& matrix, std::set<std::string>* session,
-		ScalarKind kind, std::int64_t fromRow) {
+		ScalarKind kind, std::int64_t fromRow, bool local) {
 	const char* label = (kind == ScalarKind::Alias) ? "Alias" : "Vars";
 	/* 重复报错沿用「Duplicate alias name」既有措辞（有负值回归守门），Vars 用自身名 */
 	const char* dupLabel = (kind == ScalarKind::Alias) ? "alias" : "Vars";
@@ -53,7 +53,16 @@ void HwFactory::registerScalarMatrix(const mt::MatrixObject& matrix, std::set<st
 					"Duplicate ", std::string(dupLabel), " name '", name, "' within the action script"));
 			}
 			session->insert(name);
-			if (kind == ScalarKind::Vars && registry_.contains(name)) {
+			MatrixVars_Hardware* existing = registry_.find(name);
+			if (local && existing != nullptr) {
+				const std::string_view existingKind = existing->kindName();
+				if (existingKind != "alias" && existingKind != "vars") {
+					throw IllegalArgumentException(concatMsg(
+						"Local declaration '", name, "' cannot replace a driver, daemon or"
+						" flow reference"));
+				}
+			}
+			if (!local && kind == ScalarKind::Vars && existing != nullptr) {
 				/* 审计 H-1/P0-2 防线：@Vars 的数值会经 $/$(...) 元数据引用列进入
 				 * 硬件参数（max/min/fd/channel…），动作脚本同名覆盖等价于远程改写
 				 * 结构定义（--tcp 模式下即安全边界失守，PoC 实证 note 50→4995）。
@@ -64,7 +73,7 @@ void HwFactory::registerScalarMatrix(const mt::MatrixObject& matrix, std::set<st
 					"action script @Vars must not override the "
 					"structure-defined variable '", name, "' (use a fresh name)"));
 			}
-			if (registry_.contains(name)) {
+			if (!local && existing != nullptr) {
 				std::cerr << label << " '" << name
 					<< "' defined in action script overrides the structure definition" << std::endl;
 			}

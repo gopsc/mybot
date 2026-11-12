@@ -368,9 +368,10 @@ TH_TEST(matrix_control_block_interleaves_rows_and_child_blocks) {
 }
 
 TH_TEST(matrix_leaf_block_cannot_nest) {
-	/* 叶子块（@Action/@Alias/@Vars…）的体只能是数据行：内含 @if 响亮拒绝。 */
+	/* @Action 现在是容器（体内可混排声明/控制块）；@Alias/@Vars 仍是叶子块，
+	 * 内含 @if 响亮拒绝。 */
 	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "不能嵌套",
-		fx::manyMatrices("@Action\nx.p;\n 1;\n@if(k>0)\ny.q;\n 2;\n@\n@\n"));
+		fx::manyMatrices("@Alias\nname alias;\na b;\n@if(k>0)\nx.p;\n 1;\n@\n@\n"));
 }
 
 TH_TEST(matrix_extra_bare_at_rejected) {

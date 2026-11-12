@@ -58,8 +58,11 @@ struct ActionPlan {
 };
 
 /* ---- 动作重放：@Action 逐行 play（R-1 拆自 RobotStruct）---- */
+class HwFactory;
+
 class ActionRunner {
 	HwRegistry& registry_;
+	HwFactory* factory_;
 
 	/* C-M3：$(...) 表达式 AST 按列缓存——"-" 继承链上同一表达式文本
 	 * 原实现每行每格重解析一次（O(行数²) 字符扫描）。body 为上次解析的
@@ -85,7 +88,9 @@ class ActionRunner {
 	void applyCapture(const Json& res, const Capture& cap, std::int64_t row);
 
 public:
-	explicit ActionRunner(HwRegistry& registry) : registry_(registry) {}
+	explicit ActionRunner(HwRegistry& registry) : registry_(registry), factory_(nullptr) {}
+	ActionRunner(HwRegistry& registry, HwFactory& factory)
+		: registry_(registry), factory_(&factory) {}
 
 	/* ---- @Action 设备列解析单点（公开静态：白盒单测直接锚定）----
 	 * 设备位允许写 @Alias（2026-09-19 设计评估）：解析穿透——别名不是播放
@@ -144,7 +149,7 @@ public:
 	 * children**（2026-10-12 @块嵌套：控制块自身网格为空，体在 children 里）。
 	 * 每块前查 stopRequested（Ctrl-C 逐层及时跳出）。返回值 = 本层是否遇到可执行
 	 * 块（Action/if/while）——仅顶层 runAction 用于 "No @Action" 判定。 */
-	bool execSequence(const std::vector<mt::MatrixObject>& seq);
+	bool execSequence(const std::vector<mt::MatrixObject>& seq, bool scoped = true);
 
 	/* @if(...) 条件求值（块级，轮到该块执行时）：复用 makeActionExprResolver
 	 * （标识符只认 @Vars 数值/@Alias 文本——条件引用实时传感器值走「守护
