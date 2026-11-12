@@ -17,6 +17,7 @@ from .matrix import struct_json
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*\Z")
 FLOW = re.compile(r"(controller|trigger)[0-9]*\Z")
 _local = threading.local()
+_MISSING = object()
 
 
 def safe_ident(name: str) -> str:
@@ -194,14 +195,32 @@ class Registry:
         self._overrides.pop(name, None)
         return self._base.pop(name)
 
-    def override(self, name, variable):
+    def override(self, name, variable, *, shadow_struct=False):
         safe_ident(name)
         if name in self.flow_refs:
             raise ScriptError(f"Cannot override '{name}': referenced by controller/trigger")
         existing = self.get(name)
-        if existing is not None and existing.kind == "struct" and variable.kind != "struct":
+        if (not shadow_struct and existing is not None and existing.kind == "struct"
+                and variable.kind != "struct"):
             raise ScriptError(f"Cannot replace Struct '{name}' with another variable type")
         self._overrides[name] = variable
+
+    @contextmanager
+    def scope(self, names):
+        """Restore only the named overrides on exit; other captures persist.
+
+        Block-local declarations use this so a nested scope can shadow an outer
+        name without rolling back captures written to unrelated variables.
+        """
+        saved = {name: self._overrides.get(name, _MISSING) for name in set(names)}
+        try:
+            yield self
+        finally:
+            for name, value in saved.items():
+                if value is _MISSING:
+                    self._overrides.pop(name, None)
+                else:
+                    self._overrides[name] = value
 
     @contextmanager
     def session(self):

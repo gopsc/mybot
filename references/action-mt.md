@@ -18,7 +18,8 @@ relay0.test   timer-0.delay;      # 表头：变量.参数；空白分隔，';' 
 - 块写成 `@块名`，块名遇空白结束；推荐独占一行，单独一行 `@` 闭块。
   命名块写 `@Reflex(name)` / `@Struct(name)`，名称必须紧贴括号，不能加空白。
 - Action、Reflex 和控制块的 body 可混排纯矩阵与嵌套 Action/if/while，按书写顺序执行；
-  每个纯矩阵段有自己的表头。Reflex/Struct 定义仅限顶层，Alias/Vars 另允许在 Reflex 根 body 声明。
+  每个纯矩阵段有自己的表头。Reflex 定义仅限顶层；Alias/Vars/Struct 可在顶层和任意
+  Action/控制块/Reflex body 中声明，块级作用域见第 6 节。
 - **单元格以空白（空格/Tab/换行）分隔**，`;` 提交一行；一行可以跨多行书写，
   但惯例是一行一拍。空行（连续 `;` 无内容）被忽略。
 - 每行单元格数必须等于表头列数。
@@ -128,8 +129,8 @@ $count=reading;
   与 Action、Reflex body 一样按书写顺序执行。嵌套块后的矩阵段必须重新写表头，`-` 不跨段继承。
 - 外层条件为假时，整个 body 都跳过，内层条件也不求值；后续兄弟块继续执行。
   `if` 只在进入时判断一次，`while` 每轮开始前重新判断；内层循环重新进入时也使用当前捕获值。
-- Action/控制块内不能声明 Alias/Vars、Struct 或 Reflex；Alias/Vars 另可在 Reflex 根 body
-  声明局部默认值（第 7 节），Struct/Reflex 声明始终只在顶层。
+- Action/控制块和 Reflex body 内均可声明 Alias/Vars/Struct；声明在进入该 body 时统一注册，
+  退出（含异常/取消）恢复，内层可遮蔽外层同名声明（第 6 节）。Reflex 定义仍只能顶层。
   循环变量的更新靠**捕获**：上例 `$count=reading` 把 `r` 本次结果的 `reading`
   字段写回 `count`，下一轮条件立即用新值（捕获从下一行/下一块起可见，见第 5 节）。
 - 嵌套不会重置超时、取消或输出预算，空体死循环也会被预算打断；块嵌套仍最多 32 层。
@@ -194,7 +195,7 @@ $t=T;
 - Reflex 内部的所有捕获（含外层 Struct 写入）仅在本次调用内可见；向调用者写回须使用
   外层反射捕获列，读取最后一次内部器件结果，详见第 7 节。
 
-## 6. 会话与调用局部标量 @Alias / @Vars
+## 6. 标量声明 @Alias / @Vars 与块级作用域
 
 ```mt
 @Vars
@@ -209,22 +210,28 @@ output relay0;
 ```
 
 - `@Vars` 必须有 `name` / `value` 列；`@Alias` 必须有 `name` / `alias` 列。
-- 所有顶层标量声明在执行动作前统一注册，写在动作块后面也会提前生效；它们不是顺序赋值语句。
-  Reflex 根 body 内也可声明调用局部默认值，不会注册到顶层；Action/控制块内不得声明。
-- 顶层 `@Alias` 可临时覆盖同名标量；顶层 `@Vars` 不得与结构变量同名。
-  同一声明作用域内重复声明同名 Alias/Vars 报错；Reflex 的局部默认值和参数可临时覆盖已有 Alias/Vars，
-  但不得覆盖 driver、Daemon、Struct 或 SQL controller/trigger 受保护引用，详见第 7 节。
+- **顶层声明**（直接写在脚本最外层）属于整次 `Robot.run`：执行任何动作前统一注册，
+  写在动作块后面也会提前生效，它们不是顺序赋值语句。
+- `@Alias` / `@Vars` / `@Struct` 也可以直接声明在任意 `@Action` / `@if` / `@while` /
+  `@Reflex` body 中。每个 body 是块级词法作用域：进入时先注册该 body 的直接子声明，
+  再按书写顺序执行；正常结束、异常或取消退出时只恢复本 body 声明的名字。
+  对其他名字的捕获不随块退出回滚。
+- 内层块可遮蔽外层同名 `Alias` / `Vars` / `Struct`；同一 body 内重复声明同名仍报错。
+  driver、Daemon 和 SQL controller/trigger 引用不可被块级声明遮蔽。
+  顶层 `@Alias` 可临时覆盖同名 Alias/Vars；顶层 `@Vars` 不得与结构变量同名。
+- 块级声明遮蔽 Struct 后，表达式和捕获按当前可见变量的类型解释；退出块恢复外层 Struct。
 - `@Vars` 的 `value` 若为 `$(...)`，每次读取都重新求值，可引用数值型 `@Vars` 或 Struct
   的数值成员，最终必须得到数值，不能引用 Alias。不能用重复声明或 `$(i+1)` 数据格来赋值，
   循环更新可通过捕获完成。
 - `@Vars` 可选 `precision` 列（0..15）：只影响该变量渲染为器件动作参数/捕获文本时的小数位，
   不改变表达式内部的浮点计算，也不把传给 Reflex 的数字参数转成文本；缺省仍使用 `.15g`。
   `precision` 必须是非负整数，非法值在注册阶段报错。`@Alias` 不支持该列。
-- 这里的会话指**一次 `Robot.run`**：成功或失败退出时都会恢复进入前的标量覆盖层，
-  不会重置 Lua 驱动状态或撤销设备动作，也不会把捕获值保留到下一次 `run`。
+- 这里的会话指**一次 `Robot.run`**：顶层声明和捕获在成功或失败退出时恢复进入前的标量覆盖层；
   Reflex 的默认值、参数及内部捕获有更短的生命周期，在每次调用退出时即恢复。
+  块级声明按上述作用域在块退出时恢复。变量恢复不会重置 Lua 驱动状态或撤销设备动作，
+  也不会把捕获值保留到下一次 `run`。
 - SQL 结构也支持 Alias/Vars（见 `references/structure-sql.md` 第 6 节），但它们属于
-  Robot 结构；MT 声明和捕获属于本次运行或调用的临时覆盖层，生命周期不同。
+  Robot 结构；MT 声明和捕获属于本次运行或块/调用的临时覆盖层，生命周期不同。
 
 ## 7. @Reflex(name) 命名动作块与调用
 
@@ -284,9 +291,10 @@ alarm.delay alarm.capture;
 
 ### 调用局部默认值与捕获
 
-- `@Alias` / `@Vars` 可直接声明在 Reflex **根 body**，每次调用先建立局部默认值，再绑定实参；
-  实参按类型覆盖同名默认值。它们不能声明在其中的 Action 或控制块内，`@Struct(name)` 仍只能顶层声明。
-- 局部声明与参数可临时覆盖外层已有 Alias/Vars，但不能覆盖 driver、Daemon、Struct 或 SQL
+- `@Alias` / `@Vars` / `@Struct` 可直接声明在 Reflex **根 body**，也可声明在其中的 Action
+  或控制块内；每次调用先建立根 body 的局部默认值，再绑定实参，实参按类型覆盖同名默认值。
+  嵌套 body 的声明按第 6 节的块级作用域处理。
+- 局部声明与参数可临时覆盖外层已有 Alias/Vars/Struct，但不能覆盖 driver、Daemon 或 SQL
   controller/trigger 受保护引用。未传参数时使用局部默认值，否则读取外层可见值；求值到未定义名字时报错，不补零。
   临时数值和别名允许通过后续捕获更新，仍遵守第 5 节的类型规则。
 - **所有内部 capture 都只在本次调用内可见**，不论目标是形参、新名字、已有标量，还是外层全局 Struct 的整值或成员。
@@ -387,7 +395,9 @@ $(state.points[0].x) $state.points[0].x=slept;
 ### 声明与读取
 
 - 名称必须符合 `[A-Za-z_][A-Za-z_0-9]*`，例如 `@Struct(state)`；名称内不允许连字符。
-  只能在顶层声明，Reflex 内也不能声明；与顶层 Alias/Vars 一样在动作开始前统一注册，不能重复声明或遮蔽已有变量。
+  可直接声明在顶层或任意 Action/控制块/Reflex body；顶层声明与顶层 Alias/Vars 一样在动作
+  开始前统一注册，块级声明按第 6 节进入/退出作用域。同一作用域内不能重复声明同名 Struct；
+  内层块可以遮蔽外层同名变量。
 - 声明行可带 `#` 尾随注释；JSON 块体从下一行开始，支持 object、array、字符串、数值、
   布尔和 null，用独占一行的 `@` 结束。JSON 后不加 `;`，块体不允许注释、尾逗号、
   重复对象键、NaN/Infinity 或非有限数值。
@@ -439,7 +449,8 @@ $(state) $(state.point) $(state.note);
 - Struct 声明及赋值最多在本次 `Robot.run` 内生效，正常或异常结束都会恢复进入前的变量层。
   Reflex 内即使捕获到全局 Struct 的整值或成员，也仅在本次调用内可见，调用结束或失败即恢复；
   向调用者写回须使用外层 `f.capture` 捕获最后一次内部器件结果（第 7 节）。
-  不允许用 Reflex 参数、CLI `--var` 或同名 Alias/Vars 声明替换 Struct。
+  块级 Alias/Vars/Struct 声明与 Reflex 参数可临时遮蔽外层 Struct，退出即恢复；
+  顶层同名声明与 CLI `--var` 仍不能替换已声明的 Struct。
 - Include 和顶层 Merge 保留原始 JSON 语义，智能体执行前冻结脚本时同样保留；任何 body 内的
   局部 Merge 片段都不能包含 Struct 声明。Struct 同名声明不采用 Merge 的标量覆盖规则。
 - 单个 Struct 的规范 JSON 序列化最多 8 MiB，值嵌套深度最多 32；捕获赋值也受这些限制。

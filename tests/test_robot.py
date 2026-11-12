@@ -88,6 +88,60 @@ dev.value;
         assert robot.registry["dev"].read()["count"] == 4
 
 
+def test_nested_declarations_are_block_scoped(modules):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        result = robot.run("""@Action
+@Vars
+name value;
+n 5;
+@
+@Struct(s)
+{"v":7}
+@
+dev.value;
+$(n+s.v);
+@
+""")
+        assert result[-1]["value"] == 12
+        assert robot.registry.get("n") is None
+        assert robot.registry.get("s") is None
+        with pytest.raises(ScriptError, match="n"):
+            robot.run("""@Action
+@Vars
+name value;
+n 5;
+@
+dev.value;
+$(n);
+@
+@Action
+dev.value;
+$(n);
+@
+""")
+        assert robot.registry.get("n") is None
+
+
+def test_nested_struct_shadows_outer_and_restores(modules):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        outputs = robot.run("""@Struct(s)
+{"v":1}
+@
+@Action
+@Struct(s)
+{"v":7}
+@
+dev.value;
+$(s.v);
+@
+@Action
+dev.value;
+$(s.v);
+@
+""")
+        assert [output["value"] for output in outputs] == [7, 1]
+
+
 def test_injected_alias_and_scope_on_failure(modules):
     with Robot(probe_sql(), module_paths=modules) as robot:
         result = robot.run("@Action\ndev.value;\n$(arg);\n@", vars={"arg": "hello"})

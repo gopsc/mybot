@@ -222,25 +222,22 @@ def parse_matrices(text: str) -> list[Matrix]:
                 raise ScriptError("@Trigger is not supported; call @Reflex(name) from @Action")
             if reflex_name(name) is not None and stack:
                 raise ScriptError("@Reflex definitions may only appear at the top level")
-            if struct_name(name) is not None:
-                if stack:
-                    raise ScriptError("@Struct declarations may only appear at the top level")
-                stack.append(_Frame(Matrix(name, json_text=""), json_header_line=line))
-                return
+            is_struct = struct_name(name) is not None
             if stack:
                 parent = stack[-1]
                 if not (parent.matrix.name == "Action" or is_control(parent.matrix.name)
                         or reflex_name(parent.matrix.name) is not None):
                     raise ScriptError(f"Line {line}: leaf @{parent.matrix.name} "
                                       f"cannot contain nested @{name[:160]}")
-                if name in {"Alias", "Vars"} and reflex_name(parent.matrix.name) is None:
-                    raise ScriptError(f"@{name} declarations require the top level or a Reflex body")
                 if parent.matrix.name == "Action" and parent.matrix.rows:
                     parent.pending, parent.matrix.rows = parent.matrix.rows, []
                 parent.flush()
             if len(stack) >= MAX_BLOCK_DEPTH:
                 raise ScriptError(f"Block nesting depth exceeds {MAX_BLOCK_DEPTH}")
-            stack.append(_Frame(Matrix(name)))
+            if is_struct:
+                stack.append(_Frame(Matrix(name, json_text=""), json_header_line=line))
+            else:
+                stack.append(_Frame(Matrix(name)))
 
     line_prefix = True
     for index, char in enumerate(text):
@@ -260,8 +257,9 @@ def parse_matrices(text: str) -> list[Matrix]:
                     raise ScriptError("Struct JSON must start on the line after its declaration")
                 continue
             if char == "@" and at_line_prefix and _STRUCT_END.match(text, index):
+                frame = stack.pop()
                 frame.matrix.json_text = parse_struct_json("".join(frame.json_chars))
-                out.append(stack.pop().matrix)
+                (stack[-1].matrix.children if stack else out).append(frame.matrix)
                 at_start = True
             else:
                 frame.json_chars.append(char)

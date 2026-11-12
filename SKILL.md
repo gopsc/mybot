@@ -216,7 +216,7 @@ MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物�
 9. `@if`/`@while` 条件写在块名内且括号紧贴：`@if(x>0)`；引号外的空格仍会结束块名，字符串内的空格用双引号保护（如 `@if(cfg.tag=="a b")`）。Action、控制块和 Reflex body 均可混排矩阵与嵌套块。Include 只在最外层，body 内 Merge 只合并其后的纯矩阵。
 10. 默认拒绝物理设备、非回环网络与宿主命令执行（`--allow-hardware` 才放开）；virt 总线、`loop://` 与回环 HTTP 不需要该开关。
 11. 使用顶层 `@Reflex(name)` 命名块，无 `name` 列，可声明多个但不得重名或嵌套声明；仅由 `reflexName.varName` 表头调用。MT `@Trigger` 和旧无名 `@Reflex` 在解析时拒绝；SQL trigger 完全保留。
-12. Reflex 根 body 可声明 Alias/Vars 局部默认值，实参按类型覆盖；Action/控制块内不可声明，Struct 仍仅顶层。默认值、参数及内部捕获逐次调用隔离，退出即恢复；完整规则见 `references/action-mt.md` 第 7 节。
+12. `Alias`/`Vars`/`Struct` 可声明在顶层或任意 Action/控制块/Reflex body：每个 body 是块级词法作用域，进入时统一注册、退出（含异常/取消）恢复，内层可遮蔽外层同名声明；driver/daemon/flow 引用不可遮蔽。Reflex 根 body 的默认值、参数及内部捕获逐次调用隔离；完整规则见 `references/action-mt.md` 第 6、7 节。
 
 ## 7. References
 
