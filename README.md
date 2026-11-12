@@ -79,10 +79,10 @@ cat action.mt | mybot --robot <结构脚本.sql> [选项]
 
 ```sh
 # I2C：ftdi:232h / ftdi:ft232r / 0x0403:0x6014 / 序列号，接口 1..4
-mybot --robot robots/ftdi.sql --input scripts/i2c-scan.mt --allow-hardware
+mybot --robot=robots/ftdi-i2c.sql --input=scripts/ftdi-i2c.mt --allow-hardware
 
-# SPI：?cs=0..4 选择片选；MOSI/MISO 回环可用跳线验证
-mybot --robot robots/ftdi-spi.sql --input scripts/spi-loop.mt --allow-hardware
+# SPI：?cs=0..4 选择片选；MOSI/MISO 短接做回环验证
+mybot --robot=robots/ftdi-spi.sql --input=scripts/ftdi-spi.mt --allow-hardware
 ```
 
 I2C 例：
