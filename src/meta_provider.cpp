@@ -172,8 +172,9 @@ bool MetaProvider::appendRef(Json& obj, const MetaRef& ref, bool forDestroy) {
 		 * 元数据列只收数值（拼接是 @Action 求值面的能力），requireNum 显式
 		 * 拒绝文本结果。 */
 		try {
-			double v = requireNum(
-				ref.expr->eval(numericResolver(registry_->makeVarsResolver())));
+			/* 使用 Action 求值面：@Vars 数值照旧，额外允许 @Struct 字段/下标
+			 * 选择；requireNum 仍拒绝文本/对象结果，元数据列只收数值的契约不变。 */
+			double v = requireNum(ref.expr->eval(registry_->makeActionExprResolver()));
 			obj.put(ref.col, JsonString(formatNumber(v)));
 		} catch (const std::exception& e) {
 			if (!forDestroy) { throw; }
