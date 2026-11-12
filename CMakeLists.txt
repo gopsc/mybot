@@ -440,3 +440,5 @@ endif()
 
 # 安装产物：mybot 直跑 ./build/mybot（bot4cj 原 _run.sh 的等价物，见 test/run_all.sh）
 install(TARGETS mybot RUNTIME DESTINATION bin)
+install(DIRECTORY modules robots scripts DESTINATION share/mybot)
+install(FILES README.md LICENSE DESTINATION share/doc/mybot)
