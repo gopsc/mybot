@@ -1,6 +1,10 @@
 # mybot C++ 控制器
 
-Linux 上的 C++17 机器人控制器。结构 SQL 声明硬件，LuaJIT 驱动实现设备，MT 动作脚本描述时序。当前仓库是 Python `mybot` 的 C++ 重写版，**只保留控制器**：MCP、agent、Web SSH 和 Rust agent 已移除。
+Linux 上的独立 C++17 机器人控制器。结构 SQL 声明硬件，LuaJIT 驱动实现设备，MT 动作脚本描述时序。项目只提供控制器本身，不包含 MCP、agent 或 Web SSH。
+
+## 与 pymybot 的关系
+
+本项目是独立的 C++ 实现，不是 Python 包 `pymybot` 的绑定、子项目或运行期依赖；不随 `pymybot` 发布，也不需要 Python 运行时。两者只共享同源的结构 SQL、MT 动作和 Lua 驱动脚本格式。
 
 ## 依赖
 
@@ -93,7 +97,7 @@ INSERT INTO SPI (name, path) VALUES ('spi0', 'ftdi://ftdi:232h/1?cs=0');
 
 ## 安全边界
 
-- 物理 I2C/SPI/UART、非回环 HTTP/TCP、Shell 与 FTDI 默认允许，不再需要 `--allow-hardware`。
+- 物理 I2C/SPI/UART、非回环 HTTP/TCP、Shell 与 FTDI 默认允许。
 - `proto=virt`、`virt-*`、`loop://` 与回环地址照常可用。
 - Lua 驱动仍是可信进程内代码，不是沙箱；`ffi` 仍然可用。
 - 动作派发后的异常代表“结果未知”，不会自动重试或声称回滚。
@@ -111,7 +115,7 @@ Structure SQL (SQLite3 + DSL 归一化) → MatrixObject 表
 
 - `src/sql_engine.cpp`：SQLite3 结构 SQL 加载器；`$var`、`$(expr)`、`-` 由归一化层保留为文本。
 - `src/sqlparse.cpp`：旧 SQL4cj 解析器，仍服务热 SQL。
-- `src/hal.cpp`：C++ HAL 与权限门。
+- `src/hal.cpp`：C++ HAL。
 - `src/luavar.cpp` / `src/luasandbox.cpp`：LuaJIT 驱动、`__hal_call` 注入、沙箱。
 - `src/native_*.cpp` / `src/driver_*.cpp`：原生 C++ 驱动接口与实现。
 - `src/action_runner.cpp`：MT 派发、`@if`/`@while`、`@Alias`/`@Vars` 块级作用域。
@@ -131,10 +135,10 @@ Structure SQL (SQLite3 + DSL 归一化) → MatrixObject 表
 - 原生 Time/LoopbackProbe/Shell/HTTP/TCP/Dev_enum/I2C_scan 驱动
 - FTDI `ftdi://` I2C/SPI（libftdi1 MPSSE GPIO 位操作；SPI 支持 8 位字、mode 0..3、`?cs=0..4`）
 
-尚未移植：
+尚未提供：
 
-- 当前 Python 的子命令 `check/sample/query/apply-sql/assets/new/discover/doctor`
-  （本项目按设计保留旧扁平 CLI）
+- 子命令 `check/sample/query/apply-sql/assets/new/discover/doctor`
+  （本实现采用扁平 CLI）
 - `@Struct` 数组下标的捕获目标路径（表达式下标已支持；捕获目标目前只支持 `.field`）
 
 ## 目录
