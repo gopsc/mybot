@@ -35,8 +35,8 @@ struct RobotStruct::Internals {
 	HotSqlService hotSql;
 
 	Internals(StructureStore& structures, HwRegistry& registry, MetaRegistry& metas,
-			DaemonRegistry& daemons)
-		: factory(registry, daemons, metas), runner(registry),
+			DaemonRegistry& daemons, HALManager& hal)
+		: factory(registry, daemons, metas, hal), runner(registry),
 		  hotSql(structures, registry, metas, daemons, factory, runner) {}
 };
 

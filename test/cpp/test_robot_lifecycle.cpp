@@ -17,6 +17,7 @@
 #include "fixtures.hpp"
 #include "harness.hpp"
 #include "daemonvar.hpp"
+#include "hal.hpp"
 #include "hw_factory.hpp"
 #include "matrix.hpp"
 #include "robot.hpp"
@@ -261,7 +262,8 @@ std::string assembleSql(const std::string& sql) {
 		bot::HwRegistry registry;
 		bot::DaemonRegistry daemons;
 		bot::MetaRegistry metas;
-		bot::HwFactory factory(registry, daemons, metas);
+		bot::HALManager hal;
+		bot::HwFactory factory(registry, daemons, metas, hal);
 		factory.createHardVars(matrices);
 	} catch (const std::exception& e) {
 		return std::string(e.what());

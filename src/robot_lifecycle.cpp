@@ -15,7 +15,7 @@ namespace bot {
 /* 装配机械的定义见 robot_internals.hpp；本处只负责「先四域、后机械、再装载」
  * 的次序（注释在头文件构造函数声明处）。 */
 RobotStruct::RobotStruct(bot::Reader& input)
-	: internals_(std::make_unique<Internals>(structures_, registry_, metas_, daemons_)) {
+	: internals_(std::make_unique<Internals>(structures_, registry_, metas_, daemons_, hal_)) {
 	HALManager::setCurrent(&hal_);
 	structures_.load(input);
 }

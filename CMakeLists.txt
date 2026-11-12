@@ -111,6 +111,14 @@ set(MYBOT_CORE_SOURCES
   src/luaexec.cpp
   # ---- C++ HAL：I2C/SPI/UART/TCP/HTTP/Shell 与权限门 ----
   src/hal.cpp
+  # ---- 原生 C++ 驱动：宿主能力（时间/TCP/HTTP/Shell/回环探针） ----
+  src/native_var.cpp
+  src/native_registry.cpp
+  src/driver_time.cpp
+  src/driver_loopback.cpp
+  src/driver_shell.cpp
+  src/driver_http.cpp
+  src/driver_tcp.cpp
   # ---- 硬件域：变量基类、Lua/Daemon 变量、注册表与元数据 ----
   src/hardware.cpp
   src/luavar.cpp

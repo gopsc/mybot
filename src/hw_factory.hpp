@@ -18,6 +18,8 @@
 
 namespace bot {
 
+class HALManager;
+
 /* 重构计划 2.2：本头文件不再传导 LuaJIT 头（luaend.hpp 经 daemonvar/luavar
  * 拉入 lua.h，所有 include robot.hpp 的 TU 都被迫解析 Lua 头）。守护域改经
  * DaemonRegistry 门面引用，该门面自身以 shared_ptr 持有 DaemonRunner 且对
@@ -28,6 +30,7 @@ class HwFactory {
 	HwRegistry& registry_;
 	DaemonRegistry& daemons_;
 	MetaRegistry& metas_;
+	HALManager& hal_;
 
 	/* 重名前置判重（资源泄漏防线：Lua 状态机/共享槽先申请，此处先确认可注册）。
 	 * 文案走 duplicateHwNameMsg 单点：本检查是 HwRegistry::add 的**提前版**，同一次
@@ -43,6 +46,8 @@ class HwFactory {
 	void createDaemonVars(const mt::MatrixObject& matrix, const std::string& mtName,
 			std::int64_t fromRow);
 	void createLuaVars(const mt::MatrixObject& matrix, const std::string& mtName,
+			std::int64_t fromRow);
+	void createNativeVars(const mt::MatrixObject& matrix, const std::string& mtName,
 			std::int64_t fromRow);
 
 	/* 装配前的单消费者判据（审计 1.3）：只对**自己声明** SINGLE_CONSUMER 的驱动
@@ -86,8 +91,9 @@ public:
 
 	HwFactory(HwRegistry& registry,
 			DaemonRegistry& daemons,
-			MetaRegistry& metas)
-		: registry_(registry), daemons_(daemons), metas_(metas) {}
+			MetaRegistry& metas,
+			HALManager& hal)
+		: registry_(registry), daemons_(daemons), metas_(metas), hal_(hal) {}
 
 	/* 全部硬变量创建：声明序，Alias/Vars/Lua/Daemon 分派 */
 	void createHardVars(const std::deque<mt::MatrixObject>& matrices);

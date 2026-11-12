@@ -6,9 +6,11 @@
 #include "daemonconf.hpp"
 #include "hw_factory.hpp"
 
-/* 装配 Lua/标量变量，显式引入对应实现头（Daemon 的 MtVars_Daemon 声明已在
+/* 装配 Lua/标量/原生变量，显式引入对应实现头（Daemon 的 MtVars_Daemon 声明已在
  * daemonconf.hpp，本 TU 不再直接点名 daemonvar.hpp 里的任何东西） */
 #include "luavar.hpp"
+#include "native_driver.hpp"
+#include "native_var.hpp"
 
 #include "flowcolumn.hpp"
 
@@ -389,7 +391,10 @@ void HwFactory::createHardVarsFrom(const mt::MatrixObject& matrix, std::int64_t 
 	else if (mtName == "Vars") { registerScalarMatrix(matrix, nullptr, ScalarKind::Vars, fromRow); }
 	else if (mtName == "Action") { /* 结构期 Action 由 MR 动作脚本提供 */ }
 	else if (mtName == "Daemon") { createDaemonVars(matrix, mtName, fromRow); }
-	else if (matrix.rows() > 0) { createLuaVars(matrix, mtName, fromRow); }
+	else if (matrix.rows() > 0) {
+		if (hasNativeDriver(mtName)) { createNativeVars(matrix, mtName, fromRow); }
+		else { createLuaVars(matrix, mtName, fromRow); }
+	}
 }
 
 void HwFactory::createDaemonVars(const mt::MatrixObject& matrix, const std::string& mtName,
@@ -497,6 +502,27 @@ void HwFactory::createLuaVars(const mt::MatrixObject& matrix, const std::string&
 		auto metaProv = std::make_shared<MetaProvider>(matrix, i, &registry_);
 		metas_.add(metaProv);	/* F-05：供 active() 在 build 前统一校验 $ 引用 */
 		registry_.add(name, MtVars_Lua::Factory(scriptPath, name,
+			[metaProv](bool forDestroy) {
+				return forDestroy ? metaProv->collectForDestroy() : metaProv->collect();
+			}, flow.ctrlNames, flow.trigNames, &registry_),
+			" (in table '" + mtName + "')");
+	}
+}
+
+void HwFactory::createNativeVars(const mt::MatrixObject& matrix, const std::string& mtName,
+		std::int64_t fromRow) {
+	std::int64_t idxName = matrix.requireCol(0, "name", "Table");
+	for (std::int64_t i = fromRow; i < static_cast<std::int64_t>(matrix.rows()); ++i) {
+		const std::string& name = matrix(i, idxName);
+		precheckDuplicate(name, mtName);
+		FlowRowRefs flow = parseFlowRow(matrix, i, name, mtName, registry_);
+		auto metaProv = std::make_shared<MetaProvider>(matrix, i, &registry_);
+		metas_.add(metaProv);
+		auto driver = createNativeDriver(mtName, hal_);
+		if (driver == nullptr) {
+			throw IllegalArgumentException("No native driver registered for table '" + mtName + "'");
+		}
+		registry_.add(name, MtVars_Native::Factory(std::move(driver), name,
 			[metaProv](bool forDestroy) {
 				return forDestroy ? metaProv->collectForDestroy() : metaProv->collect();
 			}, flow.ctrlNames, flow.trigNames, &registry_),
