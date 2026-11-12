@@ -1,5 +1,7 @@
 #include "matrix.hpp"
 
+#include "jsonparse.hpp"
+
 namespace mt {
 
 /* ------------- MatrixObject 冷路径方法（2026-10-01 自 matrix.hpp 下放）-------------
@@ -41,6 +43,10 @@ std::int64_t MatrixObject::requireCol(std::size_t row, const std::string& key,
 
 void MatrixObject::save(std::ostream& out) const {
 	out << "@" << getName() << "\n";
+	if (has_json_) {
+		out << json_value_.toString() << "\n@\n";
+		return;
+	}
 	for (const auto& vec : values_) {
 		for (const auto& item : vec) {
 			out << item << " ";
@@ -131,6 +137,39 @@ void MatrixObject::removeRows(const std::vector<std::size_t>& rows) {
  * 把块前游离数据混进后续块）——新机分别按「';' 属块头名字」「游离数据进 scratch_」
  * 处理，更自洽；良构脚本（每块 @名字…@ 成对、行以 ';' 收口）逐字不变。 */
 std::int64_t MatrixParser::next_(char c, std::int64_t count) {
+	/* ------------ STRUCT JSON ------------ */
+	if (!stack_.empty() && stack_.back().isStruct) {
+		Frame& frame = stack_.back();
+		if (!frame.jsonStarted) {
+			if (frame.jsonComment) {
+				if (c == '\n') {
+					frame.jsonComment = false;
+					frame.jsonStarted = true;
+					line_start_ = true;
+					return count + 1;
+				}
+				return count;
+			}
+			if (c == '#') { frame.jsonComment = true; return count; }
+			if (c == '\n') {
+				frame.jsonStarted = true;
+				line_start_ = true;
+				return count + 1;
+			}
+			if (c == ' ' || c == '\t' || c == '\r') { return count; }
+			throw bot::IllegalArgumentException(
+				"Struct JSON must start on the line after its declaration");
+		}
+		if (c == '@' && line_start_) {
+			closeFrame();	/* closeFrame 内 parseJson，错误带 JSON 偏移 */
+			line_start_ = true;
+			return count;
+		}
+		frame.jsonText.push_back(c);
+		if (c == '\n') { line_start_ = true; return count + 1; }
+		line_start_ = false;
+		return count;
+	}
 	/* ------------ QUOTED CELL ------------ */
 	/* 双引号内的空格/Tab/; /# 都是普通字符；引号本身保留进单元格，由表达式
 	 * 解析器在求值时去掉。引号必须同行闭合（字符串内换行写 \n）。 */
@@ -148,6 +187,7 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 		} else if (c == '"') {
 			quoted_ = false;
 		}
+		line_start_ = false;
 		return count;
 	}
 	/* ------------ COMMENTS ------------ */
@@ -168,6 +208,10 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 		nl_ = true;
 		cm_ = false;
 		count += 1;
+		if (!stack_.empty() && stack_.back().isStruct && !stack_.back().jsonStarted) {
+			stack_.back().jsonStarted = true;
+			line_start_ = true;
+		}
 	}
 	/* 注释中段与行首空白都是「跳过该字符」——合并为同一分支（两判据互不冲突，
 	 * 主体同为空），避免条件链出现克隆分支 */
@@ -194,7 +238,13 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 		hdr_.clear();
 		nm_ = false;
 		nl_ = true;
-		if (c == '\n') { count += 1; }	/* @Name 行末的换行同样计数，否则后续行号全部少 1 */
+		if (c == '\n') {
+			count += 1;	/* @Name 行末的换行同样计数，否则后续行号全部少 1 */
+			if (!stack_.empty() && stack_.back().isStruct) {
+				stack_.back().jsonStarted = true;
+				line_start_ = true;
+			}
+		}
 	}
 	else if (!nl_ && nm_) {
 		hdr_ += c;	/* 块头名字字符（含 ';'：块头不以 ';' 收口，与数据态区分） */
@@ -221,6 +271,7 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 	else if (!nl_) {
 		dataBuilder().addRune(c);
 	}
+	line_start_ = (c == '\n');
 	return count;
 }
 
@@ -257,9 +308,14 @@ void MatrixParser::commitHeader(const std::string& hdr) {
 	}
 	/* 开块 */
 	const auto reflexName = namedReflexName(hdr);
+	const auto structName = namedStructName(hdr);
 	if (looksLikeNamedReflex(hdr) && !reflexName) {
 		throw bot::IllegalArgumentException(
 			"Expected @Reflex(identifier) without whitespace");
+	}
+	if (looksLikeNamedStruct(hdr) && !structName) {
+		throw bot::IllegalArgumentException(
+			"Expected @Struct(identifier) without whitespace");
 	}
 	if (reflexName && !stack_.empty()) {
 		throw bot::IllegalArgumentException(
@@ -294,8 +350,14 @@ void MatrixParser::commitHeader(const std::string& hdr) {
 	f.name = hdr;
 	f.isControl = isControlBlockName(hdr);
 	f.compound = reflexName.has_value();
-	if (f.isControl || f.compound) { f.pendingAction.name("Action"); }
-	else { f.self.name(hdr); }
+	f.isStruct = structName.has_value();
+	if (f.isStruct) {
+		/* JSON 体由 next_ 的 struct 分支逐字符收集。 */
+	} else if (f.isControl || f.compound) {
+		f.pendingAction.name("Action");
+	} else {
+		f.self.name(hdr);
+	}
 	stack_.push_back(std::move(f));
 }
 
@@ -305,7 +367,12 @@ void MatrixParser::closeFrame() {
 	Frame f = std::move(stack_.back());
 	stack_.pop_back();
 	MatrixObject m;
-	if (f.isControl || f.compound) {
+	if (f.isStruct) {
+		MatrixBuilder b;
+		b.name(f.name);
+		b.jsonValue(bot::parseJson(f.jsonText));
+		m = b.take();
+	} else if (f.isControl || f.compound) {
 		flushPending(f);	/* 收尾：尾部直接行run → 最后一个隐式 @Action 子块 */
 		MatrixBuilder b;
 		b.name(f.name);
@@ -338,6 +405,7 @@ std::optional<MatrixObject> MatrixParser::parse() {
 	nm_ = false;
 	quoted_ = false;
 	escaped_ = false;
+	line_start_ = true;
 
 	/* 读取初始状态，循环直到 done_（顶层帧闭合）或 EOF。done_ 必须在 read() 之前
 	 * 检查：闭合 '@' 的名字 token 结束即置 done_，若再读一个字符会丢掉下一个块的

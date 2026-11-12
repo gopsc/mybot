@@ -402,3 +402,18 @@ TH_TEST(matrix_final_bare_at_without_newline_still_closes) {
 	TH_CHECK(m.getName() == "Action");
 	TH_CHECK(m.rows() == 2);
 }
+
+TH_TEST(matrix_struct_block_parses_json_and_keeps_it) {
+	mt::MatrixObject m = fx::oneMatrix("@Struct(cfg)\n{ \"value\": 7, \"items\": [1, 2] }\n@\n");
+	TH_CHECK(m.getName() == "Struct(cfg)");
+	TH_CHECK(m.hasJson());
+	TH_CHECK(m.rows() == 0);
+	TH_CHECK(m.jsonValue().find("value") != nullptr);
+}
+
+TH_TEST(matrix_struct_block_rejects_invalid_json) {
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "JSON parse error",
+		fx::oneMatrix("@Struct(cfg)\n{ \"value\": }\n@\n"));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "Struct JSON must start",
+		fx::manyMatrices("@Struct(cfg) { \"value\": 1 }\n@\n"));
+}

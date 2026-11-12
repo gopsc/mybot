@@ -122,6 +122,10 @@ public:
 			bool local = false) {
 		registerScalarMatrix(matrix, session, ScalarKind::Vars, 1, local);
 	}
+
+	/* 注册 @Struct(name) JSON 变量（结构体不在 SQL 结构表里，只出现在 MT）。 */
+	void registerStructMatrix(const mt::MatrixObject& matrix,
+			std::set<std::string>* session, bool local = false);
 };
 
 } // namespace bot

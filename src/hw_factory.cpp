@@ -56,7 +56,7 @@ void HwFactory::registerScalarMatrix(const mt::MatrixObject& matrix, std::set<st
 			MatrixVars_Hardware* existing = registry_.find(name);
 			if (local && existing != nullptr) {
 				const std::string_view existingKind = existing->kindName();
-				if (existingKind != "alias" && existingKind != "vars") {
+				if (existingKind != "alias" && existingKind != "vars" && existingKind != "struct") {
 					throw IllegalArgumentException(concatMsg(
 						"Local declaration '", name, "' cannot replace a driver, daemon or"
 						" flow reference"));
@@ -81,6 +81,36 @@ void HwFactory::registerScalarMatrix(const mt::MatrixObject& matrix, std::set<st
 		} else {
 			registry_.add(name, std::move(var), std::string(" (in @") + label + " matrix)");
 		}
+	}
+}
+
+void HwFactory::registerStructMatrix(const mt::MatrixObject& matrix,
+		std::set<std::string>* session, bool local) {
+	const auto name = mt::namedStructName(matrix.getName());
+	if (!name) {
+		throw IllegalArgumentException("Invalid @Struct block name: " + matrix.getName());
+	}
+	auto variable = MtVars_Struct::Factory(matrix);
+	if (session) {
+		if (session->count(*name) != 0) {
+			throw IllegalArgumentException("Duplicate Struct variable '" + *name
+				+ "' within the action script");
+		}
+		session->insert(*name);
+		MatrixVars_Hardware* existing = registry_.find(*name);
+		if (existing != nullptr) {
+			if (!local) {
+				throw IllegalArgumentException("Duplicate Struct variable '" + *name + "'");
+			}
+			const std::string_view kind = existing->kindName();
+			if (kind != "alias" && kind != "vars" && kind != "struct") {
+				throw IllegalArgumentException("Local declaration '" + *name
+					+ "' cannot replace a driver, daemon or flow reference");
+			}
+		}
+		registry_.override(*name, std::move(variable));
+	} else {
+		registry_.add(*name, std::move(variable), " (in @Struct)");
 	}
 }
 

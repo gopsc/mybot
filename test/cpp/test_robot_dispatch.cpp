@@ -202,7 +202,7 @@ TH_TEST(action_device_expr_rejects_driver_and_undefined_reference) {
 	 * 未定义名沿用既有文案 */
 	bot::HwRegistry reg;
 	reg.add("dev1", fx::dummyHw(), "");
-	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "driver/daemon variable; only @Alias/@Vars may appear in an expression",
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "driver/daemon variable; only @Alias/@Vars/@Struct may appear in an expression",
 		(void)bot::ActionRunner::resolveActionDevice(reg, "$(dev1)"));
 	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "not a defined hardware variable",
 		(void)bot::ActionRunner::resolveActionDevice(reg, "$(ghost)"));

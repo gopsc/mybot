@@ -27,6 +27,7 @@
 #include <set>
 #include <string>
 
+#include "json.hpp"
 
 namespace bot {
 
@@ -35,11 +36,12 @@ namespace bot {
  * @Vars 做运算、出现 @Alias 就拼接」的类型分派规则；Bool 只能由
  * 比较/逻辑运算产生（无 true/false 字面量，字面量语境写不出布尔）。 */
 struct ExprValue {
-	enum class Kind { Num, Text, Bool };
+	enum class Kind { Num, Text, Bool, Object };
 	Kind kind = Kind::Num;
 	double num = 0.0;
 	std::string text;
 	bool flag = false;
+	Json object;	/* Kind::Object：@Struct 的 JSON 值；字段选择在 expr.cpp 处理 */
 
 	static ExprValue makeNum(double v) {
 		ExprValue e;
@@ -59,9 +61,16 @@ struct ExprValue {
 		e.flag = v;
 		return e;
 	}
+	static ExprValue makeObject(Json v) {
+		ExprValue e;
+		e.kind = Kind::Object;
+		e.object = std::move(v);
+		return e;
+	}
 	bool isNum() const { return kind == Kind::Num; }
 	bool isText() const { return kind == Kind::Text; }
 	bool isBool() const { return kind == Kind::Bool; }
+	bool isObject() const { return kind == Kind::Object; }
 
 	/* 文本出口：Text 原样；Num 以真值渲染（formatNumber，%.15g——整数不带
 	 * 小数点，"2e3" 的真值是 "2000"）；Bool 渲染 "true"/"false"（rendered

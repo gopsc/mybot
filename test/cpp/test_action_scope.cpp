@@ -11,6 +11,7 @@
 #include "harness.hpp"
 #include "hw_factory.hpp"
 #include "hw_registry.hpp"
+#include "jsonparse.hpp"
 #include "meta_registry.hpp"
 #include "util_except.hpp"
 
@@ -203,4 +204,56 @@ TH_TEST(action_named_reflex_argument_cannot_replace_a_driver) {
 	bot::ActionRunner runner(fixture.registry, fixture.factory);
 	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "cannot replace",
 		runner.runAction(matrices));
+}
+
+TH_TEST(action_struct_selects_fields_and_array_indexes) {
+	Fixture fixture;
+	mt::MatrixBuilder builder;
+	builder.name("Struct(cfg)");
+	builder.jsonValue(bot::parseJson("{\"value\":3,\"items\":[10,20]}"));
+	fixture.registry.add("cfg", bot::MtVars_Struct::Factory(builder.take()));
+	auto matrices = actionScript(
+		"@Action\n"
+		"dev.x dev.y;\n"
+		"$(cfg.value) $(cfg.items[1]);\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	runner.runAction(matrices);
+	TH_CHECK(fixture.seen == "3");
+}
+
+TH_TEST(action_struct_capture_updates_a_field) {
+	Fixture fixture;
+	mt::MatrixBuilder builder;
+	builder.name("Struct(cfg)");
+	builder.jsonValue(bot::parseJson("{\"value\":0}"));
+	fixture.registry.add("cfg", bot::MtVars_Struct::Factory(builder.take()));
+	auto matrices = actionScript(
+		"@Action\n"
+		"dev.x dev.cap;\n"
+		"    5 $cfg.value=value;\n"
+		"@\n"
+		"@Action\n"
+		"dev.x;\n"
+		"$(cfg.value);\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	runner.runAction(matrices);
+	TH_CHECK(fixture.seen == "5");
+}
+
+TH_TEST(action_struct_local_declaration_is_scoped) {
+	Fixture fixture;
+	auto matrices = actionScript(
+		"@Action\n"
+		"@Struct(local)\n"
+		"{ \"value\": 7 }\n"
+		"@\n"
+		"dev.x;\n"
+		"$(local.value);\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	runner.runAction(matrices);
+	TH_CHECK(fixture.seen == "7");
+	TH_CHECK(fixture.registry.find("local") == nullptr);
 }

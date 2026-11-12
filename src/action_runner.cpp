@@ -33,6 +33,10 @@ std::string ActionRunner::resolveActionDevice(const HwLookup& registry, const st
 		name = v.rendered();
 	}
 	MatrixVars_Hardware* hv = registry.find(name);
+	if (hv != nullptr && std::string_view(hv->kindName()) == "struct") {
+		throw IllegalArgumentException("@Struct '" + name
+			+ "' cannot name a device in an @Action column; use a driver, daemon or @Reflex(name)");
+	}
 	if (hv == nullptr || !hv->isScalarText()) { return name; }
 	if (std::string_view(hv->kindName()) == "vars") {
 		throw IllegalArgumentException("@Vars '" + name
@@ -290,11 +294,28 @@ std::optional<Capture> ActionRunner::parseCaptureCell(const std::string& raw,
 	}
 	Capture cap;
 	cap.colHead = colHead;
-	cap.var = raw.substr(1, eq - 1);
+	const std::string target = raw.substr(1, eq - 1);
+	const std::size_t targetDot = target.find('.');
+	cap.var = targetDot == std::string::npos ? target : target.substr(0, targetDot);
 	cap.path = raw.substr(eq + 1);
 	if (!isSafeIdent(cap.var)) {
 		throw IllegalArgumentException("@Action 捕获目标变量名不是安全标识符：'" + cap.var
 			+ "'（列 '" + colHead + "'，形态 $var=field）");
+	}
+	if (targetDot != std::string::npos) {
+		std::size_t start = targetDot + 1;
+		while (true) {
+			const std::size_t dot = target.find('.', start);
+			const std::string segment = target.substr(start,
+				dot == std::string::npos ? std::string::npos : dot - start);
+			if (!isSafeIdent(segment)) {
+				throw IllegalArgumentException("@Action 捕获目标结构字段名不是安全标识符：'"
+					+ segment + "'（列 '" + colHead + "'，形态 $struct.field=field）");
+			}
+			cap.targetKeys.push_back(segment);
+			if (dot == std::string::npos) { break; }
+			start = dot + 1;
+		}
 	}
 	if (cap.path.empty()) {
 		throw IllegalArgumentException("@Action 捕获 '" + raw + "'（列 '" + colHead
@@ -358,13 +379,22 @@ double jsonNum(const Json& v) {
 
 /* ---- 捕获赋值（play 之后落地；契约见 action_runner.hpp 声明处）---- */
 void ActionRunner::applyCapture(const Json& res, const Capture& cap, std::int64_t row) {
+	std::string targetText = cap.var;
+	for (const std::string& key : cap.targetKeys) { targetText += "." + key; }
 	const std::string ctx = "(row " + std::to_string(row) + ", column '" + cap.colHead
-		+ "', $" + cap.var + "=" + cap.path + ")";
+		+ "', $" + targetText + "=" + cap.path + ")";
 	const Json val = extractFieldPath(res, cap.path, ctx);
 
 	MatrixVars_Hardware* existing = registry_.find(cap.var);
 	std::unique_ptr<MatrixVars_Hardware> nv;
-	if (existing != nullptr) {
+	if (existing != nullptr && std::string_view(existing->kindName()) == "struct") {
+		auto* structVar = static_cast<MtVars_Struct*>(existing);
+		nv = structVar->updated(cap.targetKeys, val);
+	} else if (existing != nullptr) {
+		if (!cap.targetKeys.empty()) {
+			throw IllegalArgumentException("capture " + ctx + ": target '" + cap.var
+				+ "' is not an @Struct; field-path capture requires a declared @Struct");
+		}
 		const std::string_view kind = existing->kindName();
 		if (kind == "vars") {
 			if (!val.isInt() && !val.isFloat()) {
@@ -379,6 +409,9 @@ void ActionRunner::applyCapture(const Json& res, const Capture& cap, std::int64_
 				+ "' is not an @Vars/@Alias scalar; a driver/daemon variable has no"
 				" settable text value (cannot capture into it)");
 		}
+	} else if (!cap.targetKeys.empty()) {
+		throw IllegalArgumentException("capture " + ctx + ": target @Struct '" + cap.var
+			+ "' is not declared");
 	} else if (val.isInt() || val.isFloat()) {
 		nv = MtVars_Vars::Make(jsonNum(val));
 	} else if (val.isStr()) {
@@ -433,8 +466,13 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
 		std::set<std::string> uniqueNames;
 		for (const mt::MatrixObject& m : seq) {
 			const std::string blockName = bot::trim(m.getName());
-			if (blockName != "Alias" && blockName != "Vars") { continue; }
+			const auto structName = mt::namedStructName(blockName);
+			if (blockName != "Alias" && blockName != "Vars" && !structName) { continue; }
 			declarations.push_back(&m);
+			if (structName) {
+				if (uniqueNames.insert(*structName).second) { names.push_back(*structName); }
+				continue;
+			}
 			const std::int64_t idx = m.indexOfCol(0, "name");
 			if (idx < 0) { continue; }
 			for (std::int64_t i = 1; i < static_cast<std::int64_t>(m.rows()); ++i) {
@@ -445,14 +483,17 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
 		if (!declarations.empty()) {
 			if (factory_ == nullptr) {
 				throw IllegalArgumentException(
-					"Block-scoped @Alias/@Vars requires a hardware factory");
+					"Block-scoped @Alias/@Vars/@Struct requires a hardware factory");
 			}
 			declarationScope = std::make_unique<HwRegistry::ScopedNames>(registry_, names);
 			for (const mt::MatrixObject* matrix : declarations) {
-				if (bot::trim(matrix->getName()) == "Alias") {
+				const std::string blockName = bot::trim(matrix->getName());
+				if (blockName == "Alias") {
 					factory_->registerAliasMatrix(*matrix, &localSession, true);
-				} else {
+				} else if (blockName == "Vars") {
 					factory_->registerVarsMatrix(*matrix, &localSession, true);
+				} else {
+					factory_->registerStructMatrix(*matrix, &localSession, true);
 				}
 			}
 		}
@@ -462,7 +503,9 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
 		if (stopRequested()) { break; }	/* Ctrl-C：逐层及时跳出，不再进后续块 */
 		const std::string name = bot::trim(m.getName());
 		if (mt::namedReflexName(name)) { continue; }	/* 顶层定义，由 runAction 收集 */
-		if (name == "Alias" || name == "Vars") { continue; }	/* 本层声明已提升注册 */
+		if (name == "Alias" || name == "Vars" || mt::namedStructName(name)) {
+			continue;	/* 本层声明已提升注册 */
+		}
 		if (name == "Action") {
 			sawActionable = true;
 			/* 普通 @Action：自身网格即一段动作。compound @Action（体内混排了

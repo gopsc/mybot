@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "json.hpp"
 #include "util_except.hpp"
 #include "util_str.hpp"
 
@@ -45,6 +46,9 @@ class MatrixObject {
 
 	std::string name_;
 	std::vector<std::vector<std::string>> values_;	/* 原始矩阵 */
+	/* @Struct(name) 的 JSON 体。非空时 values_ 为空，play/read 直接返回它。 */
+	bot::Json json_value_;
+	bool has_json_ = false;
 
 	/* 嵌套子块（2026-10-12 @块嵌套）：仅控制块（@if/@while）使用——其体内的
 	 * 连续直接行合成为隐式 @Action 子块、显式 @名字 子块按书写顺序并入此列。
@@ -67,6 +71,8 @@ class MatrixObject {
 public:
 	bool hasName() const { return !name_.empty(); }
 	const std::string& getName() const { return name_; }
+	bool hasJson() const { return has_json_; }
+	const bot::Json& jsonValue() const { return json_value_; }
 
 	/* 嵌套子块只读视图（仅控制块 @if/@while 非空；叶子块恒空）。执行器
 	 * execSequence 递归消费（Stage 3）；Stage 1 惰性加入，尚无填充方。 */
@@ -209,6 +215,11 @@ public:
 	 * 显式子块按书写顺序入列）。Stage 1 惰性加入，尚无调用方。 */
 	void addChild(MatrixObject child) { obj_.children_.push_back(std::move(child)); }
 
+	void jsonValue(bot::Json value) {
+		obj_.json_value_ = std::move(value);
+		obj_.has_json_ = true;
+	}
+
 	bool hasRows() const { return !obj_.values_.empty(); }
 
 	MatrixObject take() { return std::move(obj_); }
@@ -252,6 +263,25 @@ inline bool looksLikeNamedReflex(const std::string& rawName) {
 	return bot::trim(rawName).rfind("Reflex(", 0) == 0;
 }
 
+/* @Struct(name)：JSON 值声明。名称规则与 Reflex 相同（安全标识符 + 连字符）。 */
+inline std::optional<std::string> namedStructName(const std::string& rawName) {
+	const std::string n = bot::trim(rawName);
+	if (n.rfind("Struct(", 0) != 0 || n.back() != ')') { return std::nullopt; }
+	const std::string inner = n.substr(7, n.size() - 8);
+	if (inner.empty()) { return std::nullopt; }
+	const unsigned char first = static_cast<unsigned char>(inner.front());
+	if (!(std::isalpha(first) != 0 || first == '_')) { return std::nullopt; }
+	for (char c : inner) {
+		const unsigned char uc = static_cast<unsigned char>(c);
+		if (!(std::isalnum(uc) != 0 || c == '_' || c == '-')) { return std::nullopt; }
+	}
+	return inner;
+}
+
+inline bool looksLikeNamedStruct(const std::string& rawName) {
+	return bot::trim(rawName).rfind("Struct(", 0) == 0;
+}
+
 class MatrixParser {
 	bot::Reader& input_;
 
@@ -263,6 +293,10 @@ class MatrixParser {
 		/* @Action 在首次遇到嵌套子块时转为 compound：已有网格先落成一个隐式
 		 * @Action 子块，之后直接行进入 pendingAction，与子块按书写序交错。 */
 		bool compound = false;
+		bool isStruct = false;		/* @Struct(name)：JSON 体，不是网格 */
+		bool jsonStarted = false;
+		bool jsonComment = false;	/* 声明行上的 # 注释 */
+		std::string jsonText;
 		MatrixBuilder self;		/* 叶子：网格（名字已置） */
 		std::vector<MatrixObject> children;	/* 控制/compound：按书写顺序的子块 */
 		MatrixBuilder pendingAction;	/* 控制/compound：当前隐式 @Action */
@@ -279,6 +313,7 @@ class MatrixParser {
 	bool nm_ = false;	/* 正在读块头名字 token */
 	bool quoted_ = false;	/* 双引号内：空白/; /# 不分格，引号保留进单元格 */
 	bool escaped_ = false;	/* 引号内的反斜杠转义（下一个字符不闭合引号） */
+	bool line_start_ = true;	/* 下一个字符是否位于行首（@Struct 闭合标记用） */
 
 	/* 当前接收数据行的构建器：控制帧 → pendingAction，叶子帧 → self，栈空 → scratch_ */
 	MatrixBuilder& dataBuilder();

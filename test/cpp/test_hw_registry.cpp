@@ -307,7 +307,7 @@ TH_TEST(hw_registry_action_expr_resolver_also_accepts_alias_text) {
 	TH_CHECK(num.rendered() == "2000");	/* formatNumber：整数不带小数点/指数 */
 
 	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException,
-		"which is a driver/daemon variable; only @Alias/@Vars may appear in an expression",
+		"which is a driver/daemon variable; only @Alias/@Vars/@Struct may appear in an expression",
 		resolve("dev1"));
 	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException,
 		"but it is not a defined hardware variable", resolve("ghost"));

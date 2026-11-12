@@ -29,6 +29,9 @@ void RobotStruct::run(bot::Reader& input, const std::map<std::string, std::strin
 		std::string mtName = trim(matrix.getName());
 		if (mtName == "Alias") { internals_->factory.registerAliasMatrix(matrix, &session); }
 		else if (mtName == "Vars") { internals_->factory.registerVarsMatrix(matrix, &session); }
+		else if (mt::namedStructName(mtName)) {
+			internals_->factory.registerStructMatrix(matrix, &session);
+		}
 	}
 
 	/* 调用方注入的变量覆盖脚本内默认值，并受安全标识符与引用覆盖规则约束。 */

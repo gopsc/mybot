@@ -136,6 +136,30 @@ public:
 	bool isScalarText() const override { return true; }
 };
 
+/* ---- @Struct：JSON 值变量 ----
+ * play/read 返回完整 Json（对象/数组/标量）；表达式层通过 .field/[index]
+ * 选择成员，捕获可整值替换或写入结构字段。 */
+class MtVars_Struct : public MatrixVars_Hardware {
+	std::string name_;
+	Json value_;
+
+	MtVars_Struct(std::string name, Json value)
+		: name_(std::move(name)), value_(std::move(value)) {}
+
+public:
+	const char* kindName() const override { return "struct"; }
+	Json play(const Json&) override { return value_; }
+	Json read() override { return value_; }
+	const std::string& name() const { return name_; }
+
+	/* 捕获赋值：keys 为空 = 整值替换；否则按对象字段逐层下钻后写叶子。
+	 * 只允许对象字段（与旧式捕获路径的 '.' 语法一致）。 */
+	std::unique_ptr<MtVars_Struct> updated(const std::vector<std::string>& keys,
+		const Json& value) const;
+
+	static std::unique_ptr<MtVars_Struct> Factory(const mt::MatrixObject& defs);
+};
+
 /* ---- 别名硬件变量 ---- */
 class MtVars_Alias : public MtVars_Text {
 	explicit MtVars_Alias(std::string alias) : MtVars_Text(std::move(alias)) {}

@@ -26,6 +26,7 @@ namespace bot {
  * colHead = 原始列头文本，仅供报错归因。 */
 struct Capture {
 	std::string var;
+	std::vector<std::string> targetKeys;	/* $cfg.field.path：结构字段路径 */
 	std::string path;
 	std::string colHead;
 };

@@ -23,7 +23,7 @@ ctest --test-dir build --output-on-failure
 ./build/mybot --help
 ```
 
-当前基线：**569 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
+当前基线：**574 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
 
 ## 快速开始
 
@@ -111,12 +111,12 @@ Structure SQL (SQLite3 + DSL 归一化) → MatrixObject 表
 - `@Action` 内的 `@Alias`/`@Vars` 块级词法作用域
 - `@if`/`@while` 嵌套与 compound `@Action`
 - 新式 `@Reflex(name)` 命名反射（参数作用域隔离、可在 `@Action` 中按 `反射名.形参` 调用）
+- `@Struct(name)` JSON 声明：字段/数组下标选择（`$(cfg.field)`、`$(cfg.items[0])`）与结构字段捕获
 - MT 带引号单元格（引号内空格、`;`、`#` 不分格）
 - 原生 Time/LoopbackProbe/Shell/HTTP/TCP/Dev_enum/I2C_scan 驱动
 
 尚未移植：
 
-- `@Struct(name)` JSON 声明（需要扩展表达式求值器以支持对象字段/数组下标）
 - FTDI `ftdi://` I2C/SPI（当前只支持 `/dev/i2c-*`、`/dev/spidev*`、串口）
 - 当前 Python 的子命令 `check/sample/query/apply-sql/assets/new/discover/doctor`
   （本项目按设计保留旧扁平 CLI）

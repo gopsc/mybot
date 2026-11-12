@@ -194,4 +194,41 @@ std::unique_ptr<MtVars_Vars> MtVars_Vars::Make(double value) {
 		new MtVars_Vars(std::move(literal), std::nullopt, {}));
 }
 
+std::unique_ptr<MtVars_Struct> MtVars_Struct::Factory(const mt::MatrixObject& defs) {
+	const auto name = mt::namedStructName(defs.getName());
+	if (!name) {
+		throw IllegalArgumentException("Invalid @Struct block name");
+	}
+	if (!defs.hasJson()) {
+		throw IllegalArgumentException("@Struct '" + *name + "' has no JSON body");
+	}
+	return std::unique_ptr<MtVars_Struct>(new MtVars_Struct(*name, defs.jsonValue()));
+}
+
+std::unique_ptr<MtVars_Struct> MtVars_Struct::updated(
+		const std::vector<std::string>& keys, const Json& value) const {
+	if (keys.empty()) {
+		return std::unique_ptr<MtVars_Struct>(new MtVars_Struct(name_, value));
+	}
+	Json candidate = value_;
+	Json* current = &candidate;
+	for (std::size_t index = 0; index < keys.size(); ++index) {
+		if (!current->isObj()) {
+			throw IllegalArgumentException("capture into @Struct '" + name_
+				+ "': parent of field '" + keys[index] + "' is not an object");
+		}
+		Json* child = current->getPtr(keys[index]);
+		if (child == nullptr) {
+			throw IllegalArgumentException("capture into @Struct '" + name_
+				+ "': object has no field '" + keys[index] + "'");
+		}
+		if (index + 1 == keys.size()) {
+			*child = value;
+		} else {
+			current = child;
+		}
+	}
+	return std::unique_ptr<MtVars_Struct>(new MtVars_Struct(name_, std::move(candidate)));
+}
+
 } // namespace bot

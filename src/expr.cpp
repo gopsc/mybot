@@ -14,6 +14,7 @@ namespace bot {
 std::string ExprValue::rendered() const {
 	if (isText()) { return text; }
 	if (isBool()) { return flag ? "true" : "false"; }
+	if (isObject()) { return object.toString(); }
 	if (!std::isfinite(num)) {
 		throw IllegalArgumentException("expression evaluates to a non-finite value"
 			" (inf/nan), which is rejected");
@@ -26,6 +27,7 @@ const char* exprTypeName(const ExprValue& v) {
 	case ExprValue::Kind::Num: return "number";
 	case ExprValue::Kind::Text: return "text";
 	case ExprValue::Kind::Bool: return "boolean";
+	case ExprValue::Kind::Object: return "object";
 	}
 	return "?";
 }
@@ -46,6 +48,10 @@ double requireNum(const ExprValue& v) {
 		throw IllegalArgumentException("expression produced a boolean result"
 			" (a comparison or logical expression); logical expressions belong"
 			" in an @if(...) condition, not in $(...) on this position");
+	}
+	if (v.isObject()) {
+		throw IllegalArgumentException("expression produced an object/array result;"
+			" select a scalar field (for example cfg.field) before using it as a number");
 	}
 	return v.num;
 }
@@ -131,6 +137,72 @@ struct VarNode : Expression::Impl {
 	explicit VarNode(std::string n) : name(std::move(n)) {}
 	ExprValue eval(const ExprValueResolver& resolve) const override { return resolve(name); }
 	void collect(std::set<std::string>& out) const override { out.insert(name); }
+};
+
+/* @Struct 字段/数组选择：Json 值 → ExprValue。null 不进入表达式（与 Python
+ * 的 select_member 一致：字段存在但值为 null 时显式报错）。 */
+ExprValue scalarFromJson(const Json& value) {
+	if (value.isBool()) { return ExprValue::makeBool(value.getBool()); }
+	if (value.isInt()) { return ExprValue::makeNum(static_cast<double>(value.getInt())); }
+	if (value.isFloat()) { return ExprValue::makeNum(value.getFloat()); }
+	if (value.isStr()) { return ExprValue::makeText(value.getValue()); }
+	if (value.isObj() || value.isArr()) { return ExprValue::makeObject(value); }
+	throw IllegalArgumentException("expression selected a null value; select a non-null field");
+}
+
+struct FieldNode : Expression::Impl {
+	std::shared_ptr<const Expression::Impl> base;
+	std::string key;
+	FieldNode(std::shared_ptr<const Expression::Impl> b, std::string k)
+		: base(std::move(b)), key(std::move(k)) {}
+	ExprValue eval(const ExprValueResolver& resolve) const override {
+		ExprValue value = base->eval(resolve);
+		if (!value.isObject()) {
+			throw IllegalArgumentException("field selection '." + key + "' requires an object"
+				" (@Struct), but the base is a " + exprTypeName(value));
+		}
+		if (!value.object.isObj()) {
+			throw IllegalArgumentException("field selection '." + key + "' requires an object");
+		}
+		const Json* found = value.object.find(key);
+		if (found == nullptr) {
+			throw IllegalArgumentException("object has no field '" + key + "'");
+		}
+		return scalarFromJson(*found);
+	}
+	void collect(std::set<std::string>& out) const override { base->collect(out); }
+};
+
+struct IndexNode : Expression::Impl {
+	std::shared_ptr<const Expression::Impl> base;
+	std::shared_ptr<const Expression::Impl> index;
+	IndexNode(std::shared_ptr<const Expression::Impl> b,
+		std::shared_ptr<const Expression::Impl> i)
+		: base(std::move(b)), index(std::move(i)) {}
+	ExprValue eval(const ExprValueResolver& resolve) const override {
+		ExprValue value = base->eval(resolve);
+		ExprValue position = index->eval(resolve);
+		if (!value.isObject()) {
+			throw IllegalArgumentException("array index requires an array (@Struct), but the base is a "
+				+ std::string(exprTypeName(value)));
+		}
+		if (!value.object.isArr()) {
+			throw IllegalArgumentException("array index requires an array");
+		}
+		const double number = requireNum(position);
+		if (!std::isfinite(number) || std::floor(number) != number || number < 0) {
+			throw IllegalArgumentException("array index must be a nonnegative integer");
+		}
+		const std::size_t at = static_cast<std::size_t>(number);
+		if (at >= value.object.size()) {
+			throw IllegalArgumentException("array index out of bounds");
+		}
+		return scalarFromJson(value.object.at(at));
+	}
+	void collect(std::set<std::string>& out) const override {
+		base->collect(out);
+		index->collect(out);
+	}
 };
 
 struct UnNode : Expression::Impl {
@@ -414,7 +486,32 @@ class ExprParser {
 			return parseNumber();
 		}
 		if (c == '"') { return parseString(); }
-		if (isIdentStart(c)) { return parseVar(); }
+		if (isIdentStart(c)) {
+			Node node = parseVar();
+			for (;;) {
+				skipWs();
+				if (peek() == '.') {
+					++pos_;
+					skipWs();
+					if (!isIdentStart(peek())) { fail("expected field identifier after '.'"); }
+					const std::size_t begin = pos_;
+					++pos_;
+					while (isIdentChar(peek())) { ++pos_; }
+					node = std::make_shared<FieldNode>(std::move(node),
+						s_.substr(begin, pos_ - begin));
+				} else if (peek() == '[') {
+					++pos_;
+					Node at = parseOr();
+					skipWs();
+					if (peek() != ']') { fail("expected ']'"); }
+					++pos_;
+					node = std::make_shared<IndexNode>(std::move(node), std::move(at));
+				} else {
+					break;
+				}
+			}
+			return node;
+		}
 		fail(std::string("unexpected character '") + c + "'");
 	}
 

@@ -166,9 +166,12 @@ std::function<ExprValue(const std::string&)> HwRegistry::makeActionExprResolver(
 			throw IllegalArgumentException("expression references '" + nm
 				+ "', but it is not a defined hardware variable");
 		}
+		if (std::string_view(hv->kindName()) == "struct") {
+			return ExprValue::makeObject(hv->read());
+		}
 		if (!hv->isScalarText()) {
 			throw IllegalArgumentException("expression references '" + nm
-				+ "', which is a driver/daemon variable; only @Alias/@Vars may"
+				+ "', which is a driver/daemon variable; only @Alias/@Vars/@Struct may"
 				+ " appear in an expression");
 		}
 		if (std::string_view(hv->kindName()) == "vars") {
