@@ -514,6 +514,10 @@ Json HALManager::opI2cOpen(const Json& pathValue, const Json& virtualValue, int 
 	if (virtualBus) {
 		return JsonInt(addBus("i2c", path, -1, "virtual", owner));
 	}
+	if (path.rfind("ftdi://", 0) == 0) {
+		throw std::runtime_error(
+			"FTDI I2C is not implemented in this build; use /dev/i2c-N or a virt-* path");
+	}
 	if (!allowHardware_) {
 		throw std::runtime_error(
 			"Physical hardware access requires explicit --allow-hardware confirmation");
@@ -574,6 +578,10 @@ Json HALManager::opSpiOpen(const Json& pathValue, const Json& virtualValue, int 
 		|| isVirtualPath(path);
 	if (virtualBus) {
 		return JsonInt(addBus("spi", path, -1, "virtual", owner));
+	}
+	if (path.rfind("ftdi://", 0) == 0) {
+		throw std::runtime_error(
+			"FTDI SPI is not implemented in this build; use /dev/spidevX.Y or a virt-* path");
 	}
 	if (!allowHardware_) {
 		throw std::runtime_error(

@@ -23,7 +23,7 @@ ctest --test-dir build --output-on-failure
 ./build/mybot --help
 ```
 
-当前基线：**568 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
+当前基线：**569 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
 
 ## 快速开始
 
