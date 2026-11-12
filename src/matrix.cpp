@@ -256,12 +256,23 @@ void MatrixParser::commitHeader(const std::string& hdr) {
 		return;
 	}
 	/* 开块 */
+	const auto reflexName = namedReflexName(hdr);
+	if (looksLikeNamedReflex(hdr) && !reflexName) {
+		throw bot::IllegalArgumentException(
+			"Expected @Reflex(identifier) without whitespace");
+	}
+	if (reflexName && !stack_.empty()) {
+		throw bot::IllegalArgumentException(
+			"@Reflex definitions may only appear at the top level");
+	}
 	if (!stack_.empty()) {
 		Frame& parent = stack_.back();
-		if (!parent.isControl && parent.name != "Action") {
+		const bool parentCompound = parent.isControl || parent.name == "Action"
+			|| namedReflexName(parent.name).has_value();
+		if (!parentCompound) {
 			throw bot::IllegalArgumentException("叶子块 @" + parent.name
-				+ " 内不能嵌套 @" + hdr + "：只有 @Action/@if/@while 能含子块，"
-				+ "@Alias/@Vars 等叶子块的体只能是数据行");
+				+ " 内不能嵌套 @" + hdr + "：只有 @Action/@Reflex(name)/@if/@while"
+				" 能含子块，@Alias/@Vars 等叶子块的体只能是数据行");
 		}
 		if (stack_.size() + 1 > kMaxBlockDepth) {
 			throw bot::IllegalArgumentException("@块嵌套深度超过上限 "
@@ -282,7 +293,8 @@ void MatrixParser::commitHeader(const std::string& hdr) {
 	Frame f;
 	f.name = hdr;
 	f.isControl = isControlBlockName(hdr);
-	if (f.isControl) { f.pendingAction.name("Action"); }
+	f.compound = reflexName.has_value();
+	if (f.isControl || f.compound) { f.pendingAction.name("Action"); }
 	else { f.self.name(hdr); }
 	stack_.push_back(std::move(f));
 }

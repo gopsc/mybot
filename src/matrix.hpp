@@ -3,6 +3,7 @@
  * @ 开块、; 行尾、# 注释、空格/制表符分隔项、- 占位符由上层解析
  */
 
+#include <cctype>
 #include <cstdint>
 #include <optional>
 #include <ostream>
@@ -229,6 +230,26 @@ inline bool isControlBlockName(const std::string& rawName) {
 	const std::string n = bot::trim(rawName);
 	return n == "if" || n.compare(0, 3, "if(") == 0
 		|| n == "while" || n.compare(0, 6, "while(") == 0;
+}
+
+/* 新式命名反射块 @Reflex(name)：名称紧贴括号、无空白；名字允许连字符
+ * （与当前 Python 的 MT 文法一致）。返回 nullopt = 不是新式命名块。 */
+inline std::optional<std::string> namedReflexName(const std::string& rawName) {
+	const std::string n = bot::trim(rawName);
+	if (n.rfind("Reflex(", 0) != 0 || n.back() != ')') { return std::nullopt; }
+	const std::string inner = n.substr(7, n.size() - 8);
+	if (inner.empty()) { return std::nullopt; }
+	const unsigned char first = static_cast<unsigned char>(inner.front());
+	if (!(std::isalpha(first) != 0 || first == '_')) { return std::nullopt; }
+	for (char c : inner) {
+		const unsigned char uc = static_cast<unsigned char>(c);
+		if (!(std::isalnum(uc) != 0 || c == '_' || c == '-')) { return std::nullopt; }
+	}
+	return inner;
+}
+
+inline bool looksLikeNamedReflex(const std::string& rawName) {
+	return bot::trim(rawName).rfind("Reflex(", 0) == 0;
 }
 
 class MatrixParser {

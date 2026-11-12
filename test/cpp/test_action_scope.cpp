@@ -38,6 +38,7 @@ struct Fixture {
 				}
 				bot::Json ok = bot::JsonObject();
 				ok.put("result", bot::JsonString("OK"));
+				if (value != nullptr) { ok.put("value", *value); }
 				return ok;
 			})));
 	}
@@ -125,6 +126,79 @@ TH_TEST(action_scope_local_declaration_cannot_replace_a_driver) {
 		"@\n"
 		"dev.x;\n"
 		"1;\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "cannot replace",
+		runner.runAction(matrices));
+}
+
+TH_TEST(action_named_reflex_binds_parameters) {
+	Fixture fixture;
+	auto matrices = actionScript(
+		"@Reflex(echo)\n"
+		"dev.x;\n"
+		"$(v);\n"
+		"@\n"
+		"@Action\n"
+		"echo.v;\n"
+		"     5;\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	runner.runAction(matrices);
+	TH_CHECK(fixture.seen == "5");
+}
+
+TH_TEST(action_named_reflex_capture_feeds_later_action) {
+	Fixture fixture;
+	auto matrices = actionScript(
+		"@Reflex(echo)\n"
+		"dev.x;\n"
+		"$(v);\n"
+		"@\n"
+		"@Action\n"
+		"echo.v echo.cap;\n"
+		"     5 $cap=value;\n"
+		"@\n"
+		"@Action\n"
+		"dev.x;\n"
+		"$(cap);\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	runner.runAction(matrices);
+	TH_CHECK(fixture.seen == "5");
+	TH_CHECK(fixture.registry.find("cap") != nullptr);
+}
+
+TH_TEST(action_named_reflex_duplicate_definition_is_rejected) {
+	Fixture fixture;
+	auto matrices = actionScript(
+		"@Reflex(echo)\n"
+		"dev.x;\n"
+		"1;\n"
+		"@\n"
+		"@Reflex(echo)\n"
+		"dev.x;\n"
+		"2;\n"
+		"@\n"
+		"@Action\n"
+		"dev.x;\n"
+		"1;\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "Duplicate Reflex",
+		runner.runAction(matrices));
+}
+
+TH_TEST(action_named_reflex_argument_cannot_replace_a_driver) {
+	Fixture fixture;
+	auto matrices = actionScript(
+		"@Reflex(bad)\n"
+		"dev.x;\n"
+		"$(dev);\n"
+		"@\n"
+		"@Action\n"
+		"bad.dev;\n"
+		"      1;\n"
 		"@\n");
 	bot::ActionRunner runner(fixture.registry, fixture.factory);
 	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "cannot replace",

@@ -63,6 +63,11 @@ class HwFactory;
 class ActionRunner {
 	HwRegistry& registry_;
 	HwFactory* factory_;
+	/* 顶层 @Reflex(name) 定义；派发时按列头设备名查表。指针指向
+	 * RobotStruct::run 中的 actionMatrices 元素，执行期间容器不变。 */
+	std::map<std::string, const mt::MatrixObject*> namedReflexes_;
+	/* 命名反射调用期间，dispatchMatrix 把最后一次 play 结果写到这里。 */
+	Json* resultSink_ = nullptr;
 
 	/* C-M3：$(...) 表达式 AST 按列缓存——"-" 继承链上同一表达式文本
 	 * 原实现每行每格重解析一次（O(行数²) 字符扫描）。body 为上次解析的
@@ -143,6 +148,10 @@ public:
 
 	/* 单矩阵动作派发核心：@Action 与 #34 @Reflex 共用同一派发逻辑 */
 	void dispatchMatrix(const mt::MatrixObject& actionDefs);
+
+	/* 新式命名反射：顶层 @Reflex(name) 定义收集与调用。 */
+	void collectNamedReflexes(const std::vector<mt::MatrixObject>& seq);
+	Json callNamedReflex(const mt::MatrixObject& reflex, const Json& params);
 
 	/* 递归执行一段块序列（顶层序列，或某控制块的 children）：按书写顺序，
 	 * "Action" 叶子块直接 dispatchMatrix；@if/@while 控制块求值后**递归进入其

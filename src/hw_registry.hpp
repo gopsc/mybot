@@ -95,6 +95,23 @@ public:
 		ScopedNames& operator=(const ScopedNames&) = delete;
 	};
 
+	/* 反射调用作用域（当前 Python 的 Registry.session()）：进入时整体移走
+	 * 外层会话覆盖，退出时原样恢复。反射体因此看不到调用方的临时别名，
+	 * 体内部的捕获/参数也随调用结束整体回滚。 */
+	class SessionSnapshot {
+		HwRegistry* reg_;
+		std::map<std::string, std::unique_ptr<MatrixVars_Hardware>> saved_;
+
+	public:
+		explicit SessionSnapshot(HwRegistry& reg)
+			: reg_(&reg), saved_(std::move(reg.session_)) {
+			reg_->session_.clear();
+		}
+		~SessionSnapshot() { reg_->session_ = std::move(saved_); }
+		SessionSnapshot(const SessionSnapshot&) = delete;
+		SessionSnapshot& operator=(const SessionSnapshot&) = delete;
+	};
+
 	/* 会话层规模（只读）。测试与诊断用：结构清单 byName() 不得因会话而增长。 */
 	std::size_t sessionSize() const { return session_.size(); }
 

@@ -134,7 +134,12 @@ void ActionRunner::dispatchMatrix(const mt::MatrixObject& actionDefs) {
 		}
 		for (const std::string& name_dev : plan.order) {
 			MatrixVars_Hardware* hv = registry_.find(name_dev);
+			const mt::MatrixObject* reflex = nullptr;
 			if (hv == nullptr) {
+				auto found = namedReflexes_.find(name_dev);
+				if (found != namedReflexes_.end()) { reflex = found->second; }
+			}
+			if (hv == nullptr && reflex == nullptr) {
 				throw IllegalArgumentException("Hardware variable '" + name_dev
 					+ "' is used in @Action (row " + std::to_string(i)
 					+ ") but not defined in your hardware declaration section.");
@@ -151,8 +156,10 @@ void ActionRunner::dispatchMatrix(const mt::MatrixObject& actionDefs) {
 			/* 捕获格不传参：只有捕获而无普通参数的设备仍需 play（以空参数触发一次
 			 * 读取/调用），否则无从拿到返回值来提取字段。 */
 			if (!paramsOpt) { paramsOpt = JsonObject(); }
-			Json res = hv->play(*paramsOpt);
+			Json res = reflex != nullptr ? callNamedReflex(*reflex, *paramsOpt)
+				: hv->play(*paramsOpt);
 			MatrixVars_Hardware::ensureOk(res, "play " + name_dev + " (row " + std::to_string(i) + ")");
+			if (resultSink_ != nullptr) { *resultSink_ = res; }
 			if (hasCaps) {
 				for (const Capture& cap : capIt->second) {
 					applyCapture(res, cap, i);
@@ -160,6 +167,60 @@ void ActionRunner::dispatchMatrix(const mt::MatrixObject& actionDefs) {
 			}
 		}
 	}
+}
+
+void ActionRunner::collectNamedReflexes(const std::vector<mt::MatrixObject>& seq) {
+	for (const mt::MatrixObject& matrix : seq) {
+		const auto name = mt::namedReflexName(matrix.getName());
+		if (!name) { continue; }
+		if (namedReflexes_.count(*name) != 0) {
+			throw IllegalArgumentException("Duplicate Reflex definition '" + *name + "'");
+		}
+		namedReflexes_[*name] = &matrix;
+	}
+}
+
+Json ActionRunner::callNamedReflex(const mt::MatrixObject& reflex, const Json& params) {
+	/* 与外层会话隔离：反射体看不到调用方的临时别名，体内的参数/捕获在返回时
+	 * 整体回滚（对齐当前 Python 的 Registry.session()）。 */
+	HwRegistry::SessionSnapshot snapshot(registry_);
+	for (const auto& entry : params.items()) {
+		if (!isSafeIdent(entry.first)) {
+			throw IllegalArgumentException("Reflex parameter names must be safe identifiers");
+		}
+		MatrixVars_Hardware* existing = registry_.find(entry.first);
+		if (existing != nullptr) {
+			const std::string_view kind = existing->kindName();
+			if (kind != "alias" && kind != "vars") {
+				throw IllegalArgumentException("Reflex argument '" + entry.first
+					+ "' cannot replace a driver, daemon or flow reference");
+			}
+		}
+		std::unique_ptr<MatrixVars_Hardware> variable;
+		if (entry.second.isInt()) {
+			variable = MtVars_Vars::Make(static_cast<double>(entry.second.getInt()));
+		} else if (entry.second.isFloat()) {
+			variable = MtVars_Vars::Make(entry.second.getFloat());
+		} else if (entry.second.isStr()) {
+			variable = MtVars_Alias::Make(entry.second.getValue());
+		} else {
+			throw IllegalArgumentException("Reflex argument '" + entry.first
+				+ "' must be a scalar text or number");
+		}
+		registry_.override(entry.first, std::move(variable));
+	}
+	Json last = JsonObject();
+	last.put("result", JsonString("OK"));
+	Json* previous = resultSink_;
+	resultSink_ = &last;
+	try {
+		execSequence(reflex.children(), true);
+	} catch (...) {
+		resultSink_ = previous;
+		throw;
+	}
+	resultSink_ = previous;
+	return last;
 }
 
 /* ---- @if(条件)/@while(条件) 块头解析共用 helper ----
@@ -400,6 +461,7 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
 	for (const mt::MatrixObject& m : seq) {
 		if (stopRequested()) { break; }	/* Ctrl-C：逐层及时跳出，不再进后续块 */
 		const std::string name = bot::trim(m.getName());
+		if (mt::namedReflexName(name)) { continue; }	/* 顶层定义，由 runAction 收集 */
 		if (name == "Alias" || name == "Vars") { continue; }	/* 本层声明已提升注册 */
 		if (name == "Action") {
 			sawActionable = true;
@@ -451,6 +513,8 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
  * 整棵顶层序列没有任何可执行块（Action/if/while）时，若有 @Trigger 则反射
  * 独立成立（直接返回，runReflex 接手），否则响亮报错。 */
 void ActionRunner::runAction(std::vector<mt::MatrixObject>& actionMatrices) {
+	namedReflexes_.clear();
+	collectNamedReflexes(actionMatrices);
 	bool sawActionable = execSequence(actionMatrices, false);
 	if (!sawActionable) {
 		if (mt::findByName(actionMatrices, "Trigger") != nullptr) { return; }
