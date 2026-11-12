@@ -20,13 +20,18 @@
 
 #include "matrix.hpp"
 #include "script_loader.hpp"
+#include "sql_engine.hpp"
 
 namespace bot {
 
 class StructureStore {
 public:
-	/* 装载：结构 SQL 文本 → 声明序矩阵表（构造期唯一入口） */
-	void load(bot::Reader& input) { ScriptLoader::readSQL(input, tables_); }
+	/* 装载：结构 SQL 文本 → 声明序矩阵表（构造期唯一入口）。
+	 * 结构 SQL 由 SQLite3 解析/执行（SqlEngine），矩阵表按 CREATE 声明序读回。 */
+	void load(bot::Reader& input) {
+		SqlEngine engine;
+		tables_ = engine.loadStructure(input);
+	}
 
 	/* 追加一张新表（整表声明：热插 CREATE、injectLuaDriver 合成表）。
 	 * push_back 不影响既有元素引用——MetaProvider::matrix_ 的不变式见头注释。 */

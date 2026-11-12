@@ -45,6 +45,14 @@ if(NOT CURL_INCLUDE_DIR OR NOT CURL_LIBRARY)
 endif()
 message(STATUS "libcurl: ${CURL_LIBRARY} (${CURL_INCLUDE_DIR})")
 
+# SQLite3：结构 SQL 的解析/执行库。
+find_path(SQLITE3_INCLUDE_DIR NAMES sqlite3.h)
+find_library(SQLITE3_LIBRARY NAMES sqlite3)
+if(NOT SQLITE3_INCLUDE_DIR OR NOT SQLITE3_LIBRARY)
+  message(FATAL_ERROR "SQLite3 not found. Install libsqlite3-dev")
+endif()
+message(STATUS "SQLite3: ${SQLITE3_LIBRARY} (${SQLITE3_INCLUDE_DIR})")
+
 # Sanitizer 开关（F-23）：随仓库分发、两个目标一致套用，避免各人手工拼
 # CXX_FLAGS 造成「测试构建干净、主构建不干净」的错位。用法：
 #   cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
@@ -101,8 +109,9 @@ set(MYBOT_CORE_SOURCES
   # ---- 矩阵/表达式/脚本语法层：.mt 与结构 SQL 的解析基元 ----
   src/matrix.cpp
   src/expr.cpp
+  src/sql_engine.cpp         # SQLite3 驱动的结构 SQL 解析/执行
   src/sqlparse.cpp
-  src/structure.cpp          # ScriptLoader：SQL 事件 → MatrixObject
+  src/structure.cpp          # ScriptLoader：SQL 事件 → MatrixObject（热 SQL 仍用）
   src/mtmerge_core.cpp       # .mt 归并核心（mtinclude 运行端展开 + test_mtmerge 白盒）
   src/mtinclude.cpp          # @Include 展开
   # ---- Lua 层：桥接、沙箱与执行预算 ----
@@ -165,7 +174,8 @@ if(MYBOT_WERROR)
   target_compile_options(mybot_warnings INTERFACE -Werror)
 endif()
 target_include_directories(mybot_warnings INTERFACE
-  src ${LUAJIT_INCLUDE_DIRS} ${CURL_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/third_party/cli11)
+  src ${LUAJIT_INCLUDE_DIRS} ${CURL_INCLUDE_DIR} ${SQLITE3_INCLUDE_DIR}
+  ${CMAKE_SOURCE_DIR}/third_party/cli11)
 
 # Lua 运行时链接（仅 mybot / mybot_tests）
 add_library(mybot_common INTERFACE)
@@ -173,6 +183,7 @@ target_link_libraries(mybot_common INTERFACE
   mybot_warnings
   ${LUAJIT_LIBRARIES}
   ${CURL_LIBRARY}
+  ${SQLITE3_LIBRARY}
   pthread
   dl
   m

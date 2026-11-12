@@ -291,15 +291,17 @@ TH_TEST(daemon_backoff_sleep_interruptible_by_stop) {
  * 写成不存在的 'x.lua' 也能精确命中本判据。 */
 namespace {
 
-void expectConfigRejected(const std::string& fieldValue) {
+void expectConfigRejected(const std::string& fieldValue, const char* expected = "DAEMON_CONFIG") {
 	std::string sql =
 		"CREATE TABLE Daemon (name String, chunk String, fields String, proto String);\n"
 		"INSERT INTO Daemon (name, chunk, fields, proto) VALUES ('d1', 'x.lua', '";
 	sql += fieldValue;
 	sql += "', 'i2c');\n";
 	bot::MemoryReader sr(sql);
-	bot::RobotStruct robot(sr);
-	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "DAEMON_CONFIG", robot.active());
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, expected, [&]() {
+		bot::RobotStruct robot(sr);
+		robot.active();
+	}());
 }
 
 } // namespace
@@ -307,7 +309,9 @@ void expectConfigRejected(const std::string& fieldValue) {
 TH_TEST(daemon_config_rejects_nul_in_column_value) {
 	/* 校验域与 Lua 可见域不一致的那一条：C++ 侧 fields 合法、proto 合法，
 	 * 拼出的串却在 push 时被截断成 "name=d1;chunk=x.lua;fields=temp" */
-	expectConfigRejected(std::string("temp") + '\0' + "h,vin:s16");
+	/* SQLite 无法在 C 字符串里保留 NUL，故加载层在进入 SQLite 前响亮拒绝；
+	 * 校验点从 Daemon 配置前移到结构解析，但「不静默截断」的不变式不变。 */
+	expectConfigRejected(std::string("temp") + '\0' + "h,vin:s16", "NUL");
 }
 
 TH_TEST(daemon_config_rejects_semicolon_in_column_value) {
