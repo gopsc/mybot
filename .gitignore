@@ -1,0 +1,25 @@
+build/
+build-*/
+*.o
+.tmp/
+tmp/
+target/
+
+# 会话/计划目录（.zcode/plans 等为本地临时产物，不入库）
+.zcode/
+.trae/
+.workbuddy/
+
+# Trae 本地工作区元数据，不入库
+.trae/
+
+# Python 字节码缓存（scripts/lib 共用底座被 import 时生成），不入库
+__pycache__/
+
+# agent 模式的 LLM 配置：内含 API key，别提交（示例见 mybot.llm.json.example）
+mybot.llm.json
+mybot.llm.conf.json
+*.llm.json
+
+# 录制模式产物（--record / --record-dir：完整对话 + 图片本体，敏感，不入库）
+recordings/

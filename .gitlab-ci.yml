@@ -1,0 +1,289 @@
+# bot4cj CI：全部十条 job 均为硬门禁（2026-09-25 起；此前 TSan / clang /
+# clang-tidy / coverage / musl / agent 六条为 allow_failure 软门禁）。
+# GitCode（GitLab 系托管）经 .gitlab-ci.yml 驱动；若托管方不识别本文件
+# 则静默不生效（无副作用），迁移其它平台时按同结构翻译即可。
+#
+# 与本地 pre-push 钩子同一条守门（test/run_all.sh），CI 的职责是让
+# 「守门通过」成为自动结论，而非依赖开发者手工跑绿后推送。
+#
+# 转硬依据如实声明（2026-09-25）：各软门禁原写的转硬条件是「CI 基线镜像上连续
+# 2 轮 pipeline 全绿」，但开发机无 docker、也看不到托管方的 pipeline 记录，这条
+# 证据从本仓库内部**不可观测**，等下去只会把六条 job 永久留在软态。改为以「同版本
+# 工具链的本地预跑」为判据（各 job 注释写明工具链版本与预跑结论），并把预跑中
+# 暴露的真问题修掉后一并转硬。若某条 job 在 CI 上因**镜像环境**（而非代码）变红，
+# 该 job 注释里写了辨认特征——修环境或回退该条为 allow_failure，都要写明理由。
+
+stages:
+  - build
+  - gate
+
+variables:
+  DEBIAN_FRONTEND: noninteractive
+
+.install-deps: &install-deps
+  - apt-get update -qq
+  # libcurl 已随 Lua 协议驱动轨道删除（2026-09-25 #8）：无任何构建目标使用它
+  - apt-get install -y -qq cmake g++ libluajit-5.1-dev luajit python3
+
+build:release:
+  stage: build
+  image: debian:bookworm
+  before_script: *install-deps
+  script:
+    # MYBOT_WERROR=ON（2026-09-20 重构阶段 5.3）：把 README 声称的「零告警
+    # 基线」变成 CI 门禁，而不是靠人工传标志核查。本地缺省 OFF，理由见
+    # CMakeLists.txt 的 option 注释（未预跑的编译器版本不应被 -Werror 挡住）。
+    - cmake -S . -B build -DMYBOT_WERROR=ON && cmake --build build -j"$(nproc)"
+  artifacts:
+    paths:
+      - build
+
+gate:release:
+  stage: gate
+  image: debian:bookworm
+  needs: ["build:release"]
+  before_script: *install-deps
+  script:
+    # A4（2026-09-20 审计）：守门自检此前只被**可选安装**的 pre-push 钩子调用，
+    # CI 里零引用——于是「新加的 test/cpp/*.cpp 没登记进 CMakeLists.txt 就永不
+    # 编译」「test/foo.lua 命名不符就永不被收集」这两类静默消失，在 CI 上没人拦。
+    # 它便宜（纯解析 + 两个 glob）且判别力明确，放在全量守门之前：用例没被收集
+    # 就没必要等跑完两百多条。
+    - bash test/run_all_selftest.sh
+    - bash test/run_all.sh
+
+gate:sanitizer:
+  stage: gate
+  image: debian:bookworm
+  needs: ["build:release"]
+  before_script: *install-deps
+  script:
+    # run_san.sh 第二跑要求 sanitizer 产物（explicit=1 缺产物即判失败），
+    # 故本 job 必须自建——只继承 build:release 的 Release 产物不够。
+    # --asan-only：跳过脚本内第一跑（Release 全量）——gate:release 已跑过，
+    # 不加会把整段守门在同一条 pipeline 里跑两遍。
+    # 构建目录 SAN_DIR 单点 test/lib/params.sh（F3-5 余部）：与 run_san.sh
+    # 第二跑的默认路径同源；GitLab 每行独立 shell，source 须与使用同行。
+    - . test/lib/params.sh && cmake -S . -B "$SAN_DIR" -DCMAKE_BUILD_TYPE=Debug -DMYBOT_SANITIZE=address,undefined && cmake --build "$SAN_DIR" -j"$(nproc)"
+    - bash test/run_san.sh --asan-only
+
+# TSan 常态化（审计覆盖缺口 #1）：只跑 mybot_tests 的守护相关用例（并发压测 +
+# 状态机分支），不跑整段守门——LuaJIT 未按 TSan 清洁维护，全量跑的误报无信号
+# 价值（tsan.supp 已按库抑制残留噪声）。
+# halt_on_error=1：TSan 报告数据竞争时以非零退出码结束进程，使本条 job 真能被
+# 竞态判红。此前 halt_on_error=0 下 TSan 报告不改变退出码，job 只可能因测试
+# 自身断言失败而红——对竞态零拦截力。
+# 2026-09-25 转硬：本地（g++ 15.3 / 其 TSan 运行时）名单三用例连跑 5 轮零报告；此前
+# 挡住本地预跑的「unsupported VMA range」环境限制在开发机已不再复现。
+# 环境性变红的辨认特征：日志含 `FATAL: ThreadSanitizer: unsupported VMA range`
+# ——那是 runner 内核 ASLR 位数问题（docs/testing.md 有 vm.mmap_rnd_bits 记录），
+# 不是竞态；应换 runner/内核而非改代码。
+gate:tsan:
+  stage: gate
+  image: debian:bookworm
+  needs: ["build:release"]
+  before_script: *install-deps
+  script:
+    - cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DMYBOT_SANITIZE=thread
+    - cmake --build build-tsan -j"$(nproc)"
+    # 名单单一来源 test/lib/tsan_cases.txt（F3-5）：此前三条用例名在本文件与
+    # test/cpp/test_daemon_concurrency.cpp 两处手抄。零匹配时测试入口返回 1，
+    # 故名单里写错名字不会假绿。
+    - |
+      while read -r c; do
+        case "$c" in ''|\#*) continue ;; esac
+        TSAN_OPTIONS="suppressions=$(pwd)/tsan.supp halt_on_error=1" ./build-tsan/mybot_tests "$c" || exit 1
+      done < test/lib/tsan_cases.txt
+
+# 编译器矩阵（N-35）：CI 此前只有 g++ 一条编译路径，同一份源码在 clang 前端下的
+# 接受度与告警差异（-Wall -Wextra -Wpedantic 各家取舍不同）无人观察——clang 报的
+# 可能是真问题，也可能是另一套前端口径。
+# 本 job 只做烟雾验证：clang 能构建 + C++ 单测全绿（Lua 层与编译器无关，
+# 不重复跑整段守门）。构建日志含告警文本。
+# 2026-09-25 转硬：本地 LLVM 14.0.6（与 bookworm 基线镜像同版本）构建零告警 +
+# 634 条单测全绿；预跑环境是官方预编译包，与 apt 的 clang 同源。
+gate:clang:
+  stage: gate
+  image: debian:bookworm
+  needs: ["build:release"]
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq cmake clang libluajit-5.1-dev luajit
+  script:
+    - cmake -S . -B build-clang -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+    - cmake --build build-clang -j"$(nproc)"
+    - ./build-clang/mybot_tests
+
+# 静态分析门禁（fix-plan 2026-09-20 阶段 D，扣分点「门禁缺静态分析」：
+# 逻辑竞态之外的误用模式此前只能靠运行期兜底）。只分析 src/（modules 为
+# Lua 不适用）；检查集见仓库根 .clang-tidy（bugprone/performance/concurrency，
+# 格式类不开）。
+# 退出码：clang-tidy 以 --warnings-as-errors='*' 运行，其非零退出码经
+# 「重定向落文件 → 记 rc → 末尾 [ $rc -eq 0 ]」直接决定 job 结果——此前管道
+# 退出码取自末尾的 tail（恒 0），叠加 allow_failure 使该 job 无论多少告警都不会红。
+# 用 if/fi 而非 `set -o pipefail`：dash 不支持 pipefail，写法要在任意 /bin/sh 下成立。
+# 留档：clang-tidy.log 声明为 artifacts（when: always + expire_in），
+# 「首轮全量告警基线留档」由此有真实落点。
+# 计数行同时数 `warning:` 与 `error:`（2026-09-25 修正）：--warnings-as-errors 下
+# 命中一律以 `error:` 打印，只数 `warning:` 会在 job 已红时报「告警总数：0」误导读者。
+# 2026-09-25 转硬：本地 clang-tidy 14.0.6（与 bookworm 同版本）全量归零——存量 85 条
+# 当日清障后，预跑又揪出后续功能新引入的 3 条（getenv/strerror 未走 util.hpp 单点、
+# 一处 string 链式拼接），已修。后续新增告警即 job 红，处置方式同存量告警：修掉再推，
+# 理由记进提交信息（变更账本自 2026-10-04 起就是提交信息，见提交 9480de3）。
+gate:clang-tidy:
+  stage: gate
+  image: debian:bookworm
+  needs: []  # 只需源码 + 配置，不必等 Release 产物（clang-tidy 自带前端）
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq cmake clang-tidy libluajit-5.1-dev pkg-config
+  script:
+    - cmake -S . -B build-tidy -DCMAKE_BUILD_TYPE=Release
+    # 全量输出落 clang-tidy.log（artifacts 留档），控制台只回放尾部 50 行 + 命中计数。
+    - |
+      if clang-tidy -p build-tidy --warnings-as-errors='*' src/*.cpp > clang-tidy.log 2>&1; then
+        rc=0
+      else
+        rc=$?
+      fi
+      tail -50 clang-tidy.log
+      echo "命中总数：$(grep -cE '(warning|error):' clang-tidy.log || true)"
+      [ "$rc" -eq 0 ]
+  artifacts:
+    when: always
+    expire_in: 4 weeks
+    paths:
+      - clang-tidy.log
+
+# 覆盖率门禁（fix-plan 2026-09-20，扣分点「测试覆盖率无数据」）：用
+# test/run_coverage.sh 以 -DCMAKE_CXX_FLAGS=--coverage 构建并运行 mybot_tests，
+# 产出 C++ 侧行覆盖报告（优先 gcovr，其次 lcov，都没有时退化为 gcov 原生输出，
+# 缺工具不判失败）。本 job **不进入** run_all.sh 的记账——守门汇总口径不变。
+# COV_WITH_GATE=1：连同全套守门一起采集，让 e2e/TCP/Lua 对 **mybot** 的覆盖也
+# 计入（2026-09-21 AG-11 修正：此前只构建 mybot_tests，导致「叠加守门」的数字
+# 一点不涨，容易被读成「e2e 没有覆盖价值」，实际是 mybot 压根没被插桩）。
+# 本 job「硬」的含义（2026-09-25 转硬，如实）：**不设行覆盖阈值**——AG-11 实测该指标
+# 既漏掉 mybot 链路、又有结构性盲区（fork/exec 子侧代码恒 0%，见 docs/testing.md
+# 「覆盖率数字的口径与已知盲区」），设阈值只会把测试压力挤到测得到的区域。硬门禁
+# 判的是**采集链路本身**：--coverage 构建、mybot_tests、叠加守门、报告生成任一步
+# 失败即红；报告随 artifacts 留档供前后对比。原转硬条件①「artifacts 连续入库可追溯」
+# 从仓库内部不可观测（见文件头）；②「盲区由行为断言覆盖」2026-09-22 已反向验证。
+# 本地预跑：COV_WITH_GATE=1 全程 rc=0，src/ 行覆盖 78.10%（5842/7480）。
+gate:coverage:
+  stage: gate
+  image: debian:bookworm
+  needs: []  # 独立构建 --coverage 产物，不依赖 build:release
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq cmake g++ libluajit-5.1-dev luajit python3 gcovr
+  script:
+    - COV_WITH_GATE=1 bash test/run_coverage.sh
+  artifacts:
+    when: always
+    expire_in: 4 weeks
+    paths:
+      # 报告落在构建目录内（build-*/ 已被 .gitignore 覆盖，不污染 git status）
+      - build-cov/coverage/
+
+# musl（非 glibc）实证门禁（fix-plan 2026-09-20）：docs/faq.md 曾如实声明
+# 「非 glibc libc 未验证」——hal_backend_glibc.lua 经 ffi 直调 libc，termios 布局断言、
+# 波特率编码、ioctl 常量此前只在 glibc 头文件下实证过。本 job 在 alpine/musl
+# 下：① 三个常量自检目标（_Static_assert/编译期比对，跑起来即证明常量在 musl
+# 头文件下成立）；② mybot_tests 全量；③ 整段守门 test/run_all.sh（Lua 层 HAL
+# 运行时 + TCP + MCP 后端 e2e）——Rust agent 段因 alpine 镜像无 Rust
+# 产物，由 net_agent.sh 按 SKIP 计（不是假绿，汇总里可见）；C++ 产物一律显式指定
+# 到 build-musl，缺任一个都判失败（不加 ALLOW_SKIP）。
+# 2026-09-25 转硬：本地 proot + alpine 3.20 minirootfs（与 alpine:3.20 镜像同源同版本）
+# 预跑 ①②③ 全绿；预跑揪出并修掉一处真 musl 缺陷——hal_backend_glibc.lua 的
+# version() 契约是「非 glibc 返 nil」，实际在取 gnu_get_libc_version 符号时抛错，
+# 拖垮 test_uart / test_uart_baud / test_hal_backend_swap 三个用例。
+# 预跑边界（如实）：proot 会让 prctl(PR_SET_DUMPABLE) 失败，mcp_e2e 的「后端不可
+# dump」两条判据在 proot 下必红（原生 alpine 无此问题——prctl 是内核系统调用，与
+# libc 无关）；CI 容器里是原生执行，应绿。若在 CI 上恰是这两条红，先查 runner 是否
+# 以 ptrace 类沙箱（gVisor/proot）运行容器，再谈代码。
+gate:musl:
+  stage: gate
+  image: alpine:3.20
+  needs: []
+  before_script:
+    # bash/coreutils/python3：守门脚本是 bash + GNU mktemp 语法 + python3 帧客户端，
+    # busybox 的 mktemp 不接受其参数形态（预跑实测 "mktemp: Invalid argument"）。
+    - apk add --no-cache build-base cmake luajit-dev luajit linux-headers pkgconf bash coreutils python3
+  script:
+    - cmake -S . -B build-musl -DCMAKE_BUILD_TYPE=Release
+    - cmake --build build-musl -j2 --target test_ioctl_nums test_uart_consts test_v4l2_consts
+    - ./build-musl/test_ioctl_nums
+    - ./build-musl/test_uart_consts
+    - ./build-musl/test_v4l2_consts
+    - cmake --build build-musl -j2 --target mybot mybot_tests harness_selftest
+    - ./build-musl/mybot_tests
+    - BOT=./build-musl/mybot BOT_TESTS=./build-musl/mybot_tests bash test/run_all.sh
+
+# ======================================================================
+# Rust agent（agent/，包名 mybot-agent；原 MCP sidecar，rig 迁移批次 B 更名）：
+# 独立产物；Rust 工具链仅用于 gate:agent 与 gate:agent-e2e，
+# 既有 C++ jobs 不增加 Rust 依赖。
+# 四检：cargo build --release / test / clippy(-D warnings) / fmt --check（均 --locked）。
+#
+# ⚠ 响亮声明（评估 §5.3，别误读门禁覆盖面）：gate:sanitizer（ASan/UBSan）与
+#   gate:tsan 只插桩 **C++**（mybot / mybot_tests）——它们对 Rust agent **是盲的**。
+#   agent 的内存/线程安全靠 Rust 所有权模型 + 本 job 的 clippy/test，**不是**
+#   sanitizer。「gate:sanitizer 绿」绝不等于「整条后端+agent 链路过了 sanitizer」。
+#
+# 全链路 E2E 由独立 gate:agent-e2e 硬门禁承担；gate:release 仍可跳过 Rust 段，
+# 不给既有 C++ jobs 增加 Rust 工具链依赖。
+#
+# 2026-09-25 转硬：四检在本地 rustc/clippy 1.98.1 全绿（此前存量的 2 条 clippy
+#   manual_async_fn 与 5 个文件的 rustfmt 差异已清）。rust:1-slim 跟随 stable 滚动，
+#   新版 clippy 增加 lint 会让本 job 在**代码未动**时变红——那是本 job 的既定口径
+#   （lint 门禁就该跟着工具链走），处置是修 lint 或按理由 allow，不是回退软态。
+gate:agent:
+  stage: gate
+  image: rust:1-slim
+  needs: []          # 独立 Rust 产物，不依赖 C++ build:release
+  before_script:
+    # crates.io 直连在部分网络下极慢（评估实测 ~28KB/s）；配 USTC sparse 镜像。
+    # Cargo.lock 已入库 ⇒ --locked 可复现（版本与本地逐字一致）。
+    - export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+    - mkdir -p "$CARGO_HOME"
+    - printf '[source.crates-io]\nreplace-with = "ustc"\n\n[source.ustc]\nregistry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"\n' > "$CARGO_HOME/config.toml"
+    - rustup component add clippy rustfmt
+  script:
+    - cd agent
+    - cargo build --release --locked
+    - cargo test --locked
+    - cargo clippy --all-targets --locked -- -D warnings
+    - cargo fmt --check
+
+# 与 build:release 同为 bookworm，避免跨 glibc 版本复用后端产物。
+# 本 job 是 CI 里唯一带 Rust 工具链的一道，故两条 Rust 侧端到端脚本都归它：
+# scripts/agent_e2e.sh（工具循环 R1–R18）与 scripts/ica_e2e.sh（ICA 证据账本两进程）。
+# 后者此前只有守门入口的 ica-e2e 段调用（net_agent.sh），而那段在 mybot-agent
+# 产物缺失/陈旧时按 [SKIP] 计——gate:release / gate:musl 的镜像里没有 cargo，
+# 补不上这个洞，所以「ica 链路坏了」在 CI 上可以一直没人发现（2026-10-06 补）。
+gate:agent-e2e:
+  stage: gate
+  image: rust:1-slim-bookworm
+  needs: ["build:release"]
+  before_script:
+    - *install-deps
+    - apt-get install -y -qq procps
+  script:
+    - cargo build --release --locked --manifest-path agent/Cargo.toml
+    - test -x build/mybot && test -x agent/target/release/mybot-agent
+    # 两条都跑完再判红：先跑的那条一失败就 exit，后一条便永不执行，一个红掩盖另一个红
+    # （守门入口里两段也是各记各的账）。timeout 180 与守门本地的 90 是刻意差异，
+    # 理由见 test/lib/sections/net_agent.sh 的口径注释（CI 机器慢）。
+    - |
+      rc=0
+      if BOT4CJ_LLM_CONFIG=none timeout 180 bash scripts/agent_e2e.sh > agent-e2e.log 2>&1; then :; else rc=$?; fi
+      cat agent-e2e.log
+      if timeout 180 bash scripts/ica_e2e.sh > ica-e2e.log 2>&1; then :; else rc=$?; fi
+      cat ica-e2e.log
+      test "$rc" -eq 0
+  artifacts:
+    when: always
+    expire_in: 4 weeks
+    paths:
+      - agent-e2e.log
+      - ica-e2e.log
