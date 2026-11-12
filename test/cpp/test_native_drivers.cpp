@@ -95,12 +95,11 @@ TH_TEST(native_dev_enum_reports_linux_buses) {
 	TH_CHECK(result.find("uart") != nullptr);
 }
 
-TH_TEST(hal_reports_ftdi_as_unimplemented) {
+TH_TEST(hal_gates_ftdi_behind_allow_hardware) {
 	bot::HALManager hal;
-	hal.setAllowHardware(true);
 	bot::Json result = hal.call("i2c_open",
 		{bot::JsonString("ftdi://ftdi:232h/1"), bot::JsonBool(false)});
 	TH_CHECK(result.isInt() && result.getInt() == -1);
 	bot::Json last = hal.call("last_error", {});
-	TH_CHECK(last.isStr() && last.getValue().find("FTDI") != std::string::npos);
+	TH_CHECK(last.isStr() && last.getValue().find("allow-hardware") != std::string::npos);
 }

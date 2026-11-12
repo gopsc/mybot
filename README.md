@@ -6,7 +6,8 @@ Linux 上的 C++17 机器人控制器。结构 SQL 声明硬件，LuaJIT 驱动�
 
 ```sh
 sudo apt install cmake g++ ninja-build luajit libluajit-5.1-dev \
-                 libsqlite3-dev libcurl4-openssl-dev
+                 libsqlite3-dev libcurl4-openssl-dev \
+                 libftdi1-dev libusb-1.0-0-dev
 ```
 
 - LuaJIT 2.1：驱动运行时
@@ -23,7 +24,7 @@ ctest --test-dir build --output-on-failure
 ./build/mybot --help
 ```
 
-当前基线：**574 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
+当前基线：**578 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
 
 ## 快速开始
 
@@ -72,6 +73,35 @@ cat action.mt | mybot --robot <结构脚本.sql> [选项]
 
 所有诊断写 stderr；退出码 `0` 成功、`1` 运行错误、`2` 用法错误。
 
+## FTDI
+
+物理 I2C/SPI 适配器使用 `ftdi://` URL，必须同时给 `--allow-hardware`：
+
+```sh
+# I2C：ftdi:232h / ftdi:ft232r / 0x0403:0x6014 / 序列号，接口 1..4
+mybot --robot robots/ftdi.sql --input scripts/i2c-scan.mt --allow-hardware
+
+# SPI：?cs=0..4 选择片选；MOSI/MISO 回环可用跳线验证
+mybot --robot robots/ftdi-spi.sql --input scripts/spi-loop.mt --allow-hardware
+```
+
+I2C 例：
+
+```sql
+CREATE TABLE I2C_scan (name String, path String);
+INSERT INTO I2C_scan (name, path) VALUES ('scan0', 'ftdi://ftdi:232h/1');
+```
+
+SPI 例：
+
+```sql
+CREATE TABLE SPI (name String, path String);
+INSERT INTO SPI (name, path) VALUES ('spi0', 'ftdi://ftdi:232h/1?cs=0');
+```
+
+注意：FTDI 走 GPIO 位操作，速度低于内核 `spidev`/`i2c-dev`；SPI 仅支持 8 位字。
+若设备是 FT232R 等不支持 MPSSE 的型号，请使用带 MPSSE 的 FT232H/FT2232H/FT4232H。
+
 ## 安全边界
 
 | 能力 | 默认 | 打开方式 |
@@ -114,12 +144,13 @@ Structure SQL (SQLite3 + DSL 归一化) → MatrixObject 表
 - `@Struct(name)` JSON 声明：字段/数组下标选择（`$(cfg.field)`、`$(cfg.items[0])`）与结构字段捕获
 - MT 带引号单元格（引号内空格、`;`、`#` 不分格）
 - 原生 Time/LoopbackProbe/Shell/HTTP/TCP/Dev_enum/I2C_scan 驱动
+- FTDI `ftdi://` I2C/SPI（libftdi1 MPSSE GPIO 位操作；SPI 支持 8 位字、mode 0..3、`?cs=0..4`）
 
 尚未移植：
 
-- FTDI `ftdi://` I2C/SPI（当前只支持 `/dev/i2c-*`、`/dev/spidev*`、串口）
 - 当前 Python 的子命令 `check/sample/query/apply-sql/assets/new/discover/doctor`
   （本项目按设计保留旧扁平 CLI）
+- `@Struct` 数组下标的捕获目标路径（表达式下标已支持；捕获目标目前只支持 `.field`）
 
 ## 目录
 

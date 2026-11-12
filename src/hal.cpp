@@ -26,6 +26,7 @@
 
 #include <curl/curl.h>
 
+#include "ftdi.hpp"
 #include "util_env.hpp"
 
 namespace bot {
@@ -354,6 +355,7 @@ struct HALManager::Resource {
 	std::string base;
 	int timeoutMs = 10000;
 	std::vector<std::uint8_t> ring;
+	std::unique_ptr<FtdiBus> ftdi;
 	bool closed = false;
 };
 
@@ -407,6 +409,7 @@ void HALManager::closeResource(Resource& resource) {
 		::close(resource.fd);
 		resource.fd = -1;
 	}
+	resource.ftdi.reset();
 	resource.closed = true;
 }
 
@@ -515,15 +518,23 @@ Json HALManager::opI2cOpen(const Json& pathValue, const Json& virtualValue, int 
 		return JsonInt(addBus("i2c", path, -1, "virtual", owner));
 	}
 	if (path.rfind("ftdi://", 0) == 0) {
-		throw std::runtime_error(
-			"FTDI I2C is not implemented in this build; use /dev/i2c-N or a virt-* path");
+		if (!allowHardware_) {
+			throw std::runtime_error(
+				"Physical hardware access requires explicit --allow-hardware confirmation");
+		}
+		auto resource = std::make_unique<Resource>();
+		resource->kind = "i2c";
+		resource->backend = "ftdi";
+		resource->path = path;
+		resource->ftdi = std::make_unique<FtdiBus>(path, false);
+		return JsonInt(add(std::move(resource), owner));
 	}
 	if (!allowHardware_) {
 		throw std::runtime_error(
 			"Physical hardware access requires explicit --allow-hardware confirmation");
 	}
 	if (path.rfind("/dev/i2c-", 0) != 0) {
-		throw std::runtime_error("I2C requires /dev/i2c-N or a virt-* path");
+		throw std::runtime_error("I2C requires /dev/i2c-N, an ftdi:// URL, or a virt-* path");
 	}
 	const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
 	if (fd < 0) { throw std::runtime_error("cannot open " + path + ": " + errText(errno)); }
@@ -543,6 +554,11 @@ Json HALManager::opI2cTransfer(const Json& handleValue, const Json& addressValue
 	if (resource.backend == "virtual") {
 		std::vector<std::uint8_t> zeros(static_cast<std::size_t>(readCount), 0);
 		return bytesJson(zeros);
+	}
+	if (resource.backend == "ftdi") {
+		std::vector<std::uint8_t> out;
+		resource.ftdi->i2cTransfer(address, write, readCount, out);
+		return bytesJson(out);
 	}
 	std::vector<i2c_msg> messages;
 	std::vector<std::uint8_t> writeBuffer = write;
@@ -580,15 +596,23 @@ Json HALManager::opSpiOpen(const Json& pathValue, const Json& virtualValue, int 
 		return JsonInt(addBus("spi", path, -1, "virtual", owner));
 	}
 	if (path.rfind("ftdi://", 0) == 0) {
-		throw std::runtime_error(
-			"FTDI SPI is not implemented in this build; use /dev/spidevX.Y or a virt-* path");
+		if (!allowHardware_) {
+			throw std::runtime_error(
+				"Physical hardware access requires explicit --allow-hardware confirmation");
+		}
+		auto resource = std::make_unique<Resource>();
+		resource->kind = "spi";
+		resource->backend = "ftdi";
+		resource->path = path;
+		resource->ftdi = std::make_unique<FtdiBus>(path, true);
+		return JsonInt(add(std::move(resource), owner));
 	}
 	if (!allowHardware_) {
 		throw std::runtime_error(
 			"Physical hardware access requires explicit --allow-hardware confirmation");
 	}
 	if (path.rfind("/dev/spidev", 0) != 0) {
-		throw std::runtime_error("SPI requires /dev/spidevX.Y or a virt-* path");
+		throw std::runtime_error("SPI requires /dev/spidevX.Y, an ftdi:// URL, or a virt-* path");
 	}
 	const int fd = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
 	if (fd < 0) { throw std::runtime_error("cannot open " + path + ": " + errText(errno)); }
@@ -603,6 +627,13 @@ Json HALManager::opSpiSetup(const Json& handleValue, const Json& modeValue,
 	const int speed = asInt(speedValue, 1, 0x7FFFFFFF, "SPI speed");
 	Resource& resource = get(handle, "spi");
 	if (resource.backend == "virtual") {
+		resource.mode = static_cast<std::uint8_t>(mode);
+		resource.bits = static_cast<std::uint8_t>(bits);
+		resource.speed = static_cast<std::uint32_t>(speed);
+		return JsonInt(0);
+	}
+	if (resource.backend == "ftdi") {
+		resource.ftdi->spiSetup(mode, bits, speed);
 		resource.mode = static_cast<std::uint8_t>(mode);
 		resource.bits = static_cast<std::uint8_t>(bits);
 		resource.speed = static_cast<std::uint32_t>(speed);
@@ -630,6 +661,11 @@ Json HALManager::opSpiTransfer(const Json& handleValue, const Json& dataValue,
 	Resource& resource = get(handle, "spi");
 	if (resource.backend == "virtual") {
 		return bytesJson(std::vector<std::uint8_t>(data.size(), 0));
+	}
+	if (resource.backend == "ftdi") {
+		std::vector<std::uint8_t> rx;
+		resource.ftdi->spiTransfer(data, rx, delay);
+		return bytesJson(rx);
 	}
 	std::vector<std::uint8_t> rx(data.size(), 0);
 	spi_ioc_transfer transfer{};

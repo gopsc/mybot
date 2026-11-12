@@ -53,6 +53,15 @@ if(NOT SQLITE3_INCLUDE_DIR OR NOT SQLITE3_LIBRARY)
 endif()
 message(STATUS "SQLite3: ${SQLITE3_LIBRARY} (${SQLITE3_INCLUDE_DIR})")
 
+# FTDI I2C/SPI：libftdi1 + libusb-1.0。
+find_path(FTDI_INCLUDE_DIR NAMES libftdi1/ftdi.h)
+find_library(FTDI_LIBRARY NAMES ftdi1)
+find_library(USB_LIBRARY NAMES usb-1.0)
+if(NOT FTDI_INCLUDE_DIR OR NOT FTDI_LIBRARY OR NOT USB_LIBRARY)
+  message(FATAL_ERROR "libftdi1/libusb not found. Install libftdi1-dev libusb-1.0-0-dev")
+endif()
+message(STATUS "FTDI: ${FTDI_LIBRARY} (${FTDI_INCLUDE_DIR})")
+
 # Sanitizer 开关（F-23）：随仓库分发、两个目标一致套用，避免各人手工拼
 # CXX_FLAGS 造成「测试构建干净、主构建不干净」的错位。用法：
 #   cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
@@ -120,6 +129,7 @@ set(MYBOT_CORE_SOURCES
   src/luaexec.cpp
   # ---- C++ HAL：I2C/SPI/UART/TCP/HTTP/Shell 与权限门 ----
   src/hal.cpp
+  src/ftdi.cpp
   # ---- 原生 C++ 驱动：宿主能力（时间/TCP/HTTP/Shell/回环探针） ----
   src/native_var.cpp
   src/native_registry.cpp
@@ -175,7 +185,7 @@ if(MYBOT_WERROR)
 endif()
 target_include_directories(mybot_warnings INTERFACE
   src ${LUAJIT_INCLUDE_DIRS} ${CURL_INCLUDE_DIR} ${SQLITE3_INCLUDE_DIR}
-  ${CMAKE_SOURCE_DIR}/third_party/cli11)
+  ${FTDI_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/third_party/cli11)
 
 # Lua 运行时链接（仅 mybot / mybot_tests）
 add_library(mybot_common INTERFACE)
@@ -184,6 +194,8 @@ target_link_libraries(mybot_common INTERFACE
   ${LUAJIT_LIBRARIES}
   ${CURL_LIBRARY}
   ${SQLITE3_LIBRARY}
+  ${FTDI_LIBRARY}
+  ${USB_LIBRARY}
   pthread
   dl
   m
@@ -237,6 +249,7 @@ add_executable(mybot_tests
   test/cpp/test_mtinclude.cpp
   test/cpp/test_sql_engine.cpp
   test/cpp/test_native_drivers.cpp
+  test/cpp/test_ftdi.cpp
   src/mtmerge_core.cpp
   ${MYBOT_CORE_SOURCES}
 )
