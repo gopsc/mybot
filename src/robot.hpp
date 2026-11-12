@@ -23,6 +23,7 @@
 #include <string>
 
 #include "daemon_registry.hpp"
+#include "hal.hpp"
 #include "hardware.hpp"
 #include "hw_registry.hpp"
 #include "meta_registry.hpp"
@@ -52,6 +53,11 @@ private:
 	 * build 前统一校验 $ 引用存在性；热删除/整表撤下期摘除与重锚定
 	 * （详见 meta_registry.hpp）。 */
 	MetaRegistry metas_;
+	/* C++ HAL：I2C/SPI/UART/TCP/HTTP/Shell 的唯一物理边界。Lua 状态创建时
+	 * 通过 HALManager::current() 取到本对象并注入 __hal_call。 */
+	HALManager hal_;
+	bool allowHardware_ = false;
+
 	/* 装配机械（HwFactory / ActionRunner / HotSqlService）整体住进私有装配体
 	 * （Internals，定义在 robot_internals.hpp）；三个执行器是门面的实现细节，
 	 * 不占公开头。声明在四个域门面之后——Internals 持它们的引用，构造序与
@@ -128,6 +134,13 @@ public:
 
 	/* 设置 deactivate() 二段屏障的宽限上限（--daemon-grace-ms，语义见成员注释） */
 	void setDeactivateGraceMs(int64_t ms) { deactivateGraceMs_ = ms; }
+
+	/* --allow-hardware：物理设备、非回环网络与宿主 Shell 的显式开关。
+	 * 必须在 active() 之前设置；HALManager 在每次 open 时读取。 */
+	void setAllowHardware(bool allow) {
+		allowHardware_ = allow;
+		hal_.setAllowHardware(allow);
+	}
 
 	/* PL-2（2026-09-22）：把执行预算挂到**全部** Lua 硬件变量（budget=nullptr 解除）。
 	 * 调用方用 RAII 成对调用——窗口只在 run_action_script 一次工具调用之内，

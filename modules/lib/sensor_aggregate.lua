@@ -1,5 +1,5 @@
 -- sensor_aggregate.lua - 多守护聚合 chunk（sources 列，2026-10-16 路线图阶段 2）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 动机（docs/daemon.md「多守护聚合器」）：sensor_daemon_multi 已把**同一条 I2C
 -- 总线**上的 N 只器件合进一个守护；跨总线/跨协议（多 IMU + 气感 + 里程计）仍要

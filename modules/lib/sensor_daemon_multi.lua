@@ -1,5 +1,5 @@
 -- sensor_daemon_multi.lua - 多器件合并采样守护 chunk（sensor_daemon 的 N 器件变体）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 动机（docs/daemon.md「守护线程开销」）：每个 @Daemon = 独立线程 + 独立 Lua 状态，
 -- 同一总线上 N 只同型/异型传感器就要 N 份运行时。本 chunk 用**一个守护**轮询
@@ -72,6 +72,23 @@ local MAX_VALUES = P.SLOT_MAXVALS
 local fd = nil
 -- proto=virt：虚拟总线句柄（多器件共用一个注入态）
 local vbus = nil
+-- 成功 build 的器件按启动顺序登记；失败回滚与正常退出都逆序销毁
+local built = {}
+
+local function destroy_built()
+	while #built > 0 do
+		local dev = table.remove(built)
+		local destroyf = rawget(dev.env, "destroy")
+		if type(destroyf) == "function" then
+			local ok, err = pcall(destroyf, dev.params)
+			if not ok then
+				io.stderr:write(string.format(
+					"[sensor_daemon_multi] devices[%d] %s destroy() failed (will still release the rest): %s\n",
+					dev.idx, dev.driver, tostring(err)))
+			end
+		end
+	end
+end
 
 -- H-07：关闭已打开的总线 fd（幂等；fail 与 daemon_cleanup 共用）
 local function close_bus()
@@ -81,13 +98,15 @@ local function close_bus()
 	end
 end
 
--- setup 失败：打日志 → 关总线 fd → 写 status 失败码 → daemon_tick 置空转
+-- setup 失败：打日志 → 逆序销毁已成功 build 的器件 → 关总线 fd → 写 status
+-- 失败码 → daemon_tick 置空转
 -- （语义与 sensor_daemon.fail 完全一致：失败码进槽的 status 字段，
 -- 不伪装成采样值；宿主读路径见 status ≠ 0 即响亮报错）。
 -- 错误码沿用单器件版口径：-9 缺 driver、-8 驱动/模型加载失败、-1 开总线失败、
 -- -2 build 失败（兼作 chunk 级配置错误：proto 不支持、spec 残缺、字段超预算）。
 local function fail(code, msg)
 	log("[sensor_daemon_multi] setup failed (" .. tostring(code) .. "): " .. tostring(msg))
+	destroy_built()
 	close_bus()
 	if vbus ~= nil then pcall(vbus.restore) end
 	P.set_status(slot, code)
@@ -188,10 +207,7 @@ if total_vals > MAX_VALUES then
 	return
 end
 
--- 驱动加载：dofile 进器件私有 fenv（__index 落到 _G，共享 HAL/virtbus 注入
--- 的 i2c_* 全局）。驱动把 build/call/destroy 定义成「全局」函数，实际落进
--- dev_env——两份驱动互不覆盖；驱动文件内 dofile 的 HAL/drv_common 走
--- __BOT4CJ_HAL guard / 幂等重定义，共享无害。
+-- 器件入口和状态独立，公共 helper/HAL 仍经 __index 共享。
 local function load_driver_env(dev)
 	local env = setmetatable({}, { __index = _G })
 	local drvpath = mpath.resolve(dev.driver .. ".lua")
@@ -317,8 +333,8 @@ for _, dev in ipairs(devs) do
 		params[k] = v
 	end
 	dev.params = params
-	-- build 的全局函数名在器件 fenv 里（驱动 dofile 时的「全局」定义）
-	local buildf = dev.env.build
+	-- 入口必须属于本器件；仅 helper/HAL 允许经 __index 共享，缺入口不能回落 _G。
+	local buildf = rawget(dev.env, "build")
 	if type(buildf) ~= "function" then
 		fail(-2, "devices[" .. dev.idx .. "] driver '" .. dev.driver .. "' has no global build()")
 		return
@@ -336,6 +352,7 @@ for _, dev in ipairs(devs) do
 		fail(-2, "devices[" .. dev.idx .. "] " .. why)
 		return
 	end
+	built[#built + 1] = dev
 end
 
 -- daemon_body 逐拍调用：全部器件各采一拍 → 拼接 → 一次 publish（原子快照）
@@ -351,7 +368,7 @@ function daemon_tick()
 		if dev.vdev ~= nil and type(dev.vdev.virt_tick) == "function" then
 			pcall(function() dev.vdev:virt_tick(n) end)
 		end
-		local callf = dev.env.call
+		local callf = rawget(dev.env, "call")
 		local s = callf and callf(dev.params) or nil
 		local crc_bad = (type(s) == "table" and s.result == "OK" and s.CRC_OK == 0)
 		local ok_sample = (type(s) == "table" and s.result == "OK" and not crc_bad)
@@ -403,18 +420,9 @@ end
 -- H-07：守护退出（stop 后、Lua_free 前）由 daemon_body 调用。逐器件 destroy
 -- （有才调）——任一失败都继续释放余下器件与总线（语义取舍与单器件版一致：
 -- 退出路径上的资源释放优先于传播一个无人接收的错误），最后关总线 fd。
+-- 只销毁成功 build 的器件：setup 失败时 fail() 已逆序回滚并清空 built。
 function daemon_cleanup()
-	for _, dev in ipairs(devs) do
-		local destroyf = dev.env.destroy
-		if type(destroyf) == "function" then
-			local ok, err = pcall(destroyf, dev.params)
-			if not ok then
-				io.stderr:write(string.format(
-					"[sensor_daemon_multi] devices[%d] %s destroy() failed during cleanup (will still release the rest): %s\n",
-					dev.idx, dev.driver, tostring(err)))
-			end
-		end
-	end
+	destroy_built()
 	close_bus()
 	-- virt：还原全局 i2c_*（独立守护 lua_State 随之销毁，主要为状态对称）
 	if vbus ~= nil then pcall(vbus.restore) end

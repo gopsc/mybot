@@ -14,25 +14,25 @@
 -- 这正是真机驱动（如 SGP30 的基线存盘）的同款路径，顺带覆盖 HAL.O_CLOEXEC。
 
 local ffi = require("ffi")
-local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
--- HAL.lua 是 `return HAL`（表不挂全局），要持有表的驱动必须接返回值——
--- SGP30.lua:46 / Camera.lua:18 同款写法。
-local HAL = dofile(mpath.resolve("lib/HAL.lua"))
+ffi.cdef[[
+int open(const char *pathname, int flags, ...);
+long write(int fd, const void *buf, unsigned long count);
+int close(int fd);
+]]
 
--- O_WRONLY(1) + O_CREAT(0x40) + O_APPEND(0x400) + O_CLOEXEC(HAL 单点)，权限 0644
+-- O_WRONLY(1) + O_CREAT(0x40) + O_APPEND(0x400)，权限 0644
 local O_WRONLY_CREAT_APPEND = 1 + 0x40 + 0x400
 local FILE_MODE = 0x1A4
 
 local function append_marker(path)
 	if type(path) ~= "string" or #path == 0 then return "path 缺失或非字符串" end
-	local fd = HAL.sys.open(path, O_WRONLY_CREAT_APPEND + HAL.O_CLOEXEC, FILE_MODE)
-	if fd == nil or tonumber(fd) < 0 then
-		-- 注意 errno 成功时不清零，这里的值可能来自更早的失败调用
-		return "open 失败 errno=" .. tostring(HAL.sys.errno()) .. " path=" .. path
+	local fd = ffi.C.open(path, O_WRONLY_CREAT_APPEND, ffi.cast("unsigned int", FILE_MODE))
+	if fd < 0 then
+		return "open 失败 errno=" .. tostring(ffi.errno()) .. " path=" .. path
 	end
 	local buf = ffi.new("char[1]", "D")
-	local n = HAL.sys.write(fd, buf, 1)
-	HAL.sys.close(fd)
+	local n = ffi.C.write(fd, buf, 1)
+	ffi.C.close(fd)
 	if n ~= 1 then return "write 短写 n=" .. tostring(n) end
 	return nil
 end

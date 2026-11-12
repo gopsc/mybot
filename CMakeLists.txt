@@ -36,6 +36,15 @@ else()
   set(LUAJIT_LIBRARIES ${LUAJIT_LIBRARY})
 endif()
 
+# C++ HAL 的 HTTP 驱动使用 libcurl；系统运行库通常已装，开发头文件来自
+# libcurl4-openssl-dev。显式变量便于离线/trixie 环境注入本地解包路径。
+find_path(CURL_INCLUDE_DIR NAMES curl/curl.h)
+find_library(CURL_LIBRARY NAMES curl)
+if(NOT CURL_INCLUDE_DIR OR NOT CURL_LIBRARY)
+  message(FATAL_ERROR "libcurl not found. Install libcurl4-openssl-dev")
+endif()
+message(STATUS "libcurl: ${CURL_LIBRARY} (${CURL_INCLUDE_DIR})")
+
 # Sanitizer 开关（F-23）：随仓库分发、两个目标一致套用，避免各人手工拼
 # CXX_FLAGS 造成「测试构建干净、主构建不干净」的错位。用法：
 #   cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug \
@@ -100,6 +109,8 @@ set(MYBOT_CORE_SOURCES
   src/luabridge.cpp
   src/luasandbox.cpp
   src/luaexec.cpp
+  # ---- C++ HAL：I2C/SPI/UART/TCP/HTTP/Shell 与权限门 ----
+  src/hal.cpp
   # ---- 硬件域：变量基类、Lua/Daemon 变量、注册表与元数据 ----
   src/hardware.cpp
   src/luavar.cpp
@@ -144,13 +155,14 @@ if(MYBOT_WERROR)
   target_compile_options(mybot_warnings INTERFACE -Werror)
 endif()
 target_include_directories(mybot_warnings INTERFACE
-  src ${LUAJIT_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/cli11)
+  src ${LUAJIT_INCLUDE_DIRS} ${CURL_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/third_party/cli11)
 
 # Lua 运行时链接（仅 mybot / mybot_tests）
 add_library(mybot_common INTERFACE)
 target_link_libraries(mybot_common INTERFACE
   mybot_warnings
   ${LUAJIT_LIBRARIES}
+  ${CURL_LIBRARY}
   pthread
   dl
   m

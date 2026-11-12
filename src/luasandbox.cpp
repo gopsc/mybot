@@ -9,8 +9,11 @@
 
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <string>
+#include <vector>
 
+#include "hal.hpp"
 #include "util_file.hpp"
 #include "util_path.hpp"
 
@@ -303,11 +306,44 @@ void sandbox_lua(lua_State* L) {
  * 的 loadfile/pcall 留在调用方：两条路径失败契约不同（daemon 区分
  * load/setup 两段报错——run_all.sh 守门按两种短语匹配；luavar 折成
  * bool），强行合一会稀释报错定位。 */
+/* ---- __hal_call：Lua 驱动 → C++ HAL 的唯一物理入口 ----
+ * HAL.lua（portable 版）在加载时捕获该全局并立即清除。只有宿主设置了
+ * HALManager::current() 时才注入；独立 luajit 测试没有宿主，HAL.lua 会
+ * 回退到 HAL_ffi.lua。 */
+static int halCallLua(lua_State* L) {
+	auto* hal = static_cast<HALManager*>(lua_touserdata(L, lua_upvalueindex(1)));
+	if (hal == nullptr) { return luaL_error(L, "HAL is not attached to this Lua state"); }
+	if (lua_gettop(L) < 1 || lua_type(L, 1) != LUA_TSTRING) {
+		return luaL_error(L, "HAL operation name must be a string");
+	}
+	std::vector<Json> args;
+	try {
+		for (int i = 2; i <= lua_gettop(L); ++i) {
+			args.push_back(lua_value_to_json(L, i));
+		}
+	} catch (const std::exception& exc) {
+		return luaL_error(L, "HAL argument conversion failed: %s", exc.what());
+	}
+	Json result;
+	try {
+		result = hal->call(lua_tostring(L, 1), args);
+		push_json_to_lua(L, result);
+	} catch (const std::exception& exc) {
+		return luaL_error(L, "HAL call failed: %s", exc.what());
+	}
+	return 1;
+}
+
 lua_State* openSandboxedState() {
 	lua_State* L = luaL_newstate();
 	if (L != nullptr) {
 		luaL_openlibs(L);
 		sandbox_lua(L);
+		if (HALManager* hal = HALManager::current(); hal != nullptr) {
+			lua_pushlightuserdata(L, hal);
+			lua_pushcclosure(L, halCallLua, 1);
+			lua_setglobal(L, "__hal_call");
+		}
 	}
 	return L;
 }

@@ -1,5 +1,5 @@
 -- drv_common.lua - 驱动公共样板（modules/lib/）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 收敛 Low 项"样板重复"：各 I2C 驱动内联重复的开头样板：
 --   1. type(data) ~= "table" 参数校验（build/call/destroy 每函数一份）
@@ -21,7 +21,7 @@ function err(msg)
 end
 
 -- ---- 整数钳位单点（M2/B2-4，2026-09-20）-------------------------------
--- 收敛散落各驱动（ADS1015/ADS1115/AS3935/BH1745/BMI270/BMM150/EMC2101/
+-- 收敛散落各驱动（ADS1015/ADS1115/AS3935/BH1745/BMM150/EMC2101/
 -- INA226/INA3221/LSM6DSV）的本地 clampi 拷贝：此前 floor+tonumber 与裸比
 -- 两派语法并存，同一语义两样写法，新增驱动照抄哪份都算拷贝。单点取防御派
 -- ——非法值夹到端点；裸比派驱动的入参本已是数，等价。
@@ -72,17 +72,35 @@ end
 -- 注入必须在驱动碰总线之前完成，故 arg_table（各驱动入口第一行）仍代调它。
 local virt_state = "idle"		-- idle → done | error:<原因>；每状态机只尝试一次
 
+-- 按模块路径探测并加载一个共享库（rel 相对模块根，如 "lib/virtbus.lua"），
+-- 返回其模块表；找不到/加载失败返回 nil，由调用方决定兜底。
+-- 宿主注入了 __mpath（mybot luasandbox、pymybot runtime）时交给它解析：
+-- 自行按 ':' 切分 BOT4CJ_MODULE_PATH 会把 Windows 盘符（C:\...）切成假路径，
+-- 每次加载都抛一次被吞掉的 Lua 错误，且永远走不到真文件。脱离宿主直跑
+-- （luajit 单测、scscl_scan）没有 __mpath，才回到逐段切分。
+-- load 缺省为全局 dofile；virt_prepare 传入自己环境里的 dofile，宿主（pymybot
+-- HAL.lua）对 virt_prepare 做 setfenv 拦截时才能命中本状态机已有的实例。
+local function probe_lib(rel, load)
+	load = load or dofile
+	if __mpath ~= nil then
+		local ok, v = pcall(load, __mpath.resolve(rel))
+		if ok and type(v) == "table" then return v end
+		return nil
+	end
+	for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
+		local ok, v = pcall(load, p .. "/" .. rel)
+		if ok and type(v) == "table" then return v end
+	end
+	return nil
+end
+
 -- 独立入口：准备虚拟总线（加载 virtbus → 发现并挂载 *_VIRT 模型 → inject）
 -- 返回 nil 表示无需动作或已就绪；返回字符串表示必须中止本次驱动调用
 function virt_prepare(data)
 	-- fix-plan 3-3：BOT4CJ_MODULE_PATH 各段逐段探测（此前只取首段，多路径
 	-- 布局下首段没有 virtbus.lua 即误报 cannot load）。保持原有「无仓库
 	-- 缺省布局兜底」的报错契约：找不到仍走 error 分支（见下）。
-	local vbus
-	for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
-		local ok, v = pcall(dofile, p .. "/lib/virtbus.lua")
-		if ok and type(v) == "table" then vbus = v break end
-	end
+	local vbus = probe_lib("lib/virtbus.lua", dofile)
 	if type(vbus) ~= "table" then
 		virt_state = "error:cannot load lib/virtbus.lua"
 		return virt_state:sub(7)
@@ -141,7 +159,7 @@ function virt_prepare(data)
 	end
 
 	-- 挂载分派与守护路径共用 virtbus.attach_model（N-26）：
-	--   UART 模型身份是 tty 路径（来自 @UART 引用快照，modules/UART.lua 的
+	--   UART 模型身份是 tty 路径（来自 @UART 引用快照，modules/UART.py 的
 	--   call 下发 fd/baud/path）；I2C 模型身份是 address。
 	--   总线行（I2C/SPI/UART 变量自身）无 address，跳过 attach，仅靠下面的
 	--   inject 让它的 open 变成虚拟 open。
@@ -166,7 +184,7 @@ function virt_prepare(data)
 				model, addr, data.path, "i2c")
 		end
 	end
-	-- fd 由总线变量（modules/I2C.lua、modules/UART.lua）在它自己的状态机里 open
+	-- fd 由总线变量（modules/I2C.py、modules/UART.py）在它自己的状态机里 open
 	-- 出来；本状态机要先把这个进程级整数登记进本地 virtbus，否则 i2c_set_addr /
 	-- uart_read 等认不出该句柄。
 	if data.fd ~= nil then vbus.adopt_fd(data.fd, data.path, addr, bus) end
@@ -243,10 +261,7 @@ end
 -- （与 virt_prepare 同一手法；bus_contract 自带重入口守卫，身份不变）。
 local bus = __BOT4CJ_BUS_CONTRACT
 if bus == nil then
-	for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
-		local ok, v = pcall(dofile, p .. "/lib/bus_contract.lua")
-		if ok and type(v) == "table" then bus = v break end
-	end
+	bus = probe_lib("lib/bus_contract.lua")
 end
 -- 兜底：布局异常导致 bus_contract 不可达时，判定不得静默退化成「NaN 放行」
 -- ——那正是本防线要堵的洞。兜底分支与 finite_of 逐字同判据，仅此一处。
@@ -343,6 +358,8 @@ function require_driver(bus, spec)
 	if type(spec) ~= "table" then
 		error("require_driver: spec must be a table", 2)
 	end
+	-- 入口绑定调用者 fenv，公共 helper 保留共享环境（LuaJIT / Lua 5.1）。
+	local entry_env = getfenv(2)
 
 	-- ① 标准前导剩余部分（dofile 幂等，多驱动状态机内重复加载安全）
 	-- 驱动文件调 require_driver 之前须先 dofile drv_common（1 行 prelude，
@@ -402,6 +419,14 @@ function require_driver(bus, spec)
 			end
 			return fd, nil, nil
 		end,
+		-- HTTP 会话句柄经 $引用 从 HTTP 总线变量合并进元数据（fd >= 0，同 uart 口径）
+		http = function(d)
+			local fd = tonumber(d.fd)
+			if fd == nil or fd < 0 then
+				return nil, nil, err("Invalid Argument: fd (does the HTTP column reference an @HTTP variable?)")
+			end
+			return fd, nil, nil
+		end,
 	}
 	local validate = validators[bus]
 	if validate == nil then
@@ -420,7 +445,7 @@ function require_driver(bus, spec)
 	local name  = spec.name or "unknown"
 
 	-- ④ 包装 build：arg_table → 总线校验 → 用户 build(ctx, data)
-	function build(data)
+	local function build(data)
 		local ok, ek = arg_table(data)
 		if not ok then return ek end
 		local fd, addr, ek2 = validate(data)
@@ -431,7 +456,7 @@ function require_driver(bus, spec)
 	end
 
 	-- ⑤ 包装 call：同上
-	function call(data)
+	local function call(data)
 		local ok, ek = arg_table(data)
 		if not ok then return ek end
 		local fd, addr, ek2 = validate(data)
@@ -442,8 +467,9 @@ function require_driver(bus, spec)
 	end
 
 	-- ⑥ 包装 destroy：缺省即空操作（覆盖 ~40 份驱动）；自定义版本仍走 arg_table
+	local destroy
 	if user_destroy then
-		function destroy(data)
+		destroy = function(data)
 			local ok, ek = arg_table(data)
 			if not ok then return ek end
 			return user_destroy({
@@ -451,12 +477,16 @@ function require_driver(bus, spec)
 			}, data)
 		end
 	else
-		function destroy(data)
+		destroy = function(data)
 			local ok, ek = arg_table(data)
 			if not ok then return ek end
 			return { result = "OK" }
 		end
 	end
 
+	-- wrapper 捕获本次 state，HAL/virtbus 后续的共享注入仍然可见。
+	rawset(entry_env, "build", build)
+	rawset(entry_env, "call", call)
+	rawset(entry_env, "destroy", destroy)
 	return spec
 end

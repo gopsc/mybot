@@ -1,242 +1,273 @@
--- HAL.lua - 基层硬件抽象层（LuaJIT ffi，位于 modules/lib/）
--- bot4cj 仓颉语言机器人框架
---
--- issue #14：完全解耦的基层硬件应用层驱动——不再依赖仓颉注册的 cfunc。
---
--- 【运行环境】仅支持 LuaJIT：经 ffi 直调 glibc（open/ioctl/read/write/close/usleep），
--- 原生性能，fd 为真实内核句柄，跨 Lua 状态机天然有效。
--- （原 i2c-tools/spi-tools shell-out 降级后端 HAL_shell.lua 已移除。）
---
--- 【安全】设备路径经白名单模式校验；所有数值参数 tonumber + 范围校验后才进入
--- ioctl/缓冲区，无 shell 参与。
---
--- 【可测试性】系统调用统一走 HAL.sys.* 间接层，离线单测（test/test_hal_ffi.lua）
--- 注入 mock 即可验证调用序列与缓冲区内容。
---
--- 【文件布局】本文件是**聚合门面**（26.2 按域拆分）：只留加载期接线（ffi 环境
--- 检查、重入口守卫、后端派发、常量重导出、bus_contract 接线、milli_sleep、
--- 停机灭火判定），五个总线域各一文件 modules/lib/hal/{i2c,spi,gpio,uart,pwm}.lua，
--- 由下方「各总线域加载」段按序加载并传入共享上下文。域文件是本文件的分块、
--- 不是可独立加载的模块。对驱动而言接口零变化：38 个总线全局与 HAL.* 全部字段
--- 照旧由此导出。布局与域内私有 helper 清单见 docs/hal.md「文件布局」节。
---
--- 【delay 说明】delay_usecs 是逐次传输参数，内核无 per-fd 持久化 ioctl；
--- 需要延时的驱动经传输函数的 delay_us 尾参显式传入（参考 ADS1256.lua：
--- delay 配置在 @SPI 矩阵，由 SPI.lua 的 call() 随 fd 一并返回，
--- 经元数据引用机制流入设备驱动，驱动统一附带在每次传输上）。
-
--- 重复加载保护：同一状态机内只初始化一次
+-- Portable HAL: Lua buffers/driver semantics, Python library-backed hardware.
+-- Host injects __hal_call before load, then removes it. Binary data uses byte tables.
 if _G.__BOT4CJ_HAL ~= nil then return _G.__BOT4CJ_HAL end
 
--- 环境检查：必须有 ffi（LuaJIT）；shell 降级后端已移除
-local has_ffi, ffi = false, nil
-if rawget(_G, "jit") ~= nil then
-	has_ffi, ffi = pcall(require, "ffi")
+-- Standalone luajit tests have no host-injected __mpath: probe every
+-- BOT4CJ_MODULE_PATH segment (the old C++ HAL did the same).
+local function load_mpath()
+    if __mpath ~= nil then return __mpath end
+    for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
+        local chunk = loadfile(p .. "/lib/mpath.lua")
+        if chunk then return chunk() end
+    end
+    error("HAL: cannot locate lib/mpath.lua in BOT4CJ_MODULE_PATH")
 end
-if not has_ffi then
-	error("HAL requires LuaJIT with ffi (the shell-out fallback backend has been removed)")
+
+if __hal_call == nil then
+    -- No host bridge: keep the historical glibc/FFI backend so the Lua
+    -- regression suite still runs.
+    return dofile(load_mpath().resolve("lib/HAL_ffi.lua"))
 end
-
-------------------------------------------------------------------
--- ffi 声明与布局自检（2026-09-30 方案 A 重构）
-------------------------------------------------------------------
--- 所有 ffi.cdef 声明（glibc 函数、pthread 互斥锁、spidev/i2c/gpio/termios 结构体）
--- 与尺寸自检已下沉到后端（hal_backend_glibc.lua）。后端由下方加载段 dofile 加载，
--- ffi.cdef 全局生效，本文件可直接使用已声明的类型（spi_ioc_transfer、cj_i2c_msg 等）。
--- 换平台 = 新增 hal_backend_<平台>.lua（提供同构 ffi.cdef + 常量 + 原语），
--- HAL.lua 与驱动零改动。
-
-local HAL = {}
-_G.__BOT4CJ_HAL = HAL
-
--- 平台差异单点（阶段 A-2）：设备根路径常量集中一处——移植 / 仿真桩改这里，
--- GPIO / PWM 各节只取表值，不再散落字面量（i2c/spi/uart 路径白名单在
--- bus_contract.lua，同为单点）。
-HAL.platform = {
-	pwm_sysfs_root = "/sys/class/pwm",
-	gpio_prefix    = "/dev/gpiochip",
+local bridge = assert(__hal_call, "HAL requires the host __hal_call bridge")
+local ffi = require("ffi")
+local mpath = load_mpath()
+local bus = dofile(mpath.resolve("lib/bus_contract.lua"))
+local HAL = {
+    backend = "python", backend_name = "pyserial/pyftdi/urllib",
+    platform = { name = "portable", gpio_prefix = false, pwm_sysfs_root = false },
+    PWM_SYSFS_ROOT = false, i2c_addr = {}, uart_baud = {}, uart_orig = {}, pwm_state = {},
+    UART_READ_MAX_MS = bus.UART_READ_MAX_MS,
 }
-HAL.PWM_SYSFS_ROOT = HAL.platform.pwm_sysfs_root	-- 兼容既有引用（pwm_attr_path 等）
-HAL.backend = "ffi"			-- ABI 类标记（ffi=真实句柄后端；test_hal_ffi/test_jit_warmup 按此分流）
-HAL.backend_name = "glibc"	-- 后端模块名（BOT4CJ_HAL_BACKEND 指定，见下方加载段）
-
-------------------------------------------------------------------
--- 常量（2026-09-30 方案 A 重构）
-------------------------------------------------------------------
--- 平台常量（O_CLOEXEC、I2C_RDWR、SPI_IOC_*、GPIO_*、UART_*、errno）全部由后端
--- 经 HAL.sys.consts 表导出——换平台只需后端提供同键名常量表，HAL.lua 零改动。
--- 下方后端加载段完成后，从 HAL.sys.consts 逐项重导出为 HAL.* 兼容既有引用。
-local O_RDWR = 2
-HAL.i2c_addr = {}		-- fd -> 7位从地址（per-state；每条 i2c_msg 自带地址，无需 I2C_SLAVE ioctl）
-
-------------------------------------------------------------------
--- 系统调用间接层（离线单测在此注入 mock）
-------------------------------------------------------------------
--- 阶段 A-1 后端接口化：本表由 BOT4CJ_HAL_BACKEND 指定的后端提供
---（缺省 glibc，modules/lib/hal_backend_<名>.lua）。接口契约见
--- hal_backend_glibc.lua 头注（open/close/ioctl_i/ioctl_p/read/write/usleep/
--- errno/version + UART termios 六件），加载后逐项断言、缺函数 fail-fast——
--- 本文件是全部驱动的地基，契约不完整必须在加载期暴露而非首笔调用时炸。
--- 定位方式与 bus_contract 相同：BOT4CJ_MODULE_PATH 各段逐段探测，再以
--- 仓库缺省布局兜底。离线单测仍按函数粒度替换 HAL.sys.* 表项注入 mock，
--- 用法与后端化之前完全一致。
-do
-	local wanted = os.getenv("BOT4CJ_HAL_BACKEND")
-	if wanted == nil or wanted == "" then wanted = "glibc" end
-	local loaded
-	for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
-		local okb, mod = pcall(dofile, p .. "/lib/hal_backend_" .. wanted .. ".lua")
-		if okb and type(mod) == "table" then loaded = mod break end
-	end
-	if not loaded then
-		local okb, mod = pcall(dofile, "./modules/lib/hal_backend_" .. wanted .. ".lua")
-		if okb and type(mod) == "table" then loaded = mod end
-	end
-	assert(type(loaded) == "table",
-		"HAL: backend not found: modules/lib/hal_backend_" .. wanted .. ".lua (BOT4CJ_HAL_BACKEND=" .. wanted .. ")")
-	for _, k in ipairs({ "open", "close", "ioctl_i", "ioctl_p", "read", "write",
-		"usleep", "errno", "version", "tcgetattr", "tcsetattr", "cfmakeraw",
-		"cfsetispeed", "cfsetospeed", "tcflush",
-		"i2c_rdwr", "spi_setup", "spi_xfer" }) do
-		assert(type(loaded[k]) == "function",
-			"HAL: backend '" .. wanted .. "' missing contract function: " .. k
-			.. " (see modules/lib/hal_backend_glibc.lua)")
-	end
-	assert(type(loaded.consts) == "table",
-		"HAL: backend '" .. wanted .. "' missing consts table")
-	HAL.sys = loaded
-	HAL.backend_name = wanted
+-- Compatibility tokens only: never used for native OS calls.
+local consts = {
+    O_CLOEXEC = 0x80000, I2C_RDWR = 0x0707, I2C_M_RD = 1,
+    SPI_IOC_WR_MODE = 0x40016b01, SPI_IOC_WR_BITS_PER_WORD = 0x40016b03,
+    SPI_IOC_WR_MAX_SPEED_HZ = 0x40046b04, SPI_IOC_MESSAGE_1 = 0x40206b00,
+    GPIO_GET_LINEHANDLE = 0xC16CB403, GPIOHANDLE_GET_LINE_VALUES = 0xC040B408,
+    GPIOHANDLE_SET_LINE_VALUES = 0xC040B409, GPIOHANDLE_REQUEST_INPUT = 1,
+    GPIOHANDLE_REQUEST_OUTPUT = 2, GPIOHANDLE_REQUEST_ACTIVE_LOW = 4,
+    UART_O_FLAGS = 526594, UART_TCSANOW = 0, UART_TCIFLUSH = 0,
+    UART_VMIN_IDX = 6, UART_VTIME_IDX = 5, UART_CREAD_CLOCAL = 2176,
+    EAGAIN = 11, EINTR = 4, ENOENT = 2, EACCES = 13, EINVAL = 22,
+}
+for k, v in pairs(consts) do HAL[k] = v end
+-- Retain the source's non-glibc/legacy compatibility table. pyserial itself
+-- receives baud rates in Hz, never these historical termios tokens.
+HAL.UART_B_CONST = {
+    [1200] = 9, [2400] = 11, [4800] = 12, [9600] = 13, [19200] = 14, [38400] = 15,
+    [57600] = 0x1001, [115200] = 0x1002, [230400] = 0x1003, [460800] = 0x1004,
+    [500000] = 0x1005, [921600] = 0x1007, [1000000] = 0x1008,
+}
+HAL.sys = { consts = consts }
+local function unsupported(name)
+    return function() error("HAL: " .. name .. " is not supported by the portable backend", 2) end
 end
-
--- 2026-09-30 方案 A 重构：平台常量由后端 consts 表重导出，兼容既有 HAL.* 引用
--- （测试、Camera.lua 等直接访问 HAL.I2C_RDWR / HAL.SPI_IOC_* 等）。
-local _c = HAL.sys.consts
-HAL.O_CLOEXEC = _c.O_CLOEXEC
-HAL.I2C_RDWR  = _c.I2C_RDWR
-HAL.I2C_M_RD  = _c.I2C_M_RD
-HAL.SPI_IOC_WR_MODE          = _c.SPI_IOC_WR_MODE
-HAL.SPI_IOC_WR_BITS_PER_WORD = _c.SPI_IOC_WR_BITS_PER_WORD
-HAL.SPI_IOC_WR_MAX_SPEED_HZ  = _c.SPI_IOC_WR_MAX_SPEED_HZ
-HAL.SPI_IOC_MESSAGE_1        = _c.SPI_IOC_MESSAGE_1
-HAL.GPIO_GET_LINEHANDLE         = _c.GPIO_GET_LINEHANDLE
-HAL.GPIOHANDLE_GET_LINE_VALUES  = _c.GPIOHANDLE_GET_LINE_VALUES
-HAL.GPIOHANDLE_SET_LINE_VALUES  = _c.GPIOHANDLE_SET_LINE_VALUES
-HAL.GPIOHANDLE_REQUEST_INPUT      = _c.GPIOHANDLE_REQUEST_INPUT
-HAL.GPIOHANDLE_REQUEST_OUTPUT     = _c.GPIOHANDLE_REQUEST_OUTPUT
-HAL.GPIOHANDLE_REQUEST_ACTIVE_LOW = _c.GPIOHANDLE_REQUEST_ACTIVE_LOW
-
-------------------------------------------------------------------
--- 总线契约单点（N-25）
-------------------------------------------------------------------
--- 路径白名单 / UART 波特率表 / 各长度上限 / byte_of·uint_of 归一化 与
--- virtbus 共用同一份（modules/lib/bus_contract.lua），此前是两库逐字手工
--- 镜像、漂移即「仿真绿真机红」且无报错。定位方式：BOT4CJ_MODULE_PATH 各段
--- 逐段探测（fix-plan 3-3：此前只取首段，非缺省布局会让本文件地基直接失败），
--- 再以仓库缺省布局兜底——本文件是全部驱动的地基，加载失败会全线停摆，故兜底一次。
-local bus
-do
-	local probed
-	for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
-		local ok, m = pcall(dofile, p .. "/lib/bus_contract.lua")
-		if ok and type(m) == "table" then probed = m break end
-	end
-	bus = probed or dofile("./modules/lib/bus_contract.lua")
+function HAL.last_error() return bridge("last_error") end
+local function report(value)
+    if value == nil or value == -1 then print("HAL: " .. tostring(HAL.last_error())) end
+    return value
 end
-
--- 参数归一化（0~255 整数 / 非负整数 / 严格整数，非法 nil）
-local byte_of, uint_of, int_of = bus.byte_of, bus.uint_of, bus.int_of
-
-------------------------------------------------------------------
--- 停机灭火检查（BQ-1，与 src/daemonvar.hpp 的 quiesce 位配对）
-------------------------------------------------------------------
--- 守护线程的 lua_State 里有宿主注入的 DAEMON_SLOT_ADDR / DAEMON_SLOT_LAYOUT；
--- 主线程的状态两者皆无。宿主在「宽限耗尽仍存活」的守护上置槽内 quiesce 位
--- （先置位后弃管，见 daemonvar.cpp finishTeardown），此后本状态的一切真实
--- 总线传输（i2c/spi/uart）在进内核前被拒绝——把「弃管守护触总线」的竞态窗口
--- 从无界收敛到灭火时刻的在途单次传输。
--- 主线程路径的代价是两次 rawget（无全局注入即短路），virt 仿真路径不受此位
--- 约束（虚拟总线无物理副作用）。持同一把槽锁读，与 C++ 侧 daemon_quiesce
--- 的写纪律一致（TSan 经 pthread 调用拦截建立同步边）。
--- cdef 与 pthread.lua 逐字相同（LuaJIT 对相同签名的重复声明是幂等 no-op；
--- 守护 chunk 会同时加载两库，签名漂移会静默失配，故此约束双向钉死）。
-local quiesce_warned = false
-local function bus_quiesced()
-	local addr = rawget(_G, "DAEMON_SLOT_ADDR")
-	if addr == nil then return false end
-	local layout = rawget(_G, "DAEMON_SLOT_LAYOUT")
-	if type(layout) ~= "table" or layout.quiesce == nil then return false end
-	local base = ffi.cast("char*", addr)
-	local m = ffi.cast("cj_pthread_mutex_t *", base)
-	if ffi.C.pthread_mutex_lock(m) ~= 0 then
-		error("HAL: cannot lock daemon slot mutex for quiesce check")
-	end
-	local q = ffi.cast("int32_t *", base + layout.quiesce)[0]
-	ffi.C.pthread_mutex_unlock(m)
-	if q ~= 0 and not quiesce_warned then
-		quiesce_warned = true
-		print("HAL: bus access refused (daemon slot quiesced;"
-			.. " hardware teardown in progress)")
-	end
-	return q ~= 0
-end
-------------------------------------------------------------------
--- 延时
-------------------------------------------------------------------
--- 毫秒级延时（usleep，零 fork）
 function milli_sleep(ms)
-	-- 审计 2026-09-20（中）：tonumber 放行 NaN/inf——`ms <= 0` 对两者恒假、
-	-- `ms > 4294967` 对 NaN 亦恒假，于是 NaN 会走到 ffi 的 unsigned int 形参
-	-- （NaN→0，实际不睡）而 inf 撞上 usleep 的 EINVAL。统一按「非法即不睡」
-	-- 处理：本函数无返回值、调用方无从感知错误，静默不睡优于睡错时长。
-	-- 判据走总线契约单点 bus.finite_of（本文件已 dofile 过 bus_contract）。
-	local f = bus and bus.finite_of(ms)
-	if f == nil or f <= 0 then return end
-	ms = f
-	-- 审计 #10：usleep 形参是 unsigned int（usec），ms 超过 4294967 时
-	-- ms*1000 回绕成短睡/长睡错乱——钳制到 uint32 上限内并显式提示
-	if ms > 4294967 then
-		print("HAL: milli_sleep " .. tostring(ms) .. "ms exceeds uint32 usec range, clamped to 4294967ms")
-		ms = 4294967
-	end
-	HAL.sys.usleep(math.floor(ms * 1000))
+    ms = bus.finite_of(ms)
+    if ms == nil or ms <= 0 then return end
+    bridge("sleep_ms", math.min(ms, 4294967))
 end
-
-------------------------------------------------------------------
--- 各总线域加载（26.2 按域拆分：I2C / SPI / GPIO / UART / PWM 各一文件）
-------------------------------------------------------------------
--- 域文件是本文件的**分块**而非独立模块：loadfile 出来的子块看不到本文件的
--- local，故共享上下文（HAL 表、ffi、总线契约 bus、后端常量表 _c、三个归一化器、
--- quiesce 判定、O_RDWR）经 ctx 表显式传入——正文因此得以逐字搬迁不改写。
--- 域文件之间无相互引用（各自的私有 helper 都在自己那段里：i2c_rdwr/be_merge、
--- spi_xfer、UART_B_CONST*、pwm_*/sysfs_write），加载顺序只要求在本段接线之后。
--- 定位方式与 bus_contract / 后端加载段同规：BOT4CJ_MODULE_PATH 各段逐段探测，
--- 再以仓库缺省布局兜底——本文件是全部驱动的地基，加载失败会全线停摆。
--- 探测用 loadfile 而非 dofile：沙箱禁 io.open，loadfile 是既有认可的探测手段
--- （见 lib/mpath.lua 头注），且探测命中即可直接调用，省一次重读。
-do
-	local function domain_chunk(rel)
-		for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
-			local chunk = loadfile(p .. "/lib/hal/" .. rel)
-			if chunk then return chunk end
-		end
-		-- 兜底那一跳走 pcall：沙箱的 loadfile 包装对白名单外路径是 luaL_error
-		-- （不是返 nil，见 src/luasandbox.cpp restrictedLoader），BOT4CJ_MODULE_PATH
-		-- 不含 ./modules 时裸调会把「白名单拒绝」抛成 Lua error，压掉下面这条
-		-- 可诊断的成因说明。同规的后端加载段也是 pcall。
-		local ok, chunk = pcall(loadfile, "./modules/lib/hal/" .. rel)
-		assert(ok and chunk,
-			"HAL: domain file not found: modules/lib/hal/" .. rel
-			.. " (BOT4CJ_MODULE_PATH=" .. tostring(os.getenv("BOT4CJ_MODULE_PATH")) .. ")")
-		return chunk
-	end
-	local ctx = {
-		HAL = HAL, ffi = ffi, bus = bus, _c = _c,
-		byte_of = byte_of, uint_of = uint_of, int_of = int_of,
-		bus_quiesced = bus_quiesced, O_RDWR = O_RDWR,
-	}
-	for _, rel in ipairs({ "i2c.lua", "spi.lua", "gpio.lua", "uart.lua", "pwm.lua" }) do
-		domain_chunk(rel)(ctx)
-	end
+HAL.sys.usleep = function(us) return bridge("sleep_ms", us / 1000) end
+HAL.sys.close = function(fd) return report(bridge("close_handle", fd)) end
+HAL.sys.version = function() return "portable" end
+-- A data buffer ONLY; no native functions, addresses or ABI dependencies.
+ffi.cdef[[
+    typedef struct {
+        uint16_t addr; uint16_t flags; uint16_t len; uint8_t *buf;
+    } cj_i2c_msg;
+]]
+local function bytes(buf, n)
+    local out = {}
+    for i = 0, n - 1 do out[i + 1] = buf ~= nil and tonumber(buf[i]) or 0 end
+    return out
 end
-
+local function copy_bytes(buf, data, n)
+    if type(data) ~= "table" or #data ~= n then return false end
+    for i = 1, n do
+        if bus.int_of(data[i], 0, 255) == nil then return false end
+    end
+    for i = 1, n do buf[i - 1] = data[i] end
+    return true
+end
+function HAL.sys.i2c_rdwr(fd, msgs, count)
+    if count < 1 or count > 2 then return -1 end
+    local addr, write, n, readbuf = tonumber(msgs[0].addr), {}, 0, nil
+    for i = 0, count - 1 do
+        local msg = msgs[i]
+        if tonumber(msg.addr) ~= addr then return -1 end
+        if tonumber(msg.flags) == HAL.I2C_M_RD then
+            if i ~= count - 1 then return -1 end
+            n, readbuf = tonumber(msg.len), msg.buf
+        elseif tonumber(msg.flags) == 0 and i == 0 then
+            write = bytes(msg.buf, tonumber(msg.len))
+        else return -1 end
+    end
+    local out = report(bridge("i2c_transfer", fd, addr, write, n))
+    if type(out) ~= "table" or #out ~= n then return -1 end
+    if n > 0 and not copy_bytes(readbuf, out, n) then return -1 end
+    return count
+end
+function HAL.sys.spi_setup(fd, mode, bits, speed)
+    return report(bridge("spi_setup", fd, mode, bits, speed))
+end
+function HAL.sys.spi_xfer(fd, tx, rx, n, delay)
+    local out = report(bridge("spi_transfer", fd, bytes(tx, n), delay or 0))
+    if type(out) ~= "table" or #out ~= n then return -1 end
+    if rx ~= nil and not copy_bytes(rx, out, n) then return -1 end
+    return n
+end
+-- Preserve source normalization, merged-read limits and buffer behavior.
+-- These two domains use FFI only for buffers, and hardware only through HAL.sys.
+local ctx = { HAL = HAL, ffi = ffi, bus = bus, _c = consts,
+    byte_of = bus.byte_of, uint_of = bus.uint_of, int_of = bus.int_of,
+    bus_quiesced = function() return false end, O_RDWR = 2 }
+for _, name in ipairs({ "i2c", "spi" }) do
+    assert(loadfile(mpath.resolve("lib/hal/" .. name .. ".lua")))(ctx)
+end
+function i2c_open(path) return report(bridge("i2c_open", path)) end
+function spi_open(path) return report(bridge("spi_open", path)) end
+function uart_open(path, baud)
+    baud = tonumber(baud)
+    if not bus.baud_ok(baud) then return -1 end
+    local fd = report(bridge("uart_open", path, baud))
+    if fd ~= nil and fd >= 0 then HAL.uart_baud[fd] = baud end
+    return fd or -1
+end
+function uart_close(fd)
+    fd = bus.int_of(fd, 0)
+    if fd == nil then return -1 end
+    HAL.uart_baud[fd], HAL.uart_orig[fd] = nil, nil
+    return report(bridge("close_handle", fd))
+end
+function uart_flush(fd) return report(bridge("uart_flush", tonumber(fd))) end
+function uart_write(fd, data)
+    if type(data) ~= "table" or #data == 0 or #data > bus.UART_IO_MAX_BYTES then return -1 end
+    local out = {}
+    for i = 1, #data do
+        local b = bus.byte_of(data[i])
+        if b == nil then return -1 end
+        out[i] = b
+    end
+    return report(bridge("uart_write", tonumber(fd), out))
+end
+function uart_read(fd, n, timeout_ms)
+    n = bus.uint_of(n)
+    timeout_ms = timeout_ms == nil and 0 or bus.finite_of(timeout_ms)
+    if n == nil or n < 1 or timeout_ms == nil or timeout_ms > bus.UART_READ_MAX_MS then return nil end
+    return report(bridge("uart_read", tonumber(fd), math.min(n, bus.UART_IO_MAX_BYTES), timeout_ms))
+end
+function tcp_open(host, port, timeout_ms)
+    return report(bridge("tcp_open", host, port, timeout_ms == nil and 1000 or timeout_ms))
+end
+function tcp_close(fd) return report(bridge("close_handle", fd)) end
+function tcp_write(fd, data, timeout_ms)
+    return bridge("tcp_write", fd, data, timeout_ms == nil and 1000 or timeout_ms)
+end
+function tcp_read(fd, n, timeout_ms)
+    return bridge("tcp_read", fd, n, timeout_ms == nil and 1000 or timeout_ms)
+end
+-- HTTP 端点会话：open 只做 URL/超时校验（不建连，HTTP 无持久连接），
+-- 实际请求由 http_request 逐次发起。回环之外的 base 由宿主 runtime 门
+-- （--allow-hardware）拦截，Lua 侧不重复判定。http_request 返回表
+-- {result, status, body, headers}——HTTP 4xx/5xx 也是 result="OK" 的合法
+-- 响应（status 携带状态码），仅传输层失败返回 result="ERR"。
+function http_open(base, timeout_ms)
+    timeout_ms = bus.finite_of(timeout_ms)
+    if timeout_ms == nil then timeout_ms = 10000 end
+    if timeout_ms < 1 or timeout_ms > bus.HTTP_TIMEOUT_MAX_MS then return -1 end
+    return report(bridge("http_open", base, timeout_ms))
+end
+function http_close(fd)
+    fd = bus.int_of(fd, 0)
+    if fd == nil then return -1 end
+    return report(bridge("close_handle", fd))
+end
+function http_request(fd, method, path, headers, body)
+    return bridge("http_request", tonumber(fd), method, path, headers, body)
+end
+-- 宿主进程执行会话：open 仅登记默认超时（不拉起进程），实际执行在 shell_run，
+-- 进程逐次创建、随调用结束击杀。该能力属宿主世界访问，由宿主 runtime 门统一
+-- 要求 --allow-hardware（与物理设备/非回环 HTTP 同门，Lua 侧不重复判定）。
+-- shell_run 返回 {result, code, out, err, truncated}——非零退出码仍是
+-- result="OK" 的正常完成（code 携带退出码），仅启动失败/超时/取消为 ERR。
+function shell_open(timeout_ms)
+    timeout_ms = bus.finite_of(timeout_ms)
+    if timeout_ms == nil then timeout_ms = 10000 end
+    if timeout_ms < 1 or timeout_ms > bus.SHELL_TIMEOUT_MAX_MS then return -1 end
+    return report(bridge("shell_open", timeout_ms))
+end
+function shell_close(fd)
+    fd = bus.int_of(fd, 0)
+    if fd == nil then return -1 end
+    return report(bridge("close_handle", fd))
+end
+function shell_run(fd, command, timeout_ms)
+    return bridge("shell_run", tonumber(fd), command, timeout_ms)
+end
+for _, name in ipairs({ "gpio_request_line", "gpio_set_value", "gpio_get_value", "gpio_free_line",
+    "pwm_npwm", "pwm_exported", "pwm_export", "pwm_config", "pwm_set_polarity", "pwm_enable", "pwm_unexport",
+    "speaker_open", "speaker_write", "speaker_close" }) do
+    _G[name] = unsupported(name)
+end
+for _, name in ipairs({ "open", "ioctl_i", "ioctl_p", "read", "write", "errno",
+    "tcgetattr", "tcsetattr", "cfmakeraw", "cfsetispeed", "cfsetospeed", "tcflush" }) do
+    HAL.sys[name] = unsupported("native " .. name)
+end
+-- Reuse pure Lua virtual models; mixed physical/virtual states route by handle.
+-- Legacy proto=virt callers can still inject()/adopt_fd() without modification.
+local function virtual_path(path)
+    return type(path) == "string" and path:match("^virt%-%w[%w_./%-]*$") ~= nil
+end
+for _, kind in ipairs({ "i2c", "spi", "uart" }) do
+    local key, previous = kind .. "_path_ok", bus[kind .. "_path_ok"]
+    bus[key] = function(path) return virtual_path(path) or previous(path) end
+end
+-- Hand virtbus the already-loaded (and path-wrapped) contract through a private
+-- source environment instead of recompiling it. Host-resolved paths use the
+-- platform separator, so match either slash.
+local vchunk = assert(loadfile(mpath.resolve("lib/virtbus.lua")))
+local venvironment = setmetatable({ dofile = function(path)
+    if type(path) == "string" and path:match("[/\\]lib[/\\]bus_contract%.lua$") then return bus end
+    return dofile(path)
+end }, { __index = _G, __newindex = _G })
+setfenv(vchunk, venvironment)
+local vbus = vchunk()
+local virtual = {}
+for _, kind in ipairs({ "i2c", "spi", "uart" }) do
+    local name = kind .. "_open"
+    local real_open, virtual_open = _G[name], vbus["v_" .. name]
+    _G[name] = function(path, ...)
+        if virtual_path(path) then
+            local fd = virtual_open(path, ...)
+            if fd ~= nil and fd >= 0 then virtual[fd] = kind end
+            return fd
+        end
+        return real_open(path, ...)
+    end
+end
+local routed = {}
+for name, fn in pairs(vbus) do
+    if type(fn) == "function" and name:match("^v_") and not name:match("_open$") then
+        routed[name:sub(3)] = fn
+    end
+end
+for name, virtual_fn in pairs(routed) do
+    local real_fn = _G[name]
+    if real_fn ~= nil then
+        _G[name] = function(fd, ...)
+            if virtual[tonumber(fd)] ~= nil then
+                local result = virtual_fn(fd, ...)
+                if name:match("_close$") then virtual[tonumber(fd)] = nil end
+                return result
+            end
+            return real_fn(fd, ...)
+        end
+    end
+end
+_G.__BOT4CJ_HAL = HAL
+-- Route drv_common's proto=virt library probes to this state's loaded tables
+-- (virtbus/bus_contract also guard re-entry; this just skips recompiling).
+if type(virt_prepare) ~= "function" then dofile(mpath.resolve("lib/drv_common.lua")) end
+local prepare_environment = setmetatable({ dofile = function(path)
+    if type(path) == "string" and path:match("[/\\]lib[/\\]virtbus%.lua$") then return vbus end
+    if type(path) == "string" and path:match("[/\\]lib[/\\]bus_contract%.lua$") then return bus end
+    return dofile(path)
+end }, { __index = _G, __newindex = _G })
+setfenv(virt_prepare, prepare_environment)
+_G.__hal_call = nil
 return HAL

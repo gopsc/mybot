@@ -16,6 +16,7 @@ namespace bot {
  * 的次序（注释在头文件构造函数声明处）。 */
 RobotStruct::RobotStruct(bot::Reader& input)
 	: internals_(std::make_unique<Internals>(structures_, registry_, metas_, daemons_)) {
+	HALManager::setCurrent(&hal_);
 	structures_.load(input);
 }
 
@@ -27,6 +28,7 @@ void RobotStruct::active() {
 	/* 先标记为 Active：中途失败时析构仍会进入统一清理路径。 */
 	state_ = LifecycleState::Active;
 	deactivated_ = false;
+	hal_.setAllowHardware(allowHardware_);
 	internals_->factory.createHardVars(structures_.all());
 	metas_.validateAll();
 
@@ -64,18 +66,20 @@ void RobotStruct::deactivate() {
 		std::cerr << "Deactivate: " << failed << " of " << seq.size()
 			<< " hardware variable(s) failed to destroy (see warnings above)" << std::endl;
 	}
+	/* 驱动 destroy 正常会关闭自己的句柄；这里兜住 build 失败/异常路径遗留的。 */
+	hal_.closeAll();
 	deactivated_ = true;
 	state_ = LifecycleState::Inactive;
 }
 
 RobotStruct::~RobotStruct() {
-	if (deactivated_) { return; }
 	try {
-		deactivate();
+		if (!deactivated_) { deactivate(); }
 	} catch (...) {
 		std::cerr << "Deactivate: failed during destruction"
 			<< " (hardware may remain energized)" << std::endl;
 	}
+	if (HALManager::current() == &hal_) { HALManager::setCurrent(nullptr); }
 }
 
 } // namespace bot

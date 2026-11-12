@@ -1,5 +1,5 @@
 -- daemon_probe.lua - 模拟传感器守护 chunk（D 方案：setup + 全局 daemon_tick 单次采样）
--- daemon_body 先 pcall 本 chunk 一次完成 setup，随后逐拍调用 daemon_tick，拍间 Cangjie sleep 让出。
+-- daemon_body 先 pcall 本 chunk 一次完成 setup，随后逐拍调用 daemon_tick，拍间由宿主 sleep 让出。
 if jit then jit.off() end
 
 local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))

@@ -1,5 +1,5 @@
 -- regmap.lua —— 通用「寄存器指针 + burst」虚拟器件模型
--- bot4cj 虚拟硬件库（modules/lib/virtbus/，配合 modules/lib/virtbus.lua 使用）
+-- mybot 虚拟硬件库（modules/lib/virtbus/，配合 modules/lib/virtbus.lua 使用）
 --
 -- 覆盖绝大多数 I2C 传感器的事务形态（MPU6050/BME280/ADS1115/INA226…）：
 --   write {reg}          设置读指针（随后的读事务从该寄存器连续 burst）

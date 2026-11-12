@@ -132,6 +132,11 @@ static void push_lua_value(lua_State* L, const Json& val) {
 	push_lua_value_impl(L, val, 0);
 }
 
+/* C++ HAL 桥使用：把 Json 结果压入 Lua 栈。 */
+void push_json_to_lua(lua_State* L, const Json& val) {
+	push_lua_value(L, val);
+}
+
 /* ---- 读取 Lua 栈上 idx 处的值并转换为 Json（递归）；表转 JsonArray/JsonObject ----
  * 调用前后栈深不变。
  * C-9 防线：每层嵌套表压一个 C++ 栈帧，只有碰到标量才终止——驱动返回自引用表

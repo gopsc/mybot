@@ -1,5 +1,5 @@
 -- virtbus.lua —— 虚拟总线（issue #18：设计虚拟硬件用于无真机驱动链路验证）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 概念：inject 后替换 HAL 的全部全局 i2c_*/spi_*/uart_* 函数，真实驱动（经 HAL/驱动 dofile
 -- 链路）在纯内存的虚拟总线上完成 build/call/destroy——无真机、无 /dev/i2c-*、
@@ -145,9 +145,16 @@ virtbus.uart_fail_read = false  -- 总线级故障注入：true → uart_read �
 local bus
 do
 	local probed
-	for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
-		local ok, m = pcall(dofile, p .. "/lib/bus_contract.lua")
-		if ok and type(m) == "table" then probed = m break end
+	if __mpath ~= nil then
+		-- 宿主注入的解析器优先：按 ':' 切分会把 Windows 盘符切成假路径
+		-- （与 drv_common.probe_lib 同规）。
+		local ok, m = pcall(dofile, __mpath.resolve("lib/bus_contract.lua"))
+		if ok and type(m) == "table" then probed = m end
+	else
+		for p in (os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):gmatch("[^:]+") do
+			local ok, m = pcall(dofile, p .. "/lib/bus_contract.lua")
+			if ok and type(m) == "table" then probed = m break end
+		end
 	end
 	bus = probed or dofile("./modules/lib/bus_contract.lua")
 end
@@ -800,7 +807,7 @@ end
 
 -- 采纳「在别的 lua_State 里创建的虚拟 fd」：真实 fd 是进程级整数，跨状态机可用；
 -- 而本模块的 open_paths/fd_addr/uart_paths 是逐状态机的表。多状态机拓扑里总线变量
--- （modules/I2C.lua、modules/UART.lua）在自己的状态里 open 拿到 fd，设备变量在自己的
+-- （modules/I2C.py、modules/UART.py）在自己的状态里 open 拿到 fd，设备变量在自己的
 -- 状态里对同一个 fd 读写信道——不先登记的话 v_i2c_set_addr / v_uart_* 会因
 -- open_paths[fd] / uart_paths[fd] 为空而失败。
 -- bus 决定登记到哪张 fd 表：缺省/"i2c" → open_paths + fd_addr；"spi" → spi_paths；

@@ -133,6 +133,7 @@ int main(int argc, char** argv) {
 
 	std::unique_ptr<RobotStruct> robot = loadStructure(*options.robot);
 	if (!robot) { return 1; }
+	robot->setAllowHardware(options.allowHardware);
 
 	if (!applyDaemonGraceMs(options.daemonGraceMs, *robot)) { return 2; }
 

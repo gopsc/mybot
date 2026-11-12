@@ -1,5 +1,5 @@
 -- kalman.lua - 一维卡尔曼滤波器
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 自 src/math/kalman.cj（extKalman）移植为 Lua 模块（返回表风格，供驱动 dofile 使用）
 --
 -- 用法：
@@ -10,7 +10,7 @@
 --       local filtered = kf:filter(raw)  -- 滤波
 --   end
 --
--- 参数说明（与原仓颉版一致）：
+-- 参数说明（与原实现一致）：
 --   R 固定；Q 越大越信任测量值（Q 无穷 = 只用测量值），
 --   Q 越小越信任模型预测（Q 为 0 = 只用模型预测）
 
