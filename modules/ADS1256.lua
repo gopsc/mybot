@@ -1,5 +1,5 @@
 -- ADS1256 模数转换器 驱动模块（SPI，24 位，8 通道单端 / 4 路差分）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 虚拟器件模型：内嵌本文件尾部 ADS1256_VIRT（2026-09-15 自 modules/lib/virtbus/ads1256.lua
 -- 迁入，单文件驱动+模型实验第五个，SPI 族样板；无硬件单测与守护 E2E 共用；同协议独立实现，改协议两处同步）
 --
@@ -30,7 +30,7 @@ dofile(mpath.resolve("lib/drv_common.lua"))
 local bitc = dofile(mpath.resolve("bitcompat.lua"))
 
 -- 本设备的 SPI 传输封装：统一附带 @SPI 矩阵配置的 delay
--- （delay 由 SPI.lua 的 call() 随 fd 返回，经元数据引用流入 data.delay）
+-- （delay 由 SPI.py 的 call() 随 fd 返回，经元数据引用流入 data.delay）
 local dev_delay = 0
 local function spi_w(fd, v)        return spi_write(fd, v, dev_delay) end
 local function spi_w3(fd, a, b, c) return spi_write3(fd, a, b, c, dev_delay) end

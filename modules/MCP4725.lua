@@ -1,5 +1,5 @@
 -- MCP4725 12 位 I2C DAC 驱动模块（模拟量输出，EEPROM 断电保持）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 虚拟器件模型：内嵌本文件尾部 MCP4725_VIRT（2026-09-15 自 modules/lib/virtbus/mcp4725.lua
 -- 迁入，单文件驱动+模型实验第八个，write-only I2C 收尾；无硬件单测共用；写-only 无测量值，守护 E2E 豁免）
 -- Microchip，I2C 地址 0x62（A0=GND）/0x63（A0=VDD），12 位 0~VDD 输出

@@ -1,5 +1,5 @@
 -- Relay 中继测试模块
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 配合通用 controller 引用机制使用：先处理收到的参数（test → delay），
 -- 返回值由框架与元数据合并后转发给 controller 指定的硬件变量（如 Timer）
 -- 用法：在结构脚本中定义 @Relay 矩阵并带 controller 列，见 robots/relay-test.sql

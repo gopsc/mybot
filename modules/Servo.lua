@@ -1,10 +1,10 @@
 -- Servo 舵机驱动模块
--- bot4cj 仓颉语言机器人框架
--- 由仓颉内建版本（MtVars_Servo + hd/Servo.cj）迁移而来：
+-- mybot 机器人框架
+-- 由旧版内建实现（MtVars_Servo + hd/Servo.cj）迁移而来：
 -- 对输入角度做 offset 漂移、|min|/|max| 限幅、max<0 反向处理，
 -- 返回 {channel, angle}，由框架的 controller 机制转发给 PWM 控制器（如 PCA9685）
 --
--- 元数据列：max/min/offset/channel（"-" 或非法值按 0 处理，与仓颉版 parseMt 首行语义一致）
+-- 元数据列：max/min/offset/channel（"-" 或非法值按 0 处理，与旧版 parseMt 首行语义一致）
 -- 输入参数：angle（支持浮点）
 -- 用法见 robots/spider1.sql 的 Servo 表与 scripts/*.mt 动作脚本
 
@@ -57,7 +57,7 @@ end
 
 
 -- 【调用Servo】
--- 角度处理管线（与仓颉版 Servo.setAngle 一致）：
+-- 角度处理管线（与旧版 Servo.setAngle 一致）：
 --   angle + offset → 限幅 [|min|, |max|] → max < 0 时反向 (180 - a)
 --
 function call(data)

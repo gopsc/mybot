@@ -1,5 +1,5 @@
 -- VL53L4CD ToF 激光测距 驱动模块（ST FlightSense，I2C 地址 0x29）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 --
 -- 【单消费者声明】16 位指针族，一次测距是**多事务状态机**：写 REG_SYSTEM_START
 -- （0x21 连续 / 0x40 自主 / 0x00 停）→ wait_ready 轮询 HV mux 与 TIO 状态位 →

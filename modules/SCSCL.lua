@@ -1,10 +1,10 @@
 -- SCSCL 总线舵机 驱动模块（飞特 FT-SCS 自定义协议，UART TTL 单总线）
--- bot4cj 仓颉语言机器人框架
+-- mybot 机器人框架
 -- 虚拟器件模型：内嵌本文件尾部 SCSCL_VIRT（无硬件单测与 @Action E2E 共用；
 -- 模型与驱动保持独立实现——模型自带帧组装/校验和，不引用上方驱动局部量）
 --
--- 适用：飞特（Feetech）电位器型 SCSCL 舵机（SCS 系列；文档见
--- http://doc.feetech.cn 《SCSCL舵机内存表手册》《SCS通信协议》）。
+-- 适用：飞特（Feetech）电位器型 SCSCL 舵机（SCS 系列；文档见飞特官方
+-- 《SCSCL舵机内存表手册》《SCS通信协议》）。
 -- 帧格式：FF FF ID LEN INST 参数… CS，LEN = 参数数 + 2；
 -- CS = 0xFF - ((ID+LEN+INST+参数) mod 256)。
 -- SCSCL 多字节寄存器为大端（高字节在前，内存表 0x02 END=1 表大端存储）。
