@@ -53,24 +53,11 @@ ParsedArgs parseArgs(int argc, char** argv) {
 	std::string input;
 	app.add_option("--robot", robot, "结构脚本 .sql 路径（必选）");
 	app.add_option("--input", input, "动作脚本 .mt 路径；不给则读 stdin");
-	app.add_flag("--allow-hardware", opts.allowHardware,
-		"允许物理设备、非回环网络与宿主 Shell");
 	app.add_option("--timeout", opts.actionTimeoutSec,
 		"动作脚本墙钟预算（秒，>0 且 <=3600，缺省 180）")
 		->default_val("180");
 	app.add_option("--daemon-grace-ms", opts.daemonGraceMs,
 		"守护线程停机宽限（毫秒，0..300000）");
-
-	app.add_option("--tcp", opts.tcp.tcpPort,
-		"TCP 动作源端口；裸写 --tcp 表示使用缺省端口校验")
-		->expected(0, 1);
-	app.add_option("--tcp-host", opts.tcp.tcpHost, "TCP 监听地址（缺省 127.0.0.1）");
-	app.add_option("--tcp-token", opts.tcp.tcpToken, "TCP 口令（非回环监听必填）");
-	app.add_option("--tcp-idle", opts.tcp.tcpIdle, "TCP 空闲超时（秒）");
-	app.add_option("--tcp-max-auth-attempts", opts.tcp.tcpMaxAuthAttempts,
-		"TCP 口令连续失败上限（1..1000）");
-	app.add_option("--tcp-total-timeout", opts.tcp.tcpTotalTimeout,
-		"TCP 连接总时长预算下限（秒，1..86400）");
 
 	app.add_option("--var", opts.varSpecs, "会话别名 NAME=VALUE（可重复）")
 		->expected(1);
@@ -90,7 +77,6 @@ ParsedArgs parseArgs(int argc, char** argv) {
 
 	if (!robot.empty()) { opts.robot = robot; }
 	if (!input.empty()) { opts.input = input; }
-	opts.tcp.enabled = app.count("--tcp") > 0;
 	return parsed;
 }
 
@@ -111,40 +97,6 @@ int validateOptions(CliOptions& opts) {
 		std::cerr << rangeErrorText("选项 --daemon-grace-ms",
 			daemon_limits::kGraceMsMin, daemon_limits::kGraceMsMax,
 			opts.daemonGraceMs) << std::endl;
-		return 2;
-	}
-
-	if (opts.tcp.enabled && opts.tcp.tcpPort.empty()) {
-		std::cerr << usageError("--tcp 缺少端口号（用法：--tcp 19240 或 --tcp=19240）")
-			<< std::endl;
-		return 2;
-	}
-	if (!opts.tcp.tcpPort.empty()
-			&& !parseBoundedLong(opts.tcp.tcpPort, 1, 65535)) {
-		std::cerr << rangeErrorText("选项 --tcp 端口", 1, 65535, opts.tcp.tcpPort)
-			<< std::endl;
-		return 2;
-	}
-	if (!opts.tcp.tcpIdle.empty()
-			&& !parseBoundedLong(opts.tcp.tcpIdle, 1, 86400)) {
-		std::cerr << rangeErrorText("选项 --tcp-idle", 1, 86400, opts.tcp.tcpIdle)
-			<< std::endl;
-		return 2;
-	}
-	if (!opts.tcp.tcpMaxAuthAttempts.empty()
-			&& !parseBoundedLong(opts.tcp.tcpMaxAuthAttempts,
-				tcp_limits::kAuthMaxFailsMin, tcp_limits::kAuthMaxFailsMax)) {
-		std::cerr << rangeErrorText("选项 --tcp-max-auth-attempts",
-			tcp_limits::kAuthMaxFailsMin, tcp_limits::kAuthMaxFailsMax,
-			opts.tcp.tcpMaxAuthAttempts) << std::endl;
-		return 2;
-	}
-	if (!opts.tcp.tcpTotalTimeout.empty()
-			&& !parseBoundedLong(opts.tcp.tcpTotalTimeout,
-				tcp_limits::kTotalTimeoutMin, tcp_limits::kTotalTimeoutMax)) {
-		std::cerr << rangeErrorText("选项 --tcp-total-timeout",
-			tcp_limits::kTotalTimeoutMin, tcp_limits::kTotalTimeoutMax,
-			opts.tcp.tcpTotalTimeout) << std::endl;
 		return 2;
 	}
 
@@ -196,30 +148,21 @@ std::string helpText() {
 	return
 		"用法:\n"
 		"  mybot --robot <结构脚本.sql> [--input <动作脚本.mt>] [选项]\n"
-		"  mybot --robot <结构脚本.sql> --tcp <端口> [选项]\n"
 		"  cat action.mt | mybot --robot <结构脚本.sql> [选项]\n"
 		"\n"
-		"输入源优先级：--tcp > --input > stdin。\n"
+		"输入源优先级：--input > stdin。\n"
 		"\n"
 		"选项:\n"
 		"  --robot <path>              结构脚本 .sql（必选）\n"
 		"  --input <path>              动作脚本 .mt；不给则读 stdin\n"
-		"  --allow-hardware            允许物理设备、非回环网络与宿主 Shell\n"
 		"  --timeout <sec>             动作脚本墙钟预算（>0 且 <=3600，缺省 180）\n"
 		"  --daemon-grace-ms <ms>      守护线程停机宽限（0..300000，缺省 30000）\n"
-		"  --tcp <port>                TCP 动作源端口；裸写 --tcp 会报缺端口\n"
-		"  --tcp-host <addr>           TCP 监听地址（缺省 127.0.0.1）\n"
-		"  --tcp-token <tok>           TCP 口令；非回环监听必填\n"
-		"  --tcp-idle <sec>            TCP 空闲超时（1..86400，缺省 30）\n"
-		"  --tcp-max-auth-attempts <N> TCP 口令连续失败上限（1..1000，缺省 5）\n"
-		"  --tcp-total-timeout <sec>   TCP 连接总时长预算下限（1..86400，缺省 600）\n"
 		"  --var NAME=VALUE            会话别名注入（可重复）\n"
 		"  --var-env NAME=ENVVAR       从环境变量读取会话别名（可重复）\n"
 		"  --help, -h                  打印帮助\n"
 		"\n"
 		"示例:\n"
-		"  mybot --robot robots/relay-test.sql --input scripts/relay-test.mt\n"
-		"  mybot --robot robots/relay-test.sql --tcp 19240\n";
+		"  mybot --robot robots/relay-test.sql --input scripts/relay-test.mt\n";
 }
 
 } // namespace bot

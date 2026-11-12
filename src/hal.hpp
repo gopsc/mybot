@@ -2,8 +2,8 @@
 /* hal.hpp —— C++ 硬件抽象层（替代 modules/lib/HAL.lua 的 FFI 物理后端）
  *
  * 所有操作名与当前 Python HAL 保持一致，Lua 驱动通过宿主注入的 __hal_call
- * 调用这里。物理设备、非回环网络和宿主 Shell 受 --allow-hardware 门控；
- * virt-* / loop:// / 回环地址不受限。
+ * 调用这里。物理设备、非回环网络和宿主 Shell 默认允许；virt-* / loop://
+ * 与回环地址照常可用。
  */
 
 #include <cstdint>
@@ -22,9 +22,6 @@ public:
 	~HALManager();
 	HALManager(const HALManager&) = delete;
 	HALManager& operator=(const HALManager&) = delete;
-
-	void setAllowHardware(bool allow) { allowHardware_ = allow; }
-	bool allowHardware() const { return allowHardware_; }
 
 	/* 返回值约定：
 	 *   open/setup/close/sleep → JSON int
@@ -89,7 +86,6 @@ private:
 	std::map<std::int64_t, std::unique_ptr<Resource>> handles_;
 	std::map<std::int64_t, int> owners_;
 	std::int64_t nextHandle_ = 1LL << 20;
-	bool allowHardware_ = false;
 	bool closed_ = false;
 };
 

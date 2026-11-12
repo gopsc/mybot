@@ -28,7 +28,6 @@ void RobotStruct::active() {
 	/* 先标记为 Active：中途失败时析构仍会进入统一清理路径。 */
 	state_ = LifecycleState::Active;
 	deactivated_ = false;
-	hal_.setAllowHardware(allowHardware_);
 	internals_->factory.createHardVars(structures_.all());
 	metas_.validateAll();
 

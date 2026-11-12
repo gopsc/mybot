@@ -1,5 +1,5 @@
-/* FTDI SPI 回环示例（真机，需要 --allow-hardware）：
- *   mybot --robot=robots/ftdi-spi.sql --input=scripts/ftdi-spi.mt --allow-hardware
+/* FTDI SPI 回环示例（真机）：
+ *   mybot --robot=robots/ftdi-spi.sql --input=scripts/ftdi-spi.mt
  *
  * 把适配器 MOSI 与 MISO 短接，probe0 发送的字节应原样读回。
  * FTDI 走 GPIO 位操作，速度不会达到 spidev 的水平；SPI 目前只支持 8 位字。

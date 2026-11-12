@@ -43,20 +43,6 @@ bool isVirtualPath(const std::string& path) {
 	return std::isalnum(c) != 0 || c == '_';
 }
 
-bool isLoopbackHost(const std::string& host) {
-	if (host == "localhost") { return true; }
-	in_addr v4{};
-	if (inet_pton(AF_INET, host.c_str(), &v4) == 1) {
-		return (ntohl(v4.s_addr) >> 24) == 127;
-	}
-	in6_addr v6{};
-	if (inet_pton(AF_INET6, host.c_str(), &v6) == 1) {
-		static const in6_addr loopback = IN6ADDR_LOOPBACK_INIT;
-		return std::memcmp(&v6, &loopback, sizeof(v6)) == 0;
-	}
-	return false;
-}
-
 std::string urlHost(const std::string& base) {
 	const std::size_t scheme = base.find("://");
 	if (scheme == std::string::npos) { return std::string(); }
@@ -518,20 +504,12 @@ Json HALManager::opI2cOpen(const Json& pathValue, const Json& virtualValue, int 
 		return JsonInt(addBus("i2c", path, -1, "virtual", owner));
 	}
 	if (path.rfind("ftdi://", 0) == 0) {
-		if (!allowHardware_) {
-			throw std::runtime_error(
-				"Physical hardware access requires explicit --allow-hardware confirmation");
-		}
 		auto resource = std::make_unique<Resource>();
 		resource->kind = "i2c";
 		resource->backend = "ftdi";
 		resource->path = path;
 		resource->ftdi = std::make_unique<FtdiBus>(path, false);
 		return JsonInt(add(std::move(resource), owner));
-	}
-	if (!allowHardware_) {
-		throw std::runtime_error(
-			"Physical hardware access requires explicit --allow-hardware confirmation");
 	}
 	if (path.rfind("/dev/i2c-", 0) != 0) {
 		throw std::runtime_error("I2C requires /dev/i2c-N, an ftdi:// URL, or a virt-* path");
@@ -596,20 +574,12 @@ Json HALManager::opSpiOpen(const Json& pathValue, const Json& virtualValue, int 
 		return JsonInt(addBus("spi", path, -1, "virtual", owner));
 	}
 	if (path.rfind("ftdi://", 0) == 0) {
-		if (!allowHardware_) {
-			throw std::runtime_error(
-				"Physical hardware access requires explicit --allow-hardware confirmation");
-		}
 		auto resource = std::make_unique<Resource>();
 		resource->kind = "spi";
 		resource->backend = "ftdi";
 		resource->path = path;
 		resource->ftdi = std::make_unique<FtdiBus>(path, true);
 		return JsonInt(add(std::move(resource), owner));
-	}
-	if (!allowHardware_) {
-		throw std::runtime_error(
-			"Physical hardware access requires explicit --allow-hardware confirmation");
 	}
 	if (path.rfind("/dev/spidev", 0) != 0) {
 		throw std::runtime_error("SPI requires /dev/spidevX.Y, an ftdi:// URL, or a virt-* path");
@@ -689,10 +659,6 @@ Json HALManager::opUartOpen(const Json& pathValue, const Json& baudValue,
 		|| isVirtualPath(path) || path == "loop://";
 	if (virtualBus) {
 		return JsonInt(addBus("uart", path, -1, "loop", owner, baud));
-	}
-	if (!allowHardware_) {
-		throw std::runtime_error(
-			"Physical hardware access requires explicit --allow-hardware confirmation");
 	}
 	if (path.rfind("/dev/", 0) != 0) {
 		throw std::runtime_error("UART requires a /dev path, loop://, or a virt-* path");
@@ -789,10 +755,6 @@ Json HALManager::opTcpOpen(const Json& hostValue, const Json& portValue,
 	const std::string host = asStr(hostValue, "TCP host");
 	const int port = asInt(portValue, 1, 65535, "TCP port");
 	const int timeoutMs = asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout");
-	if (!isLoopbackHost(host) && !allowHardware_) {
-		throw std::runtime_error(
-			"TCP access beyond loopback requires explicit --allow-hardware confirmation");
-	}
 	addrinfo hints{};
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
@@ -925,10 +887,6 @@ Json HALManager::opHttpOpen(const Json& baseValue, const Json& timeoutValue, int
 	}
 	const std::string host = urlHost(base);
 	if (host.empty()) { throw std::runtime_error("HTTP base requires a host"); }
-	if (!isLoopbackHost(host) && !allowHardware_) {
-		throw std::runtime_error(
-			"HTTP access beyond loopback requires explicit --allow-hardware confirmation");
-	}
 	auto resource = std::make_unique<Resource>();
 	resource->kind = "http";
 	resource->backend = "http";
@@ -1008,10 +966,6 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 
 Json HALManager::opShellOpen(const Json& timeoutValue, int owner) {
 	const int timeoutMs = asInt(timeoutValue, 1, kShellTimeoutMs, "shell timeout");
-	if (!allowHardware_) {
-		throw std::runtime_error(
-			"Host command execution requires explicit --allow-hardware confirmation");
-	}
 	auto resource = std::make_unique<Resource>();
 	resource->kind = "shell";
 	resource->backend = "shell";

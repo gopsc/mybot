@@ -34,7 +34,7 @@ extern "C" void onStopSignal(int sig) {
 }
 
 /* ---- 进程自护：PR_SET_DUMPABLE=0 ----
- * 本进程内存里可能有 --tcp-token。non-dumpable 让同 UID 的非特权进程
+ * 本进程内存里可能有敏感配置。non-dumpable 让同 UID 的非特权进程
  * ptrace / 读 /proc/<pid>/mem 被拒，崩溃也不落 core（core 里就是整份内存）。
  * BOT4CJ_ALLOW_PTRACE=1 供调试显式放开；sanitizer 构建跳过。 */
 void hardenAgainstInspection() {
@@ -111,7 +111,7 @@ void installStopSignalHandlers() {
 int main(int argc, char** argv) {
 	using namespace bot;
 
-	hardenAgainstInspection();	/* 先于 parseArgs：argv 可能含 --tcp-token */
+	hardenAgainstInspection();	/* 启动期尽早收紧进程可检查性 */
 
 	ParsedArgs args = parseArgs(argc, argv);
 	if (args.help) {
@@ -133,7 +133,6 @@ int main(int argc, char** argv) {
 
 	std::unique_ptr<RobotStruct> robot = loadStructure(*options.robot);
 	if (!robot) { return 1; }
-	robot->setAllowHardware(options.allowHardware);
 
 	if (!applyDaemonGraceMs(options.daemonGraceMs, *robot)) { return 2; }
 
