@@ -44,5 +44,7 @@ std::unique_ptr<NativeDriver> makeLoopbackProbeDriver(HALManager& hal);
 std::unique_ptr<NativeDriver> makeShellDriver(HALManager& hal);
 std::unique_ptr<NativeDriver> makeHttpDriver(HALManager& hal);
 std::unique_ptr<NativeDriver> makeTcpDriver(HALManager& hal);
+std::unique_ptr<NativeDriver> makeDevEnumDriver(HALManager& hal);
+std::unique_ptr<NativeDriver> makeI2cScanDriver(HALManager& hal);
 
 } // namespace bot

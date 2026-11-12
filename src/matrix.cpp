@@ -131,6 +131,25 @@ void MatrixObject::removeRows(const std::vector<std::size_t>& rows) {
  * 把块前游离数据混进后续块）——新机分别按「';' 属块头名字」「游离数据进 scratch_」
  * 处理，更自洽；良构脚本（每块 @名字…@ 成对、行以 ';' 收口）逐字不变。 */
 std::int64_t MatrixParser::next_(char c, std::int64_t count) {
+	/* ------------ QUOTED CELL ------------ */
+	/* 双引号内的空格/Tab/; /# 都是普通字符；引号本身保留进单元格，由表达式
+	 * 解析器在求值时去掉。引号必须同行闭合（字符串内换行写 \n）。 */
+	if (quoted_) {
+		if (c == '\n') {
+			throw bot::IllegalArgumentException(
+				"unterminated quoted string; close it before the line ends"
+				" (use \\n inside an expression string for a newline)");
+		}
+		dataBuilder().addRune(c);
+		if (escaped_) {
+			escaped_ = false;
+		} else if (c == '\\') {
+			escaped_ = true;
+		} else if (c == '"') {
+			quoted_ = false;
+		}
+		return count;
+	}
 	/* ------------ COMMENTS ------------ */
 	if (!cm_ && c == '#') {
 		cm_ = true;
@@ -164,6 +183,7 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 	else if (nl_ && c != '@') {
 		nl_ = false;
 		dataBuilder().addRune(c);
+		if (c == '"') { quoted_ = true; escaped_ = false; }
 	}
 	/* ------------- not nl ------------- */
 	else if (!nl_ && nm_ && (c == ' ' || c == '\t' || c == '\r' || c == '\n')) {
@@ -178,6 +198,11 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 	}
 	else if (!nl_ && nm_) {
 		hdr_ += c;	/* 块头名字字符（含 ';'：块头不以 ';' 收口，与数据态区分） */
+	}
+	else if (!nl_ && c == '"') {
+		quoted_ = true;
+		escaped_ = false;
+		dataBuilder().addRune(c);
 	}
 	else if (!nl_ && (c == ' ' || c == '\t' || c == '\n')) {
 		dataBuilder().submitItem();
@@ -285,6 +310,8 @@ std::optional<MatrixObject> MatrixParser::parse() {
 	nl_ = true;
 	cm_ = false;
 	nm_ = false;
+	quoted_ = false;
+	escaped_ = false;
 
 	/* 读取初始状态，循环直到 done_（顶层帧闭合）或 EOF。done_ 必须在 read() 之前
 	 * 检查：闭合 '@' 的名字 token 结束即置 done_，若再读一个字符会丢掉下一个块的
@@ -293,6 +320,10 @@ std::optional<MatrixObject> MatrixParser::parse() {
 		if (done_) { break; }
 		int c = input_.read();
 		if (c < 0) {
+			if (quoted_) {
+				throw bot::IllegalArgumentException("EOF at line " + std::to_string(count)
+					+ ": unterminated quoted string");
+			}
 			/* EOF 前若正读块头名字 token（nm_），先落定它——脚本以裸 '@' 收尾
 			 * 且无尾随换行时，闭合符否则永远等不到终止空白而被误判「未闭合」。 */
 			if (nm_) {

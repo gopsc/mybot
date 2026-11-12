@@ -69,6 +69,24 @@ TH_TEST(matrix_comment_start_flushes_pending_cell) {
 	TH_CHECK(n.rows() == 2);
 }
 
+TH_TEST(matrix_quoted_cells_keep_spaces_and_delimiters) {
+	/* 与当前 Python 文法一致：双引号内的空格/Tab/; /# 不分格，引号本身保留
+	 * 在单元格里，由表达式解析器在求值时去掉。 */
+	mt::MatrixObject m = fx::oneMatrix(
+		"@Action\n"
+		"dev.a dev.b;\n"
+		"$(\"hello world\") $(\"a;b#c\");\n"
+		"@\n");
+	TH_CHECK(m.cols() == 2);
+	TH_CHECK(fx::cell(m, 1, 0) == "$(\"hello world\")");
+	TH_CHECK(fx::cell(m, 1, 1) == "$(\"a;b#c\")");
+}
+
+TH_TEST(matrix_unterminated_quote_is_rejected_loudly) {
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "unterminated quoted string",
+		fx::oneMatrix("@Action\ndev.a;\n$(\"oops);\n@\n"));
+}
+
 TH_TEST(matrix_match_rows_equality_on_inherited_values) {
 	/* WHERE 等值匹配单点（2026-09-23）：SELECT 渲染与未来的 DELETE/UPDATE
 	 * 选行共用。比对 inherited 显示值（"-" 继承前向填充后），与全列渲染

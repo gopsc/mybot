@@ -251,6 +251,8 @@ class MatrixParser {
 	bool nl_ = true;	/* new line（行首态） */
 	bool cm_ = false;	/* comment */
 	bool nm_ = false;	/* 正在读块头名字 token */
+	bool quoted_ = false;	/* 双引号内：空白/; /# 不分格，引号保留进单元格 */
+	bool escaped_ = false;	/* 引号内的反斜杠转义（下一个字符不闭合引号） */
 
 	/* 当前接收数据行的构建器：控制帧 → pendingAction，叶子帧 → self，栈空 → scratch_ */
 	MatrixBuilder& dataBuilder();

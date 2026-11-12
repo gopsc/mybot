@@ -119,6 +119,8 @@ set(MYBOT_CORE_SOURCES
   src/driver_shell.cpp
   src/driver_http.cpp
   src/driver_tcp.cpp
+  src/driver_dev_enum.cpp
+  src/driver_i2c_scan.cpp
   # ---- 硬件域：变量基类、Lua/Daemon 变量、注册表与元数据 ----
   src/hardware.cpp
   src/luavar.cpp

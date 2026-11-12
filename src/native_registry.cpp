@@ -12,6 +12,8 @@ const std::map<std::string, NativeDriverFactory>& registry() {
 		{"Shell", makeShellDriver},
 		{"HTTP", makeHttpDriver},
 		{"TCP", makeTcpDriver},
+		{"Dev_enum", makeDevEnumDriver},
+		{"I2C_scan", makeI2cScanDriver},
 	};
 	return drivers;
 }
