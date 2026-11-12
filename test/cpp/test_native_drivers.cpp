@@ -61,16 +61,8 @@ TH_TEST(native_loopback_probe_echoes_through_the_hal) {
 	TH_CHECK(result.find("rx") != nullptr && result.find("rx")->getInt() == 42);
 }
 
-TH_TEST(native_shell_driver_requires_the_hardware_gate) {
+TH_TEST(native_shell_driver_runs_a_command) {
 	bot::HALManager hal;
-	auto driver = bot::makeShellDriver(hal);
-	bot::Json rejected = driver->build(callData({{"timeout", bot::JsonInt(1000)}}));
-	TH_CHECK(rejected.find("result")->getValue() == "ERR");
-}
-
-TH_TEST(native_shell_driver_runs_a_command_when_allowed) {
-	bot::HALManager hal;
-	hal.setAllowHardware(true);
 	auto driver = bot::makeShellDriver(hal);
 	bot::Json built = driver->build(callData({{"timeout", bot::JsonInt(5000)}}));
 	TH_CHECK(built.find("result")->getValue() == "OK");
@@ -93,13 +85,4 @@ TH_TEST(native_dev_enum_reports_linux_buses) {
 	TH_CHECK(result.find("i2c") != nullptr);
 	TH_CHECK(result.find("spi") != nullptr);
 	TH_CHECK(result.find("uart") != nullptr);
-}
-
-TH_TEST(hal_gates_ftdi_behind_allow_hardware) {
-	bot::HALManager hal;
-	bot::Json result = hal.call("i2c_open",
-		{bot::JsonString("ftdi://ftdi:232h/1"), bot::JsonBool(false)});
-	TH_CHECK(result.isInt() && result.getInt() == -1);
-	bot::Json last = hal.call("last_error", {});
-	TH_CHECK(last.isStr() && last.getValue().find("allow-hardware") != std::string::npos);
 }

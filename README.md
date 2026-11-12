@@ -24,7 +24,7 @@ ctest --test-dir build --output-on-failure
 ./build/mybot --help
 ```
 
-当前基线：**578 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
+当前基线：**562 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
 
 ## 快速开始
 
@@ -39,9 +39,6 @@ ctest --test-dir build --output-on-failure
 
 # 动作脚本也可以从 stdin 读
 cat scripts/relay-test.mt | ./build/mybot --robot=robots/relay-test.sql
-
-# TCP 动作源
-./build/mybot --robot=robots/relay-test.sql --tcp 19240
 ```
 
 `--robot`/`--input` 是相对当前目录的路径；模块根默认 `./modules`，可用 `BOT4CJ_MODULE_PATH`（`:` 分隔）或环境变量覆盖。
@@ -50,7 +47,6 @@ cat scripts/relay-test.mt | ./build/mybot --robot=robots/relay-test.sql
 
 ```text
 mybot --robot <结构脚本.sql> [--input <动作脚本.mt>] [选项]
-mybot --robot <结构脚本.sql> --tcp <端口> [选项]
 cat action.mt | mybot --robot <结构脚本.sql> [选项]
 ```
 
@@ -58,15 +54,8 @@ cat action.mt | mybot --robot <结构脚本.sql> [选项]
 | --- | --- |
 | `--robot <path>` | 结构脚本 `.sql`（必选） |
 | `--input <path>` | 动作脚本 `.mt`；不给则读 stdin |
-| `--allow-hardware` | 允许物理设备、非回环网络与宿主 Shell |
 | `--timeout <sec>` | 动作脚本墙钟预算（>0 且 <=3600，缺省 180） |
 | `--daemon-grace-ms <ms>` | 守护线程停机宽限（0..300000，缺省 30000） |
-| `--tcp <port>` | TCP 动作源端口 |
-| `--tcp-host <addr>` | TCP 监听地址（缺省 `127.0.0.1`） |
-| `--tcp-token <tok>` | TCP 口令；非回环监听必填 |
-| `--tcp-idle <sec>` | TCP 空闲超时（1..86400，缺省 30） |
-| `--tcp-max-auth-attempts <N>` | TCP 口令连续失败上限（1..1000，缺省 5） |
-| `--tcp-total-timeout <sec>` | TCP 连接总时长预算下限（1..86400，缺省 600） |
 | `--var NAME=VALUE` | 会话别名注入（可重复） |
 | `--var-env NAME=ENVVAR` | 从环境变量读取会话别名（可重复） |
 | `--help, -h` | 帮助 |
@@ -75,14 +64,14 @@ cat action.mt | mybot --robot <结构脚本.sql> [选项]
 
 ## FTDI
 
-物理 I2C/SPI 适配器使用 `ftdi://` URL，必须同时给 `--allow-hardware`：
+物理 I2C/SPI 适配器直接使用 `ftdi://` URL：
 
 ```sh
 # I2C：ftdi:232h / ftdi:ft232r / 0x0403:0x6014 / 序列号，接口 1..4
-mybot --robot=robots/ftdi-i2c.sql --input=scripts/ftdi-i2c.mt --allow-hardware
+mybot --robot=robots/ftdi-i2c.sql --input=scripts/ftdi-i2c.mt
 
 # SPI：?cs=0..4 选择片选；MOSI/MISO 短接做回环验证
-mybot --robot=robots/ftdi-spi.sql --input=scripts/ftdi-spi.mt --allow-hardware
+mybot --robot=robots/ftdi-spi.sql --input=scripts/ftdi-spi.mt
 ```
 
 I2C 例：
@@ -104,12 +93,8 @@ INSERT INTO SPI (name, path) VALUES ('spi0', 'ftdi://ftdi:232h/1?cs=0');
 
 ## 安全边界
 
-| 能力 | 默认 | 打开方式 |
-| --- | --- | --- |
-| 物理 I2C/SPI/UART、非回环 HTTP/TCP、Shell | 关闭 | `--allow-hardware` |
-| `proto=virt`、`virt-*`、`loop://`、回环 HTTP/TCP | 可用 | 无需开关 |
-
-- 物理设备访问在 C++ HAL 的 `i2c_open`/`spi_open`/`uart_open`/`tcp_open`/`http_open`/`shell_open` 处统一门控。
+- 物理 I2C/SPI/UART、非回环 HTTP/TCP、Shell 与 FTDI 默认允许，不再需要 `--allow-hardware`。
+- `proto=virt`、`virt-*`、`loop://` 与回环地址照常可用。
 - Lua 驱动仍是可信进程内代码，不是沙箱；`ffi` 仍然可用。
 - 动作派发后的异常代表“结果未知”，不会自动重试或声称回滚。
 
