@@ -1,15 +1,13 @@
 #include "robot_application.hpp"
 
+#include <chrono>
 #include <iostream>
 #include <memory>
 
 #include "actionsource.hpp"
-#include "agent_subprocess.hpp"
 #include "daemonvar.hpp"
-#include "mcpbackend.hpp"
+#include "luaexec.hpp"
 #include "robot.hpp"
-#include "util_env.hpp"
-#include "util_num.hpp"
 
 namespace bot {
 namespace {
@@ -21,38 +19,37 @@ int runActionPipeline(RobotStruct& robot, const CliOptions& options) {
 		return 1;
 	}
 	robot.active();
-	robot.run(*input);
-	return 0;
-}
 
-int runMcpBackendPipeline(RobotStruct& robot, const agent::AgentModeConfig& cfg,
-		const CliOptions& options) {
-	robot.active();
-	agent::McpBackendOptions bopts;
-	bopts.socketPath = options.mcp.mcpSocket;
-	bopts.authToken = cfg.mcpAuthToken;
-	if (!options.mcp.mcpCallBudget.empty()) {
-		bopts.callBudget = static_cast<long>(parseLongStrict(options.mcp.mcpCallBudget).second);
+	double timeoutSec = 180.0;
+	if (!options.actionTimeoutSec.empty()) {
+		try {
+			timeoutSec = std::stod(options.actionTimeoutSec);
+		} catch (const std::exception&) {
+			// validateOptions 已拒绝非法值；这里只是防御性回退。
+			timeoutSec = 180.0;
+		}
 	}
-	if (!options.mcp.mcpWallClock.empty()) {
-		bopts.wallClockBudgetSec =
-			static_cast<long>(parseLongStrict(options.mcp.mcpWallClock).second);
+	LuaExecBudget budget;
+	budget.deadline = std::chrono::steady_clock::now()
+		+ std::chrono::milliseconds(static_cast<long long>(timeoutSec * 1000.0));
+	budget.watchStop = true;
+	robot.armExecBudget(&budget);
+	try {
+		robot.run(*input, options.injectVars);
+	} catch (...) {
+		robot.armExecBudget(nullptr);
+		throw;
 	}
-	if (!options.mcp.mcpIdleTimeout.empty()) {
-		bopts.idleTimeoutSec = static_cast<int>(parseLongStrict(options.mcp.mcpIdleTimeout).second);
-	}
-	return agent::runMcpBackend(robot, cfg, bopts, std::cerr);
+	robot.armExecBudget(nullptr);
+	return 0;
 }
 
 } // namespace
 
-int runRobotAndCleanup(RobotStruct& robot, const CliOptions& options,
-		const agent::AgentModeConfig& agentCfg) {
+int runRobotAndCleanup(RobotStruct& robot, const CliOptions& options) {
 	int rc = 0;
 	try {
-		rc = options.mcp.enabled
-			? runMcpBackendPipeline(robot, agentCfg, options)
-			: runActionPipeline(robot, options);
+		rc = runActionPipeline(robot, options);
 	} catch (const std::exception& e) {
 		std::cerr << "Aborted: " << e.what() << std::endl;
 		rc = 1;

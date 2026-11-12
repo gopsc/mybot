@@ -86,12 +86,9 @@ endif()
 # 原相对次序）。段序自下而上：语言/序列化基元（JSON/配置/矩阵/Lua）→ 领域层
 # （硬件/装配执行/机器人门面/热插）→ 装配面（通道与 CLI/agent/MCP）→ 应用编排。
 set(MYBOT_CORE_SOURCES
-  # ---- JSON 层：词法/语法解析、序列化、配置文件读取 ----
+  # ---- JSON 层：词法/语法解析与序列化 ----
   src/json.cpp
   src/jsonparse.cpp
-  src/jsonconfig.cpp
-  # ---- 配置层：模型接入参数（CLI 与配置文件两路归一） ----
-  src/llmconfig.cpp
   # ---- 矩阵/表达式/脚本语法层：.mt 与结构 SQL 的解析基元 ----
   src/matrix.cpp
   src/expr.cpp
@@ -126,32 +123,8 @@ set(MYBOT_CORE_SOURCES
   # ---- 输入通道与 CLI 解析（--input/stdin/TCP 与选项表） ----
   src/actionsource.cpp
   src/cliargs.cpp
-  src/cliargs_help.cpp
-  # ---- agent 域：进程自护、帧协议、工具、视图、提示词、审计、策略与模式 ----
-  src/agent_subprocess.cpp
-  src/agent_envscrub.cpp
-  src/agent_fdguard.cpp
-  src/agentproto.cpp
-  src/agenttools.cpp
-  src/agenttools_wait.cpp
-  src/agentview.cpp
-  src/agentimage.cpp
-  src/agenttools_fs.cpp
-  src/agentdispatch.cpp
-  src/agentprompt.cpp
-  src/agentmode.cpp
-  src/agentaudit.cpp
-  src/agentpolicy.cpp
-  # ---- MCP 后端：帧通道、监听、工具后端与 context.get 素材 ----
-  src/mcpbackend.cpp
-  src/mcplisten.cpp
-  src/mcptransport.cpp
-  src/context_service.cpp
-  # ---- 应用编排：把上面各域串成 --input/stdin/TCP/agent 四条运行路径 ----
+  # ---- 应用编排：--input/stdin/TCP 三条运行路径 ----
   src/robot_application.cpp
-  src/wsproto.cpp
-  src/webterm.cpp
-  src/webshell.cpp
 )
 
 # 两个目标的公共配置：零告警基线 + 头文件路径，一处声明一致套用，
@@ -170,7 +143,8 @@ target_compile_options(mybot_warnings INTERFACE -Wall -Wextra -Wpedantic)
 if(MYBOT_WERROR)
   target_compile_options(mybot_warnings INTERFACE -Werror)
 endif()
-target_include_directories(mybot_warnings INTERFACE src ${LUAJIT_INCLUDE_DIRS})
+target_include_directories(mybot_warnings INTERFACE
+  src ${LUAJIT_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/third_party/cli11)
 
 # Lua 运行时链接（仅 mybot / mybot_tests）
 add_library(mybot_common INTERFACE)
@@ -200,15 +174,11 @@ add_executable(mybot_tests
   test/cpp/main.cpp
   test/cpp/test_json.cpp
   test/cpp/test_jsonparse.cpp
-  test/cpp/test_llmconfig.cpp
-  test/cpp/test_llmconfig_assembly.cpp
-  test/cpp/test_llmconfig_surface.cpp
   test/cpp/test_matrix.cpp
   test/cpp/test_expr.cpp
   test/cpp/test_sqlparse.cpp
   test/cpp/test_sqlparse_query.cpp
   test/cpp/test_util.cpp
-  test/cpp/test_cliargs.cpp
   test/cpp/test_hardware.cpp
   test/cpp/test_hw_registry.cpp
   test/cpp/test_meta_registry.cpp
@@ -231,23 +201,6 @@ add_executable(mybot_tests
   test/cpp/test_daemon_concurrency.cpp
   test/cpp/test_mtmerge.cpp
   test/cpp/test_mtinclude.cpp
-  test/cpp/test_agentproto.cpp
-  test/cpp/test_agenttools.cpp
-  test/cpp/test_agenttools_wait.cpp
-  test/cpp/test_agenttools_sql.cpp
-  test/cpp/test_agenttools_image.cpp
-  test/cpp/test_agenttools_runcommand.cpp
-  test/cpp/test_agenttools_subproc.cpp
-  test/cpp/test_agenttools_fs.cpp
-  test/cpp/test_agentaudit.cpp
-  test/cpp/test_agentpolicy.cpp
-  test/cpp/test_mcpbackend.cpp
-  test/cpp/test_mcptransport.cpp
-  test/cpp/test_mcplisten.cpp
-  test/cpp/test_agenttools_sandbox.cpp
-  test/cpp/test_wsproto.cpp
-  test/cpp/test_webterm.cpp
-  test/cpp/test_webshell.cpp
   src/mtmerge_core.cpp
   ${MYBOT_CORE_SOURCES}
 )
