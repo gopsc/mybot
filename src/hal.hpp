@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,16 @@ public:
 private:
 	struct Resource;
 
+	/* 句柄租约：map 只保护「句柄 → Resource」的所有权，Resource 自己的
+	 * recursive_mutex 保护「操作期间不被 close」。两者分锁，避免长时间
+	 * HTTP/Shell 阻塞所有句柄的 open/close；recursive 允许 TCP 错误路径在
+	 * 租约内直接 closeResource。 */
+	struct Lease {
+		std::shared_ptr<Resource> resource;
+		std::unique_lock<std::recursive_mutex> lock;
+		explicit Lease(std::shared_ptr<Resource> r);
+	};
+
 	Json opI2cOpen(const Json& path, const Json& virtualFlag, int owner);
 	Json opI2cTransfer(const Json& handle, const Json& address,
 		const Json& write, const Json& readCount);
@@ -98,13 +109,15 @@ private:
 	Json opCloseHandle(const Json& handle);
 	Json opSleepMs(const Json& ms);
 
-	Resource& get(std::int64_t handle, const char* kind);
+	std::shared_ptr<Resource> lookup(std::int64_t handle, const char* kind);
+	Lease acquire(std::int64_t handle, const char* kind);
 	std::int64_t add(std::unique_ptr<Resource> resource, int owner);
 	std::int64_t addBus(const char* kind, const std::string& path, int fd,
 		const std::string& backend, int owner, int baud = 0);
 	void closeResource(Resource& resource);
 
-	std::map<std::int64_t, std::unique_ptr<Resource>> handles_;
+	mutable std::mutex mutex_;	/* handles_/owners_/nextHandle_ 的锁 */
+	std::map<std::int64_t, std::shared_ptr<Resource>> handles_;
 	std::map<std::int64_t, int> owners_;
 	std::int64_t nextHandle_ = 1LL << 20;
 	bool closed_ = false;

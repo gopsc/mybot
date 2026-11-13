@@ -247,6 +247,18 @@ function P.signal_stop(slot)
 	mutex_call("unlock", m)
 end
 
+-- 总线灭火位（BQ-1）：0 = 正常；非 0 = 宿主已弃管该守护、拒绝后续总线传输。
+-- 与 stop/status 同一契约：持槽内 mutex 读写。宿主 HAL 的 __hal_call 路径
+-- 也必须走这里，否则弃管守护仍能驱动 i2c/spi/uart（2026-11 核对时发现
+-- 宿主 HAL.lua 的 bus_quiesced 曾是恒 false）。
+function P.quiesced(slot)
+	local m = slot_mutex(slot)
+	mutex_call("lock", m)
+	local q = slot[0].quiesce
+	mutex_call("unlock", m)
+	return q ~= 0
+end
+
 -- 守护 setup 状态（N-27）：0 = 正常；负 = 失败码（sensor_daemon.fail 写入）。
 -- 与 stop 同一契约：读写都持槽内 mutex。宿主的读路径据此把「守护启动失败」
 -- 报成错误，而不是把失败码当成一个采样值（旧实现把 -2 发进 v0，下游会把它

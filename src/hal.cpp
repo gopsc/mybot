@@ -257,15 +257,28 @@ speed_t baudToSpeed(int baud) {
 #ifdef B460800
 	case 460800: return B460800;
 #endif
+#ifdef B500000
+	case 500000: return B500000;
+#endif
+#ifdef B921600
+	case 921600: return B921600;
+#endif
+#ifdef B1000000
+	case 1000000: return B1000000;
+#endif
 	default: throw std::runtime_error("unsupported UART baud");
 	}
 }
 
-void configureSerial(int fd, int baud) {
+/* 配置串口并把 open 前的 termios 快照交给调用方，供 close 时恢复。
+ * baud 是 Hz；baudToSpeed 只在这里调用一次（此前调用点先映射一次、
+ * 本函数又映射一次，任何真实串口都会在第二次查表时被判 unsupported）。 */
+void configureSerial(int fd, int baud, termios& original) {
 	termios tio{};
 	if (::tcgetattr(fd, &tio) != 0) {
 		throw std::runtime_error("tcgetattr failed: " + errText(errno));
 	}
+	original = tio;
 	::cfmakeraw(&tio);
 	const speed_t speed = baudToSpeed(baud);
 	if (::cfsetispeed(&tio, speed) != 0 || ::cfsetospeed(&tio, speed) != 0) {
@@ -468,7 +481,37 @@ struct HALManager::Resource {
 	std::vector<std::uint8_t> ring;
 	std::unique_ptr<FtdiBus> ftdi;
 	bool closed = false;
+	/* 操作期间防 close：所有 op 经 Lease 持本锁，closeResource 也持本锁。
+	 * recursive 允许 TCP 错误路径/GPIO free 在租约内 close。 */
+	mutable std::recursive_mutex mutex;
+	/* 真实 UART 在 open 时的 termios 快照；close 前恢复，避免 raw 模式/
+	 * 波特率残留给后续使用者。仅 backend=="serial" 时有效。 */
+	termios serialOriginal{};
+	bool hasSerialOriginal = false;
+
+	/* 关闭 fd 并尽力恢复 UART termios。析构也走这里——add() 的 map 插入
+	 * 失败等异常路径不会再泄漏已 open 的 fd/串口配置。 */
+	void closeFd() {
+		if (fd < 0) { return; }
+		if (hasSerialOriginal) {
+			(void)::tcsetattr(fd, TCSANOW, &serialOriginal);
+			hasSerialOriginal = false;
+		}
+		::close(fd);
+		fd = -1;
+	}
+	~Resource() { closeFd(); }
 };
+
+/* 租约构造：先锁 Resource，再检查 closed。lookup 已完成 map 查询并持有
+ * shared_ptr，Resource 在本对象存活期间不会被析构；锁住后 closeResource
+ * 无法与之并发。 */
+HALManager::Lease::Lease(std::shared_ptr<Resource> r)
+	: resource(std::move(r)), lock(resource->mutex) {
+	if (resource->closed) {
+		throw std::runtime_error("invalid or closed hardware handle");
+	}
+}
 
 HALManager::HALManager() {
 	static std::once_flag once;
@@ -487,20 +530,36 @@ void HALManager::setCurrent(HALManager* hal) {
 	g_current = hal;
 }
 
-HALManager::Resource& HALManager::get(std::int64_t handle, const char* kind) {
+std::shared_ptr<HALManager::Resource> HALManager::lookup(
+		std::int64_t handle, const char* kind) {
+	std::lock_guard<std::mutex> guard(mutex_);
 	auto found = handles_.find(handle);
-	if (found == handles_.end() || found->second->closed
+	if (found == handles_.end()
 			|| std::strcmp(found->second->kind.c_str(), kind) != 0) {
 		throw std::runtime_error("invalid or closed hardware handle");
 	}
-	return *found->second;
+	return found->second;
+}
+
+HALManager::Lease HALManager::acquire(std::int64_t handle, const char* kind) {
+	return Lease(lookup(handle, kind));
 }
 
 std::int64_t HALManager::add(std::unique_ptr<Resource> resource, int owner) {
+	std::lock_guard<std::mutex> guard(mutex_);
+	if (closed_) {
+		throw std::runtime_error("HAL manager is shut down; cannot open new handles");
+	}
 	const std::int64_t handle = nextHandle_++;
 	resource->closed = false;
-	handles_[handle] = std::move(resource);
-	owners_[handle] = owner;
+	std::shared_ptr<Resource> shared(std::move(resource));
+	handles_[handle] = std::move(shared);
+	try {
+		owners_[handle] = owner;
+	} catch (...) {
+		handles_.erase(handle);
+		throw;
+	}
 	return handle;
 }
 
@@ -516,10 +575,8 @@ std::int64_t HALManager::addBus(const char* kind, const std::string& path, int f
 }
 
 void HALManager::closeResource(Resource& resource) {
-	if (resource.fd >= 0) {
-		::close(resource.fd);
-		resource.fd = -1;
-	}
+	std::lock_guard<std::recursive_mutex> guard(resource.mutex);
+	resource.closeFd();
 	resource.ftdi.reset();
 	resource.closed = true;
 }
@@ -683,7 +740,8 @@ Json HALManager::opI2cTransfer(const Json& handleValue, const Json& addressValue
 	if (write.empty() && readCount == 0) {
 		throw std::runtime_error("empty I2C transaction");
 	}
-	Resource& resource = get(handle, "i2c");
+	auto lease = acquire(handle, "i2c");
+	Resource& resource = *lease.resource;
 	if (resource.backend == "virtual") {
 		std::vector<std::uint8_t> zeros(static_cast<std::size_t>(readCount), 0);
 		return bytesJson(zeros);
@@ -750,7 +808,8 @@ Json HALManager::opSpiSetup(const Json& handleValue, const Json& modeValue,
 	const int mode = asInt(modeValue, 0, 3, "SPI mode");
 	const int bits = asInt(bitsValue, 7, 16, "SPI bits");
 	const int speed = asInt(speedValue, 1, 0x7FFFFFFF, "SPI speed");
-	Resource& resource = get(handle, "spi");
+	auto lease = acquire(handle, "spi");
+	Resource& resource = *lease.resource;
 	if (resource.backend == "virtual") {
 		resource.mode = static_cast<std::uint8_t>(mode);
 		resource.bits = static_cast<std::uint8_t>(bits);
@@ -783,7 +842,8 @@ Json HALManager::opSpiTransfer(const Json& handleValue, const Json& dataValue,
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const std::vector<std::uint8_t> data = asBytes(dataValue, 64, 1);
 	const int delay = asInt(delayValue, 0, 65535, "SPI delay");
-	Resource& resource = get(handle, "spi");
+	auto lease = acquire(handle, "spi");
+	Resource& resource = *lease.resource;
 	if (resource.backend == "virtual") {
 		return bytesJson(std::vector<std::uint8_t>(data.size(), 0));
 	}
@@ -858,7 +918,8 @@ Json HALManager::opGpioRequestLine(const Json& chipValue, const Json& offsetValu
 
 Json HALManager::opGpioSetValue(const Json& handleValue, const Json& valueValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
-	Resource& resource = get(handle, "gpio");
+	auto lease = acquire(handle, "gpio");
+	Resource& resource = *lease.resource;
 	struct gpiohandle_data data{};
 	data.values[0] = numberOrZero(valueValue) != 0 ? 1 : 0;
 	if (::ioctl(resource.fd, GPIOHANDLE_SET_LINE_VALUES_IOCTL, &data) < 0) {
@@ -870,7 +931,8 @@ Json HALManager::opGpioSetValue(const Json& handleValue, const Json& valueValue)
 
 Json HALManager::opGpioGetValue(const Json& handleValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
-	Resource& resource = get(handle, "gpio");
+	auto lease = acquire(handle, "gpio");
+	Resource& resource = *lease.resource;
 	struct gpiohandle_data data{};
 	if (::ioctl(resource.fd, GPIOHANDLE_GET_LINE_VALUES_IOCTL, &data) < 0) {
 		g_lastError = "GPIO get value failed: " + errText(errno);
@@ -881,7 +943,10 @@ Json HALManager::opGpioGetValue(const Json& handleValue) {
 
 Json HALManager::opGpioFreeLine(const Json& handleValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
-	(void)get(handle, "gpio");
+	{
+		auto lease = acquire(handle, "gpio");	/* 只验类型/存活；不跨 map 锁 */
+		(void)lease;
+	}
 	return opCloseHandle(handleValue);
 }
 
@@ -959,8 +1024,12 @@ Json HALManager::opPwmConfig(const Json& chipValue, const Json& channelValue,
 	}
 	const std::int64_t periodNs = std::max<std::int64_t>(
 		1, static_cast<std::int64_t>(std::llround(period)));
+	/* 用 long double 算 duty，避免 periodNs * duty 在 double/long long 上溢出
+	 * （periodNs 上限 9e18，duty=100 时乘积 9e20 超出 llround 值域）。 */
+	const long double dutyNanos = static_cast<long double>(periodNs)
+		* static_cast<long double>(duty) / 100.0L;
 	const std::int64_t dutyNs = std::min<std::int64_t>(periodNs,
-		static_cast<std::int64_t>(std::llround(periodNs * duty / 100.0)));
+		std::max<std::int64_t>(0, static_cast<std::int64_t>(std::llround(dutyNanos))));
 
 	std::string error;
 	/* 写序与 Lua HAL 一致：先 duty=0 再改 period，否则降频会被 EINVAL 拒绝。 */
@@ -1032,19 +1101,30 @@ Json HALManager::opUartOpen(const Json& pathValue, const Json& baudValue,
 	}
 	const int fd = ::open(path.c_str(), O_RDWR | O_NOCTTY | O_CLOEXEC);
 	if (fd < 0) { throw std::runtime_error("cannot open " + path + ": " + errText(errno)); }
+	termios original{};
 	try {
-		configureSerial(fd, baudToSpeed(baud));
+		configureSerial(fd, baud, original);
 	} catch (...) {
 		::close(fd);
 		throw;
 	}
-	return JsonInt(addBus("uart", path, fd, "serial", owner, baud));
+	auto resource = std::make_unique<Resource>();
+	resource->kind = "uart";
+	resource->path = path;
+	resource->fd = fd;
+	resource->backend = "serial";
+	resource->baud = baud;
+	resource->serialOriginal = original;
+	resource->hasSerialOriginal = true;
+	/* add() 抛异常时 resource 析构会 closeFd()：既关 fd 也恢复 termios。 */
+	return JsonInt(add(std::move(resource), owner));
 }
 
 Json HALManager::opUartWrite(const Json& handleValue, const Json& dataValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const std::vector<std::uint8_t> data = asBytes(dataValue, kUartMaxBytes, 1);
-	Resource& resource = get(handle, "uart");
+	auto lease = acquire(handle, "uart");
+	Resource& resource = *lease.resource;
 	if (resource.backend == "loop" || resource.backend == "virtual") {
 		resource.ring.insert(resource.ring.end(), data.begin(), data.end());
 		return JsonInt(static_cast<int>(data.size()));
@@ -1074,7 +1154,8 @@ Json HALManager::opUartRead(const Json& handleValue, const Json& countValue,
 	const int count = std::min(asInt(countValue, 1, kUartMaxBytes, "UART count"),
 		kUartMaxBytes);
 	const int timeoutMs = asInt(timeoutValue, 0, kUartMaxMs, "UART timeout");
-	Resource& resource = get(handle, "uart");
+	auto lease = acquire(handle, "uart");
+	Resource& resource = *lease.resource;
 	if (resource.backend == "loop" || resource.backend == "virtual") {
 		const std::size_t take = std::min<std::size_t>(count, resource.ring.size());
 		std::vector<std::uint8_t> out(resource.ring.begin(), resource.ring.begin() + take);
@@ -1108,7 +1189,8 @@ Json HALManager::opUartRead(const Json& handleValue, const Json& countValue,
 
 Json HALManager::opUartFlush(const Json& handleValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
-	Resource& resource = get(handle, "uart");
+	auto lease = acquire(handle, "uart");
+	Resource& resource = *lease.resource;
 	if (resource.backend == "loop" || resource.backend == "virtual") {
 		resource.ring.clear();
 	} else {
@@ -1169,7 +1251,8 @@ Json HALManager::opTcpWrite(const Json& handleValue, const Json& dataValue,
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const std::vector<std::uint8_t> data = asBytes(dataValue, kTcpMaxBytes);
 	const int timeoutMs = asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout");
-	Resource& resource = get(handle, "tcp");
+	auto lease = acquire(handle, "tcp");
+	Resource& resource = *lease.resource;
 	int sent = 0;
 	const auto deadline = std::chrono::steady_clock::now()
 		+ std::chrono::milliseconds(timeoutMs);
@@ -1208,7 +1291,8 @@ Json HALManager::opTcpRead(const Json& handleValue, const Json& countValue,
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const int count = asInt(countValue, 1, kTcpMaxBytes, "TCP count");
 	const int timeoutMs = asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout");
-	Resource& resource = get(handle, "tcp");
+	auto lease = acquire(handle, "tcp");
+	Resource& resource = *lease.resource;
 	const auto deadline = std::chrono::steady_clock::now()
 		+ std::chrono::milliseconds(timeoutMs);
 	while (true) {
@@ -1275,7 +1359,8 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 		throw std::runtime_error("HTTP path must be relative to the declared base URL");
 	}
 	if (!path.empty() && path.front() != '/') { path = "/" + path; }
-	Resource& resource = get(handle, "http");
+	auto lease = acquire(handle, "http");
+	Resource& resource = *lease.resource;
 	CURL* curl = curl_easy_init();
 	if (curl == nullptr) { throw std::runtime_error("cannot initialize libcurl"); }
 	HttpCapture capture;
@@ -1318,12 +1403,14 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 	if (code == CURLE_ABORTED_BY_CALLBACK && stopRequested()) {
 		throw std::runtime_error("HTTP request aborted: stop requested");
 	}
+	/* 写回调超限返回 0 时 libcurl 会折成 CURLE_WRITE_ERROR；先判体积
+	 * 才能给出真正的成因（不是笼统的 "Failed writing received data"）。 */
+	if (capture.tooLarge || capture.body.size() > static_cast<std::size_t>(kHttpMaxBytes)) {
+		throw std::runtime_error("HTTP response exceeds the size ceiling");
+	}
 	if (code != CURLE_OK) {
 		throw std::runtime_error(std::string("HTTP request failed: ")
 			+ curl_easy_strerror(code));
-	}
-	if (capture.tooLarge || capture.body.size() > static_cast<std::size_t>(kHttpMaxBytes)) {
-		throw std::runtime_error("HTTP response exceeds the size ceiling");
 	}
 	Json result = JsonObject();
 	result.put("result", JsonString("OK"));
@@ -1350,20 +1437,30 @@ Json HALManager::opShellRun(const Json& handleValue, const Json& commandValue,
 		const Json& timeoutValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const std::string command = asStr(commandValue, "shell command");
-	const int timeoutMs = timeoutValue.isNull()
-		? get(handle, "shell").timeoutMs
-		: asInt(timeoutValue, 1, kShellTimeoutMs, "shell timeout");
-	(void)handle;
+	int timeoutMs = 0;
+	{
+		auto lease = acquire(handle, "shell");
+		timeoutMs = timeoutValue.isNull()
+			? lease.resource->timeoutMs
+			: asInt(timeoutValue, 1, kShellTimeoutMs, "shell timeout");
+	}
 	return runShell(command, timeoutMs);
 }
 
 Json HALManager::opCloseHandle(const Json& handleValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
-	auto found = handles_.find(handle);
-	if (found == handles_.end()) { return JsonInt(-1); }
-	closeResource(*found->second);
-	handles_.erase(found);
-	owners_.erase(handle);
+	std::shared_ptr<Resource> resource;
+	{
+		std::lock_guard<std::mutex> guard(mutex_);
+		auto found = handles_.find(handle);
+		if (found == handles_.end()) { return JsonInt(-1); }
+		resource = found->second;
+		handles_.erase(found);
+		owners_.erase(handle);
+	}
+	/* 先摘 map 再 close：新操作已拿不到该句柄，已在操作中的租约持有
+	 * shared_ptr，closeResource 会等它释放 Resource 锁后再真正关闭。 */
+	closeResource(*resource);
 	return JsonInt(0);
 }
 
@@ -1388,9 +1485,17 @@ Json HALManager::opSleepMs(const Json& msValue) {
 }
 
 void HALManager::closeAll() {
-	for (auto& entry : handles_) { closeResource(*entry.second); }
-	handles_.clear();
-	owners_.clear();
+	/* 先把句柄表整体搬到局部：map 锁只保护搬运，随后逐个资源加锁关闭。
+	 * 已在操作中的租约持有 shared_ptr，这里会等它的 Resource 锁释放；
+	 * 搬运后新 lookup 立即失败，不会再有新操作进入。 */
+	std::map<std::int64_t, std::shared_ptr<Resource>> resources;
+	{
+		std::lock_guard<std::mutex> guard(mutex_);
+		closed_ = true;
+		resources.swap(handles_);
+		owners_.clear();
+	}
+	for (auto& entry : resources) { closeResource(*entry.second); }
 }
 
 } // namespace bot

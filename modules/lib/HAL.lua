@@ -50,6 +50,23 @@ HAL.UART_B_CONST = {
     [500000] = 0x1005, [921600] = 0x1007, [1000000] = 0x1008,
 }
 HAL.sys = { consts = consts }
+
+-- 停机灭火位（BQ-1）：宿主 C++ HAL 的传输入口也必须检查槽内 quiesce 位。
+-- 仅守护线程的 lua_State 有 DAEMON_SLOT_ADDR；主线程没有，直接短路。
+-- 复用 lib/pthread.lua 的槽布局/锁原语：sensor_daemon 已先加载它，此处
+-- dofile 命中 guard；独立驱动状态只有在该全局存在时才加载。P/slot 缓存，
+-- 避免每次传输都重新 dofile 一次。
+local daemonP, daemonSlot = nil, nil
+local function bus_quiesced()
+    local addr = rawget(_G, "DAEMON_SLOT_ADDR")
+    if addr == nil then return false end
+    if daemonP == nil then
+        daemonP = dofile(mpath.resolve("lib/pthread.lua"))
+        daemonSlot = daemonP.slot_attach(addr)
+    end
+    return daemonP.quiesced(daemonSlot)
+end
+
 local function unsupported(name)
     return function() error("HAL: " .. name .. " is not supported by the portable backend", 2) end
 end
@@ -86,6 +103,7 @@ local function copy_bytes(buf, data, n)
     return true
 end
 function HAL.sys.i2c_rdwr(fd, msgs, count)
+    if bus_quiesced() then return -1 end
     if count < 1 or count > 2 then return -1 end
     local addr, write, n, readbuf = tonumber(msgs[0].addr), {}, 0, nil
     for i = 0, count - 1 do
@@ -107,6 +125,7 @@ function HAL.sys.spi_setup(fd, mode, bits, speed)
     return report(bridge("spi_setup", fd, mode, bits, speed))
 end
 function HAL.sys.spi_xfer(fd, tx, rx, n, delay)
+    if bus_quiesced() then return -1 end
     local out = report(bridge("spi_transfer", fd, bytes(tx, n), delay or 0))
     if type(out) ~= "table" or #out ~= n then return -1 end
     if rx ~= nil and not copy_bytes(rx, out, n) then return -1 end
@@ -116,7 +135,7 @@ end
 -- These two domains use FFI only for buffers, and hardware only through HAL.sys.
 local ctx = { HAL = HAL, ffi = ffi, bus = bus, _c = consts,
     byte_of = bus.byte_of, uint_of = bus.uint_of, int_of = bus.int_of,
-    bus_quiesced = function() return false end, O_RDWR = 2 }
+    bus_quiesced = bus_quiesced, O_RDWR = 2 }
 for _, name in ipairs({ "i2c", "spi" }) do
     assert(loadfile(mpath.resolve("lib/hal/" .. name .. ".lua")))(ctx)
 end
@@ -135,8 +154,12 @@ function uart_close(fd)
     HAL.uart_baud[fd], HAL.uart_orig[fd] = nil, nil
     return report(bridge("close_handle", fd))
 end
-function uart_flush(fd) return report(bridge("uart_flush", tonumber(fd))) end
+function uart_flush(fd)
+    if bus_quiesced() then return -1 end
+    return report(bridge("uart_flush", tonumber(fd)))
+end
 function uart_write(fd, data)
+    if bus_quiesced() then return -1 end
     if type(data) ~= "table" or #data == 0 or #data > bus.UART_IO_MAX_BYTES then return -1 end
     local out = {}
     for i = 1, #data do
@@ -147,6 +170,7 @@ function uart_write(fd, data)
     return report(bridge("uart_write", tonumber(fd), out))
 end
 function uart_read(fd, n, timeout_ms)
+    if bus_quiesced() then return nil end
     n = bus.uint_of(n)
     timeout_ms = timeout_ms == nil and 0 or bus.finite_of(timeout_ms)
     if n == nil or n < 1 or timeout_ms == nil or timeout_ms > bus.UART_READ_MAX_MS then return nil end
