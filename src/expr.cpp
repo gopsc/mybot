@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 
 #include "util_except.hpp"
 #include "util_num.hpp"
@@ -190,8 +191,13 @@ struct IndexNode : Expression::Impl {
 			throw IllegalArgumentException("array index requires an array");
 		}
 		const double number = requireNum(position);
-		if (!std::isfinite(number) || std::floor(number) != number || number < 0) {
-			throw IllegalArgumentException("array index must be a nonnegative integer");
+		/* 上界用 2^bits 而不是 numeric_limits::max()：max() 转 double 会向上
+		 * 舍入成 2^bits，用 <= 比较仍会放行 2^bits 并在 static_cast 处 UB。 */
+		const double indexLimit = std::ldexp(
+			1.0, std::numeric_limits<std::size_t>::digits);
+		if (!std::isfinite(number) || std::floor(number) != number
+				|| number < 0 || number >= indexLimit) {
+			throw IllegalArgumentException("array index must be a nonnegative integer within size_t");
 		}
 		const std::size_t at = static_cast<std::size_t>(number);
 		if (at >= value.object.size()) {
@@ -264,16 +270,24 @@ struct BinNode : Expression::Impl {
 		 * 写错了位置」，消费面自有专门拒绝文案。 */
 		if (op == BinOp::Add) {
 			if (a.isText() || b.isText()) {
-				if (a.isBool() || b.isBool()) { throwNonNumOperand(op, a.isBool() ? a : b); }
+				if (a.isBool() || b.isBool() || a.isObject() || b.isObject()) {
+					throwNonNumOperand(op, a.isBool() || a.isObject() ? a : b);
+				}
 				return ExprValue::makeText(a.rendered() + b.rendered());
 			}
 		}
 		/* Eq/Ne 是唯一收文本/布尔的二元运算（同类比较，分支内自带类型
-		 * 检查与跨类报错），不走数值/拼接的通用拦截。 */
+		 * 检查与跨类报错），不走数值/拼接的通用拦截。Object 是 @Struct
+		 * 的字段选择中间值，绝不能被当成数值 0 参与算术/比较。 */
 		const bool equality = (op == BinOp::Eq || op == BinOp::Ne);
-		if (!equality && (a.isText() || b.isText() || a.isBool() || b.isBool())) {
-			throwNonNumOperand(op, a.isBool() || b.isBool()
-				? (a.isBool() ? a : b) : (a.isText() ? a : b));
+		if (!equality && (a.isText() || b.isText() || a.isBool() || b.isBool()
+				|| a.isObject() || b.isObject())) {
+			throwNonNumOperand(op, (a.isText() || a.isBool() || a.isObject()) ? a : b);
+		}
+		if (equality && (a.isObject() || b.isObject())) {
+			throw IllegalArgumentException(std::string("expression operator '")
+				+ binOpText(op) + "' cannot compare object/array values; select a"
+				" scalar field (for example cfg.field) first");
 		}
 		switch (op) {
 		case BinOp::Add: return ExprValue::makeNum(a.num + b.num);
@@ -332,14 +346,19 @@ bool isIdentChar(char c) { return isIdentStart(c) || isDigit(c); }
  *    parseTerm/parseAnd/parseOr 的循环就地折叠成左深树——kMaxDepth 拦不住
  *    它，而 BinNode::eval 的递归深度等于树深，无界链会在求值期 SIGSEGV（且
  *    崩溃点在硬件 build 之后，绕过 deactivate 清理链）。限制单表达式运算符
- *    总数（含比较/逻辑）后，树深上界为 kMaxDepth + kMaxOps，求值递归安全。 */
+ *    总数（含比较/逻辑）后，树深上界为 kMaxDepth + kMaxOps，求值递归安全。
+ * ③ 字段/下标链（selections_）：`.` 与 `[` 在 parsePrimary 里循环构建
+ *    FieldNode/IndexNode 链，eval/collectVars 递归深度等于链长；数组下标
+ *    还走 parseOr 递归，必须单独计深（此前的 20k 层嵌套下标实测 SIGSEGV）。 */
 class ExprParser {
 	const std::string& s_;
 	std::size_t pos_ = 0;
 	int depth_ = 0;
 	int ops_ = 0;
+	int selections_ = 0;
 	static constexpr int kMaxDepth = 128;
 	static constexpr int kMaxOps = 512;
+	static constexpr int kMaxSelections = 256;
 
 	[[noreturn]] void fail(const std::string& msg) const {
 		throw IllegalArgumentException("invalid expression '" + echoSource(s_) + "': " + msg
@@ -491,6 +510,9 @@ class ExprParser {
 			for (;;) {
 				skipWs();
 				if (peek() == '.') {
+					if (++selections_ > kMaxSelections) {
+						fail("too many field/index selections in one expression");
+					}
 					++pos_;
 					skipWs();
 					if (!isIdentStart(peek())) { fail("expected field identifier after '.'"); }
@@ -500,11 +522,16 @@ class ExprParser {
 					node = std::make_shared<FieldNode>(std::move(node),
 						s_.substr(begin, pos_ - begin));
 				} else if (peek() == '[') {
+					if (++selections_ > kMaxSelections) {
+						fail("too many field/index selections in one expression");
+					}
 					++pos_;
+					if (++depth_ > kMaxDepth) { fail("expression nesting too deep"); }
 					Node at = parseOr();
 					skipWs();
 					if (peek() != ']') { fail("expected ']'"); }
 					++pos_;
+					--depth_;
 					node = std::make_shared<IndexNode>(std::move(node), std::move(at));
 				} else {
 					break;

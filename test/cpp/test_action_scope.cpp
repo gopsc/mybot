@@ -222,6 +222,39 @@ TH_TEST(action_struct_selects_fields_and_array_indexes) {
 	TH_CHECK(fixture.seen == "3");
 }
 
+TH_TEST(action_struct_object_cell_is_rejected) {
+	Fixture fixture;
+	mt::MatrixBuilder builder;
+	builder.name("Struct(cfg)");
+	builder.jsonValue(bot::parseJson("{\"value\":3}"));
+	fixture.registry.add("cfg", bot::MtVars_Struct::Factory(builder.take()));
+	auto matrices = actionScript(
+		"@Action\n"
+		"dev.x;\n"
+		"$(cfg);\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "不能产出对象/数组结果",
+		runner.runAction(matrices));
+}
+
+TH_TEST(action_struct_cannot_be_reached_through_a_device_alias) {
+	Fixture fixture;
+	mt::MatrixBuilder builder;
+	builder.name("Struct(s)");
+	builder.jsonValue(bot::parseJson("{\"value\":1}"));
+	fixture.registry.add("s", bot::MtVars_Struct::Factory(builder.take()));
+	fixture.registry.add("devAlias", bot::MtVars_Alias::Make("s"));
+	auto matrices = actionScript(
+		"@Action\n"
+		"devAlias.x;\n"
+		"  1;\n"
+		"@\n");
+	bot::ActionRunner runner(fixture.registry, fixture.factory);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "resolves via @Alias to @Struct",
+		runner.runAction(matrices));
+}
+
 TH_TEST(action_struct_capture_updates_a_field) {
 	Fixture fixture;
 	mt::MatrixBuilder builder;

@@ -55,6 +55,24 @@ bot::ExprValue evalMixed(const std::string& text, std::map<std::string, double> 
 	return Expression::parse(text).eval(mixedTable(std::move(nums), std::move(texts)));
 }
 
+/* 模拟 @Struct：obj 含标量 value 与数组 items；obj2 是不同的对象。 */
+bot::ExprValueResolver objectTable() {
+	bot::Json items = bot::JsonArray();
+	items.add(bot::JsonInt(10));
+	items.add(bot::JsonInt(20));
+	bot::Json first = bot::JsonObject();
+	first.put("value", bot::JsonInt(1));
+	first.put("items", std::move(items));
+	bot::Json second = bot::JsonObject();
+	second.put("value", bot::JsonInt(2));
+	return [first = std::move(first), second = std::move(second)](
+			const std::string& name) -> bot::ExprValue {
+		if (name == "obj") { return bot::ExprValue::makeObject(first); }
+		if (name == "obj2") { return bot::ExprValue::makeObject(second); }
+		throw bot::IllegalArgumentException("undefined: " + name);
+	};
+}
+
 } // namespace
 
 TH_TEST(expr_arithmetic_and_precedence) {
@@ -354,4 +372,44 @@ TH_TEST(expr_bool_rejected_in_numeric_contexts) {
 	/* rendered 的 Bool 出口：通用字符串化（"true"/"false"） */
 	TH_CHECK(evalMixed("1>0", {}, {}).rendered() == "true");
 	TH_CHECK(evalMixed("1<0", {}, {}).rendered() == "false");
+}
+
+TH_TEST(expr_object_operands_are_never_numeric_zero) {
+	/* @Struct 的 Object 只是字段选择的中间值：不得以 num=0 参与算术/比较 */
+	const auto resolver = objectTable();
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "'+' cannot be applied to a object operand",
+		Expression::parse("obj+1").eval(resolver));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "'-' cannot be applied to a object operand",
+		Expression::parse("obj-1").eval(resolver));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "'>' cannot be applied to a object operand",
+		Expression::parse("obj>1").eval(resolver));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "'+' cannot be applied to a object operand",
+		Expression::parse("obj+\"x\"").eval(resolver));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "cannot compare object/array values",
+		Expression::parse("obj==obj2").eval(resolver));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "produced an object/array result",
+		bot::requireNum(Expression::parse("obj").eval(resolver)));
+	/* 字段选择仍然有效 */
+	TH_CHECK(bot::requireNum(Expression::parse("obj.value").eval(resolver)) == 1.0);
+}
+
+TH_TEST(expr_deep_brackets_and_field_chains_are_rejected_before_the_stack) {
+	std::string brackets = "x";
+	for (int i = 0; i < 1000; ++i) { brackets = "x[" + brackets + "]"; }
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "expression nesting too deep",
+		Expression::parse(brackets));
+
+	std::string fields = "x";
+	fields.reserve(2 + 3 * 1000);
+	for (int i = 0; i < 1000; ++i) { fields += ".f"; }
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException,
+		"too many field/index selections",
+		Expression::parse(fields));
+}
+
+TH_TEST(expr_index_out_of_size_t_range_is_rejected) {
+	const auto resolver = objectTable();
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException,
+		"array index must be a nonnegative integer within size_t",
+		Expression::parse("obj.items[1e300]").eval(resolver));
 }

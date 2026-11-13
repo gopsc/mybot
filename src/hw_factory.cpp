@@ -505,6 +505,13 @@ FlowRowRefs parseFlowRow(const mt::MatrixObject& matrix, std::int64_t i, const s
 				"': '@Alias'/'@Vars' scalars cannot be ",
 				kind, " targets (both are invoked via play and must return a result table)."));
 		}
+		if (std::string_view(target->kindName()) == "struct") {
+			throw IllegalArgumentException(concatMsg("Hardware variable '", name, "' declares ",
+				kind, " '", raw, "' in table '", mtName,
+				"': '@Struct' values cannot be ", kind,
+				" targets (a flow target must be a driver or daemon; select a scalar"
+				" field or use a driver variable)."));
+		}
 		if (!isCtrl) {
 			/* 触发器结果以触发器名字为键并入调用参数——与本行元数据列同名会让
 			 * 该键易主，装配期拒绝（排除集 = name + 全部流引用列；列集合此刻已

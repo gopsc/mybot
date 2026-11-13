@@ -30,6 +30,10 @@ std::string ActionRunner::resolveActionDevice(const HwLookup& registry, const st
 			throw IllegalArgumentException("@Action 设备列的 $(...) 不能产出布尔结果"
 				"（比较/逻辑表达式属于 @if(...) 条件）；设备位需要设备名（文本）");
 		}
+		if (v.isObject()) {
+			throw IllegalArgumentException("@Action 设备列的 $(...) 不能产出对象/数组结果；"
+				"设备位需要设备名（请先选择 @Struct 的字段，例如 cfg.device）");
+		}
 		name = v.rendered();
 	}
 	MatrixVars_Hardware* hv = registry.find(name);
@@ -56,6 +60,11 @@ std::string ActionRunner::resolveActionDevice(const HwLookup& registry, const st
 			" scalar (@Alias/@Vars); the device part must name a driver or daemon"
 			" variable (one level of alias indirection is supported).");
 	}
+	if (std::string_view(resolved->kindName()) == "struct") {
+		throw IllegalArgumentException("@Action device column '" + dev
+			+ "' resolves via @Alias to @Struct '" + target
+			+ "'; use a driver, daemon or @Reflex(name) as the device target.");
+	}
 	return target;
 }
 
@@ -68,6 +77,10 @@ std::string ActionRunner::resolveActionParam(const HwLookup& registry, const std
 		if (v.isBool()) {
 			throw IllegalArgumentException("@Action 参数位的 $(...) 不能产出布尔结果"
 				"（比较/逻辑表达式属于 @if(...) 条件）；参数位需要参数名（文本）");
+		}
+		if (v.isObject()) {
+			throw IllegalArgumentException("@Action 参数位的 $(...) 不能产出对象/数组结果；"
+				"参数位需要参数名（请先选择 @Struct 的字段）");
 		}
 		return v.rendered();
 	}
@@ -599,6 +612,10 @@ void ActionRunner::parseActionCell(Json& set, const mt::MatrixObject& actionDefs
 		if (v.isBool()) {
 			throw IllegalArgumentException("@Action 单元格的 $(...) 不能产出布尔结果"
 				"（比较/逻辑表达式属于 @if(...) 条件）；单元格接受数值或文本参数");
+		}
+		if (v.isObject()) {
+			throw IllegalArgumentException("@Action 单元格的 $(...) 不能产出对象/数组结果；"
+				"请先选择 @Struct 的字段（例如 cfg.field）或整值捕获");
 		}
 		paramVal = v.isText() ? JsonString(v.text) : JsonFloat(v.num);
 	} else if (auto cap = parseCaptureCell(raw, actionDefs(0, j))) {
