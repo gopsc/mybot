@@ -3,13 +3,7 @@
 # 用法: bash test/run_all.sh [测试名过滤]
 #   例: bash test/run_all.sh                # 跑全部
 #       bash test/run_all.sh pca9685       # 只跑文件名含 pca9685 的
-#       bash test/run_all.sh agent-all     # agent 全表面（见顶部 filter_* 映射）：
-#                                          #   Lua test_llm_*.lua + agent E2E +
-#                                          #   C++ 作用域 agent: + agent 负路径
-#   注意：裸 agent / agent: 各只覆盖一半表面（子串 vs 作用域 vs 分段门不同），
-#   要「agent 全跑」请用 agent-all（AG-23）。agent-all 的覆盖由 filter_* 映射与
-#   agent_lua_roster **自证**：roster 里的文件必须存在且真的会跑到，反向漏登记
-#   也判失败（SAN-2——此前映射指向一个从未存在的 test_agent*.lua，Lua 段实跑 0 个文件）。
+#       bash test/run_all.sh hardening     # 只跑输入边界/加固段
 # 说明：
 #   - 统一用 luajit 运行（HAL 依赖 ffi）；可用环境变量 LUACMD 覆盖解释器
 #   - 单测超时 TEST_TIMEOUT 秒（默认取 test/lib/params.sh 单点，需 coreutils
@@ -18,11 +12,8 @@
 #     真机摄像头回归（需 /dev/video*）：文件首行标记 -- requires: i2c / video，无设备自动跳过
 #   - 守门完整性：编译产物（mybot / mybot_tests）缺失的分段**判失败**而非静默跳过——
 #     否则整段 C++ 守门可以在不构建的情况下消失而汇总仍报「0 失败」。
-#     仅两类例外按跳过计（汇总里以「N 跳过 + 未执行清单」显式可见）：
-#     真机 i2c 用例（本机无 /dev/i2c-*）、TCP/agent 段缺 python3（README 声明的
-#     软依赖）。agent 端到端不依赖 libcurl：Lua 协议驱动轨道已删（2026-09-25 #8），
-#     模型调用由 Rust mybot-agent 直连（reqwest + rustls）。
-#     只想跑 Lua 段的逃生口：ALLOW_SKIP=1 bash test/run_all.sh
+#     真机 i2c/video 用例（本机无对应设备）按跳过计，汇总里以「N 跳过 + 未执行清单」
+#     显式可见。只想跑 Lua 段的逃生口：ALLOW_SKIP=1 bash test/run_all.sh
 #     （显式给了 BOT=/BOT_TESTS= 却指向不存在的文件，一律判失败，ALLOW_SKIP 也不放行）
 #   - test_ioctl_nums.c 为 C 编译期常量自检，不在本入口范围
 # 本文件绝对路径：下面 cd 之后相对 $0 不再可解析，而 count_calls 靠它数用例
@@ -57,111 +48,15 @@ if command -v timeout >/dev/null 2>&1; then
 	timeout_cmd="timeout -k $TEST_KILL_GRACE $TEST_TIMEOUT"
 fi
 
-# mybot-agent 产物新鲜度判据单点（取材面见该文件头注）：守门的 agent-rust-e2e /
-# ica-e2e 两段与 scripts/git-hooks/pre-push 共用同一份，别在调用处再手抄一遍 find。
-. test/lib/agent_stale.sh || { echo "判据单点缺失：test/lib/agent_stale.sh" >&2; exit 1; }
-
 filter="${1:-}"
-# ---- 分段过滤器（AG-23，2026-09-21 第三轮审计）----
-# 一个 raw 过滤器要在四类分段上用**不同形态**匹配，此前没做区分，于是
-# `agent` 与 `agent:` 各只覆盖一半表面：
-#   * `bash test/run_all.sh agent`  -> 0 个 Lua 用例（test_*.lua 文件名里没有
-#     agent）、C++ 走**子串**只命中 89 例（作用域里那 15 条 agentconfig_/
-#     agentmode_ 因名字不含 "agent" 被漏掉）、agent 的 CLI 负路径也跑不到；
-#   * `bash test/run_all.sh agent:` -> 反过来：加固段比的是 "agent" 与 "agent:"
-#     （不相等）=> **跳过 agent 端到端**；C++ 侧确实是作用域匹配，但两侧口径不统一。
-# 现在把「哪个分段该拿哪种过滤器」收敛成单点，并给出覆盖全表面的入口：
-#   agent-all -> Lua 段与端到端拿 "agent"，C++ 拿作用域 "agent:"，加固段拿 "agent_"
-# 裸 agent / agent: 的语义保持不变（不破坏既有用法），只是文档不再把它们当作
-# 「agent 全表面」的推荐入口。
-filter_lua="$filter"		# test/test_*.lua 的文件名子串
-filter_e2e="$filter"		# scripts/agent_e2e.sh 等端到端分段
-filter_hardening="$filter"	# 加固负路径（agent 子块单独设门，见文件后段）
-filter_cpp="$filter"		# mybot_tests 的过滤器（支持 scope: 语法）
-if [ "$filter" = "agent-all" ]; then
-	# SAN-2（2026-09-22）：这里原写 filter_lua="agent"（注释称 test_agent*.lua），
-	# 但**该文件模式从未存在**（git log --all 零命中），于是"agent 全表面"入口的
-	# Lua 段静默跑了 0 个文件——而循环对"命中 0"是合法状态，不报错也不计入汇总。
-	# 真正覆盖 agent 协议面的是 test_llm_*.lua 的报文整形与响应映射用例
-	# （PL-3 数组形态 content、PL-6 tool_calls 形态非法都在这一层），
-	# 也就是 SAN-3 改动的那三个文件所在的那一层。
-	# 2026-09-25 #8：Lua 协议驱动轨道整条删除（模块 + 库 + 两个 test_llm_*.lua），
-	# agent 的协议面现由 Rust mybot-agent 直连承担，报文的假模型回归在 e2e 段
-	# （R12/R13 多协议）。2026-10-01：Lua 段对 agent-all 的贡献不再是空表——
-	# 摄像头协议面 test_camera.lua 经 agent_lua_roster 精确清单纳入（子串过滤器
-	# 会连带真机的 test_camera_v4l2.lua，故改走 roster，见 Lua 段循环处注释）。
-	filter_lua="llm"	# test_llm_*.lua：已删尽；Lua 段实际由 roster 驱动
-	filter_e2e="agent"
-	filter_hardening="agent_"
-	filter_cpp="agent:"
-fi
+# ---- 分段过滤器 ----
+# Lua 段按文件名子串匹配；C++ 单测段在 tail_checks.sh 里把手势原样交给 harness。
+filter_lua="$filter"
 
 # 某分段是否应在当前过滤器下执行（$1=分段名，$2=该分段使用的过滤器）
 filter_matches() {
 	[ -z "$2" ] || [[ "$1" == *"$2"* ]]
 }
-
-# 某**单条**用例（名字 $1）是否应在当前过滤器下执行。段门只决定「本段进不进」，
-# 段内若不做这层判断，`bash test/run_all.sh agent_missing_key` 会把同段 4 条全跑
-# 一遍——段门一旦放行，段内就没有第二道判据。agent-all / hardening 按整段进。
-case_matches() {
-	[ -z "$filter" ] || [[ "hardening" == *"$filter"* ]] || [ "$filter" = "agent-all" ] \
-		|| [[ "$1" == *"$filter"* ]]
-}
-
-# agent-all 的映射**自证**：上面那张表就是「覆盖全表面」这句承诺的实现，而它
-# 此前正是靠四个分散的 if 各写一遍判断、才漏掉了一半的分段。
-#
-# SAN-2（2026-09-22）：自证从「过滤器变量非空 + e2e/cpp 认得这个输入」升级为
-# **按 roster 核对真实文件**。旧判据只检查映射本身，检查不到"映射指向的文件
-# 存不存在"——`filter_lua="agent"` 命中 0 个文件时它照样通过，于是"覆盖全表面"
-# 这个结论在没有人跑过一条 Lua 用例的情况下成立了很久（实测汇总 11 条、Lua 段 0 条）。
-# 判据是「roster 里每个文件必须存在，且在本过滤器下真的会被跑到」——
-# 检查的是**被映射到的文件**，不是映射的形状。
-# 2026-09-25 #8：Lua 协议驱动轨道整条删除，agent 协议面不再有 test_llm_*.lua，
-# roster 因此为空——第 ② 步反向检查（test_llm_*.lua 必须全部登记）对空 glob
-# 自然通过，将来若新增协议面 Lua 用例而漏登记，这一步仍会红（机制保留不拆）。
-agent_lua_roster="test/test_camera.lua"
-# 2026-10-01：agent 表面的摄像头协议面（capture_image 依赖的仿真取帧/base64/
-# 错误路径）经 roster 精确清单纳入 agent-all——真机的 test_camera_v4l2.lua 因
-# 同名子串刻意**不在**清单里（理由见 Lua 段循环处的 roster 注释）。
-if [ "$filter" = "agent-all" ]; then
-	_agentall_bad=""
-	[ -n "$filter_lua" ] || _agentall_bad="$_agentall_bad lua(空值=跑全部文件)"
-	filter_matches "agent" "$filter_e2e" || _agentall_bad="$_agentall_bad e2e"
-	filter_matches "agent:" "$filter_cpp" || _agentall_bad="$_agentall_bad cpp"
-	# ① roster 里的文件必须存在，且在 agent-all 下会被跑到
-	for _f in $agent_lua_roster; do
-		# Lua 段对 agent-all 走 roster 精确清单（见循环处），故只查存在性，
-		# 不再与子串过滤器对账（子串判据已不是 agent-all 的执行依据）。
-		[ -f "$_f" ] || _agentall_bad="$_agentall_bad $_f(roster 声明的文件不存在)"
-	done
-	# ② 反向：agent 协议面的用例文件必须全部登记（漏登记即红）——
-	#    与 C++ 侧 test_util.cpp 的「非 agent 面 roster 带理由登记」同一条纪律。
-	#    2026-09-25 #8 起该 glob 无文件（协议面用例随 Lua 轨道删除），空转通过。
-	for _f in test/test_llm_*.lua; do
-		[ -f "$_f" ] || continue
-		case " $agent_lua_roster " in
-			*" $_f "*) ;;
-			*) _agentall_bad="$_agentall_bad $_f(未登记进 agent_lua_roster)" ;;
-		esac
-	done
-	# 摄像头协议面（仿真）已入 agent 表面：文件在而漏登记即红（与 test_llm_*
-	# 同一条「agent 面用例必须登记」纪律）。真机 v4l2 用例不在此列。
-	if [ -f "test/test_camera.lua" ]; then
-		case " $agent_lua_roster " in
-			*" test/test_camera.lua "*) ;;
-			*) _agentall_bad="$_agentall_bad test/test_camera.lua(未登记进 agent_lua_roster)" ;;
-		esac
-	fi
-	if [ -n "$_agentall_bad" ]; then
-		echo "错误：agent-all 的分段过滤器映射失效，以下分段/文件不会执行：$_agentall_bad" >&2
-		echo "（见 test/run_all.sh 顶部的 filter_* 映射与 agent_lua_roster。本自证防的就是" >&2
-		echo "  AG-23/SAN-2 那种「号称覆盖全表面、实际一个文件都没跑」的静默退化）" >&2
-		exit 2
-	fi
-	unset _agentall_bad _f
-fi
 pass=0
 fail=0
 failed=""
@@ -313,18 +208,7 @@ unset _sec
 
 for t in test/test_*.lua; do
 	name="$(basename "$t")"
-	# AG-23：分段过滤器。旧入口在这条判断上用 raw filter，于是
-	# `bash test/run_all.sh agent` 匹配到 0 个 Lua 文件而汇总照绿。
-	if [ "$filter" = "agent-all" ]; then
-		# agent-all 的 Lua 段走 roster **精确清单**（2026-10-01）：子串过滤器
-		# 分不开 test_camera.lua（仿真协议面，应入 agent 表面）与
-		# test_camera_v4l2.lua（真机 ABI 回归，只该由全量/显式过滤器跑）——
-		# "camera" 子串会把真机用例一起卷进来。
-		case " $agent_lua_roster " in
-			*" $t "*) ;;
-			*) continue ;;
-		esac
-	elif ! filter_matches "$name" "$filter_lua"; then
+	if ! filter_matches "$name" "$filter_lua"; then
 		continue
 	fi
 	echo "----- $name -----"
@@ -767,7 +651,7 @@ parse_cases=(
 	'ref_forward.sql|ref_forward.mt|0|joined, total publishes=|Deactive warning'
 	'ref_undefined.sql|ref_undefined.mt|1|but it is not defined|spawned, config:'
 	'ref_override.sql|ref_override.mt|0|note=200|referenced variable returned a non-object'
-	'lex_semicolons.sql|lex_semicolons.mt|1|Token ;'
+	"lex_semicolons.sql|lex_semicolons.mt|1|unexpected ';'"
 	'param_override.sql|param_override.mt|1|is rejected because'
 	'daemon_badfield.sql|daemon_badfield.mt|0|absent or non-numeric in driver result'
 	'pca9685_virt.sql|pca9685_virt.mt|0|VIRTUAL HARDWARE|Deactive warning'
@@ -917,84 +801,13 @@ fi
 fi
 
 # ======================================================================
-# TCP 动作源端到端：唯一覆盖 actionsource.cpp（--tcp 监听分支）的守门。
-# 复用 scripts/tcp_e2e.sh：起服务端 → Python 客户端下发 relay-test.mt →
-# 校验服务端日志。缺编译产物判失败（本段是 actionsource.cpp 监听分支的唯一覆盖）；
-# 缺 python3 仍按 README 声明的软依赖跳过并计入汇总。
-# 随机高位端口（19000-19999）规避默认 19240 被占/串扰。
-# ======================================================================
-if filter_matches "tcp" "$filter"; then
-	run_one_tcp
-fi
-
-# ======================================================================
-# TCP 异常注入（审计覆盖缺口 #2）：tcp_e2e.sh 只有 happy path，半包/断连/
-# 空闲挂死/垃圾帧/口令负路径此前零覆盖。复用 scripts/tcp_adversarial.sh
-# 场景矩阵（详见该脚本头注释），每场景独立服务端 + 看门狗——「挂死不退」
-# 本身是被断言的故障形态。缺 python3 按 SKIP 计（与 TCP 段同约定）。
-# 场景数从该脚本的 run_scenario 调用点数出来（本文件不做第二份计数）。
-# ======================================================================
-if filter_matches "tcp" "$filter"; then
-	run_one_tcp_adv
-fi
-
-# ======================================================================
-# Rust agent 端到端（scripts/agent_e2e.sh，rig 迁移批次 B/C）：拓扑是
-# mybot-agent（agent/，rig 驱动）↔ mybot --mcp-backend（AF_UNIX 帧）两个进程。
-# R1 工具循环（三条回执真的从后端回来 + 后端侧 Lua
-# 驱动见证）、R2 提示词包进系统提示词、R3 审计轨迹（agent 落 session/model 行、
-# 工具行归后端）、R4 REPL + 能力门控（缺 --agent-shell 时 run_command 不在工具表）、
-# R5 --check-config 正负路径、R6 单轮调用上限、R7/R7b 限流重试与恒失败、
-# R8/R8b 单次超时与 SIGINT 取消、R9 图片后注、R10 stdout 写失败不 panic、
-# R11 --session-file/--resume 两进程接力（批次 D，2026-09-25 落地）。
-# mybot-agent 是**可选**产物（Rust 由单独 CI job 构建）：缺它按 SKIP 计；
-# 缺 build/mybot 判失败（本段的后端就是它，且那是核心产物）。
-#
-# 原先此文件上面还有一段「agent 模式端到端」（C++ 的 22 个场景）。d384a9b9 把
-# C++ Agent REPL 换成桩之后那 22 段全部打在「错误: C++ Agent 已移除」上（实测
-# 119 条断言红），而该表面是**有意移除**的，留着一段恒红的守门没有意义，故整段
-# 删除；它验过的性质按归属分流，不是凭空消失：
-#   * 后端工具面的 6 条（apply_sql 带电生效与热删除、两者的门控对照、
-#     read_variables 回读与对照、策略拒绝零副作用）→ 迁进 scripts/mcp_e2e.sh
-#     的独立趟（纯 Python 帧客户端直连后端，不经模型，判据更硬）；
-#   * 循环层的（工具循环、超时、重试、取消、图片后注、stdout 纯净/写失败、
-#     会话持久化两进程接力）→ R 段（R11 = --session-file/--resume，批次 D）；
-#   * DeepSeek/Anthropic 协议差异与恢复 → R12/R13；虚拟 DAC 读写闭环 → R14。
-#     agent over TCP 远程 REPL 已评估不做（2026-09-25，决策记录见提交 c38928f）。
-# ======================================================================
-if filter_matches "agent" "$filter_e2e"; then
-	# 状态目录双保险（2026-10-03 家目录持久化批次）：agent_e2e.sh 自身会把 MYBOT_HOME
-	# 指向它的临时目录，这里再兜一层——即便那层隔离将来失效，缺省落盘的对话历史/地图
-	# 也只会写进这个临时目录，绝不碰真实 $HOME/.mybot。
-	_e2e_home="$(mktemp -d "${TMPDIR:-/tmp}/mybot-e2e-home.XXXXXX")"
-	MYBOT_HOME="$_e2e_home" run_one_agent_rust_e2e
-	# ICA 证据账本两进程（scripts/ica_e2e.sh，BOT4CJ_ICA=1 实验特性）：此前无人调用，
-	# 接进同一段。产物依赖与上面那段相同，脚本自身也无条件沙箱 MYBOT_HOME，共用这层双保险。
-	MYBOT_HOME="$_e2e_home" run_one_ica_e2e
-	rm -rf "$_e2e_home"
-	unset _e2e_home
-fi
-
-# ======================================================================
-# MCP 后端端到端（scripts/mcp_e2e.sh）：Python 帧客户端（纯标准库，独立第三实现）
-# 直连 mybot --mcp-backend（AF_UNIX 4B BE 帧）→ relay 虚拟机器人。含两趟能力门控对照
-# （run_command 随 --agent-shell 进出工具表）、socket 0700/0600、审计 session+tool 记录、
-# fd 卫生（run_command 子进程不继承 socket fd）、SIGTERM 优雅停机、M5 反面（开危险能力
-# 无 policy 拒启，退出 2）。2026-09-24（批次 B）：MCP stdio 段随 sidecar→agent 迁移删除，
-# 本段因此不再依赖任何 Rust 产物——Rust 侧链路断言由上面的 agent-rust-e2e 接力。
-# ======================================================================
-if filter_matches "mcp" "$filter_e2e"; then
-	run_one_mcp_e2e
-fi
-
-# ======================================================================
-# mtmerge 离线合成器相位语义回归已移除（2026-10-10，随独立 mtmerge 目标一起删除）。
-# 运行端 @Merge 展开的相位语义由 test_mtinclude.cpp 覆盖。
+# TCP 动作源 / Rust agent / MCP 后端端到端已随 controller-only 裁剪移除：
+# 对应的 scripts/tcp_*.sh、agent/ 与 --mcp-backend 都不在当前二进制里。
+# 保留本注释作为边界记录，别再把这些段加回 run_all.sh。
 # ======================================================================
 
 # ======================================================================
 # 审计加固回归（#1/#2/#4）：输入源信任边界与守护 setup 失败回滚。
-#   tcp_host_bad    --tcp-host 非点分 IPv4 → 清晰报错、退出码非 0
 #   help_exit_and_sections  --help 退出码 0 且含关键区块（帮助文本的黄金锚点，B1）
 #   action_toolarge 动作脚本超 8MiB 上限 → 拒绝而非把整份输入吃进内存
 #                   （防线前实测 100MB 输入 → RSS 4.2GB）
@@ -1012,22 +825,11 @@ fi
 # 夹具写在 .tmp/（已 gitignore），经 BOT4CJ_MODULE_PATH 多路径注入。
 # ======================================================================
 
-if filter_matches "hardening" "$filter" || filter_matches "tcp_host" "$filter"; then
-	run_one_hardening 'tcp_host_bad' 1 '--tcp-host 地址无效' \
-		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql --tcp 19301 --tcp-host 'not-an-ip'
-
-	# 审计 H-2：非回环监听必须设 --tcp-token，缺省即拒绝启动（不再仅告警）
-	run_one_hardening 'tcp_noloop_requires_token' 1 '非回环且未设 --tcp-token' \
-		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql --tcp 19302 --tcp-host 0.0.0.0
-
-	# 审计中-3：裸 --tcp（漏写端口号）明确报错，不再静默回落端口 1 走到 bind 失败
-	run_one_hardening 'tcp_no_port' 1 '--tcp 需要端口号' \
-		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql --tcp
-
+if filter_matches "hardening" "$filter"; then
 	# B1（2026-09-20 计划 M0）：--help 此前零守门（全仓 grep 无命中）。CLI 帮助
 	# 文本是用户可见契约：退出码 0 与关键区块在此钉住；选项集合与 docs/ 选项表
 	# 的双向一致性由 C++ 单测 cliargs_help_option_set_matches_docs 比对。
-	run_one_hardening 'help_exit_and_sections' 0 '安全约束：动作脚本只能引入新的参数键' \
+	run_one_hardening 'help_exit_and_sections' 0 '用法:' \
 		timeout $HARDENING_TIMEOUT "$bin" --help
 
 	mkdir -p .tmp
@@ -1047,8 +849,8 @@ if filter_matches "hardening" "$filter" || filter_matches "tcp_host" "$filter"; 
 	rm -f .tmp/sql_toolarge.sql
 
 	# F-20：未知/拼错的 --key 不再「打印帮助 + exit 0」——CI 里的假成功出口
-	run_one_hardening 'unknown_arg' 2 '未知参数：--robott' \
-		timeout $HARDENING_TIMEOUT "$bin" --robott=robots/relay-test.sql
+	run_one_hardening 'unknown_arg' 2 'not expected' \
+		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql --robott=x
 
 	# 多路径模块根（2026-09-20 重构阶段 2）：docs/reference.md 承诺
 	# BOT4CJ_MODULE_PATH 支持 ':' 分隔多路径按序查找，但驱动侧引导只取首段
@@ -1110,120 +912,6 @@ if filter_matches "hardening" "$filter" || filter_matches "tcp_host" "$filter"; 
 fi
 
 # ======================================================================
-# agent CLI 负路径（F-20 同族；2026-09-24 随「agent 循环迁 Rust」整体改写：
-# --agent 已移除（cliargs 快速失败 + 指引），模型循环类选项指路 mybot-agent，
-# 门控类选项归属 --mcp-backend，--check-config 与 --mcp-backend 联用）。
-#
-# AG-23（第三轮审计）：这些用例独立设门——裸 `hardening` 仍进（向后兼容）、
-# `agent-all` 也进（那是覆盖全表面的入口）、单条名字前缀 `agent_` 也进。
-# ======================================================================
-if filter_matches "hardening" "$filter" || [ "$filter" = "agent-all" ] \
-	|| [[ "$filter" == agent_* ]]; then
-
-	# 1) 模型循环类选项属于 mybot-agent：显式拒绝退出 2 并指路（不静默忽略、
-	#    也不报「未知参数」——那是 mybot-agent 的选项面，本程序只是不跑模型循环）
-	if case_matches 'agent_opt_outside_agent'; then
-	run_one_hardening 'agent_opt_outside_agent' 2 '属于 Rust agent' \
-		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql --task '让继电器动作一次'
-	fi
-
-	# 2) --agent 已移除（agent 循环迁 Rust）：校验层快速失败退出 2 + 两进程替代
-	#    用法指引——不再有「注入 LLM 驱动 → 装配哨兵 → TCP accept → 桩报错」的
-	#    死工作序列（原三条 --agent --tcp 组合互斥用例随之改写为等价负路径）
-	if case_matches 'agent_tcp_input_mutex'; then
-	run_one_hardening 'agent_tcp_input_mutex' 2 '--agent 已移除' \
-		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql --agent --tcp 19399 --input=/dev/null
-	fi
-	if case_matches 'agent_tcp_task_mutex'; then
-	run_one_hardening 'agent_tcp_task_mutex' 2 '--mcp-backend 与 --tcp 互斥' \
-		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql \
-		--mcp-backend --mcp-socket /tmp/hard-mcp.sock --tcp 19399
-	fi
-	if case_matches 'agent_tcp_crossmachine_needs_token'; then
-	run_one_hardening 'agent_tcp_crossmachine_needs_token' 2 '需要 --mcp-socket' \
-		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql --mcp-backend
-	fi
-
-	# 3) 后端 + 危险能力 ⇒ 强制外部确认（评估 §3.2）：开 --agent-shell 必须配
-	#    --agent-policy 且 require_confirm 含 run_command，否则 buildAgentConfig
-	#    拒绝启动（退出 2，配置错误不碰真机）。原「agent 缺 API key」用例随
-	#    --agent 移除改写——C++ 宿主侧已无模型调用，「缺 key」判据归
-	#    mybot-agent（agent_e2e.sh R5 的 --check-config 场景）
-	if case_matches 'agent_missing_key'; then
-	run_one_hardening 'agent_missing_key' 2 '必须用 --agent-policy' \
-		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql \
-		--mcp-backend --mcp-socket /tmp/hard-mcp.sock --agent-shell
-	fi
-
-	# 4) 提示词包选项归属：--prompt-file 属 mybot-agent（总量上限 F2-9 的判据
-	#    也随之在 Rust prompt.rs，agent_e2e.sh 的 R2b 场景钉「超 64KiB 启动即拒」；
-	#    C++ 侧的配置期预检已随 --agent 移除不可达）。本程序对它显式拒绝并指路。
-	if case_matches 'agent_prompt_over_cap'; then
-	mkdir -p .tmp
-	awk 'BEGIN { for (i = 0; i < 3000; i++) print "padding line for the system prompt cap test" }' \
-		> .tmp/bigprompt.md
-	run_one_hardening 'agent_prompt_over_cap' 2 '属于 Rust agent' \
-		env BOT4CJ_LLM_KEY=dummy timeout $HEAVY_TIMEOUT "$bin" \
-		--robot=robots/relay-test.sql --prompt-file .tmp/bigprompt.md
-	fi
-
-	# 5) PL-1（2026-09-22）：--check-config 的端到端判据（2026-09-24 起与
-	#    --mcp-backend 联用；配置文件经 BOT4CJ_LLM_CONFIG 指定——--llm-config
-	#    选项本身已属 mybot-agent，但配置文件查找链两侧共用）。
-	#    这条选项的**全部价值**在「不装载结构、不上电、不联网」，所以只断言
-	#    「打印了摘要」不够——把这三件事分别钉住：
-	#      ① 正向：配置指向必然拒绝连接的接入点（127.0.0.1:1）仍 rc=0，
-	#         且输出里**没有网络错误字样** → 证明它真的没发起请求；
-	#      ② 「只读不装载」：结构脚本**可读但不是合法 SQL** 时 --check-config 仍
-	#         rc=0，而对同一脚本真跑一次必然非 0 → 两者对照才证明它只读了脚本头、
-	#         没有走 SQL 解析与上电（若结构脚本连读都读不到，那是配置错误，
-	#         与真跑同样非 0，故不能拿「不存在的脚本」当这条的夹具）；
-	#      ③ 配置拼错字段 → rc=2（校验仍然生效，不是「什么都放行」）。
-	#    配置文件一律写真实临时文件并经环境变量显式指定：不用 <(...) 进程替换
-	#    （被 open 时报 /dev/fd/63 打不开），也不能省略——CWD 里恰好存在的
-	#    ./mybot.llm.json 会被自动拾取，让用例随开发者本机配置飘。
-	if case_matches 'agent_check_config'; then
-	printf '{"endpoint":"http://127.0.0.1:1/v1/chat/completions","model":"m"}' \
-		> .tmp/checkcfg_ok.json
-	printf '{"api_kee":"x"}' > .tmp/checkcfg_bad.json
-	printf 'THIS IS NOT SQL AT ALL;\n' > .tmp/checkcfg_badstruct.sql
-
-	run_one_hardening 'agent_check_config_ok' 0 '配置校验通过' \
-		env BOT4CJ_LLM_KEY=dummy BOT4CJ_LLM_CONFIG=.tmp/checkcfg_ok.json timeout $HEAVY_TIMEOUT "$bin" \
-		--robot=robots/relay-test.sql --mcp-backend --check-config
-
-	echo "----- agent_check_config_no_network (agent) -----"
-	out="$(env BOT4CJ_LLM_KEY=dummy BOT4CJ_LLM_CONFIG=.tmp/checkcfg_ok.json timeout $HEAVY_TIMEOUT "$bin" \
-		--robot=robots/relay-test.sql --mcp-backend --check-config 2>&1)"
-	if echo "$out" | grep -qiE 'curl|连接|connection|refused|网络错误'; then
-		record_fail "agent_check_config_no_network(输出含网络错误字样)"
-		echo "$out"
-	else
-		record_pass
-	fi
-
-	echo "----- agent_check_config_only_reads_structure_head (agent) -----"
-	cfg_rc=0
-	env BOT4CJ_LLM_KEY=dummy BOT4CJ_LLM_CONFIG=.tmp/checkcfg_ok.json timeout $HEAVY_TIMEOUT "$bin" \
-		--robot=.tmp/checkcfg_badstruct.sql --mcp-backend --check-config \
-		>/dev/null 2>&1 || cfg_rc=$?
-	run_rc=0
-	env BOT4CJ_LLM_KEY=dummy BOT4CJ_LLM_CONFIG=.tmp/checkcfg_ok.json timeout $HEAVY_TIMEOUT "$bin" \
-		--robot=.tmp/checkcfg_badstruct.sql \
-		--mcp-backend --mcp-socket /tmp/hard-mcp.sock >/dev/null 2>&1 || run_rc=$?
-	if [ "$cfg_rc" -eq 0 ] && [ "$run_rc" -ne 0 ]; then
-		record_pass
-	else
-		record_fail "agent_check_config_only_reads_structure_head(校验 rc=$cfg_rc 应 0，真跑 rc=$run_rc 应非 0)"
-	fi
-
-	run_one_hardening 'agent_check_config_bad_field' 2 '未知字段' \
-		env BOT4CJ_LLM_KEY=dummy BOT4CJ_LLM_CONFIG=.tmp/checkcfg_bad.json timeout $HEAVY_TIMEOUT "$bin" \
-		--robot=robots/relay-test.sql --mcp-backend --check-config
-	fi
-fi
-
-# ======================================================================
 # 守护 tick 期故障注入（审计覆盖缺口 #3）：总线持续 NACK → tick error
 # 日志 + count 停滞 + 主流程不受影响（rc=0，仍正常 join/清理）。
 # 旧守门只断言「count 达标」（正向路径）；sensor_daemon「坏样本不发布、
@@ -1257,8 +945,6 @@ fi
 # 此前 main.cpp 的 sigaction 与 robot.cpp 的停机分支全仓零覆盖。
 #   signal_halt  播放中发 SIGTERM（12s 长动作，1s 后打断）
 #                → rc=0 + 停派发行 + 「joined, total publishes=」行
-#   signal_accept --tcp 等待客户端时发 SIGTERM → rc=1 + 明确中断报错（accept
-#                 被 EINTR 打断并检查停止标志的路径）
 # 夹具写在 .tmp/（gitignore）：Timer 长动作 + 无硬件守护（lib/daemon_probe.lua）。
 # ======================================================================
 if filter_matches "signal" "$filter"; then
@@ -1266,8 +952,6 @@ if filter_matches "signal" "$filter"; then
 	{ echo '@Action'; echo 't0.delay;'; for _ in $(seq 1 60); do echo '   200;'; done; echo '@'; } > .tmp/signal_long.mt
 	run_one_signal 'signal_halt' 0 'Stop requested, halting action dispatch' 'joined, total publishes=' \
 		"$bin" --robot=.tmp/signal_robot.sql --input=.tmp/signal_long.mt
-	run_one_signal 'signal_accept' 1 'TCP 等待客户端连接被停止信号中断' '' \
-		"$bin" --robot=robots/relay-test.sql --tcp $((18000 + RANDOM % 1000))
 fi
 
 # ======================================================================
@@ -1322,7 +1006,7 @@ run_harness_selftest
 
 # 空匹配防线：过滤器拼错时 0 通过 0 失败不得假绿
 if [ $((pass + fail)) -eq 0 ]; then
-	echo "汇总: 无匹配用例（过滤器 '${filter}' 未命中任何 test/test_*.lua、mybot E2E、无硬件契约回归、TCP E2E、agent E2E、输入边界加固、C++ 单测或测试骨架自证，请检查拼写）"
+	echo "汇总: 无匹配用例（过滤器 '${filter}' 未命中任何 test/test_*.lua、mybot E2E、无硬件契约回归、输入边界加固、C++ 单测或测试骨架自证，请检查拼写）"
 	exit 1
 fi
 echo "汇总: $pass 通过, $fail 失败, $skip 跳过"

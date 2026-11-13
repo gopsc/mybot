@@ -94,23 +94,15 @@ if(MYBOT_SANITIZE)
   add_compile_definitions(MYBOT_SANITIZE_BUILD=1)
 endif()
 
-# ======================================================================
-# agent 模式：--mcp-backend 让大模型工具循环成为主执行流程（工具后端半边），
-# 机器人结构脚本加载后硬件常驻内存。
-#
-# 模型调用**不引入任何链接期依赖**：它由独立的 Rust 二进制 mybot-agent 直连
-# provider（reqwest + rustls；2026-09-25 #8 起 Lua 协议驱动轨道整条删除，此前
-# 经 LuaJIT ffi 运行期加载 libcurl 的那条路径已不复存在）。因此本工程的
-# 「零第三方 C++ 依赖（仅 LuaJIT + pthread + dl）」承诺依旧成立。
-# ======================================================================
-
 # 被测主体（不含入口 main.cpp）：mybot 与 mybot_tests 共用同一份，
 # 保证单测编译的正是发布二进制里的那套实现，而不是第二份拷贝。
 #
 # 2026-10-04 分组：此前 50 个文件平铺，领域边界只存在于文件名里。现按编译单元
 # 所属领域分段——**只重排、不增删**（下方 B8 自检判据因此一字不变，段内亦保持
 # 原相对次序）。段序自下而上：语言/序列化基元（JSON/配置/矩阵/Lua）→ 领域层
-# （硬件/装配执行/机器人门面/热插）→ 装配面（通道与 CLI/agent/MCP）→ 应用编排。
+# （硬件/装配执行/机器人门面/热插）→ 装配面（CLI/输入源）→ 应用编排。
+# controller-only 起不再有 agent/MCP TU；链接期依赖为 LuaJIT、libcurl、SQLite3、
+# libftdi1/libusb、pthread/dl/m/util（见 mybot_common）。
 set(MYBOT_CORE_SOURCES
   # ---- JSON 层：词法/语法解析与序列化 ----
   src/json.cpp

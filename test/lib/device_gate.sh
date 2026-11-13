@@ -35,7 +35,15 @@ if [ "$req" = "video" ] && [ -n "${BOT4CJ_TEST_VIDEO:-}" ]; then
 	exit 125
 fi
 
-if [ -n "$req" ] && ! ls /dev/"$req"* >/dev/null 2>&1; then
+if [ -n "$req" ] && [ "$req" = "video" ]; then
+	# 该用例缺省固定打开 /dev/video0（BOT4CJ_TEST_VIDEO 已在上方单独处理）。
+	# 只检查 /dev/video* 会把“仅有 video19+”的机器放进来，随后用例因 video0
+	# 不存在而 Failed；这里按用例真正的默认设备判定，缺则跳过。
+	if [ ! -e /dev/video0 ]; then
+		echo "[SKIP] 需要 /dev/video0（文件标记 -- requires: video；可用 BOT4CJ_TEST_VIDEO 指定），本机不存在，跳过"
+		exit 125
+	fi
+elif [ -n "$req" ] && ! ls /dev/"$req"* >/dev/null 2>&1; then
 	echo "[SKIP] 需要 /dev/${req}* 真机设备（文件标记 -- requires: $req），本机无 ${req}，跳过"
 	exit 125
 fi

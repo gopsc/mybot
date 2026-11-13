@@ -9,27 +9,25 @@
 > 构建步带 `-DMYBOT_WERROR=ON`（README 声称的「零告警」由此成为门禁而非约定）；
 > 与本地 pre-push 钩子同一条守门。
 >
-> 十条 job 全部为硬门禁（2026-09-25 起；此前 6 条为 `allow_failure` 软门禁），逐条与 `.gitlab-ci.yml` 一一对应：
+> 八条 job 全部为硬门禁（2026-09-25 起；此前 6 条为 `allow_failure` 软门禁），逐条与 `.gitlab-ci.yml` 一一对应：
 
 | job | 类型 | 内容 |
 | --- | ---- | ---- |
 | `build:release` | 硬 | `-DMYBOT_WERROR=ON` 构建（零告警即门禁） |
-| `gate:release` | 硬 | `bash test/run_all_selftest.sh`（守门自检 14 段：用例是否真被收集/编译 + 七组零编译跨源一致性校验，见下「跨源一致性校验」）→ `bash test/run_all.sh`（Release 全量守门） |
+| `gate:release` | 硬 | `bash test/run_all_selftest.sh`（守门自检 7 段：脚本语法、用例是否真被收集/编译、计数与过滤器防线）→ `bash test/run_all.sh`（Release 全量守门） |
 | `gate:sanitizer` | 硬 | ASan/UBSan 构建 + `bash test/run_san.sh --asan-only`；UBSan 以 `-fno-sanitize-recover=undefined` 编译（**检出即终止**，见下） |
-| `gate:agent-e2e` | 硬 | `rust:1-slim-bookworm` 继承 `build:release` 后端产物并构建 Rust release；直接运行 `scripts/agent_e2e.sh` 与 `scripts/ica_e2e.sh`（两条都跑完再判红，一个红不掩盖另一个红），缺产物/依赖或超时即失败，`agent-e2e.log`/`ica-e2e.log` 始终留档；不受其它 jobs 的 Rust 可选跳过影响。CI 里唯一带 Rust 工具链的一道，故两条 Rust 侧端到端都归它 |
 | `gate:tsan` | 硬 | TSan 构建 + 三条守护并发 C++ 用例，`halt_on_error=1`（TSan 报告即影响退出码） |
 | `gate:clang` | 硬 | clang 构建 + C++ 单测烟雾 |
 | `gate:clang-tidy` | 硬 | `src/` 静态分析；退出码取 clang-tidy 自身，`clang-tidy.log` 随 artifacts（`when: always`）留档 |
 | `gate:coverage` | 硬 | `bash test/run_coverage.sh`（`--coverage` 构建 + 跑 `mybot_tests`；`COV_WITH_GATE=1` 时另跑一遍全套守门），报告随 artifacts 留档。「硬」判的是采集链路本身，**不设行覆盖阈值**（理由见下节） |
-| `gate:musl` | 硬 | alpine 3.20/musl 下：三个常量自检 → `mybot_tests` → 整段 `test/run_all.sh`（`BOT`/`BOT_TESTS` 指到 `build-musl/`；Rust agent 段因镜像无 Rust 产物按 SKIP 计，汇总可见） |
-| `gate:agent` | 硬 | Rust agent（`agent/`，包名 `mybot-agent`；原 MCP sidecar，rig 迁移批次 B 更名）：`cargo build --release`/`test`/`clippy -D warnings`/`fmt --check`（均 `--locked`，`rust:1-slim`）。与 `gate:agent-e2e` 独立，不给既有 C++ jobs 加 Rust。⚠ ASan/UBSan/TSan 只插桩 C++，**对 agent 是盲的**——agent 安全靠 Rust 所有权 + clippy/test，不是 sanitizer |
+| `gate:musl` | 硬 | alpine 3.20/musl 下：三个常量自检 → `mybot_tests` → 整段 `test/run_all.sh`（`BOT`/`BOT_TESTS` 指到 `build-musl/`） |
 
 ### 覆盖率数字的口径与已知盲区（2026-09-21 AG-11 实测）
 
 **先看口径再看数字**，否则极易误判：
 
 - **它只反映该脚本实际跑过的东西**。缺省模式只跑 `mybot_tests`（C++ 单测），`mybot` 二进制的
-  e2e/TCP/Lua 链路不计入；要计入请设 `COV_WITH_GATE=1`。实测差距为零不是因为 e2e 没价值，
+  e2e/Lua 链路不计入；要计入请设 `COV_WITH_GATE=1`。实测差距为零不是因为 e2e 没价值，
   而是因为以前 `mybot` **根本没被插桩**（脚本只构建 `mybot_tests`）。现在两个 target 都构建。
 - **fork/exec 子侧代码恒为 0%，且这不是「没测」而是「测了测不到」**：gcov 计数在进程退出时
   落盘，而 `agent_subprocess.cpp` 的 `execChild` / `revokeInheritedFds` 永远以 `execve`
@@ -80,37 +78,14 @@
 ```bash
 bash test/run_all.sh          # 全部离线守门（分段见下，顺序与条数以脚本为准）
 bash test/run_all.sh pca9685  # 文件名过滤
-bash test/run_all.sh tcp      # 只跑 TCP 动作源
-bash test/run_all.sh agent-all # agent 全表面（过滤口径见下面的方框说明）
+bash test/run_all.sh hardening # 只跑输入边界/加固段
 ```
 
-全部守门在无 `/dev/i2c` 的开发机上即可运行。
+全部守门在无 `/dev/i2c` / `/dev/video0` 的开发机上即可运行；缺设备用例按 `[SKIP]` 计。
 
-> **按名字过滤时注意分段过滤器形态不同**：Lua 段比 `test_*.lua` 文件名子串、
-> C++ 段比 `scope:` 作用域语法、加固段按分段门、端到端按段名——所以裸 `agent`
-> 与 `agent:` **各只覆盖一半表面**（前者漏掉 15 条 `agentconfig_`/`agentmode_` 与
-> agent 负路径，后者跳过 agent E2E）。要「agent 全跑」用 `agent-all`；
-> 映射单点在 `test/run_all.sh` 顶部，并有一条自证防它悄悄退化。
->
-> **自证的口径（SAN-2，2026-09-22）**：`agent-all` 的 Lua 那一格曾是
-> `filter_lua="agent"`（注释称 `test_agent*.lua`），而**该文件模式从未存在**——
-> 于是 Lua 段实跑 0 个文件，而循环对「命中 0」是合法状态、既不报错也不计入汇总
-> （实测汇总 11 条、Lua 段 0 条）。后来那一格是 `"llm"`（`test_llm_*.lua`：
-> 协议驱动报文整形与响应映射，即 PL-3/PL-6 落过缺陷的那一层），自证改为
-> **按 `agent_lua_roster` 核对真实文件**：① roster 里的文件必须存在且会被跑到；
-> ② `test/test_llm_*.lua` 下每个文件都必须登记（漏登记即红）。
-> 2026-09-25 #8 删除 Lua 协议驱动轨道后，该过滤器**有意命中 0 个文件**——机制
-> 保留（roster 现为空表、反向核对仍生效），将来若再出现 `test_llm_*.lua` 会被
-> 自动纳入自证，而不是悄悄跑 0 个文件还报绿。
-> 旧自证检查的是**映射的形状**，新自证检查的是**被映射到的文件**。
->
-> `agent-all` 的 Lua 段经 `agent_lua_roster` **精确清单**纳入 `test_camera.lua`
-> （`capture_image` 依赖的摄像头协议面：仿真取帧、base64、错误路径）——2026-10-01
-> 起改 `modules/Camera.lua` 或图像链路，`run_all.sh agent-all` 会拦住。真机的
-> `test_camera_v4l2.lua`（需 /dev/video*）**不在**清单内：子串过滤器分不开两文件，
-> 精确清单只点名仿真用例；真机 ABI 回归仍由全量跑/真机上显式跑。摄像头链路的
-> 端到端覆盖在 `scripts/agent_e2e.sh` 的 R9（OpenAI `image_url`）与 R13（Anthropic
-> base64 图片块及恢复占位）。
+> **按名字过滤时注意分段形态不同**：Lua 段比 `test_*.lua` 文件名子串，
+> C++ 段交给 `harness` 按作用域语法匹配，加固段按分段门执行。controller-only
+> 起不再有 TCP 动作源/MCP/agent 的端到端过滤入口。
 
 ### ctest 逐用例入口（可选）
 
@@ -129,9 +104,10 @@ cd build && ctest -R 'lua_|cpp_unit'         # 只跑 Lua 段 + C++ 单测
 `/dev/<dev>*` 时以 125 退出，由 `SKIP_RETURN_CODE 125` 记为跳过（2026-09-20 阶段 5.2
 之前 ctest 侧按**文件名**特判 `test_jit_warmup.lua`，同样带 `video` 标记的
 `test_camera_v4l2.lua` 被裸注册，无摄像头机器上报 Failed 而非 Skipped；现在两条入口
-共用同一个标记解析）。外加 `cpp_unit` / `const_ioctl` / `const_uart` / `const_v4l2`。
+共用同一个标记解析，且 `video` 标记按用例实际默认设备 `/dev/video0` 判定）。外加
+`cpp_unit` / `const_ioctl` / `const_uart` / `const_v4l2`。
 只跑 ctest
-**不覆盖** `run_all.sh` 的端到端、TCP、agent 与守门完整性分段——提交前仍以
+**不覆盖** `run_all.sh` 的端到端与守门完整性分段——提交前仍以
 `bash test/run_all.sh` 为准。
 
 ## 守门日志怎么读（中途态 vs 失败）
@@ -150,6 +126,8 @@ cd build && ctest -R 'lua_|cpp_unit'         # 只跑 Lua 段 + C++ 单测
 ## 守门分段明细
 
 > 分段顺序与用例条数以 `test/run_all.sh` 为准（本节只讲每段职责，不维护条数）。
+> 第 6–8 项（TCP 动作源/异常注入、agent 端到端）属于已移除能力的历史说明，当前
+> controller-only 脚本不再执行它们。
 
 1. **Lua 离线单测**（`test/test_*.lua`，LuaJIT 运行；断言统一经 `test/lib/tester.lua` 出 `[PASS]`/`[FAIL]` 与 `[DONE]` 完成标记；真机用例经 `test/lib/device_gate.sh` 按 `-- requires:` 标记自动跳过）
    - 其中 `test_driver_contract.lua` 是**驱动入口契约 sweep**（2026-09-20 阶段 4.5）：逐个真的加载全部 `modules/*.lua`，断言 ① 可加载（模块路径引导写错即刻红，不必等 E2E）、② `build`/`call`/`destroy` 三入口齐全、③ 非表入参返回 ERR 契约表而非抛 Lua error。豁免只有两个且都注明理由：`bitcompat`（纯 Lua 库）与 `Camera`（头注声明不挂 `arg_table`）

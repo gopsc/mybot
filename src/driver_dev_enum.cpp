@@ -16,13 +16,6 @@ namespace {
 
 namespace fs = std::filesystem;
 
-Json error(const std::string& message) {
-	Json out = JsonObject();
-	out.put("result", JsonString("ERR"));
-	out.put("message", JsonString(message));
-	return out;
-}
-
 Json ok() {
 	Json out = JsonObject();
 	out.put("result", JsonString("OK"));
@@ -53,11 +46,6 @@ std::optional<std::string> readText(const std::string& path) {
 
 bool startsWith(const std::string& text, const std::string& prefix) {
 	return text.rfind(prefix, 0) == 0;
-}
-
-bool endsWith(const std::string& text, const std::string& suffix) {
-	return text.size() >= suffix.size()
-		&& text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
 bool allDigits(const std::string& text) {

@@ -1,5 +1,6 @@
-# bot4cj CI：全部十条 job 均为硬门禁（2026-09-25 起；此前 TSan / clang /
-# clang-tidy / coverage / musl / agent 六条为 allow_failure 软门禁）。
+# bot4cj controller-only CI：全部八条 job 均为硬门禁（2026-09-25 起；此前
+# TSan / clang / clang-tidy / coverage / musl / agent 六条为 allow_failure 软门禁；
+# 2026-11 移除 agent/MCP 相关的两条 Rust job，与 controller-only 源码面保持一致）。
 # GitCode（GitLab 系托管）经 .gitlab-ci.yml 驱动；若托管方不识别本文件
 # 则静默不生效（无副作用），迁移其它平台时按同结构翻译即可。
 #
@@ -22,8 +23,10 @@ variables:
 
 .install-deps: &install-deps
   - apt-get update -qq
-  # libcurl 已随 Lua 协议驱动轨道删除（2026-09-25 #8）：无任何构建目标使用它
-  - apt-get install -y -qq cmake g++ libluajit-5.1-dev luajit python3
+  # C++ HAL 仍使用 libcurl；结构 SQL 用 SQLite3；FTDI I2C/SPI 用 libftdi1 + libusb。
+  # 这些 dev 包是 CMakeLists.txt 的硬依赖，缺任一都会在 configure 阶段 FATAL。
+  - apt-get install -y -qq cmake g++ libluajit-5.1-dev luajit python3 \
+      libsqlite3-dev libcurl4-openssl-dev libftdi1-dev libusb-1.0-0-dev
 
 build:release:
   stage: build
@@ -108,7 +111,8 @@ gate:clang:
   needs: ["build:release"]
   before_script:
     - apt-get update -qq
-    - apt-get install -y -qq cmake clang libluajit-5.1-dev luajit
+    - apt-get install -y -qq cmake clang libluajit-5.1-dev luajit \
+        libsqlite3-dev libcurl4-openssl-dev libftdi1-dev libusb-1.0-0-dev
   script:
     - cmake -S . -B build-clang -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
     - cmake --build build-clang -j"$(nproc)"
@@ -136,7 +140,8 @@ gate:clang-tidy:
   needs: []  # 只需源码 + 配置，不必等 Release 产物（clang-tidy 自带前端）
   before_script:
     - apt-get update -qq
-    - apt-get install -y -qq cmake clang-tidy libluajit-5.1-dev pkg-config
+    - apt-get install -y -qq cmake clang-tidy libluajit-5.1-dev pkg-config \
+        libsqlite3-dev libcurl4-openssl-dev libftdi1-dev libusb-1.0-0-dev
   script:
     - cmake -S . -B build-tidy -DCMAKE_BUILD_TYPE=Release
     # 全量输出落 clang-tidy.log（artifacts 留档），控制台只回放尾部 50 行 + 命中计数。
@@ -159,7 +164,7 @@ gate:clang-tidy:
 # test/run_coverage.sh 以 -DCMAKE_CXX_FLAGS=--coverage 构建并运行 mybot_tests，
 # 产出 C++ 侧行覆盖报告（优先 gcovr，其次 lcov，都没有时退化为 gcov 原生输出，
 # 缺工具不判失败）。本 job **不进入** run_all.sh 的记账——守门汇总口径不变。
-# COV_WITH_GATE=1：连同全套守门一起采集，让 e2e/TCP/Lua 对 **mybot** 的覆盖也
+# COV_WITH_GATE=1：连同全套守门一起采集，让 e2e/Lua 对 **mybot** 的覆盖也
 # 计入（2026-09-21 AG-11 修正：此前只构建 mybot_tests，导致「叠加守门」的数字
 # 一点不涨，容易被读成「e2e 没有覆盖价值」，实际是 mybot 压根没被插桩）。
 # 本 job「硬」的含义（2026-09-25 转硬，如实）：**不设行覆盖阈值**——AG-11 实测该指标
@@ -175,7 +180,8 @@ gate:coverage:
   needs: []  # 独立构建 --coverage 产物，不依赖 build:release
   before_script:
     - apt-get update -qq
-    - apt-get install -y -qq cmake g++ libluajit-5.1-dev luajit python3 gcovr
+    - apt-get install -y -qq cmake g++ libluajit-5.1-dev luajit python3 gcovr \
+        libsqlite3-dev libcurl4-openssl-dev libftdi1-dev libusb-1.0-0-dev
   script:
     - COV_WITH_GATE=1 bash test/run_coverage.sh
   artifacts:
@@ -190,25 +196,22 @@ gate:coverage:
 # 波特率编码、ioctl 常量此前只在 glibc 头文件下实证过。本 job 在 alpine/musl
 # 下：① 三个常量自检目标（_Static_assert/编译期比对，跑起来即证明常量在 musl
 # 头文件下成立）；② mybot_tests 全量；③ 整段守门 test/run_all.sh（Lua 层 HAL
-# 运行时 + TCP + MCP 后端 e2e）——Rust agent 段因 alpine 镜像无 Rust
-# 产物，由 net_agent.sh 按 SKIP 计（不是假绿，汇总里可见）；C++ 产物一律显式指定
-# 到 build-musl，缺任一个都判失败（不加 ALLOW_SKIP）。
+# 运行时 + 输入边界加固）；C++ 产物一律显式指定到 build-musl，缺任一个都判失败
+# （不加 ALLOW_SKIP）。
 # 2026-09-25 转硬：本地 proot + alpine 3.20 minirootfs（与 alpine:3.20 镜像同源同版本）
 # 预跑 ①②③ 全绿；预跑揪出并修掉一处真 musl 缺陷——hal_backend_glibc.lua 的
 # version() 契约是「非 glibc 返 nil」，实际在取 gnu_get_libc_version 符号时抛错，
 # 拖垮 test_uart / test_uart_baud / test_hal_backend_swap 三个用例。
-# 预跑边界（如实）：proot 会让 prctl(PR_SET_DUMPABLE) 失败，mcp_e2e 的「后端不可
-# dump」两条判据在 proot 下必红（原生 alpine 无此问题——prctl 是内核系统调用，与
-# libc 无关）；CI 容器里是原生执行，应绿。若在 CI 上恰是这两条红，先查 runner 是否
-# 以 ptrace 类沙箱（gVisor/proot）运行容器，再谈代码。
+# controller-only 起，run_all.sh 不再有 TCP/MCP/agent e2e 段。
 gate:musl:
   stage: gate
   image: alpine:3.20
   needs: []
   before_script:
-    # bash/coreutils/python3：守门脚本是 bash + GNU mktemp 语法 + python3 帧客户端，
+    # bash/coreutils/python3：守门脚本是 bash + GNU mktemp 语法，且部分检查用 python3；
     # busybox 的 mktemp 不接受其参数形态（预跑实测 "mktemp: Invalid argument"）。
-    - apk add --no-cache build-base cmake luajit-dev luajit linux-headers pkgconf bash coreutils python3
+    - apk add --no-cache build-base cmake luajit-dev luajit linux-headers pkgconf bash coreutils python3 \
+        sqlite-dev curl-dev libftdi1-dev libusb-dev
   script:
     - cmake -S . -B build-musl -DCMAKE_BUILD_TYPE=Release
     - cmake --build build-musl -j2 --target test_ioctl_nums test_uart_consts test_v4l2_consts
@@ -218,72 +221,3 @@ gate:musl:
     - cmake --build build-musl -j2 --target mybot mybot_tests harness_selftest
     - ./build-musl/mybot_tests
     - BOT=./build-musl/mybot BOT_TESTS=./build-musl/mybot_tests bash test/run_all.sh
-
-# ======================================================================
-# Rust agent（agent/，包名 mybot-agent；原 MCP sidecar，rig 迁移批次 B 更名）：
-# 独立产物；Rust 工具链仅用于 gate:agent 与 gate:agent-e2e，
-# 既有 C++ jobs 不增加 Rust 依赖。
-# 四检：cargo build --release / test / clippy(-D warnings) / fmt --check（均 --locked）。
-#
-# ⚠ 响亮声明（评估 §5.3，别误读门禁覆盖面）：gate:sanitizer（ASan/UBSan）与
-#   gate:tsan 只插桩 **C++**（mybot / mybot_tests）——它们对 Rust agent **是盲的**。
-#   agent 的内存/线程安全靠 Rust 所有权模型 + 本 job 的 clippy/test，**不是**
-#   sanitizer。「gate:sanitizer 绿」绝不等于「整条后端+agent 链路过了 sanitizer」。
-#
-# 全链路 E2E 由独立 gate:agent-e2e 硬门禁承担；gate:release 仍可跳过 Rust 段，
-# 不给既有 C++ jobs 增加 Rust 工具链依赖。
-#
-# 2026-09-25 转硬：四检在本地 rustc/clippy 1.98.1 全绿（此前存量的 2 条 clippy
-#   manual_async_fn 与 5 个文件的 rustfmt 差异已清）。rust:1-slim 跟随 stable 滚动，
-#   新版 clippy 增加 lint 会让本 job 在**代码未动**时变红——那是本 job 的既定口径
-#   （lint 门禁就该跟着工具链走），处置是修 lint 或按理由 allow，不是回退软态。
-gate:agent:
-  stage: gate
-  image: rust:1-slim
-  needs: []          # 独立 Rust 产物，不依赖 C++ build:release
-  before_script:
-    # crates.io 直连在部分网络下极慢（评估实测 ~28KB/s）；配 USTC sparse 镜像。
-    # Cargo.lock 已入库 ⇒ --locked 可复现（版本与本地逐字一致）。
-    - export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
-    - mkdir -p "$CARGO_HOME"
-    - printf '[source.crates-io]\nreplace-with = "ustc"\n\n[source.ustc]\nregistry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"\n' > "$CARGO_HOME/config.toml"
-    - rustup component add clippy rustfmt
-  script:
-    - cd agent
-    - cargo build --release --locked
-    - cargo test --locked
-    - cargo clippy --all-targets --locked -- -D warnings
-    - cargo fmt --check
-
-# 与 build:release 同为 bookworm，避免跨 glibc 版本复用后端产物。
-# 本 job 是 CI 里唯一带 Rust 工具链的一道，故两条 Rust 侧端到端脚本都归它：
-# scripts/agent_e2e.sh（工具循环 R1–R18）与 scripts/ica_e2e.sh（ICA 证据账本两进程）。
-# 后者此前只有守门入口的 ica-e2e 段调用（net_agent.sh），而那段在 mybot-agent
-# 产物缺失/陈旧时按 [SKIP] 计——gate:release / gate:musl 的镜像里没有 cargo，
-# 补不上这个洞，所以「ica 链路坏了」在 CI 上可以一直没人发现（2026-10-06 补）。
-gate:agent-e2e:
-  stage: gate
-  image: rust:1-slim-bookworm
-  needs: ["build:release"]
-  before_script:
-    - *install-deps
-    - apt-get install -y -qq procps
-  script:
-    - cargo build --release --locked --manifest-path agent/Cargo.toml
-    - test -x build/mybot && test -x agent/target/release/mybot-agent
-    # 两条都跑完再判红：先跑的那条一失败就 exit，后一条便永不执行，一个红掩盖另一个红
-    # （守门入口里两段也是各记各的账）。timeout 180 与守门本地的 90 是刻意差异，
-    # 理由见 test/lib/sections/net_agent.sh 的口径注释（CI 机器慢）。
-    - |
-      rc=0
-      if BOT4CJ_LLM_CONFIG=none timeout 180 bash scripts/agent_e2e.sh > agent-e2e.log 2>&1; then :; else rc=$?; fi
-      cat agent-e2e.log
-      if timeout 180 bash scripts/ica_e2e.sh > ica-e2e.log 2>&1; then :; else rc=$?; fi
-      cat ica-e2e.log
-      test "$rc" -eq 0
-  artifacts:
-    when: always
-    expire_in: 4 weeks
-    paths:
-      - agent-e2e.log
-      - ica-e2e.log

@@ -1,8 +1,4 @@
-./build/mybot --robot=robots/relay-test.sql \
-  --mcp-backend --mcp-socket /tmp/mybot.sock \
-  --scripts-dir scripts \
-  --fs-root . --agent-write-file \
-  --agent-shell --agent-hot-sql \
-  --read-var relay0 \
-  --agent-policy mybot.policy.json \
-  --audit-log -
+#!/bin/sh
+# 无硬件快速验证：Relay 虚拟驱动 + 自检动作脚本。
+# 有真实硬件时请直接传 --robot/--input（见 README 快速开始）。
+exec ./build/mybot --robot=robots/relay-test.sql --input=scripts/relay-test.mt

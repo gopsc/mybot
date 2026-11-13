@@ -184,7 +184,10 @@ SQLEOF
                         fd="${fd##*/}"
                         if [ "$fd" -gt 2 ]; then exec {fd}>&-; fi
                 done
-                "$bin" --robot=.tmp/fdprobe_robot.sql --input=.tmp/fdprobe.mt >/dev/null 2>&1 &
+                # 采样 /proc/<pid>/fd 需要目标进程可被同 UID 检查；生产形态的
+                # PR_SET_DUMPABLE=0 会让后续采样全部读不到 fd 表（首拍后归零）。
+                BOT4CJ_ALLOW_PTRACE=1 "$bin" --robot=.tmp/fdprobe_robot.sql \
+                        --input=.tmp/fdprobe.mt >/dev/null 2>&1 &
                 pid=$!
                 for _ in $(seq 1 24); do
                         kill -0 "$pid" 2>/dev/null || break

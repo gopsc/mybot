@@ -307,7 +307,7 @@ FtdiBus::FtdiBus(const std::string& urlText, bool spi)
 		impl_->ctx = nullptr;
 		throw std::runtime_error(message);
 	}
-	ftdi_usb_purge_buffers(impl_->ctx);
+	ftdi_tcioflush(impl_->ctx);
 	/* MPSSE 基础序列：关闭 5 分频/自适应时钟/三相位时钟，并设一个保守的时钟分频。
 	 * GPIO 位操作不依赖时钟分频，但初始化序列让适配器进入确定状态。 */
 	impl_->writeRaw({0x8A, 0x97, 0x8D, 0x86, 0x1D, 0x00});
