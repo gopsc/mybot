@@ -87,7 +87,7 @@ UART 的易踩坑约束：
 
 **总线并发边界与停机灭火（BQ-1，2026-09-29 审计 P2-3 收口）**：主线程驱动与守护线程对同一 `/dev/i2c-*` 的**单次传输**由内核 adapter 锁串行；不同器件的传输交错（各自带从地址）不构成破坏，**同一器件被两线程并发访问不是受支持的配置**——唯一的既定场景是停机序列：弃管守护与硬件销毁并发。对此的收口是**灭火协议**：守护共享槽新增 `quiesce` 位（`daemonvar.hpp`，ABI v2 offset 92；与 `stop` 分离——`stop` 是「请退出」，宽限内退场的守护还要跑 `daemon_cleanup` 做去初始化，传输必须放行；`quiesce` 是「物理隔离」，只给确定要与硬件销毁并发的那批）。`DaemonRunner` 停机序列重排为「requestStopAndWait 等待（不弃管）→ finishTeardown 宽限 → 仍未退场才灭火弃管」，灭火后该守护 lua_State 里 HAL 的一切真实总线传输（`i2c_rdwr` / `spi_xfer` / `uart_read/write`，持槽锁读）在进内核前被拒绝；`open/close` 不受约束（退出路径要能关 fd）。竞态窗口从「无界」收敛到「灭火时刻的在途单次传输」；已进入 D 态 ioctl 的那一笔是用户态无法收回的残余。virt 仿真路径不受 `quiesce` 约束（无物理副作用）。回归：`test/test_hal_quiesce.lua`（mock 三族传输 + 零内核调用断言）、`test/cpp/test_daemon.cpp` 的 `finishTeardown` 两态用例。
 
-> **实现边界（2026-11 核对）**：上述“灭火后拒绝真实总线传输”目前由 `HAL_ffi.lua` 回退路径实现（`bus_quiesced` 检查）；宿主 `HAL.lua` 的 portable 分支仍把 `bus_quiesced` 固定为 `false`，C++ `HALManager` 也尚未读取槽位。宿主运行期该条防线目前**未生效**，弃管守护的超时告警仍会打印，但后续总线调用不会被 quiesce 拦截。要把这条安全保证扩展到宿主，需要在 C++ HAL 的 i2c/spi/uart 传输入口接入槽位检查。
+> **实现边界（2026-11 修复）**：宿主 `HAL.lua` 的 portable 分支此前把 `bus_quiesced` 固定为 `false`，C++ `HALManager` 也不读槽位，导致弃管守护的后续总线调用不被拦截。现在宿主分支经 `lib/pthread.lua` 的 `P.quiesced` 持槽锁读取 `quiesce` 位，`HAL.sys.i2c_rdwr` / `HAL.sys.spi_xfer` 与 `i2c`/`spi`/`uart` 的读写入口都在进 `__hal_call` 前检查；`open/close` 仍放行（退出路径要能关 fd）。`HAL_ffi` 回退路径保持原实现。回归：`test/test_hal_quiesce.lua`（HAL_ffi）与 `test/test_hal_quiesce_host.lua`（宿主 `__hal_call` 路径）分别覆盖两侧。
 
 - 当前威胁模型下成立：驱动/chunk 文件名只取自本地 `.sql`/`.mt` 表名，动作数据无法注入 Lua 加载路径
 - 两个失效条件（引入任何一条前须先补回归测试钉死）：`BOT4CJ_MODULE_PATH` 指向不可信目录；未来新增远程选择驱动文件的入口

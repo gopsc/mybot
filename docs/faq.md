@@ -4,7 +4,7 @@
 
 ## 已知限制
 
-- **仅支持 Linux**：缺省 HAL 后端经 ffi 直调 glibc，Windows/macOS 未支持；musl 等非缺省后端的验证范围见下文与 [hal.md](hal.md)
+- **仅支持 Linux**：宿主 `mybot` 运行期走 C++ HAL（直接 ioctl/sysfs）；独立 LuaJIT 回归才走 ffi 回退后端。Windows/macOS 未支持；musl 等非缺省后端的验证范围见下文与 [hal.md](hal.md)
 - **非 glibc libc：musl（alpine 3.20，x86_64）已实证，其它未验证**：HAL.sys 已后端
   接口化（`BOT4CJ_HAL_BACKEND`，缺省 glibc，接口契约见 `modules/lib/hal_backend_glibc.lua`
   头注）。CI 的 `gate:musl`（硬门禁）在 alpine/musl 下跑两个常量自检、`mybot_tests`
@@ -44,8 +44,9 @@
   （直连变量走真器件、守护走内嵌 `*_VIRT` 模型，双路径覆盖都保留）。
 - **同一物理串口无跨变量引用计数（UART）**：HAL 的 fd 为进程级，但每个硬件变量
   一个独立 `lua_State`，各自 open 时快照 termios、destroy 时按自己 open 时的配置
-  恢复——**后关闭者以自己 open 时看到的配置为准**（`modules/lib/hal/uart.lua` 自述，
-  跨变量协调在 Lua 层不可能）。安全的共享形态只有一个：多个器件行经 `'$uart-x'`
+  恢复——**后关闭者以自己 open 时看到的配置为准**（宿主 C++ HAL 的 `Resource`
+  与独立回退的 `modules/lib/hal/uart.lua` 各自快照，跨变量协调不在 HAL 层做）。
+  安全的共享形态只有一个：多个器件行经 `'$uart-x'`
   引用**同一个** UART 总线变量（fd 只有一个、termios 只设一次）。危险形态是
   两个消费者**各自 open** 同一 `path`（重复声明 UART 总线变量、或 UART 变量 +
   真机守护各开一个 fd）：混用波特率会互相改线速、后关闭者覆盖前者的恢复值。
@@ -67,7 +68,7 @@
 
 ### Q: 不接硬件也能开发吗？
 
-A: 可以。`./build/mybot_tests` 与 Lua/virtbus 单测不需要硬件；`relay-test` 链路也不需要，先跑通它即可验证环境。注意 `test/run_all.sh` 仍保留已移除的 TCP/agent 分段，当前整段可能不绿；开发时优先用 C++ 单测与按名过滤的 Lua 用例。详见 [virtbus.md](virtbus.md) 与 [testing.md](testing.md)。
+A: 可以。`./build/mybot_tests` 与 Lua/virtbus 单测不需要硬件；`relay-test` 链路也不需要，先跑通它即可验证环境。当前 controller-only 分支的 `bash test/run_all.sh` 在无硬件开发机上是完整离线守门（实测全绿；缺 `/dev/` 的真机用例由 `device_gate.sh` 自动记为跳过）。调试单条用例时优先用 `ctest -R ...` 或 `bash test/run_all.sh <名字过滤>`，提交前仍跑一次完整守门。详见 [virtbus.md](virtbus.md) 与 [testing.md](testing.md)。
 
 ### Q: 守护线程 publishes=0？
 

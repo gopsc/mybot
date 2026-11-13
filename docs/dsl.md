@@ -25,7 +25,7 @@ INSERT INTO Servo (name, max, min, offset, controller, channel)
 - `I2C` 列以 `$i2c-1` 引用上方定义的总线（引用列必须 `$` 前缀，裸名一律按字面值）
 - 注释整行 INSERT 即可下线一个硬件实例；报错会指明是哪张表、哪一行、哪一列
 - **INSERT 的列名清单决定「哪个值属于哪一列」，值按列名落到建表声明序**（2026-09-20 审计 C3）。`INSERT INTO Timer (delay, name) VALUES (50, 'timer-0')` 与 `(name, delay)` 写法等价，列序写反不会错列。三条硬约束（违规在解析期报错，不再静默错位）：列名必须在建表声明里存在（`no such column`）、同一列不得写两次（`listed twice`）、每列都必须给值（`missing value for column`，要继承上一行就显式写 `-`）
-- 列类型支持 `String` / `Number`：值一律以文本驻留（`MatrixObject` 只存 String），`Number` 目前仅在**解析期**对字面量做一次数值校验（整数/小数/带符号/科学计数法合法，空值与 `nan`/`inf` 拒绝），不做运行期类型转换；校验按 INSERT 的列名匹配声明列，报错形如 `Column 'delay' of table 'Timer' is declared Number, but value 'abc' is not numeric.`
+- 列类型支持 `String` / `Number`：值一律以文本驻留（`MatrixObject` 只存 String），`Number` 目前仅在**解析期**对字面量做一次数值校验（整数/小数/带符号/科学计数法合法，空值与 `nan`/`inf` 拒绝），不做运行期类型转换；校验按 INSERT 的列名匹配声明列，报错形如 `Column 'delay' of table 'Timer' is declared Number, but value 'abc' is not numeric.`。**`-` 占位符不参与数值校验**——它按矩阵继承语义解析（与 `String` 列同一规则），首行 `-` 原样保留、由消费方决定含义。
 - **方言只认七条语句**：`CREATE TABLE` / `INSERT INTO` / `SELECT * FROM 表;` / `SHOW TABLES;` / `DELETE FROM 表;` / `DROP TABLE 表;` / `UPDATE 表 SET 列 = 值 [, ...];`
   - **SELECT** 仅在 agent 的 `query_sql` 与 REPL `/sql` 里可用（只读，见 [agent.md](agent.md)）。
   - **SHOW TABLES** 同样只读、同样只在 `query_sql` 与 REPL `/sql` 里可用：列出当前结构的**全部表名与数据行数**（数据行 = 除列头外的行数），形如 `SHOW TABLES (2):` 后逐行 `  表名 (N 行)`。**不带 `WHERE`/`LIKE`**（本方言取向「能一句话说清就够」，要筛某张表的行请用 `SELECT * FROM 表 WHERE ...`）。
@@ -187,7 +187,7 @@ s1.A;
 - **条件语法**：`$(...)` 表达式引擎的全部算术（`+ - * / %`、括号、一元正负、字符串字面量）加上比较 `> < >= <= == !=` 与逻辑 `&& || !`（短路求值，优先级同 C：`&&` 高于 `||`、比较高于逻辑、算术高于比较）。**类型严格无隐式转换**：比较 `> < >= <=` 只收数值；`== !=` 同类可比（数值/文本/布尔）；`&& || !` 只收布尔——`@if(threshold)` 不是「非零即真」，要写 `@if(threshold>0)`
 - **块头内不能有空格**（与 `$(...)` 同约束：矩阵解析把空白当分隔，`@if(a > b)` 会被切成块名 `if(a` 与数据行）——写成 `@if(a>b)`；条件里需要字面文本用双引号 `@if(mode=="auto")`（值内不得含空格；双引号/换行等控制字符写转义 `\"`、`\n`，见[表达式](#表达式-)的「转义」条）
 - **求值时机是「轮到该块时」**：前面的块执行完后条件才求值（`@Vars`/`@Alias` 是静态值，此时机主要保证语义直白）；条件求值失败（未定义标识符、类型错、非有限值）按 halt-on-error 中止整个脚本
-- **@Merge 片段里不支持**：片段的 `@Action` 按相位归并进主脚本，`@if` 没有独立执行位置——出现在片段里**响亮拒绝**（不是静默丢弃），把该块挪到主脚本
+- **@Merge 片段里不支持**：片段的 `@Action` 按相位归并进主脚本，`@if`/`@while` 没有独立执行位置——出现在片段里**响亮拒绝**（不是静默丢弃），把该块挪到主脚本。片段 `@Action` 自身携带嵌套子块（`@if`/`@while`/`@Merge` 等）同样拒绝：片段的动作只按相位归并**数据行**，不能整棵采纳子块树。
 - **可嵌套**：`@if` 里能再写 `@if`/`@while`/`@Action`，裸 `@` 关闭最内层块——详见 [`@while` 循环块](#while-循环块)的「块嵌套」条与 [块嵌套与 @Include/@Merge](#块嵌套与-includemerge2026-10-12)
 - `@Reflex` 反射矩阵与热 SQL 的瞬态 `Action` 表不带条件语义（`@if` 只在主脚本顶层生效）；`@Trigger`/`@Reflex` 条件反射的完整语义见下文专节
 
@@ -369,7 +369,7 @@ INSERT INTO Servo (name, max, min, offset, controller, channel)
 
 ## `@Vars` 命名数值变量
 
-`@Vars` 与 `@Alias` 同构（列 `name` / `value`），但**仅支持 Number**：`value` 必须是数值字面量（整数/小数/带符号/科学计数法）或 `$(<表达式>)`（见 [表达式](#表达式-)），否则在注册期即报错。字面量按原文驻留、不做转换（与结构脚本 `Number` 列共用同一判定）；表达式在读取时求值。它有两种消费方式：
+`@Vars` 与 `@Alias` 同构（列 `name` / `value`），但**仅支持 Number**：`value` 必须是数值字面量（整数/小数/带符号/科学计数法）或 `$(<表达式>)`（见 [表达式](#表达式-)），否则在注册期即报错（`-` 占位符先按矩阵继承解析为上一行的值；首行 `-` 没有上一行，按非数值报错）。字面量按原文驻留、不做转换（与结构脚本 `Number` 列共用同一判定）；表达式在读取时求值。它有两种消费方式：
 
 1. **结构脚本 `$` 数值常量**：元数据列写 `$<name>`，该列取变量的数值文本——这是唯一允许 `$` 指向标量的变量类型（`Alias` 等标量仍按上节报错）：
 
@@ -449,7 +449,7 @@ timer-0.delay;
 > **历史注记（2026-10-12）**：`@Merge` 承接的是旧 `@Include` 的**归并**语义（相位补 `-`、设备集不相交、`@Alias`/`@Vars` 主从覆盖、`mtmerge_core` 内核）。`@Include` 这个名字被**重新定义**为「C 式内容拷贝」（见 [@Include 内容拷贝](#include-内容拷贝c-式顶层拷贝2026-10-12)）——两者是不同机制：`@Merge` 把目标**并进**累加器/下表，`@Include` 把目标内容**原样搬到**当前位置。仓库里原先用 `@Include` 做归并的脚本已全部机械改名为 `@Merge`。
 
 - **归并语义**：`@Action` 两两归并（设备集相交报错、`phase` 滞后/提前、耗尽补 `-` 保持姿势、前导 `-` 未起拍跳过、负相位部分丢弃告警/全部丢弃报错）。主脚本没有 `@Action` 时首个 `@Merge` 目标顶替累加器（其相位无对齐目标不生效）。
-- **顶层 vs 子块内**：**顶层** `@Merge` 走上面这套累加器机制（`@Alias`/`@Vars` 主从覆盖、合并 `@Action` 锚定、块重排）。**控制块 children 内**的 `@Merge` 走**位置局部归并**（见 [块嵌套与 @Include/@Merge](#块嵌套与-includemerge2026-10-12)）：把目标**纯矩阵**按声明序用 `mergeTwo`（同相位/设备集语义）并入**同序列里紧邻其下的那张叶子表**，随后 `@Merge` 块被消费掉；不重排块序、不折叠标量（子块内的 `@Merge` 目标只能是纯矩阵，携带 `@Alias`/`@Vars` 或控制块即响亮拒绝）。
+- **顶层 vs 子块内**：**顶层** `@Merge` 走上面这套累加器机制（`@Alias`/`@Vars` 主从覆盖、合并 `@Action` 锚定、块重排）。**控制块 children 内**的 `@Merge` 走**位置局部归并**（见 [块嵌套与 @Include/@Merge](#块嵌套与-includemerge2026-10-12)）：把目标**纯矩阵**按声明序用 `mergeTwo`（同相位/设备集语义）并入**同序列里紧邻其下的那张叶子表**，随后 `@Merge` 块被消费掉；不重排块序、不折叠标量（子块内的 `@Merge` 目标只能是纯矩阵，携带 `@Alias`/`@Vars`、`@Merge`/`@Include` 等指令块或控制块即响亮拒绝——空控制块也按名字识别，不再因 `children` 为空被当空叶子表静默吞掉）。
 - **片段递归合法**：顶层 `@Merge` 的片段可以再 `@Merge` 别的片段（终止性由「已展开文件表」保证——每个文件至多展开一次，自包含/互包含在第二次触达时终止）。被包含文件可以没有自有 `@Action`（纯标量片段、纯组合片段都合法）；整体没有任何 `@Action` 时由派发期报错。
 - **include-once（`*.once.mt` 后缀）**：带此后缀的文件是「可复用片段」——被再次包含时**跳过**并打 stderr 注记，菱形依赖（两个片段共享同一个子片段）就此可表达；普通 `.mt` 重复包含仍**报错**（抓笔误）
   - 后缀放在文件上：片段自己声明复用策略，所有包含点免于各自记忆
@@ -499,7 +499,7 @@ path;
 - **只拷贝、不归并**：目标文件的每个顶层矩阵（`@Action`/`@Alias`/`@Vars`/`@if`/`@while` …）按序插到 `@Include` 块的原位置，随后与主脚本其余块一起走正常的注册/派发。与 `@Merge` 的区别：`@Merge` 把目标**并进**一张表，`@Include` 把目标**平铺搬进来**。
 - **控制块可原样搬运**：与 `@Merge` 片段拒绝 `@if`/`@while` 不同，`@Include` 是纯拷贝，能把目标里的控制块（含其 children）原样搬进来，由 `execSequence` 正常执行。
 - **`path` 列，仅此而已**：只接受 `path` 列——`phase` 对纯拷贝无意义，出现即**响亮拒绝**并指引改用 `@Merge`；其它列名同样拒绝。词法规则与 `@Merge` 同一套（拒绝对路径、`..`、空段、NUL，只放行 `.mt`，`O_NOFOLLOW` 拒软链）。
-- **只能出现在最外层**（像 C 的 `#include`）：出现在 `@if`/`@while` 子块内**响亮拒绝**（「@Include 只能出现在最外层」）——拷贝进来的块会被归并/执行序打散，嵌在子块里没有意义。子块内要归并动作表请用 `@Merge`。
+- **只能出现在最外层**（像 C 的 `#include`）：出现在 `@if`/`@while` 子块内**响亮拒绝**（「@Include 只能出现在最外层」）——拷贝进来的块会被归并/执行序打散，嵌在子块里没有意义；出现在 `@Merge` 片段里同样**响亮拒绝**（片段只贡献 `@Alias`/`@Vars`/`@Action`，内容拷贝没有落点；要复用片段请用 `@Merge`）。子块内要归并动作表请用 `@Merge`。
 - **递归以片段自身目录为基准**：被拷贝内容里若还有 `@Include`，以**该文件自身目录**为基准递归展开（库片段可整体搬移）。
 - **允许重复拷贝、靠预算终止**：C 式拷贝**不设**「已展开文件表」（同一文件可被多次拷贝，与 `@Merge` 的重复报错不同）；自包含/互包含的拷贝靠**行数预算**（`@Include`/`@Merge` 共享 ≤ 32 行）在触达上限时**响亮终止**，不无限递归、不 OOM。字节预算同 `@Merge`（总量 ≤ 8 MiB）。
 - 回归：`mtinclude_include_*`（`test/cpp/test_mtinclude.cpp`）覆盖原样拼接、片段相对递归、控制块搬运、拒绝 phase 列、拒绝子块内出现、自包含靠行预算终止。
@@ -511,6 +511,6 @@ path;
 - **闭合模型：扁平裸 `@` + 深度栈**。每个裸 `@` 关闭**当前最内层**的块；控制块（`@if`/`@while`）可嵌套、可含 `@Action`，叶子块（`@Action`/`@Alias`/`@Vars`）不可再嵌 `@名字`（响亮拒绝）。深度上限 `mt::kMaxBlockDepth = 32`；EOF 时未闭合的块响亮报错、多余裸 `@` 报错——不再静默截断。
 - **块体是子块序列**：控制块体内的连续直接行合成隐式 `@Action` 子块、显式 `@名字` 子块按**书写顺序**并入 children；执行器 `ActionRunner::execSequence` 递归下钻、按书写序交错执行（`@if` 假跳过整棵子树并注记跳过多少动作行；`@while` 每轮先查停止标志再判条件）。
 - **归并 ⟂ 嵌套（核心不变量）**：`mergeTwo` 的操作数必须是**纯矩阵叶子表**——控制块（有 children）当归并操作数会被拒绝（其网格为空、体在 children，按网格行补 `-` 会静默丢弃 children）。归并与嵌套是两条正交能力，不得混用。
-- **子块内 `@Merge` = 位置局部归并**：控制块 children 里的 `@Merge`，把目标**纯矩阵**按声明序用 `mergeTwo`（复用相位补 `-`、设备集不相交、拒绝控制块操作数）并入**同序列里紧邻其下的那张叶子表**；连续多个 `@Merge` 累加进同一张下表，随后 `@Merge` 块被消费、从序列移除，**块序保持书写序**（`execSequence` 的交错执行依赖此序）。目标文件必须只含纯矩阵：携带 `@Alias`/`@Vars`（子块内不注册标量）或控制块即响亮拒绝。归并 pass 递归下钻所有 children；子块内 `@Merge` 目标路径以**主脚本目录**为基准。
+- **子块内 `@Merge` = 位置局部归并**：控制块 children 里的 `@Merge`，把目标**纯矩阵**按声明序用 `mergeTwo`（复用相位补 `-`、设备集不相交、拒绝控制块操作数）并入**同序列里紧邻其下的那张叶子表**；连续多个 `@Merge` 累加进同一张下表，随后 `@Merge` 块被消费、从序列移除，**块序保持书写序**（`execSequence` 的交错执行依赖此序）。目标文件必须只含纯矩阵：携带 `@Alias`/`@Vars`（子块内不注册标量）、`@Merge`/`@Include` 等指令块或控制块即响亮拒绝；空控制块（如只有 `@if(...)` 与 `@` 的退化块）也按名字识别——只看 `children` 是否为空会把它当空叶子表并入，合并后的动作随后被执行器的控制块分支静默丢弃。归并 pass 递归下钻所有 children；子块内 `@Merge` 目标路径以**主脚本目录**为基准。
 - **顶层 `@Merge` 机制不变**：仍是累加器式（`@Alias`/`@Vars` 主从覆盖、合并 `@Action` 锚定、块重排），与子块内的位置局部归并是两条独立路径。
-- 回归：`matrix_*`（`test/cpp/test_matrix.cpp`，解析器 children 树/交错/叶子不可嵌套/多余裸 `@`/深度上限/EOF 未闭合）、`action_nesting_*`（`test/cpp/test_action_nesting.cpp`，执行器递归）、`mtmerge_merge_two_rejects_control_block_operand`（`test/cpp/test_mtmerge.cpp`，归并拒绝控制块操作数）、`mtinclude_merge_nested_*`（`test/cpp/test_mtinclude.cpp`，子块内位置局部归并的正/负路径）。
+- 回归：`matrix_*`（`test/cpp/test_matrix.cpp`，解析器 children 树/交错/叶子不可嵌套/多余裸 `@`/深度上限/EOF 未闭合）、`action_nesting_*`（`test/cpp/test_action_nesting.cpp`，执行器递归）、`mtmerge_merge_two_rejects_control_block_operand`（`test/cpp/test_mtmerge.cpp`，归并拒绝控制块操作数）、`mtinclude_merge_nested_*`（`test/cpp/test_mtinclude.cpp`，子块内位置局部归并的正/负路径）、`mtinclude_fragment_*`（片段拒绝 `@Include` 与带嵌套子块的 `@Action`）、`mtinclude_deep_fragment_chain_*`（32 层片段链与行预算边界）。

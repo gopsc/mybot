@@ -2,7 +2,7 @@
 
 > 本文是贡献者指南。[README](../README.md) 中只保留入口链接。
 >
-> **2026-11 状态**：本分支是 controller-only 版本。文中 pre-push 的 `mybot-agent` 新鲜度门、`agent/`/`sim/` 跨源检查与 `--llm-config` 示例属于历史全仓流程；当前仓库没有这些目录，相关检查会失败或跳过。提交前请以 `./build/mybot_tests`、Lua 单测和 `bash test/run_all.sh <filter>` 的实际结果为准。
+> **2026-11 状态**：本分支是 controller-only 版本，agent/MCP、Web SSH、sim 与 TCP 动作源均已移除（相关文档如 [agent.md](agent.md) 仅作历史存档）。pre-push 钩子只做三件事：提交信息规范校验、`test/run_all_selftest.sh` 守门自检、`test/run_all.sh` 离线守门。提交前请以 `./build/mybot_tests`、Lua 单测和完整 `bash test/run_all.sh` 的实际结果为准。
 
 ## 起步
 

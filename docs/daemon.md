@@ -23,6 +23,9 @@ INSERT INTO Daemon (name, chunk) VALUES ('imu0', 'lib/daemon_probe.lua');
   之后才逆序 `destroy()` 硬件。防的是「执行器已断电、某个在途 tick 又写它一次」——
   最后一次写随机胜出，进程退出时器件可能重新带电。
   `stop` 只在两拍之间被看见，所以屏障最坏要等一整拍。
+  二段宽限也由全体 missed 守护**共享**一个截止点：从屏障 deadline 起算一次（封顶
+  `graceCapMs`），不是每个守护各拿 `now+graceMs`——否则 N 个卡死守护会把最坏停机
+  时间放大成 N×grace。
   超时弃管的守护在弃管前被置总线灭火位（quiesce）：其后的总线传输在进内核前被 HAL
   拒绝，只有弃管瞬间已在途的一次调用可能再碰一下总线。弃管告警会如实说明：
   `not exited within <N>ms, abandoning slot and quiescing its bus access (HAL will refuse further transfers; an in-flight call may still touch the bus once)`，
