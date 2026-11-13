@@ -258,12 +258,120 @@ TH_TEST(hot_sql_plan_drop_and_new_table_deletion_keep_only_planned_effects) {
 	const auto newDeleted = planner.build("CREATE TABLE Vars (name String, value String);"
 		"INSERT INTO Vars (name, value) VALUES ('v0', '1'); DELETE FROM Vars;");
 	TH_CHECK(newDeleted.deletions.dels.empty());
-	TH_CHECK(newDeleted.deletions.newTableDels.size() == 1);
+	/* CREATE+INSERT+DELETE 的新表：readSQL 已在影子上删除，提交段直接用最终
+	 * 形态（header 一行）；不得再按删除行数 popRows（旧实现会二次删除）。 */
 	TH_CHECK(newDeleted.insertions.newTables.at(0).rows() == 1);
 	const auto newDropped = planner.build("CREATE TABLE Vars (name String, value String);"
 		"INSERT INTO Vars (name, value) VALUES ('v0', '1'); DELETE FROM Vars; DROP TABLE Vars;");
 	TH_CHECK(newDropped.insertions.newTables.empty());
 	TH_CHECK(newDropped.mutations.droppedTables == std::set<std::string>{"Vars"});
+}
+
+TH_TEST(hot_sql_plan_rejects_non_numeric_existing_number_columns) {
+	HotPlanFixture f("CREATE TABLE Vars (name String, value Number);");
+	const bot::HotSqlPlanner planner(f.matrices, f.registry);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "declared Number, but value 'abc' is not numeric",
+		planner.build("INSERT INTO Vars (name, value) VALUES ('v1', 'abc');"));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "invalid expression",
+		planner.build("INSERT INTO Vars (name, value) VALUES ('v1', '$(1+)');"));
+	/* 合法数值与表达式照常可规划。 */
+	const auto ok = planner.build(
+		"INSERT INTO Vars (name, value) VALUES ('v1', '$(1+2)');");
+	TH_CHECK(ok.insertions.appends.size() == 1);
+}
+
+TH_TEST(hot_sql_plan_update_validates_existing_number_columns) {
+	/* UPDATE 与 INSERT 走同一条新行校验：readSQL 把改后行以 kInsertedRowOrigin
+	 * 追加，planHotInsertions 必须把它当新增行重新校验——否则 Number 列的
+	 * 坏值会绕过 INSERT 侧防线从 UPDATE 流进驱动。 */
+	HotPlanFixture f("CREATE TABLE Vars (name String, value Number);"
+		"INSERT INTO Vars (name, value) VALUES ('v0', 1);");
+	const bot::HotSqlPlanner planner(f.matrices, f.registry);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "declared Number, but value 'abc' is not numeric",
+		planner.build("UPDATE Vars SET value = 'abc' WHERE name = 'v0';"));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "invalid expression",
+		planner.build("UPDATE Vars SET value = '$(1+)' WHERE name = 'v0';"));
+	const auto ok = planner.build("UPDATE Vars SET value = '$(1+2)' WHERE name = 'v0';");
+	TH_CHECK(ok.mutations.updatedRows.at("Vars") == 1);
+}
+
+TH_TEST(hot_sql_plan_accepts_number_placeholder_on_existing_tables) {
+	/* '-' 在 Number 列上与启动期同一语义：占位符放行，由矩阵继承解析。
+	 * 既验证 INSERT 与 UPDATE 两条入口，也钉住「不把 '-' 当非数值」的判据。 */
+	HotPlanFixture f("CREATE TABLE Vars (name String, value Number);"
+		"INSERT INTO Vars (name, value) VALUES ('v0', 1);");
+	const bot::HotSqlPlanner planner(f.matrices, f.registry);
+	const auto ins = planner.build("INSERT INTO Vars (name, value) VALUES ('v1', '-');");
+	TH_CHECK(ins.insertions.appends.size() == 1);
+	TH_CHECK(ins.insertions.appends[0].second.at(0).at(1) == "-");
+	const auto upd = planner.build("UPDATE Vars SET value = '-' WHERE name = 'v0';");
+	TH_CHECK(upd.mutations.updatedRows.at("Vars") == 1);
+}
+
+TH_TEST(hot_sql_plan_rejects_unsafe_new_row_names_and_bus_paths) {
+	HotPlanFixture f(kPlanSql);
+	const bot::HotSqlPlanner planner(f.matrices, f.registry);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "不是合法变量名",
+		planner.build("INSERT INTO Vars (name, value) VALUES ('bad name', '1');"));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "不是合法变量名",
+		planner.build("INSERT INTO Vars (name, value) VALUES ('bad/name', '1');"));
+
+	HotPlanFixture buses(
+		"CREATE TABLE I2C (name String, path String);"
+		"CREATE TABLE Daemon (name String, chunk String, driver String, devices String, path String, interval String);");
+	const bot::HotSqlPlanner busPlanner(buses.matrices, buses.registry);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "不是允许的设备路径",
+		busPlanner.build("INSERT INTO I2C (name, path) VALUES ('bus0', '../../etc/passwd');"));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "必须是模块名",
+		busPlanner.build("INSERT INTO Daemon (name, chunk, driver, devices, path, interval)"
+			" VALUES ('d0', 'lib/daemon_probe.lua', '../evil', '-', '/dev/i2c-1', '10');"));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "必须是安全标识符",
+		busPlanner.build("INSERT INTO Daemon (name, chunk, driver, devices, path, interval)"
+			" VALUES ('d0', 'lib/daemon_probe.lua', '-', '../../evil@0x68', '/dev/i2c-1', '10');"));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "不是允许的设备路径",
+		busPlanner.build("INSERT INTO Daemon (name, chunk, driver, devices, path, interval)"
+			" VALUES ('d0', 'lib/daemon_probe.lua', 'MPU6050', '-', '../../etc', '10');"));
+	/* 合法值仍可规划。 */
+	const auto ok = busPlanner.build(
+		"INSERT INTO I2C (name, path) VALUES ('bus0', '/dev/i2c-1');");
+	TH_CHECK(ok.insertions.appends.size() == 1);
+}
+
+TH_TEST(hot_sql_plan_accepts_native_driver_tables) {
+	ModulePathGuard guard("modules:test/cpp");
+	HotPlanFixture f(kPlanSql);
+	const bot::HotSqlPlanner planner(f.matrices, f.registry);
+	/* Time 由宿主 native registry 装配，不需要 modules/Time.lua；旧校验会误拒。 */
+	const auto plan = planner.build(
+		"CREATE TABLE Time (name String); INSERT INTO Time (name) VALUES ('clock0');");
+	TH_CHECK(plan.insertions.newTables.size() == 1);
+	TH_CHECK(plan.insertions.newTables.at(0).getName() == "Time");
+	TH_CHECK(cell(plan.insertions.newTables.at(0), 1, 0) == "clock0");
+}
+
+TH_TEST(hot_sql_plan_new_table_insert_then_delete_keeps_surviving_rows) {
+	ModulePathGuard guard("modules:test/cpp");
+	HotPlanFixture f(kPlanSql);
+	const bot::HotSqlPlanner planner(f.matrices, f.registry);
+	const auto plan = planner.build(
+		"CREATE TABLE Timer (name String);\n"
+		"INSERT INTO Timer (name) VALUES ('a');\n"
+		"INSERT INTO Timer (name) VALUES ('b');\n"
+		"DELETE FROM Timer WHERE name = 'a';\n");
+	TH_CHECK(plan.deletions.dels.empty());
+	TH_CHECK(plan.insertions.newTables.size() == 1);
+	const auto& table = plan.insertions.newTables.at(0);
+	/* header + 存活行 'b'；删除只生效一次（旧 reconcile 会再 pop 一次，变成空表）。 */
+	TH_CHECK(table.rows() == 2);
+	TH_CHECK(cell(table, 1, 0) == "b");
+
+	/* 既有表 INSERT 后再 DELETE 掉同一新行：没有活体变量可摘，但也不得
+	 * 再按「活体原始行号」报错；计划为空、整批可安全提交。 */
+	const auto noop = planner.build(
+		"INSERT INTO Vars (name, value) VALUES ('v9', '9');\n"
+		"DELETE FROM Vars WHERE name = 'v9';\n");
+	TH_CHECK(noop.insertions.appends.empty());
+	TH_CHECK(noop.deletions.dels.empty());
 }
 
 TH_TEST(hot_sql_plan_daemon_slots_come_from_declaration_order_without_threads) {

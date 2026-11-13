@@ -11,6 +11,7 @@
  * 走单点是必须的：controller2/trigger10 这类编号列也算引用列，自带一份判据
  * 就会漏掉它们而留下悬垂指针。 */
 #include "flowcolumn.hpp"
+#include "native_driver.hpp"
 
 #include <set>
 #include <utility>
@@ -18,6 +19,7 @@
 #include "expr.hpp"		/* Expression::parse / exprBody（$(...) 引用扫描） */
 #include "hw_factory.hpp"	/* HwFactory::precheckStructure（合并视图全结构判据） */
 #include "util_except.hpp"	/* IllegalArgumentException / MemoryReader */
+#include "util_num.hpp"		/* isNumericLiteral（Number 列热插校验） */
 #include "util_path.hpp"	/* modulePaths / findExistingModule / checkRelPath */
 #include "util_str.hpp"		/* trim / isSafeIdent / concatMsg */
 
@@ -32,6 +34,7 @@ mt::MatrixObject copyRows(const mt::MatrixObject& src, std::size_t rowBegin, std
 	mt::MatrixBuilder b;
 	b.name(src.getName());
 	for (std::size_t c = 0; c < src.cols(); ++c) { b.item(src(0, c)); }
+	b.columnTypes(src.columnTypes());
 	b.line(0);
 	for (std::size_t r = rowBegin; r < rowEnd; ++r) {
 		for (std::size_t c = 0; c < src.cols(); ++c) { b.item(src(r, c)); }
@@ -77,12 +80,86 @@ void validateNewTableDecl(const std::deque<mt::MatrixObject>& staged, std::size_
 		}
 	}
 	/* 驱动模块存在性：启动期这条缺失要到 build 才以 loadfile 失败暴露，
-	 * 热插路径提前折成一句点名表名的人话（判据与 createLuaVars 同一来源）。 */
-	if (!isAction && tname != "Alias" && tname != "Vars" && tname != "Daemon") {
+	 * 热插路径提前折成一句点名表名的人话（判据与 createLuaVars 同一来源）。
+	 * native 驱动由宿主注册表直接装配，不要求 modules/<表名>.lua。 */
+	if (!isAction && tname != "Alias" && tname != "Vars" && tname != "Daemon"
+			&& !hasNativeDriver(tname)) {
 		if (!findExistingModule(modulePaths(), tname + ".lua")) {
 			throw IllegalArgumentException(concatMsg("热插表：表 '", tname,
 				"' 需要驱动模块 modules/", tname, ".lua，模块路径下找不到它"));
 		}
+	}
+}
+
+/* 热插变量名的字符集：结构脚本里的实例名允许连字符（timer-0/uart-0），
+ * 但不允许空白、点（@Action 列头用点分隔 device.param）、路径分隔符或 NUL。
+ * 只用于热插的新行；启动期脚本是可信文件，保持既有宽松面。 */
+bool isSafeHotVariableName(const std::string& s) {
+	if (s.empty()) { return false; }
+	const unsigned char first = static_cast<unsigned char>(s[0]);
+	if (!(std::isalpha(first) != 0 || s[0] == '_')) { return false; }
+	for (char c : s) {
+		const unsigned char u = static_cast<unsigned char>(c);
+		if (!(std::isalnum(u) != 0 || c == '_' || c == '-')) { return false; }
+	}
+	return true;
+}
+
+/* 设备 path 的允许形态：绝对 /dev 节点、virt-* 虚拟总线、loop:// 回环或
+ * ftdi:// URL。拒绝相对路径、'..' 与任意宿主文件路径（热插输入不可信）。 */
+bool isAllowedDevicePath(const std::string& path) {
+	return path.rfind("/dev/", 0) == 0 || path.rfind("virt-", 0) == 0
+		|| path == "loop://" || path.rfind("ftdi://", 0) == 0;
+}
+
+void validateHotPathColumn(const mt::MatrixObject& st, std::size_t r,
+		const std::string& tname) {
+	const std::int64_t idxPath = st.indexOfCol(0, "path");
+	if (idxPath < 0) { return; }
+	const std::string path = trim(st(r, static_cast<std::size_t>(idxPath)));
+	if (path.empty() || path == "-") { return; }
+	if (!isAllowedDevicePath(path)) {
+		throw IllegalArgumentException(concatMsg("热插表：表 '", tname, "' 第 ",
+			std::to_string(r), " 行的 path '", path,
+			"' 不是允许的设备路径（必须是 /dev/ 节点、virt-*、loop:// 或 ftdi://）"));
+	}
+}
+
+/* Daemon 行的 driver/devices 模块名：必须是安全标识符；devices 的每段
+ * driver@addr... 也校验 driver 段。chunk 已在 validateHotNewRow 单独校验。 */
+void validateHotDaemonColumns(const mt::MatrixObject& st, std::size_t r,
+		const std::string& tname) {
+	const std::int64_t idxDriver = st.indexOfCol(0, "driver");
+	if (idxDriver >= 0) {
+		const std::string driver = trim(st(r, static_cast<std::size_t>(idxDriver)));
+		if (!driver.empty() && driver != "-" && !isSafeIdent(driver)) {
+			throw IllegalArgumentException(concatMsg("热插表：Daemon 表 '", tname,
+				"' 第 ", std::to_string(r), " 行的 driver '", driver,
+				"' 必须是模块名（安全标识符，不允许路径分隔符）"));
+		}
+	}
+	const std::int64_t idxDevices = st.indexOfCol(0, "devices");
+	if (idxDevices < 0) { return; }
+	const std::string devices = trim(st(r, static_cast<std::size_t>(idxDevices)));
+	if (devices.empty() || devices == "-") { return; }
+	std::size_t start = 0;
+	while (start <= devices.size()) {
+		const std::size_t bar = devices.find('|', start);
+		const std::string spec = trim(devices.substr(start,
+			bar == std::string::npos ? std::string::npos : bar - start));
+		if (!spec.empty()) {
+			const std::size_t at = spec.find('@');
+			if (at != std::string::npos) {
+				const std::string driver = trim(spec.substr(0, at));
+				if (driver.empty() || !isSafeIdent(driver)) {
+					throw IllegalArgumentException(concatMsg("热插表：Daemon 表 '", tname,
+						"' 第 ", std::to_string(r), " 行的 devices 驱动名 '", driver,
+						"' 必须是安全标识符（不允许路径分隔符）"));
+				}
+			}
+		}
+		if (bar == std::string::npos) { break; }
+		start = bar + 1;
 	}
 }
 
@@ -101,6 +178,11 @@ void validateHotNewRow(const HwLookup& registry, const mt::MatrixObject& st,
 			throw IllegalArgumentException(concatMsg(
 				"热插表：表 '", tname, "' 第 ", std::to_string(r), " 行的 name 列为空"));
 		}
+		if (!isSafeHotVariableName(v)) {
+			throw IllegalArgumentException(concatMsg("热插表：表 '", tname, "' 第 ",
+				std::to_string(r), " 行的 name '", v,
+				"' 不是合法变量名（字母/数字/下划线/连字符，且以字母或下划线开头）"));
+		}
 		/* 重名判据的 doomed 豁免（先删后建模式）：UPDATE 同名重建的行
 		 * 复用旧名，而旧名此刻仍挂在注册表上（本批次的物理摘除排在
 		 * 插入之前执行）——不豁免会把「改写」误判成「重名」。豁免只在
@@ -115,7 +197,12 @@ void validateHotNewRow(const HwLookup& registry, const mt::MatrixObject& st,
 				"（结构里已有同名变量，或本批次内重复）"));
 		}
 	}
+	if (tname == "I2C" || tname == "SPI" || tname == "UART") {
+		validateHotPathColumn(st, r, tname);
+	}
 	if (tname == "Daemon") {
+		validateHotDaemonColumns(st, r, tname);
+		validateHotPathColumn(st, r, tname);
 		const std::int64_t idxChunk = st.indexOfCol(0, "chunk");
 		if (idxChunk < 0) {
 			throw IllegalArgumentException("热插表：Daemon 表没有 'chunk' 列");
@@ -132,6 +219,23 @@ void validateHotNewRow(const HwLookup& registry, const mt::MatrixObject& st,
 					"' 第 ", std::to_string(r), " 行的 chunk '", chunk,
 					"' 必须是模块路径下存在的相对路径（热插不允许绝对路径/目录穿越）"));
 			}
+		}
+	}
+	/* Number 列的类型只在声明期存在（矩阵只驻留文本）；MatrixObject 现在
+	 * 保存 columnTypes，故对既有表的热插 INSERT/UPDATE 也能做与启动期
+	 * SqlEngine 相同的校验，不再让 'abc' 静默流进驱动参数。 */
+	for (std::size_t c = 0; c < st.cols(); ++c) {
+		if (st.columnType(c) != "Number") { continue; }
+		const std::string value = trim(st(r, c));
+		if (value == "-") { continue; }
+		if (auto body = exprBody(value)) {
+			Expression::parse(*body);	/* 语法早报；标识符在装配期判定 */
+			continue;
+		}
+		if (!isNumericLiteral(value)) {
+			throw IllegalArgumentException(concatMsg(
+				"Column '", st(0, c), "' of table '", tname,
+				"' is declared Number, but value '", value, "' is not numeric."));
 		}
 	}
 }
@@ -164,11 +268,15 @@ HotSqlPlan HotSqlPlanner::build(const std::string& sql) const {
 	const auto& delPlan = plan.deletions;
 	plan.insertions = planHotInsertions(staged, liveCount, muts, delPlan);
 	auto& insPlan = plan.insertions;
-	reconcileNewTableDels(staged, delPlan, insPlan);
 
 	/* 空表 DROP（表壳动了、行没动）也算变更：判据必须包含 droppedTables，
-	 * 否则「DROP 一张本来就没有数据行的表」会被误判成「本批次什么都没做」。 */
-	if (insPlan.appends.empty() && insPlan.newTables.empty() && insPlan.actionMats.empty()
+	 * 否则「DROP 一张本来就没有数据行的表」会被误判成「本批次什么都没做」。
+	 * INSERT 后 DELETE 掉新增行（净零）也应放行：SQL 确实发生了行级变更，
+	 * 只是没有活体变量可摘；行级记账为空不代表语句是 SELECT。 */
+	const bool hasRowMutations = !muts.insertedRows.empty()
+		|| !muts.deletedRows.empty() || !muts.updatedRows.empty();
+	if (!hasRowMutations
+			&& insPlan.appends.empty() && insPlan.newTables.empty() && insPlan.actionMats.empty()
 			&& delPlan.dels.empty() && muts.droppedTables.empty()) {
 		throw IllegalArgumentException("热插表：本批次没有任何 CREATE/INSERT/DELETE/DROP/UPDATE 变更"
 			"（SELECT 是只读查询，请用 query_sql / REPL 的 /sql）");
@@ -186,8 +294,9 @@ HotSqlPlan HotSqlPlanner::build(const std::string& sql) const {
  *     误判成「重名」而拒绝；
  *  ② hw 指针必须在任何插入之前取好：先建后拆下按名 find 会命中新注册的
  *     同名变量、摘错对象。
- * 批次新建表的删除对账（popRows）依赖 newTables——那是阶段 2 的产物，
- * 只能延后（newTableDels 收集，阶段 2.4 处理）。 */
+ * 新建表的删除不需要对账：readSQL 已在影子表上把行擦掉，newTables 拿到的
+ * 就是最终形态；旧实现再按「删除行数」popRows 一次，造成二次删除（2026-11
+ * 修复）。 */
 HotSqlPlan::Deletes HotSqlPlanner::planHotDeletes(const ScriptLoader::Mutations& muts) const {
 	HotSqlPlan::Deletes out;
 	out.deleteFirst = !muts.updatedRows.empty();
@@ -208,23 +317,14 @@ HotSqlPlan::Deletes HotSqlPlanner::planHotDeletes(const ScriptLoader::Mutations&
 			if (trim(matrices_[k].getName()) == tname) { si = k; break; }
 		}
 		if (si == liveCount) {
-			/* 表不在活体结构里 ⇒ 它是**本批次 CREATE 出来的**：撤销范围为空且必须
-			 * 为空（这些行从未装配、从未注册、从未上电，没有硬件可摘、没有断电
-			 * 可做）。但影子上的删除效果必须落到待提交的新表上，否则新表会带着
-			 * 「已被删掉的行」一起装配，凭空长出一个器件。
-			 *
-			 * 这里**不能**按原行号再删一遍：影子（= newTables 里的那张表）已经由
-			 * readSQL 擦过行，行号已前移，二次应用会越界或删错行。
-			 * 删除只会命中尾部的新增行、新增行只可能追加在尾部，故「影子比
-			 * 原始多出的行数」就是必须从尾部丢掉的行数——用 popRows 精确表达，
-			 * 不依赖任何行号。newTables 是阶段 2 的产物，对账延后到阶段 2.4。 */
-			out.newTableDels.emplace_back(tname, rows);
+			/* 表不在活体结构里 ⇒ 它是**本批次 CREATE 出来的**：这些行从未装配、
+			 * 从未注册、从未上电，没有硬件可摘、没有断电可做。影子表已经由
+			 * readSQL 擦过行，提交段直接使用它的最终形态即可，不能在这里再删一次。 */
 			continue;
 		}
 		HotSqlPlan::Deletion p;
 		p.matIdx = si;
 		p.table = tname;
-		p.rows = rows;
 		const std::int64_t idxName = matrices_[si].indexOfCol(0, "name");
 		if (idxName < 0) {
 			throw IllegalArgumentException(concatMsg(
@@ -232,11 +332,15 @@ HotSqlPlan::Deletes HotSqlPlanner::planHotDeletes(const ScriptLoader::Mutations&
 				"无法定位要摘除的硬件变量"));
 		}
 		for (std::size_t r : rows) {
+			/* 本批次 INSERT 的行没有活体原始行号；删它不需要摘任何已装配变量
+			 * （它从未装配），自然也不该按活体行号报「行不存在」。 */
+			if (r == ScriptLoader::Mutations::kInsertedRowOrigin) { continue; }
 			if (r >= matrices_[si].rows()) {
 				throw IllegalArgumentException(concatMsg(
-					"热删除：表 '", tname, "' 的第 ", std::to_string(r), " 行不存在（结构可能已被改动）"));
+					"热删除：表 '", tname, "' 的第 ", std::to_string(r) + " 行不存在（结构可能已被改动）"));
 			}
 			const std::string v = trim(matrices_[si](r, static_cast<std::size_t>(idxName)));
+			p.rows.push_back(r);
 			p.names.push_back(v);
 			out.doomedNames.insert(v);
 			/* 计划期取好对象指针（前移的理由②）：执行期（先删后建模式下已在
@@ -252,7 +356,7 @@ HotSqlPlan::Deletes HotSqlPlanner::planHotDeletes(const ScriptLoader::Mutations&
 			}
 			p.hw.push_back(hw);
 		}
-		out.dels.push_back(std::move(p));
+		if (!p.rows.empty()) { out.dels.push_back(std::move(p)); }
 	}
 	return out;
 }
@@ -281,76 +385,57 @@ HotSqlPlan::Insertions HotSqlPlanner::planHotInsertions(
 
 		if (!isShadow) { validateNewTableDecl(staged, si); }
 
-		/* insCount = 本批次插入到这张表的行数（readSQL 回报的权威计数）。 */
-		const std::size_t insCount = [&]() {
-			auto it = muts.insertedRows.find(tname);
-			return it == muts.insertedRows.end() ? std::size_t(0) : it->second;
-		}();
-		/* 本批次新增行的区间：**插入的行永远在尾部连续一块**（INSERT 只追加、
-		 * 删除只前移它前面的行），故这块 = [st.rows() - insCount, st.rows())。
-		 * 朴素做法「用解析前行数当起点」在同一批既有 INSERT 又有 DELETE 落在
-		 * 这张表上时会错：删除让尾部的插入块整体前移，旧起点就越过了尾端
-		 * （表现为新增行被整批漏掉，甚至行号越界）。insCount 是本批次插入行数
-		 * 的权威来源，与行号无关，故不受删除影响。
-		 * 非影子表（本批次新建）整张都是新增，直接取 [1, rows)。 */
-		const std::size_t newFrom = isShadow
-			? (st.rows() >= insCount ? st.rows() - insCount : 1) : 1;
-		const std::size_t newTo = st.rows();
-		/* 既有表且本批次既没插行也没删行 → 无需进入逐行校验与建计划 */
-		if (isShadow && muts.deletedRows.count(tname) == 0 && insCount == 0) { continue; }
+		/* 新增行由 readSQL 的 rowOrigins 精确标记（哨兵 kInsertedRowOrigin），
+		 * 不再假设「插入块永远在尾部」：INSERT 后再 DELETE 掉插入行时尾部
+		 * 已经不是新增块，旧公式会越界/漏行。 */
+		const auto originsIt = muts.rowOrigins.find(tname);
+		auto isNewRow = [&](std::size_t r) {
+			if (!isShadow) { return true; }
+			if (originsIt == muts.rowOrigins.end() || r >= originsIt->second.size()) {
+				return false;
+			}
+			return originsIt->second[r] == ScriptLoader::Mutations::kInsertedRowOrigin;
+		};
+
+		std::vector<std::size_t> newRows;
+		for (std::size_t r = 1; r < st.rows(); ++r) {
+			if (isNewRow(r)) { newRows.push_back(r); }
+		}
+		/* 既有表本批次没有插入行：DELETE / 外键校验走 planHotDeletes，无需建插入计划。 */
+		if (isShadow && newRows.empty()) { continue; }
 
 		const std::int64_t idxName = st.indexOfCol(0, "name");
-		for (std::size_t r = newFrom; r < newTo; ++r) {
+		for (std::size_t r : newRows) {
 			validateHotNewRow(registry_, st, tname, isAction, r, idxName, delPlan,
 				batchNames);
 		}
 
 		if (isAction) {
-			/* Action 瞬态：保留「列头 + 本批次新增行」成一张独立矩阵（不入活体）。 */
-			if (newTo > newFrom) { out.actionMats.push_back(copyRows(st, newFrom, newTo)); }
-		} else if (isShadow) {
-			if (newTo > newFrom) {
-				std::vector<std::vector<std::string>> rows;
-				for (std::size_t r = newFrom; r < newTo; ++r) { rows.push_back(rowOf(st, r)); }
-				out.appends.emplace_back(si, std::move(rows));
+			/* Action 瞬态：列头 + 本批次新增行（保持原行序）成一张独立矩阵。 */
+			if (!newRows.empty()) {
+				mt::MatrixBuilder b;
+				b.name(st.getName());
+				for (std::size_t c = 0; c < st.cols(); ++c) { b.item(st(0, c)); }
+				b.columnTypes(st.columnTypes());
+				b.line(0);
+				for (std::size_t r : newRows) {
+					for (std::size_t c = 0; c < st.cols(); ++c) { b.item(st(r, c)); }
+					b.line(static_cast<std::int64_t>(r));
+				}
+				out.actionMats.push_back(b.take());
 			}
+		} else if (isShadow) {
+			std::vector<std::vector<std::string>> rows;
+			rows.reserve(newRows.size());
+			for (std::size_t r : newRows) { rows.push_back(rowOf(st, r)); }
+			out.appends.emplace_back(si, std::move(rows));
 		} else {
-			/* 本批次新建的表：直接取影子即可——影子已经带着本批次的插入与删除
-			 * （readSQL 就在这个容器上改），故「先 CREATE 再 INSERT 再 DELETE」
-			 * 的新表到这里已经是删干净的样子，不会凭空长出一个已删掉的器件。
-			 * 切勿在这里再应用一次删除：行号已随擦除前移，二次应用会越界或删错行。 */
+			/* 本批次新建的表：影子已经是最终形态（readSQL 已应用插入与删除），
+			 * 直接整表提交；绝不在这里二次应用删除。 */
 			out.newTables.push_back(st);
 		}
 	}
 	return out;
-}
-
-/* ---- 阶段 2.4：批次新建表的删除对账（原阶段 2.5 的 newTable 分支，2026-09-23
- * 热更新随计划前移拆出）----
- * 计划本体（dels / doomedNames / hw 指针 / daemonNameIndex）已前移到阶段 1.5
- * （见其注释）；本段只处理「表不在活体里 ⇒ 本批次 CREATE 出来的」的删除——
- * 撤销范围为空且必须为空（这些行从未装配、从未注册、从未上电，没有硬件可
- * 摘、没有断电可做），但影子上的删除效果必须落到待提交的新表上，否则新表
- * 会带着「已被删掉的行」一起装配，凭空长出一个器件。
- *
- * 这里**不能**按原行号再删一遍：影子（= newTables 里的那张表）已经由
- * readSQL 擦过行，行号已前移，二次应用会越界或删错行。删除只会命中尾部的
- * 新增行、新增行只可能追加在尾部，故「影子比原始多出的行数」就是必须从
- * 尾部丢掉的行数——用 popRows 精确表达，不依赖任何行号。对账要读 newTables
- * （阶段 2 的产物），故只能排在其后。 */
-void HotSqlPlanner::reconcileNewTableDels(const std::deque<mt::MatrixObject>& staged,
-		const HotSqlPlan::Deletes& delPlan, HotSqlPlan::Insertions& insPlan) {
-	for (const auto& [tname, rows] : delPlan.newTableDels) {
-		mt::MatrixObject* nt = mt::findByName(insPlan.newTables, tname);
-		if (nt == nullptr) { continue; }	/* 该新表随后又被 DROP：影子已整表擦除 */
-		for (const auto& st : staged) {
-			if (trim(st.getName()) != tname) { continue; }
-			const std::size_t appended = st.rows() > 0 ? st.rows() - 1 : 0;
-			const std::size_t keep = rows.size() >= appended ? 0 : appended - rows.size();
-			if (appended > keep) { nt->popRows(appended - keep); }
-			break;
-		}
-	}
 }
 
 /* ---- 阶段 3：全结构判据 + 引用完整性（对「提交之后的视图」，2026-09-23

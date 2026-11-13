@@ -97,6 +97,29 @@ TH_TEST(sql_engine_matches_legacy_on_quoted_punctuation) {
 	requireSame(viaEngine(sql), viaLegacy(sql));
 }
 
+TH_TEST(sql_engine_matches_legacy_on_number_placeholder) {
+	/* Number 列的 '-' 是矩阵占位符，不是数值字面量：两个结构加载器都必须
+	 * 放行并原样驻留，后续由矩阵 inherited() 解析为上一行的数值。 */
+	const std::string sql =
+		"CREATE TABLE Timer (name String, delay Number);\n"
+		"INSERT INTO Timer (name, delay) VALUES ('t0', 50);\n"
+		"INSERT INTO Timer (name, delay) VALUES ('t1', '-');\n";
+	const std::deque<mt::MatrixObject> tables = viaEngine(sql);
+	requireSame(tables, viaLegacy(sql));
+	TH_CHECK(tables.size() == 1);
+	TH_CHECK(fx::cell(tables[0], 2, 1) == "-");
+	TH_CHECK(tables[0].inherited(std::size_t{2}, std::size_t{1}) == "50");
+}
+
+TH_TEST(sql_engine_rejects_non_numeric_number_column) {
+	/* 生产加载器与旧 loader 都对 Number 列的非数值字面量报错；'-' 是唯一
+	 * 放行的占位符（见上一条），不能借占位符把 'abc' 之类漏进结构。 */
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "invalid value 'abc'",
+		viaEngine("CREATE TABLE T (v Number); INSERT INTO T (v) VALUES (abc);"));
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "not numeric",
+		viaLegacy("CREATE TABLE T (v Number); INSERT INTO T (v) VALUES (abc);"));
+}
+
 TH_TEST(sql_engine_matches_legacy_on_a_real_virt_fixture) {
 	const std::string sql = readAll("robots/test/ads1015_virt.sql");
 	requireSame(viaEngine(sql), viaLegacy(sql));

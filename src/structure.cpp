@@ -30,6 +30,7 @@
 #include "script_loader.hpp"
 #include "sqlparse.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <deque>
 #include <set>
@@ -59,9 +60,8 @@ struct ReadSqlState {
 	std::set<std::string> createdHere;
 	std::set<std::string> droppedHere;
 	/* 本批次被 INSERT/DELETE/UPDATE（改**行**）触碰过的表名。DROP（撤**表**）与
-	 * UPDATE（改写行 = 擦原行 + 尾部追加改后行）都要求自己是本批次针对该表的
-	 * **唯一**行级语句：与其它行级语句同批会打乱 applySql 靠 insertedRows 划
-	 * 「新增行区间（尾部连续块）」的算法（被删掉的新增行不在尾部连续块里），且
+	 * UPDATE（改写行 = 擦原行 + 追加改后行）都要求自己是本批次针对该表的
+	 * **唯一**行级语句：混批会让提交/回滚的语义与审计数字复杂化，且
 	 * 「加了又整表撤下」本就无意义——拆成两批即可。CREATE 不算触碰：本批次新建后
 	 * 又被 DROP 有专门路径（新建后被 UPDATE 则直接拒绝，见 UPDATE 分支）。 */
 	std::set<std::string> touchedHere;
@@ -134,10 +134,9 @@ struct ReadSqlState {
 	}
 
 	/* 带记账的尾部追加（INSERT 的 VALUES 与 UPDATE 的改后行共用，单点）：追加数据行、
-	 * 维护「当前行号 → 原始行号」映射（新增行在原始坐标里也是新的一行：用当前行数
-	 * 当它的原始行号——此刻它还没被任何删除前移过；删掉它时这条映射会被剔除，而
-	 * 调用方拿到该原始行号后只在「本批次新增区间」里找它），并把本批次插入行数
-	 * 计入 Mutations.insertedRows（UPDATE 的改后行同样计数：它就是「本批次新增行」）。 */
+	 * 维护「当前行号 → 原始行号」映射。新行没有活体原始行号，记
+	 * kInsertedRowOrigin 哨兵；删掉它时该哨兵进入 deletedRows，热插计划据此
+	 * 区分「活体行」与「本批次新增行」。 */
 	void appendRowTracked(mt::MatrixObject* root, const std::string& target,
 			std::vector<std::string> values) {
 		root->appendRow(std::move(values), 0);
@@ -153,7 +152,7 @@ struct ReadSqlState {
 				rowOrigin[oi].push_back(r);	/* 既有行，不含刚追加的这行 */
 			}
 		}
-		rowOrigin[oi].push_back(root->rows() - 1);
+		rowOrigin[oi].push_back(ScriptLoader::Mutations::kInsertedRowOrigin);
 		if (mutations != nullptr) { ++mutations->insertedRows[target]; }
 	}
 
@@ -205,7 +204,13 @@ struct ReadSqlState {
 		}
 		mt::MatrixBuilder b;
 		b.name(eve.create.tableName);
-		for (const auto& col : eve.create.tableColumns) { b.item(col.name); }
+		std::vector<std::string> types;
+		types.reserve(eve.create.tableColumns.size());
+		for (const auto& col : eve.create.tableColumns) {
+			b.item(col.name);
+			types.push_back(col.type_ == sql4cj::VarType::Number ? "Number" : "String");
+		}
+		b.columnTypes(std::move(types));
 		b.line(0);
 		out.push_back(b.take());
 		createdHere.insert(eve.create.tableName);
@@ -523,6 +528,14 @@ void ScriptLoader::readSQL(bot::Reader& input, std::deque<mt::MatrixObject>& out
 		case sql4cj::EventType::DROP_TABLE:   st.onDrop(eve);   break;
 		case sql4cj::EventType::UPDATE_TABLE: st.onUpdate(eve); break;
 		default: break;
+		}
+	}
+	if (mutations != nullptr) {
+		const std::size_t n = std::min(out.size(), st.rowOrigin.size());
+		for (std::size_t i = 0; i < n; ++i) {
+			if (!st.rowOrigin[i].empty()) {
+				mutations->rowOrigins[trim(out[i].getName())] = st.rowOrigin[i];
+			}
 		}
 	}
 }

@@ -426,6 +426,11 @@ void validateNumberColumn(const std::string& table, const Column& column,
 		const std::string& value) {
 	if (column.type != "Number") { return; }
 	const std::string text = trim(value);
+	/* '-' 是矩阵占位符（继承上一行），不是字面量：与 String 列同一语义，
+	 * 放行给矩阵层。首行 '-' 按 matrix 的既有约定原样保留（消费方决定
+	 * 含义）——此处不能当数值校验失败，否则 Number 列无法使用 - 继承，
+	 * 与 INSERT 报错里的「use '-' to inherit」自相矛盾。 */
+	if (text == "-") { return; }
 	if (text.size() >= 3 && text.rfind("$(", 0) == 0 && text.back() == ')') {
 		return;  // 表达式在运行期求值，解析期只校验语法（由表达式层负责）
 	}
@@ -446,7 +451,13 @@ std::deque<mt::MatrixObject> readTables(sqlite3* db, const std::vector<Table>& s
 		}
 		mt::MatrixBuilder builder;
 		builder.name(table.name);
-		for (const Column& column : table.columns) { builder.item(column.name); }
+		std::vector<std::string> types;
+		types.reserve(table.columns.size());
+		for (const Column& column : table.columns) {
+			builder.item(column.name);
+			types.push_back(column.type);
+		}
+		builder.columnTypes(std::move(types));
 		builder.line(1);
 		std::int64_t rowNumber = 1;
 		while (sqlite3_step(stmt) == SQLITE_ROW) {

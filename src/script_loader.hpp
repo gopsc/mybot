@@ -32,16 +32,23 @@ public:
 	 * （name 列取值），供生效摘要与审计对账。两者都只增不改——调用方据新增部分
 	 * 判断本批次的影响面。 */
 	struct Mutations {
+		/* 本批次新增行的「原始坐标」哨兵。新行没有活体原始行号；用哨兵与
+		 * 既有行的真实 origin 区分，DELETE 命中本批次新增行时不会被误当成
+		 * 「活体第 N 行」去摘（否则会越界/错删）。 */
+		static constexpr std::size_t kInsertedRowOrigin = static_cast<std::size_t>(-1);
+
 		std::map<std::string, std::vector<std::size_t>> deletedRows;
 		std::vector<std::string> deletedNames;
-		/* 每表本批次**插入的行数**（按表名）。调用方（applySql 的影子容器对既有
-		 * 表是全量拷贝）靠它划出「哪些行是本批次新增」——不能用「当前行数 >
-		 * 解析前行数」代替：一条 INSERT 与一条 DELETE 落在同一张表上时净行数
-		 * 可能不变，那个判据会把新增行整批漏掉（既装配不出来，也不进瞬态 Action）。
-		 * 表名在**本批次 CREATE 出来的表**上也会出现（其插入行数即全表数据行数）。
-		 * UPDATE 的分解实现（改写行 = 擦原行 + 尾部追加改后行）**同样计数**：
-		 * 改后行就是「本批次新增行」，靠本计数进入新增区间；被改写的原始行另计入
-		 * deletedRows（原始坐标）。 */
+		/* 每表**当前影子行** → 原始行号（与影子容器当前行同序，含行 0 列头）。
+		 * 只记录本批次被改过的表；未出现在 map 里的表 = 从未改动（全恒等）。
+		 * 新增行值为 kInsertedRowOrigin。热插计划据此精确挑出「本批次新增行」，
+		 * 不再假设新增块永远在尾部——INSERT 后再 DELETE 掉插入行时尾部假设
+		 * 会越界（2026-11 修复）。 */
+		std::map<std::string, std::vector<std::size_t>> rowOrigins;
+		/* 每表本批次**插入的行数**（按表名；UPDATE 的改后行、INSERT 的行都计数）。
+		 * 计数只作账本/摘要；精确定位哪些当前行是新增行看 rowOrigins（下方），
+		 * 不能再用「当前行数 - 插入数」推尾部区间——INSERT 后再 DELETE 掉插入行
+		 * 会让尾部假设失效。 */
 		std::map<std::string, std::size_t> insertedRows;
 		/* 每表本批次**被 UPDATE 改写的行数**（按表名，2026-09-23 热更新）。两个
 		 * 用途：① applySql 据此判定「本批次含改写」→ 切换为先删后建执行序（见

@@ -89,7 +89,6 @@ std::string HotSqlService::apply(const std::string& sql, std::int64_t graceMs) {
 	 *  1   解析到影子容器（活体一字未动；readSQL 直接在影子上落删除）；
 	 *  1.5 备删计划（planHotDeletes——先删后建的两条硬前提都要求它在插入之前）；
 	 *  2   建计划 + 只读全量校验（planHotInsertions）；
-	 *  2.4 批次新建表的删除对账（reconcileNewTableDels）；
 	 *  3   合并视图判据：全结构消费判据 + 引用完整性（checkMergedView）；
 	 *  4   提交 + 增量装配 + 上电（commitHotBatch——插入段任何一步失败 ⇒ 全回滚）；
 	 *  4.6 热删除物理执行（executeHotDeletes，两个执行序按 deleteFirst 分派）；
@@ -171,9 +170,9 @@ std::string HotSqlService::summarizeHotOutcome(const CommitOutcome& committed,
 }
 
 /* ==================== HotSqlPlanner：只读计划层 ====================
- * build / planHotDeletes / planHotInsertions / reconcileNewTableDels /
- * checkMergedView 的实现已整体迁至 hotsql_plan.cpp（2026-10-01 TU 拆分），
- * 阶段编号（1/1.5/2/2.4/3）的判据与理由注释随实现迁移。 */
+ * build / planHotDeletes / planHotInsertions / checkMergedView 的实现已整体
+ * 迁至 hotsql_plan.cpp（2026-10-01 TU 拆分），阶段编号（1/1.5/2/3）的判据
+ * 与理由注释随实现迁移。 */
 
 /* ---- 阶段 4：提交 + 增量装配 + 上电（插入段任何一步失败 ⇒ 全回滚）----
  * deleteFirst 批次的物理删除已在 apply（本函数之前）执行，其结果经
@@ -391,11 +390,13 @@ HotSqlService::HotDeleteOutcome HotSqlService::executeHotDeletes(
 		std::size_t row = 0;
 		std::string name;
 		MatrixVars_Hardware* hw = nullptr;
+		bool isDaemon = false;
 	};
 	std::vector<Doomed> order;
 	for (const HotSqlPlan::Deletion& p : plans) {
 		for (std::size_t k = 0; k < p.rows.size(); ++k) {
-			order.push_back({p.matIdx, p.rows[k], p.names[k], p.hw[k]});
+			order.push_back({p.matIdx, p.rows[k], p.names[k], p.hw[k],
+				p.table == "Daemon"});
 		}
 	}
 	std::sort(order.begin(), order.end(), [](const Doomed& a, const Doomed& b) {
@@ -429,6 +430,7 @@ HotSqlService::HotDeleteOutcome HotSqlService::executeHotDeletes(
 
 	/* 4.6.3 逆序断电（逐项容错并点名；失败即中止剩余项） */
 	std::vector<std::string> failures;
+	std::set<const DaemonRunner*> deadRunners;
 	std::size_t attempted = 0;
 	for (const Doomed& d : order) {
 		if (stopRequested()) {
@@ -442,6 +444,14 @@ HotSqlService::HotDeleteOutcome HotSqlService::executeHotDeletes(
 		} catch (const std::exception& e) {
 			failures.push_back(d.name + ": " + e.what());
 			break;		/* 中止剩余项：继续硬闯只在别的器件上叠加失败 */
+		}
+		if (d.isDaemon) {
+			auto slot = daemonNameIndex.find(d.name);
+			if (slot == daemonNameIndex.end() || slot->second >= daemons_.size()) {
+				throw IllegalArgumentException(concatMsg(
+					"热删除：守护 '", d.name, "' 找不到对应的守护线程登记槽（内部不一致）"));
+			}
+			deadRunners.insert(daemons_.at(slot->second).get());
 		}
 		++out.deletedVars;
 		out.deletedNames.push_back(d.name);
@@ -460,7 +470,7 @@ HotSqlService::HotDeleteOutcome HotSqlService::executeHotDeletes(
 			}
 			for (auto& [mi, rs] : byMat) { perTable.emplace_back(mi, std::move(rs)); }
 		}
-		applyHotDeleteConsistency(perTable, removed, dyingHolders, out);
+		applyHotDeleteConsistency(perTable, removed, deadRunners, out);
 	}
 
 	if (!failures.empty()) {
@@ -483,7 +493,7 @@ HotSqlService::HotDeleteOutcome HotSqlService::executeHotDeletes(
 void HotSqlService::applyHotDeleteConsistency(
 		const std::vector<std::pair<std::size_t, std::vector<std::size_t>>>& perTable,
 		const std::set<MatrixVars_Hardware*>& removed,
-		const std::vector<std::shared_ptr<DaemonRunner>>& dyingHolders,
+		const std::set<const DaemonRunner*>& deadRunners,
 		HotDeleteOutcome& out) {
 	/* ① 元数据提供者：指向被删行的整条摘除。判据是「矩阵 + 行号」而不是
 	 * 引用相等——矩阵是 std::deque 的元素，地址稳定（这正是选 deque 的
@@ -514,10 +524,9 @@ void HotSqlService::applyHotDeleteConsistency(
 		structures_.removeRows(mi, rs);
 		out.deletedRows += rs.size();
 	}
-	/* ③ 守护登记表：按保留项重建（不做 resize——删中间项会让尾部前移，
-	 * resize 只能表达「砍掉尾巴」）。 */
-	std::set<const DaemonRunner*> deadRunners;
-	for (const auto& h : dyingHolders) { deadRunners.insert(h.get()); }
+	/* ③ 守护登记表：只摘**已成功断电**的守护（失败/未尝试的仍留在登记表与
+	 * 结构里，二者保持一致）；按保留项重建——不做 resize，删中间项会让
+	 * 尾部前移。 */
 	daemons_.remove(deadRunners);
 	/* ④ 撤注册（所有权 + 名字索引 + 流引用） */
 	registry_.removeBatch(removed);

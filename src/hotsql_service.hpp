@@ -71,13 +71,13 @@ class HotSqlService {
 	 * 只对**已成功断电**的部分落实：① 摘除指向被删行的 MetaProvider → ①′ 重锚定
 	 * 存活提供者的行号（removeRows 保序擦除会让其后行前移）→ ② 擦结构行 →
 	 * ③ 按保留项重建守护登记表 → ④ registry_.removeBatch 撤注册。perTable 是
-	 * 「矩阵下标 → 被删行号（原始坐标，升序）」、removed 是已断电变量指针集，
-	 * 二者由调用方从销毁序清单算好传入——本方法不认 Doomed，只认这两个派生
-	 * 视图与 dyingHolders。deletedRows 累加进 out。语义与顺序理由见实现处。 */
+	 * 「矩阵下标 → 被删行号（原始坐标，升序）」、removed 是已断电变量指针集、
+	 * deadRunners 是**已成功断电**的守护（未删成的守护仍留在登记表），三者由
+	 * 调用方从销毁序清单算好传入——本方法不认 Doomed，只认派生视图。 */
 	void applyHotDeleteConsistency(
 		const std::vector<std::pair<std::size_t, std::vector<std::size_t>>>& perTable,
 		const std::set<MatrixVars_Hardware*>& removed,
-		const std::vector<std::shared_ptr<DaemonRunner>>& dyingHolders,
+		const std::set<const DaemonRunner*>& deadRunners,
 		HotDeleteOutcome& out);
 
 	/* 阶段 4 产物包：提交段的回执计数。mark.seq 不出函数——addedVars 在提交段

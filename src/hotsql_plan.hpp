@@ -38,10 +38,6 @@ struct HotSqlPlan {
 		std::set<std::string> doomedNames;	/* 将被摘除的变量名（阶段 2 重名预检豁免用） */
 		std::vector<Deletion> dels;
 		std::map<std::string, std::size_t> daemonNameIndex;	/* 守护名 → 声明序下标 */
-		/* 表不在活体里 ⇒ 本批次 CREATE 出来的删除：撤销范围为空且必须为空，
-		 * 但影子上的删除效果要落到待提交的新表上——对账读 newTables（阶段 2
-		 * 的产物），只能延后到阶段 2.4（reconcileNewTableDels）。 */
-		std::vector<std::pair<std::string, std::vector<std::size_t>>> newTableDels;
 	};
 
 	/* 阶段 2 产物包：建计划（新增行落位 + 新表 + 瞬态 Action），全部只读校验
@@ -70,8 +66,6 @@ class HotSqlPlanner {
 	HotSqlPlan::Insertions planHotInsertions(const std::deque<mt::MatrixObject>& staged,
 		std::size_t liveCount, const ScriptLoader::Mutations& muts,
 		const HotSqlPlan::Deletes& delPlan) const;
-	static void reconcileNewTableDels(const std::deque<mt::MatrixObject>& staged,
-		const HotSqlPlan::Deletes& delPlan, HotSqlPlan::Insertions& insPlan);
 	void checkMergedView(const HotSqlPlan::Deletes& delPlan,
 		const HotSqlPlan::Insertions& insPlan) const;
 

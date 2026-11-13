@@ -301,18 +301,21 @@ TH_TEST(parser_create_table_records_number_column_type) {
 
 TH_TEST(parser_number_column_accepts_numeric_values) {
 	/* Integer / 小数 / 带符号 / 引号包裹的数值字面量都算数值；
-	 * 值仍按文本驻留（本层不做类型转换）。 */
+	 * 值仍按文本驻留（本层不做类型转换）。`-` 是矩阵占位符而非字面量：
+	 * 与 String 列同一继承语义，放行给矩阵层解析。 */
 	std::vector<Event> eves = events(
 		"CREATE TABLE T ( v Number );\n"
 		"INSERT INTO T ( v ) VALUES ( 42 );\n"
 		"INSERT INTO T ( v ) VALUES ( -1.5 );\n"
 		"INSERT INTO T ( v ) VALUES ( +2e3 );\n"
-		"INSERT INTO T ( v ) VALUES ( '7' );\n");
-	TH_CHECK(eves.size() == 5);
+		"INSERT INTO T ( v ) VALUES ( '7' );\n"
+		"INSERT INTO T ( v ) VALUES ( '-' );\n");
+	TH_CHECK(eves.size() == 6);
 	TH_CHECK(eves[1].insert.tableRows[0][0].value == "42");
 	TH_CHECK(eves[2].insert.tableRows[0][0].value == "-1.5");
 	TH_CHECK(eves[3].insert.tableRows[0][0].value == "+2e3");
 	TH_CHECK(eves[4].insert.tableRows[0][0].value == "7");
+	TH_CHECK(eves[5].insert.tableRows[0][0].value == "-");
 }
 
 TH_TEST(parser_number_column_rejects_non_numeric_value) {

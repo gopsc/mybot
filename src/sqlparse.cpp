@@ -471,7 +471,10 @@ void Parser::validateNumberValues(const std::string& tableName,
 		auto typeIt = schemaIt->second.find(p.columnName);
 		if (typeIt == schemaIt->second.end() || typeIt->second != VarType::Number) { continue; }
 		/* Number 列允许数值字面量或 $(<表达式>)（表达式语法在此早校验，
-		 * 标识符的可达性由 @Vars/元数据层在装配后判定）。 */
+		 * 标识符的可达性由 @Vars/元数据层在装配后判定）。
+		 * '-' 是矩阵占位符（继承上一行），不是字面量——与 String 列同一语义，
+		 * 放行给矩阵层解析；首行 '-' 原样保留，由消费方决定含义。 */
+		if (bot::trim(p.value) == "-") { continue; }
 		if (auto body = bot::exprBody(p.value)) {
 			bot::Expression::parse(*body);
 			continue;

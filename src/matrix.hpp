@@ -8,6 +8,7 @@
 #include <optional>
 #include <ostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "json.hpp"
@@ -46,6 +47,9 @@ class MatrixObject {
 
 	std::string name_;
 	std::vector<std::vector<std::string>> values_;	/* 原始矩阵 */
+	/* 列类型（与列头同序，值 "String"/"Number"；空表/非 SQL 矩阵为空）。
+	 * 结构期热 SQL 的 Number 列校验需要它：矩阵只存文本，不保留 SQL 类型。 */
+	std::vector<std::string> columnTypes_;
 	/* @Struct(name) 的 JSON 体。非空时 values_ 为空，play/read 直接返回它。 */
 	bot::Json json_value_;
 	bool has_json_ = false;
@@ -73,6 +77,14 @@ public:
 	const std::string& getName() const { return name_; }
 	bool hasJson() const { return has_json_; }
 	const bot::Json& jsonValue() const { return json_value_; }
+
+	/* 列类型（与列头同序；未声明的列/非 SQL 矩阵返回空串）。 */
+	void setColumnTypes(std::vector<std::string> types) { columnTypes_ = std::move(types); }
+	const std::vector<std::string>& columnTypes() const { return columnTypes_; }
+	const std::string& columnType(std::size_t col) const {
+		static const std::string empty;
+		return col < columnTypes_.size() ? columnTypes_[col] : empty;
+	}
 
 	/* 嵌套子块只读视图（仅控制块 @if/@while 非空；叶子块恒空）。执行器
 	 * execSequence 递归消费（Stage 3）；Stage 1 惰性加入，尚无填充方。 */
@@ -218,6 +230,10 @@ public:
 	void jsonValue(bot::Json value) {
 		obj_.json_value_ = std::move(value);
 		obj_.has_json_ = true;
+	}
+
+	void columnTypes(std::vector<std::string> types) {
+		obj_.columnTypes_ = std::move(types);
 	}
 
 	bool hasRows() const { return !obj_.values_.empty(); }
