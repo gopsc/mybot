@@ -18,6 +18,9 @@ sudo apt install cmake g++ ninja-build luajit libluajit-5.1-dev \
 - SQLite3：结构 SQL 的解析/执行库
 - libcurl：HTTP 驱动
 - CLI11：命令行解析（已 vendored 在 `third_party/cli11`）
+- nn4cpp（可选）：`Nns` 原生神经网络驱动；默认检测同级 `../nn4cpp` 或
+  `../botprj/nn4cpp`，也可用 `-DMYBOT_NN4CPP_DIR=...` 指定。Eigen 已 vendored
+  在 nn4cpp 内。显式关闭：`-DMYBOT_WITH_NN4CPP=OFF`。
 
 ## 构建与测试
 
@@ -28,7 +31,7 @@ cmake --build build -j4
 ./build/mybot --help
 ```
 
-当前基线：**568 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
+当前基线：**573 个 C++ 单测通过**；ctest 除 `lua_test_camera_v4l2.lua`（需要 `/dev/video0`）外全部通过。
 
 ## 快速开始
 
@@ -40,6 +43,10 @@ cmake --build build -j4
 # 纯软件示例
 ./build/mybot --robot=robots/relay-test.sql \
               --input=scripts/relay-test.mt
+
+# C++ 原生神经网络示例（需构建时启用 nn4cpp）
+./build/mybot --robot=examples/nns/robot.sql --input=examples/nns/train.mt
+./build/mybot --robot=examples/nns/robot.sql --input=examples/nns/predict.mt
 
 # 动作脚本也可以从 stdin 读
 cat scripts/relay-test.mt | ./build/mybot --robot=robots/relay-test.sql

@@ -97,8 +97,69 @@
 | `bitcompat` | Lua 5.1/5.3 位运算兼容库（非驱动） |
 | `Camera` | **摄像头驱动**：V4L2 mmap 取帧、只取硬件编码的 MJPEG（ffi，无第三方库）；`src=<图片>` 为仿真模式。调用参数可带 `width`/`height`（正整数，须同给同缺）：与上次请求不同即重开设备重协商 `VIDIOC_S_FMT`，返回表报**实际协商尺寸**（设备可能就近调档） |
 | `Sim` | **仿真器桥接驱动**：把语义动作以行文本发到外部 `mybot-sim` 的 AF_UNIX socket，只传「动作 + 速度」不传关节角。`range` 走独立 sensor socket；**仿真器缺席＝静默成功**（可视化从端不该打断动作脚本），感知侧相反。协议、动作码 0–10 与场景持久化见历史文档 [sim.md](sim.md)；本仓不包含仿真器服务端 |
+| `Nns` | **C++ 原生神经网络驱动**（`src/driver_nns.cpp`）：在结构 SQL 的 `Nns` 表中创建/加载 MLP，动作里做推理或训练；矩阵运算由 vendored `nn4cpp`（Eigen）完成，不经过 Lua |
 
 > 不依赖 HAL 的模块（如滤波器、virtbus 底座）可用 `luajit`/`lua5.4` 独立调试。
+
+## Nns（原生神经网络）
+
+`Nns` 是 C++ 原生驱动，表名固定为 `Nns`；每行 INSERT 创建一个独立的网络变量。
+模型文件使用 nn4cj 的文本格式（`nn4cj 1`），可由仓颉版 nn4cj 或 `nn4cpp` 读写。
+
+```sql
+CREATE TABLE Nns (
+    name String,               -- 变量名；动作列写作 <name>.<param>
+    layers String,             -- "2,4,1"；path 不存在时必填
+    activation String,         -- 隐藏层激活，缺省 Leaky_ReLU
+    output_activation String,  -- 输出层激活，缺省 Sigmoid
+    learning_rate String,      -- 缺省 0.01
+    optimizer String,          -- sgd（缺省）/ adam
+    beta1 String, beta2 String, epsilon String,
+    alpha String,              -- Leaky_ReLU 的 alpha，缺省 0.1
+    seed String,               -- 可选；每层用 seed + layerIndex
+    path String,               -- 模型文件；存在则加载，不存在则按 layers 创建并保存
+    autosave String            -- 训练/销毁时自动保存，缺省 0
+);
+
+INSERT INTO Nns (name, layers, activation, output_activation,
+                 learning_rate, optimizer, beta1, beta2, epsilon, alpha,
+                 seed, path, autosave)
+VALUES ('nn', '2,4,1', 'Leaky_ReLU', 'Sigmoid', '0.01', 'adam',
+        '-', '-', '-', '-', '42', '', '0');
+```
+
+也可以显式逐层指定激活（长度必须为 `layers` 尺寸数 − 1）：
+
+```sql
+-- activations 列出现时覆盖 activation/output_activation
+CREATE TABLE Nns (name String, layers String, activations String, ...);
+INSERT INTO Nns (...) VALUES ('nn', '2,4,1', 'Leaky_ReLU,Tanh,Sigmoid', ...);
+```
+
+动作协议：
+
+```mt
+@Action
+nn.input0 nn.input1 nn.target0;   # 有 target -> 训练；无 target -> 推理
+  0         1         1;
+@
+```
+
+- 输入/输出向量可写 `input`/`target`（逗号或空格分隔的文本，或 JSON 数组），
+  也可写 `input0, input1, ...` / `target0, target1, ...`（每个数据格是普通数值，
+  最符合 `.mt` 的数值格习惯）。
+- 可选参数：`command`（`predict`/`train`/`save`/`load`/`info`）、`discount`
+  （训练折扣，缺省 1.0）、`save`（本次训练后保存）。动作数据格只认数值；
+  `command` 这类文本参数用 `$(别名)` 间接传入（与 `scripts/music.mt` 同法）。
+- 返回值：推理为 `{result:"OK", output:[...], output0:...}`；训练额外带
+  `loss` 与 `saved`。`Nns` 变量被 `$` 引用时，`read()` 返回模型信息与最近一次
+  输出。
+- `path` 存在则加载（并用 `layers` 列校验维度）；不存在则要求 `layers`，
+  创建后立即保存。`autosave=1` 时训练后和 `destroy` 时自动写回。
+- 优化器、学习率、seed、激活名在 `build` 期校验；未知激活/优化器/维度
+  直接返回 ERR，不会打开或改写模型文件。
+- 构建开关：`-DMYBOT_WITH_NN4CPP=ON`（默认在检测到 `../nn4cpp` 或
+  `../botprj/nn4cpp` 时开启）；关闭时 `Nns` 表不存在，保持原有构建面。
 
 ## 驱动契约
 

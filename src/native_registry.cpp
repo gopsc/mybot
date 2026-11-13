@@ -14,6 +14,9 @@ const std::map<std::string, NativeDriverFactory>& registry() {
 		{"TCP", makeTcpDriver},
 		{"Dev_enum", makeDevEnumDriver},
 		{"I2C_scan", makeI2cScanDriver},
+#ifdef MYBOT_HAVE_NN4CPP
+		{"Nns", makeNnsDriver},
+#endif
 	};
 	return drivers;
 }

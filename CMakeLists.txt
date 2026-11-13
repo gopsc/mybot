@@ -140,6 +140,7 @@ set(MYBOT_CORE_SOURCES
   src/driver_tcp.cpp
   src/driver_dev_enum.cpp
   src/driver_i2c_scan.cpp
+  src/driver_nns.cpp
   # ---- 硬件域：变量基类、Lua/Daemon 变量、注册表与元数据 ----
   src/hardware.cpp
   src/luavar.cpp
@@ -202,6 +203,42 @@ target_link_libraries(mybot_common INTERFACE
   util
 )
 
+# ======================================================================
+# nn4cpp（可选）：Nns 原生驱动依赖的 C++ 神经网络库。
+#
+# 默认在检测到同级 ../nn4cpp 或 ../botprj/nn4cpp 时启用；独立 clone
+# mybot-cpp 且不带 nn4cpp 时自动关闭，保持原有可构建性。显式关闭/指定路径：
+#   -DMYBOT_WITH_NN4CPP=OFF
+#   -DMYBOT_NN4CPP_DIR=/path/to/nn4cpp
+# ======================================================================
+set(_mybot_nn4cpp_default_dir "${CMAKE_CURRENT_SOURCE_DIR}/../nn4cpp")
+if(NOT EXISTS "${_mybot_nn4cpp_default_dir}/CMakeLists.txt"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../botprj/nn4cpp/CMakeLists.txt")
+  set(_mybot_nn4cpp_default_dir "${CMAKE_CURRENT_SOURCE_DIR}/../botprj/nn4cpp")
+endif()
+set(MYBOT_NN4CPP_DIR "${_mybot_nn4cpp_default_dir}" CACHE PATH
+  "Path to the nn4cpp source tree (sibling ../nn4cpp or ../botprj/nn4cpp)")
+if(EXISTS "${MYBOT_NN4CPP_DIR}/CMakeLists.txt")
+  set(_mybot_nn4cpp_default ON)
+else()
+  set(_mybot_nn4cpp_default OFF)
+endif()
+option(MYBOT_WITH_NN4CPP "Build the Nns native driver backed by nn4cpp" ${_mybot_nn4cpp_default})
+if(MYBOT_WITH_NN4CPP)
+  if(NOT EXISTS "${MYBOT_NN4CPP_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+      "MYBOT_WITH_NN4CPP=ON but nn4cpp was not found at '${MYBOT_NN4CPP_DIR}'. "
+      "Clone/build nn4cpp as a sibling directory or set -DMYBOT_NN4CPP_DIR=...")
+  endif()
+  # mybot 只需要库本身；不要在这里顺带构建 nn4cpp 的测试/示例/安装规则。
+  set(NN4CPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(NN4CPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(NN4CPP_INSTALL OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${MYBOT_NN4CPP_DIR}" "${CMAKE_BINARY_DIR}/nn4cpp")
+  target_link_libraries(mybot_common INTERFACE nn4cpp)
+  target_compile_definitions(mybot_common INTERFACE MYBOT_HAVE_NN4CPP=1)
+endif()
+
 add_executable(mybot
   src/main.cpp
   ${MYBOT_CORE_SOURCES}
@@ -249,6 +286,7 @@ add_executable(mybot_tests
   test/cpp/test_mtinclude.cpp
   test/cpp/test_sql_engine.cpp
   test/cpp/test_native_drivers.cpp
+  test/cpp/test_nns.cpp
   test/cpp/test_ftdi.cpp
   src/mtmerge_core.cpp
   ${MYBOT_CORE_SOURCES}

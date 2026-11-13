@@ -4,7 +4,7 @@
 
 ## 结构脚本（.sql）
 
-由内置 SQL4cj 解析器（`src/sqlparse.cpp`）解析，支持 `--` 行注释与 `/* */` 块注释。一组 `CREATE TABLE / INSERT INTO`：每张表对应一类硬件（表名即矩阵名，决定加载哪个驱动，`modules/<矩阵名>.lua`），每行 INSERT 就是一个实例：
+由内置 SQL4cj 解析器（`src/sqlparse.cpp`）解析，支持 `--` 行注释与 `/* */` 块注释。一组 `CREATE TABLE / INSERT INTO`：每张表对应一类硬件（表名即矩阵名，决定加载哪个驱动，`modules/<矩阵名>.lua`），每行 INSERT 就是一个实例。C++ 原生驱动（如 `Time`/`Shell`/`Nns`）由宿主注册表直接装配，不要求有对应的 Lua 模块；`Nns` 的用法见 [drivers.md](drivers.md)。
 
 ```sql
 CREATE TABLE I2C (name String, path String);

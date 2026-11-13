@@ -23,3 +23,6 @@ mybot.llm.conf.json
 
 # 录制模式产物（--record / --record-dir：完整对话 + 图片本体，敏感，不入库）
 recordings/
+
+# Nns 示例运行后生成的模型文件
+examples/nns/model.nn
