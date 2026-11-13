@@ -644,7 +644,21 @@ Json NnsDriver::train(const Json& data) {
 		return error("Nns: save requested but 'path' is empty");
 	}
 
-	const double loss = network_->train(inputMatrix, targetMatrix, discount);
+	std::int64_t repeat = 1;
+	if (const Json* repeatValue = data.find("repeat");
+			repeatValue != nullptr && !repeatValue->isNull()) {
+		const auto value = numberValue(*repeatValue);
+		if (!value || *value < 1.0 || std::floor(*value) != *value
+				|| *value > 1000000.0) {
+			return error("Nns: repeat must be an integer in [1, 1000000]");
+		}
+		repeat = static_cast<std::int64_t>(*value);
+	}
+
+	double loss = 0.0;
+	for (std::int64_t i = 0; i < repeat; ++i) {
+		loss = network_->train(inputMatrix, targetMatrix, discount);
+	}
 	lastLoss_ = loss;
 	hasLoss_ = true;
 	const nn4cpp::Matrix output = network_->predict(inputMatrix);

@@ -18,10 +18,10 @@ cmake --build build -j4
 ## 跑
 
 ```bash
-# 训练（4 行 = 4 次逐样本更新；重复执行会继续训练并自动保存）
+# 训练（30 轮 x 4 个样本 = 120 次逐样本更新；自动保存）
 ./build/mybot --robot=examples/nns/robot.sql --input=examples/nns/train.mt
 
-# 推理（加载 examples/nns/model.nn）
+# 推理（加载 examples/nns/model.nn；XOR 输出应接近 [0, 1, 1, 0]）
 ./build/mybot --robot=examples/nns/robot.sql --input=examples/nns/predict.mt
 ```
 

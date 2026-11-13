@@ -149,8 +149,9 @@ nn.input0 nn.input1 nn.target0;   # 有 target -> 训练；无 target -> 推理
   也可写 `input0, input1, ...` / `target0, target1, ...`（每个数据格是普通数值，
   最符合 `.mt` 的数值格习惯）。
 - 可选参数：`command`（`predict`/`train`/`save`/`load`/`info`）、`discount`
-  （训练折扣，缺省 1.0）、`save`（本次训练后保存）。动作数据格只认数值；
-  `command` 这类文本参数用 `$(别名)` 间接传入（与 `scripts/music.mt` 同法）。
+  （训练折扣，缺省 1.0）、`repeat`（同一行在一次进程内重复训练的次数，缺省 1，
+  用来避免反复启动时 Adam 状态被重置）、`save`（本次训练后保存）。动作数据格
+  只认数值；`command` 这类文本参数用 `$(别名)` 间接传入（与 `scripts/music.mt` 同法）。
 - 返回值：推理为 `{result:"OK", output:[...], output0:...}`；训练额外带
   `loss` 与 `saved`。`Nns` 变量被 `$` 引用时，`read()` 返回模型信息与最近一次
   输出。

@@ -87,6 +87,22 @@ TH_TEST(nns_driver_creates_predicts_trains_and_reads) {
 	TH_CHECK(std::isfinite(trained.find("loss")->getFloat()));
 	TH_CHECK(trained.find("saved") != nullptr && !trained.find("saved")->getBool());
 
+	const bot::Json repeated = driver->call(data({
+		{"input0", bot::JsonFloat(1.0)},
+		{"input1", bot::JsonFloat(0.0)},
+		{"target0", bot::JsonFloat(1.0)},
+		{"repeat", bot::JsonInt(3)},
+	}));
+	TH_CHECK(resultOf(repeated) == "OK");
+	TH_CHECK(repeated.find("loss") != nullptr
+		&& std::isfinite(repeated.find("loss")->getFloat()));
+	TH_CHECK(resultOf(driver->call(data({
+		{"input0", bot::JsonFloat(1.0)},
+		{"input1", bot::JsonFloat(0.0)},
+		{"target0", bot::JsonFloat(1.0)},
+		{"repeat", bot::JsonInt(0)},
+	}))) == "ERR");
+
 	const bot::Json readBack = driver->read(bot::JsonObject());
 	TH_CHECK(resultOf(readBack) == "OK");
 	TH_CHECK(readBack.find("output0") != nullptr);
