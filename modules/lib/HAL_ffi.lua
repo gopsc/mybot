@@ -109,7 +109,7 @@ do
 end
 
 -- 2026-09-30 方案 A 重构：平台常量由后端 consts 表重导出，兼容既有 HAL.* 引用
--- （测试、Camera.lua 等直接访问 HAL.I2C_RDWR / HAL.SPI_IOC_* 等）。
+-- （测试等直接访问 HAL.I2C_RDWR / HAL.SPI_IOC_* 等）。
 local _c = HAL.sys.consts
 HAL.O_CLOEXEC = _c.O_CLOEXEC
 HAL.I2C_RDWR  = _c.I2C_RDWR

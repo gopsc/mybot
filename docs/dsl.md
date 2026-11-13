@@ -28,7 +28,7 @@ INSERT INTO Servo (name, max, min, offset, controller, channel)
 - 列类型支持 `String` / `Number`：值一律以文本驻留（`MatrixObject` 只存 String），`Number` 目前仅在**解析期**对字面量做一次数值校验（整数/小数/带符号/科学计数法合法，空值与 `nan`/`inf` 拒绝），不做运行期类型转换；校验按 INSERT 的列名匹配声明列，报错形如 `Column 'delay' of table 'Timer' is declared Number, but value 'abc' is not numeric.`
 - **方言只认七条语句**：`CREATE TABLE` / `INSERT INTO` / `SELECT * FROM 表;` / `SHOW TABLES;` / `DELETE FROM 表;` / `DROP TABLE 表;` / `UPDATE 表 SET 列 = 值 [, ...];`
   - **SELECT** 仅在 agent 的 `query_sql` 与 REPL `/sql` 里可用（只读，见 [agent.md](agent.md)）。
-  - **SHOW TABLES** 同样只读、同样只在 `query_sql` 与 REPL `/sql` 里可用：列出当前结构的**全部表名与数据行数**（数据行 = 除列头外的行数），形如 `SHOW TABLES (2):` 后逐行 `  表名 (N 行)`。**不带 `WHERE`/`LIKE`**（本方言取向「能一句话说清就够」，要筛某张表的行请用 `SELECT * FROM 表 WHERE ...`）。agent 模式下它还会列出宿主**自动注入**的 `Camera` 表——这在结构脚本摘录里看不到，是「当前到底有哪些表」的唯一权威答案。
+  - **SHOW TABLES** 同样只读、同样只在 `query_sql` 与 REPL `/sql` 里可用：列出当前结构的**全部表名与数据行数**（数据行 = 除列头外的行数），形如 `SHOW TABLES (2):` 后逐行 `  表名 (N 行)`。**不带 `WHERE`/`LIKE`**（本方言取向「能一句话说清就够」，要筛某张表的行请用 `SELECT * FROM 表 WHERE ...`）。
   - **DELETE**（删**行**）、**DROP**（删**表**）与 **UPDATE**（改写**行**）都是**带电变更**：
     只在 REPL `/sql` 与 agent 的 `apply_sql` 里可用（需 `--agent-hot-sql`），在结构脚本 `.sql`
     文件里出现会在解析期报错（机器人尚未上电，没有可变的结构）。

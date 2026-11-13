@@ -95,7 +95,7 @@ cd build && ctest --output-on-failure -R cpp_unit
 
 - `build`/`call`/`destroy` 必须返回带 `result` 键的表（`"OK"` 或 `"ERR"`）；返回非表或漏写 `return` 会被判契约违反并中断。非硬件的协议型模块同样适用——`call(nil)` 必须返 ERR 契约表而非抛 Lua error
 - 硬件驱动使用 `require_driver("i2c"|"spi"|"uart", { name=, build=, call=, destroy= })`，框架自动处理 `arg_table` 入参校验与总线校验（`i2c_pair` / `fd≥0`）、`proto=virt` 虚拟总线注入前置，驱动闭包接收 `ctx.fd`/`ctx.addr` 直接写业务逻辑
-- 非驱动模块（`Relay`/`dummy` 等）入口第一行仍需 `local ok, ek = arg_table(data)` + `if not ok then return ek end`（`drv_common`）——它同时承担入参类型校验与 `proto=virt` 虚拟总线注入前置，手写 `type(data) ~= "table"` 内联检查会绕过注入钩子（`run_all.sh` 的 lint 段会拦；Camera 是唯一豁免，见其头注）
+- 非驱动模块（`Relay`/`dummy` 等）入口第一行仍需 `local ok, ek = arg_table(data)` + `if not ok then return ek end`（`drv_common`）——它同时承担入参类型校验与 `proto=virt` 虚拟总线注入前置，手写 `type(data) ~= "table"` 内联检查会绕过注入钩子（`run_all.sh` 的 lint 段会拦）
 - **模块路径引导固定写法**（多路径加载的前提）：`local mpath = __mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua")`，后续 lib 一律 `dofile(mpath.resolve("lib/xxx.lua"))`。`__mpath` 由宿主建沙箱时注入（逐段探测），直接写 `(env):match("[^:]+")` 只取首段、多路径布局下会失败；`run_all.sh` 的 lint 段会拦
 - `result`/`message`/`mode` 三键由框架保留（见 [dsl.md](dsl.md)）
 - 建议随驱动在文件尾部内嵌 `<矩阵名>_VIRT` 仿真模型，接入 virtbus 回归（见 [virtbus.md](virtbus.md)）

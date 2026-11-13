@@ -309,8 +309,8 @@ add_test(NAME cpp_unit COMMAND mybot_tests)
 set_tests_properties(cpp_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # ======================================================================
-# 常量一致性自检（F-24）：把 Lua 源里硬编码的 ioctl/termios/V4L2 编号
-# 与系统头文件编译期比对——换内核/换架构导致常量漂移时构建即失败；三个二进制
+# 常量一致性自检（F-24）：把 Lua 源里硬编码的 ioctl/termios 编号
+# 与系统头文件编译期比对——换内核/换架构导致常量漂移时构建即失败；两个二进制
 # 再由 run_all.sh 在执行期跑一遍（构建期断言之外的双保险）。
 #
 # A2（2026-09-20 审计）：此前自检把 Lua 里的数字**在 C 里又手抄一遍**，
@@ -318,16 +318,15 @@ set_tests_properties(cpp_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 # HAL.SPI_IOC_WR_MODE 后全部目标仍绿）。现在配置期先用
 # test/gen_const_check.cmake 从 modules/lib/hal_backend_glibc.lua（consts 表，
 # 2026-09-30 方案 A 下沉后的唯一事实源）、modules/lib/hal/uart.lua（两套波特率
-# 映射表，26.2 按域拆分前在 HAL.lua 的 uart 段）、modules/Camera.lua 抽取真实值生成
-# const_lua.h，断言对**两侧**各钉一次：
+# 映射表，26.2 按域拆分前在 HAL.lua 的 uart 段）抽取真实值生成 const_lua.h，
+# 断言对**两侧**各钉一次：
 # Lua 抽取值 == 手抄预期值（抽取生效 + Lua 未漂移）+ 预期值 == 系统头。
 # consts 表走**执行期求值**（luajit + test/lib/dump_consts.lua，2026-10-01 加固：
 # 2026-10-01 P0 的教训「抽取模式与被抽文件的书写风格是同一份契约」由此收口——
-# 契约只剩「后端导出 M.consts 表」）；Camera.lua 仍为纯文本抽取（其顶层会执行
-# 整套 HAL 加载，不宜在配置期跑）。抽不到/执行失败即 FATAL_ERROR（静默生成
+# 契约只剩「后端导出 M.consts 表」）。抽不到/执行失败即 FATAL_ERROR（静默生成
 # 空头会让断言退化成自证，正是 A2 的原始缺陷形态）。
 # 2026-09-25 #8：llm_http.lua 的 CURLOPT 抽取与 test_curl_consts 随 Lua 协议
-# 驱动轨道整条删除——libcurl 已无任何代码使用，该自检无对象。
+# 驱动轨道整条删除。
 # ======================================================================
 set(MYBOT_CONST_LUA_H "${CMAKE_BINARY_DIR}/const_lua.h")
 execute_process(
@@ -343,22 +342,18 @@ endif()
 
 add_executable(test_ioctl_nums test/test_ioctl_nums.c)
 add_executable(test_uart_consts test/test_uart_consts.c)
-add_executable(test_v4l2_consts test/test_v4l2_consts.c)
-foreach(_const_target test_ioctl_nums test_uart_consts test_v4l2_consts)
+foreach(_const_target test_ioctl_nums test_uart_consts)
   target_include_directories(${_const_target} PRIVATE ${CMAKE_BINARY_DIR})
 endforeach()
 add_test(NAME const_ioctl COMMAND test_ioctl_nums)
 add_test(NAME const_uart COMMAND test_uart_consts)
-add_test(NAME const_v4l2 COMMAND test_v4l2_consts)
 
 # ======================================================================
 # Lua 离线回归逐用例注册（run_all.sh 保持主编排入口不变）：
 # 每个 test_*.lua 都是 `luajit test/xxx.lua` 可单跑的独立用例（HAL 依赖 ffi
-# 必须 LuaJIT）。真机用例（文件头 "-- requires: i2c" / "video"）经
+# 必须 LuaJIT）。真机用例（文件头 "-- requires: i2c" 等）经
 # test/lib/device_gate.sh 包装：本机无对应 /dev/<dev>* 时以 125 退出，
-# 由 SKIP_RETURN_CODE 记为跳过——**不再按文件名特判**（阶段 5.2 前只特判
-# test_jit_warmup.lua，导致同样带 video 标记的 test_camera_v4l2.lua 被裸注册，
-# 无摄像头机器上 ctest 报 Failed 而不是 Skipped）。标记解析与 run_all.sh 同源。
+# 由 SKIP_RETURN_CODE 记为跳过——**不再按文件名特判**。标记解析与 run_all.sh 同源。
 # 收益：ctest -R lua_ 获得逐用例粒度与超时，不必整段跑完 run_all.sh 守门脚本。
 # ======================================================================
 file(GLOB MYBOT_LUA_TESTS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/test/test_*.lua)

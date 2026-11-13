@@ -274,7 +274,7 @@ _extract_lint_cmd() {	# $1=lint 名 → stdout 吐 run_one_inline_lint 第 3 个
 _lint_tmp="$(mktemp -d)"
 mkdir -p "$_lint_tmp/modules"
 # A 的合成坏样本：真实违规驱动会写的那种内联 `type(data) ~= "table"` 守卫
-# （不叫 Camera.lua，否则会被判据自己的豁免过滤器挡掉——那是在测豁免，不是测判据）。
+# （文件名刻意不与任何 lint 豁免项重名——那是在测豁免，不是测判据）。
 printf 'local function build(ctx, data)\n  if type(data) ~= "table" then error("x") end\nend\n' \
 	> "$_lint_tmp/modules/Fixture.lua"
 # B 的合成坏样本：真实违规会写的那种裸 `:match("[^:]+")` 首段提取，且不含 __mpath

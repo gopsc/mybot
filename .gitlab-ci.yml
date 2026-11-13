@@ -214,10 +214,9 @@ gate:musl:
         sqlite-dev curl-dev libftdi1-dev libusb-dev
   script:
     - cmake -S . -B build-musl -DCMAKE_BUILD_TYPE=Release
-    - cmake --build build-musl -j2 --target test_ioctl_nums test_uart_consts test_v4l2_consts
+    - cmake --build build-musl -j2 --target test_ioctl_nums test_uart_consts
     - ./build-musl/test_ioctl_nums
     - ./build-musl/test_uart_consts
-    - ./build-musl/test_v4l2_consts
     - cmake --build build-musl -j2 --target mybot mybot_tests harness_selftest
     - ./build-musl/mybot_tests
     - BOT=./build-musl/mybot BOT_TESTS=./build-musl/mybot_tests bash test/run_all.sh

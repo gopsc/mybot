@@ -83,7 +83,7 @@ static int restrictedLoader(lua_State* L) {
  * 加载 lib 目录下脚本的既有用法不变，'..' 穿越与绝对路径外读被拒绝）。
  * os.tmpname 一并中和：返回可预测路径的临时文件，是多用户主机上符号链接
  * 竞争的经典面，而全仓驱动与守护 chunk 无一使用它（仅独立 luajit 测试
- * test_camera.lua 在沙箱外用）。各全局缺表时跳过对应组。 */
+ * 独立 luajit 测试在沙箱外用）。各全局缺表时跳过对应组。 */
 /* M3：dofile/loadfile 白名单表。白名单来自 BOT4CJ_MODULE_PATH（':' 分段，
  * 去空），缺省 "./modules"——与 modules/lib/mpath.lua 的 paths() 同语义。
  * 白名单为空不可能（缺省值兜底），仍防御：空表时 restrictedLoader 全拒。 */

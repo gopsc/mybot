@@ -2,11 +2,9 @@
 # device_gate.sh —— 真机用例统一跳过门（2026-09-20 重构阶段 5.2）
 #
 # 背景：同一条「本机没有真机设备就跳过」的规则此前有两份实现、且口径不一致——
-#   run_all.sh   用 bash grep 逐个标记写两条 if（i2c / video）
-#   CMakeLists   按**文件名**特判 test_jit_warmup.lua，于是同样带
-#                "-- requires: video" 的 test_camera_v4l2.lua 被裸注册，
-#                无摄像头机器上 `ctest -R lua_test_camera_v4l2` 报 Failed
-#                而不是 Skipped（同仓库两条入口结论相反）。
+#   run_all.sh   用 bash grep 逐个标记写 if
+#   CMakeLists   按**文件名**特判 test_jit_warmup.lua，同标记的用例被裸注册，
+#                无设备机器上 ctest 报 Failed 而不是 Skipped。
 # 现在两条入口都走本脚本，标记解析只有一处。
 #
 # 用法：device_gate.sh <lua 文件> <解释器> <脚本> [参数...]
@@ -24,26 +22,7 @@ luacmd="$1"; shift
 # 只认设备名（字母/数字/下划线），免得把说明文字吃进来。
 req="$(sed -n 's/^-- requires: *\([A-Za-z0-9_]*\).*/\1/p' "$lua_file" | head -1)"
 
-# 显式指定设备路径时以它为准：测试体自己读 BOT4CJ_TEST_VIDEO（把回归指向别的
-# 设备/软链），但跳过门排在它之前——不在这里放行，文档承诺的逃生阀永远不可达
-# （2026-09-20 审计 M3：docs/testing.md 写了该变量，实现却在门就退出 125）。
-if [ "$req" = "video" ] && [ -n "${BOT4CJ_TEST_VIDEO:-}" ]; then
-	if [ -e "$BOT4CJ_TEST_VIDEO" ]; then
-		exec "$luacmd" "$@"
-	fi
-	echo "[SKIP] BOT4CJ_TEST_VIDEO=$BOT4CJ_TEST_VIDEO 不存在，跳过"
-	exit 125
-fi
-
-if [ -n "$req" ] && [ "$req" = "video" ]; then
-	# 该用例缺省固定打开 /dev/video0（BOT4CJ_TEST_VIDEO 已在上方单独处理）。
-	# 只检查 /dev/video* 会把“仅有 video19+”的机器放进来，随后用例因 video0
-	# 不存在而 Failed；这里按用例真正的默认设备判定，缺则跳过。
-	if [ ! -e /dev/video0 ]; then
-		echo "[SKIP] 需要 /dev/video0（文件标记 -- requires: video；可用 BOT4CJ_TEST_VIDEO 指定），本机不存在，跳过"
-		exit 125
-	fi
-elif [ -n "$req" ] && ! ls /dev/"$req"* >/dev/null 2>&1; then
+if [ -n "$req" ] && ! ls /dev/"$req"* >/dev/null 2>&1; then
 	echo "[SKIP] 需要 /dev/${req}* 真机设备（文件标记 -- requires: $req），本机无 ${req}，跳过"
 	exit 125
 fi

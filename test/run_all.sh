@@ -8,11 +8,11 @@
 #   - 统一用 luajit 运行（HAL 依赖 ffi）；可用环境变量 LUACMD 覆盖解释器
 #   - 单测超时 TEST_TIMEOUT 秒（默认取 test/lib/params.sh 单点，需 coreutils
 #     timeout；缺失则不限时）——防单个用例死循环挂死整个入口
-#   - test_jit_warmup.lua 是真机 ABI 回归（需 /dev/i2c-*）、test_camera_v4l2.lua 是
-#     真机摄像头回归（需 /dev/video*）：文件首行标记 -- requires: i2c / video，无设备自动跳过
+#   - test_jit_warmup.lua 是真机 ABI 回归（需 /dev/i2c-*）：文件首行标记
+#     -- requires: i2c，无设备自动跳过
 #   - 守门完整性：编译产物（mybot / mybot_tests）缺失的分段**判失败**而非静默跳过——
 #     否则整段 C++ 守门可以在不构建的情况下消失而汇总仍报「0 失败」。
-#     真机 i2c/video 用例（本机无对应设备）按跳过计，汇总里以「N 跳过 + 未执行清单」
+#     真机 i2c 用例（本机无对应设备）按跳过计，汇总里以「N 跳过 + 未执行清单」
 #     显式可见。只想跑 Lua 段的逃生口：ALLOW_SKIP=1 bash test/run_all.sh
 #     （显式给了 BOT=/BOT_TESTS= 却指向不存在的文件，一律判失败，ALLOW_SKIP 也不放行）
 #   - test_ioctl_nums.c 为 C 编译期常量自检，不在本入口范围
@@ -213,7 +213,7 @@ for t in test/test_*.lua; do
 	fi
 	echo "----- $name -----"
 	# 真机用例跳过门与 ctest 共用同一实现（阶段 5.2）：标记解析单点，
-	# 不再按设备名各写一条 if（此前 i2c/video 两份，且 ctest 侧只特判文件名）。
+	# 不再按设备名各写一条 if（ctest 侧也共用同一实现）。
 	out="$($timeout_cmd sh test/lib/device_gate.sh "$t" "$LUACMD" "$t" 2>&1)"
 	rc=$?
 	# A5（2026-09-20 审计）：125 必须**带 device_gate.sh 的 [SKIP] 横幅**才记跳过。
@@ -254,8 +254,7 @@ echo "==============================================="
 # 驱动入口 lint（fix-plan 2-2 收尾防线）：器件驱动 build/call 入口必须走
 # drv_common.arg_table——内联 `type(data) ~= "table"` 会绕过 arg_table
 # 附带的 proto=virt 注入钩子（@Action 直写路径绕开仿真打到真实总线）。
-# Camera 有意豁免（头注声明：全仓唯一不挂 arg_table 样板的驱动，build
-# 不碰设备、入参走内联类型守卫）。lib/ 内部实现自用，不在检查范围。
+# lib/ 内部实现自用，不在检查范围。
 # ======================================================================
 # 本 lint 搜的是「坏形态」，PASS 的条件天然是 0 命中——不能再给 min_hits（那是
 # 给「正向抽取」用的参数，语义是「命中数应 ≥ N，低于则判抽取判据失效」，套在
@@ -264,7 +263,7 @@ echo "==============================================="
 # test/run_all_selftest.sh 的合成坏样本正向对照去管，不在这里用活树命中数假装自检。
 run_one_inline_lint "lint-driver-entry-arg_table" \
 	"驱动入口 arg_table 断言" \
-	"grep -l 'type(data) ~= \"table\"' modules/*.lua | grep -v '^modules/Camera.lua$'"
+	"grep -l 'type(data) ~= \"table\"' modules/*.lua"
 
 # ======================================================================
 # 模块路径引导 lint（2026-09-20 重构阶段 2 收尾防线）：
@@ -297,11 +296,10 @@ run_one_inline_lint "lint-module-path-bootstrap" \
 # 只盯 `data.` 这一种形态：`data` 是 arg_table 强制的配置表名，而 `opts.` 是
 # *_VIRT 内嵌模型构造器的参数名（TPL0501/BME280/AD9833 的三处 opts 站点全在
 # 模型块内，生产路径零执行），不属本防线范围。
-# Camera 有意豁免（在不碰清单：冻结边界，width/height 两列不改写）。
 # ======================================================================
 run_one_inline_lint "lint-driver-nan-fallback" \
 	"配置列 NaN 兜底断言" \
-	"grep -rnE 'tonumber\(data\.[A-Za-z_]+\) or ' modules/*.lua | grep -v '^modules/Camera.lua:'"
+	"grep -rnE 'tonumber\(data\.[A-Za-z_]+\) or ' modules/*.lua"
 
 # ======================================================================
 # 生命周期形态一致性 lint（26.3 收尾防线）：走 require_driver 的驱动**不得**

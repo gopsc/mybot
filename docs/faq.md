@@ -7,7 +7,7 @@
 - **仅支持 Linux**：缺省 HAL 后端经 ffi 直调 glibc，Windows/macOS 未支持；musl 等非缺省后端的验证范围见下文与 [hal.md](hal.md)
 - **非 glibc libc：musl（alpine 3.20，x86_64）已实证，其它未验证**：HAL.sys 已后端
   接口化（`BOT4CJ_HAL_BACKEND`，缺省 glibc，接口契约见 `modules/lib/hal_backend_glibc.lua`
-  头注）。CI 的 `gate:musl`（硬门禁）在 alpine/musl 下跑三个常量自检、`mybot_tests`
+  头注）。CI 的 `gate:musl`（硬门禁）在 alpine/musl 下跑两个常量自检、`mybot_tests`
   与整段 `test/run_all.sh`（Lua 层 HAL 运行时含 UART 波特率分叉探测——musl 无
   `gnu_get_libc_version`，`version()` 返 nil、按旧 ABI 编码表处理）。边界如实：只证明
   x86_64 musl，其它架构 / 其它 libc 仍需在目标头文件下重跑同一套断言；后端接口只为

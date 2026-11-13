@@ -1,15 +1,14 @@
 -- unix_socket_ffi.lua —— AF_UNIX socket 公共 FFI 声明与连接工具
 --
--- 【为什么抽出来】Sim.lua 和 Camera.lua 都需要连 AF_UNIX socket 到仿真器，
--- 各自声明了一遍几乎相同的 FFI 结构（sockaddr_un、socket/connect/send/recv）。
--- 用前缀隔离（cj_ vs cam_）避免同名 struct 在同一个 lua_State 里重复 cdef 报错，
--- 但代码本身是重复的。提取到这里统一维护，新驱动不用再抄一遍。
+-- 【为什么抽出来】Sim.lua 需要连 AF_UNIX socket 到仿真器，此前调用方各自
+-- 声明一遍几乎相同的 FFI 结构（sockaddr_un、socket/connect/send/recv）。
+-- 提取到这里统一维护，新调用方不用再抄一遍。
 --
--- 【前缀选择】usock_（unix socket 缩写），与已有的 cj_（Sim）和 cam_（Camera）
--- 不冲突。LuaJIT 对同名 struct 的重复 cdef 是硬错误，函数同签名重复则允许。
+-- 【前缀选择】usock_（unix socket 缩写），与已有的 cj_（Sim）不冲突。
+-- LuaJIT 对同名 struct 的重复 cdef 是硬错误，函数同签名重复则允许。
 --
--- 【职责边界】只负责 FFI 声明 + 基础连接原语。协议语义（仿真器的命令格式、
--- 拍照的请求-响应流程）仍由各驱动自己处理，不在此层抽象。
+-- 【职责边界】只负责 FFI 声明 + 基础连接原语。协议语义（仿真器的命令格式）
+-- 仍由调用方自己处理，不在此层抽象。
 local ffi = require("ffi")
 
 -- 一次性 cdef：模块可能被多个驱动 require，但 ffi.cdef 对同签名函数允许重复，
@@ -101,8 +100,8 @@ end
 
 -- 带超时的 poll 等待：返回 true 表示就绪，false 表示超时，nil+原因 表示出错。
 -- EINTR（被信号打断）自动重试，不视为错误。
--- 注意：pollfd 结构由各驱动自己声明（Sim.lua 用 cj_pollfd，Camera.lua 用 cam_pollfd），
--- 这里只调用 ffi.C.poll，签名由驱动侧的 cdef 决定。
+-- 注意：pollfd 结构由调用方自己声明（Sim.lua 用 cj_pollfd），
+-- 这里只调用 ffi.C.poll，签名由调用方的 cdef 决定。
 local function poll_ready(fd, timeout_ms, pollfd_ptr)
 	local fds = pollfd_ptr
 	fds[0].fd = fd

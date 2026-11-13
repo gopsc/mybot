@@ -15,8 +15,6 @@
 --
 -- 豁免（都在文件头注声明过理由，此处集中列举，避免 grep 式的隐式豁免）：
 --   bitcompat  纯 Lua 库：只 return 一个表，无驱动入口
---   Camera     全仓唯一不挂 arg_table 样板的驱动（可选外设，build 不碰设备，
---              入参走内联类型守卫；见 modules/Camera.lua 头注与 run_all.sh lint 段）
 --
 -- 用法（项目根目录）：luajit test/test_driver_contract.lua（run_all.sh 自动纳入）
 
@@ -24,7 +22,6 @@ local tester = dofile("test/lib/tester.lua")
 local check = tester.check
 
 local LIB_ONLY = { bitcompat = true }
-local NO_ARG_TABLE = { Camera = true }
 
 -- 枚举模块（测试进程不在驱动沙箱内，io.popen 可用；run_all.sh 亦依赖 coreutils）
 local function listModules()
@@ -58,47 +55,45 @@ for _, path in ipairs(mods) do
 			check(name .. " 定义 build", type(build) == "function")
 			check(name .. " 定义 call", type(call) == "function")
 			check(name .. " 定义 destroy", type(destroy) == "function")
-			if not NO_ARG_TABLE[name] then
-				-- 非表入参：必须是 ERR 契约表（不是抛错、不是 nil）。
-				-- 用 pcall 包住：一旦某驱动抛 Lua error，sweep 必须把它记成
-				-- 失败并继续扫下一个模块，而不是整个用例中途夭折
-				--（首版就踩过：LlmDeepSeek.call(nil) 抛错，后面的模块全没扫到）。
-				local pok, rb = pcall(build, nil)
-				check(name .. ".build 非表入参返 ERR 契约（不抛错）",
-					pok and type(rb) == "table" and rb.result == "ERR",
-					pok and (type(rb) == "table" and tostring(rb.result) or type(rb))
-						or ("raised: " .. tostring(rb)))
-				local cok, rc = pcall(call, nil)
-				check(name .. ".call 非表入参返 ERR 契约（不抛错）",
-					cok and type(rc) == "table" and rc.result == "ERR",
-					cok and (type(rc) == "table" and tostring(rc.result) or type(rc))
-						or ("raised: " .. tostring(rc)))
-				-- D2-1（2026-09-20 审计 / 2026-09-21 落地）：destroy 同样必须收
-				-- arg_table 守卫——`destroy(nil)` 返回 "OK" 属「静默成功」绕过，
-				-- 会让 teardown 在资源缺失时被当成正常完成掩盖。与 build/call
-				-- 同一语义出口：非表入参返回 ERR 契约而非抛错/静默成功。
-				local dok, rd = pcall(destroy, nil)
-				check(name .. ".destroy 非表入参返 ERR 契约（不抛错）",
-					dok and type(rd) == "table" and rd.result == "ERR",
-					dok and (type(rd) == "table" and tostring(rd.result) or type(rd))
-						or ("raised: " .. tostring(rd)))
-				-- D2-7/F1-9（2026-09-21）：可选 read(data) 入口此前既无契约条目
-				-- 也无任何覆盖（docs/drivers.md 现已登记）。宿主对 read 走
-				-- **不过 ensureOk** 的路径（src/luavar.cpp:189-201）——读是数据流
-				-- 而非动作，返回值可以是标量（Ema/Kalman/Monitor 返回 last）。
-				-- 故这里只钉两条现状：不抛错、不返回 nil；有 ERR 表时字段齐备。
-				-- 反过来说：把 read(nil) 改成抛错或返回 nil，本断言即红。
-				if type(read) == "function" then
-					local rok, rr = pcall(read, nil)
-					local shapeOk = rok and rr ~= nil
-					if shapeOk and type(rr) == "table" then
-						shapeOk = (rr.result == nil) or (rr.result == "ERR" and rr.message ~= nil)
-							or (rr.result == "OK")
-					end
-					check(name .. ".read(nil) 不抛错且非 nil（宿主 read 路径不过 ensureOk）",
-						shapeOk,
-						rok and ("返回 " .. type(rr) .. ": " .. tostring(rr)) or ("raised: " .. tostring(rr)))
+			-- 非表入参：必须是 ERR 契约表（不是抛错、不是 nil）。
+			-- 用 pcall 包住：一旦某驱动抛 Lua error，sweep 必须把它记成
+			-- 失败并继续扫下一个模块，而不是整个用例中途夭折
+			--（首版就踩过：LlmDeepSeek.call(nil) 抛错，后面的模块全没扫到）。
+			local pok, rb = pcall(build, nil)
+			check(name .. ".build 非表入参返 ERR 契约（不抛错）",
+				pok and type(rb) == "table" and rb.result == "ERR",
+				pok and (type(rb) == "table" and tostring(rb.result) or type(rb))
+					or ("raised: " .. tostring(rb)))
+			local cok, rc = pcall(call, nil)
+			check(name .. ".call 非表入参返 ERR 契约（不抛错）",
+				cok and type(rc) == "table" and rc.result == "ERR",
+				cok and (type(rc) == "table" and tostring(rc.result) or type(rc))
+					or ("raised: " .. tostring(rc)))
+			-- D2-1（2026-09-20 审计 / 2026-09-21 落地）：destroy 同样必须收
+			-- arg_table 守卫——`destroy(nil)` 返回 "OK" 属「静默成功」绕过，
+			-- 会让 teardown 在资源缺失时被当成正常完成掩盖。与 build/call
+			-- 同一语义出口：非表入参返回 ERR 契约而非抛错/静默成功。
+			local dok, rd = pcall(destroy, nil)
+			check(name .. ".destroy 非表入参返 ERR 契约（不抛错）",
+				dok and type(rd) == "table" and rd.result == "ERR",
+				dok and (type(rd) == "table" and tostring(rd.result) or type(rd))
+					or ("raised: " .. tostring(rd)))
+			-- D2-7/F1-9（2026-09-21）：可选 read(data) 入口此前既无契约条目
+			-- 也无任何覆盖（docs/drivers.md 现已登记）。宿主对 read 走
+			-- **不过 ensureOk** 的路径（src/luavar.cpp:189-201）——读是数据流
+			-- 而非动作，返回值可以是标量（Ema/Kalman/Monitor 返回 last）。
+			-- 故这里只钉两条现状：不抛错、不返回 nil；有 ERR 表时字段齐备。
+			-- 反过来说：把 read(nil) 改成抛错或返回 nil，本断言即红。
+			if type(read) == "function" then
+				local rok, rr = pcall(read, nil)
+				local shapeOk = rok and rr ~= nil
+				if shapeOk and type(rr) == "table" then
+					shapeOk = (rr.result == nil) or (rr.result == "ERR" and rr.message ~= nil)
+						or (rr.result == "OK")
 				end
+				check(name .. ".read(nil) 不抛错且非 nil（宿主 read 路径不过 ensureOk）",
+					shapeOk,
+					rok and ("返回 " .. type(rr) .. ": " .. tostring(rr)) or ("raised: " .. tostring(rr)))
 			end
 		end
 	end
@@ -112,11 +107,10 @@ end
 -- `err(...)` 全部变成 "attempt to call a nil/string value"，驱动对宿主抛裸 Lua
 -- error 而不是返回 ERR 契约。
 --
--- 实测案例：modules/Camera.lua 抓帧重试循环误写全局 err（AG-2），成功路径把它
--- 赋成 nil、失败路径赋成字符串。既有 sweep 逐个加载模块却从不检查「加载完
--- 全局被谁动过」，所以这条缺陷一直是隐形的。下面把「加载完全部驱动后 err 仍是
--- 可用的构造函数」变成断言——单条断言覆盖全部模块，后续任何驱动再犯同样的错
--- 都会在这里红。
+-- 实测案例：曾有驱动的重试/错误分支误写全局 err（AG-2），成功路径把它赋成
+-- nil、失败路径赋成字符串。既有 sweep 逐个加载模块却从不检查「加载完全局被谁
+-- 动过」，所以这条缺陷一直是隐形的。下面把「加载完全部驱动后 err 仍是可用的
+-- 构造函数」变成断言——单条断言覆盖全部模块，后续任何驱动再犯同样的错都会红。
 do
 	local err_now = _G.err
 	check("全局 err 构造器未被任何驱动覆盖（AG-2）", type(err_now) == "function",

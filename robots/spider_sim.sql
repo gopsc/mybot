@@ -49,18 +49,3 @@ CREATE TABLE Sim (
 	name String
 );
 INSERT INTO Sim (name) VALUES ('sim');
-
-/* Camera：拍照设备（modules/Camera.lua）。注册它，宿主的 capture_image 工具
- * 才会出现（agent 靠它「看」仿真画面）。设备变量名用 cam0——与宿主缺省的
- * --camera-var 对齐，registry().find("cam0") 命中即挂上工具。
- *
- * 仿真器实时帧走环境变量而非结构脚本：给 mybot 进程设
- *   MYBOT_SIM_CAPTURE_SOCK=/tmp/mybot-sim-capture.sock
- * Camera.lua 便从这个 socket 抓 mybot-sim 的当前画面（JPEG）。不设该变量则
- * 落回真机 V4L2 路径（/dev/video0）。刻意用 env 不用列：socket 路径属部署期
- * 配置，与 Sim 侧的 MYBOT_SIM_SOCK 同源同风格，且避免把「连哪个 socket」变成
- * 模型可控的调用参数（那是条「连任意 socket」的原语）。 */
-CREATE TABLE Camera (
-	name String
-);
-INSERT INTO Camera (name) VALUES ('cam0');

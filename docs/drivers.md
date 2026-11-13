@@ -2,7 +2,7 @@
 
 > **清单与计数以 `modules/` 目录为准**（本页是速查索引，可能滞后于代码；`ls modules/*.lua` 即权威清单）。结构脚本里每张 `CREATE TABLE <矩阵名>` 对应加载 `modules/<矩阵名>.lua`。各驱动的协议细节与其内嵌 `<矩阵名>_VIRT` 仿真模型见 [virtbus.md](virtbus.md)。
 >
-> **计数口径**（README 与架构页引用的数字按此推导，可复算）：`ls modules/*.lua` = 61 = **49 款器件/执行器/系统接口驱动**（本页前六节：舵机/输出 13 + IMU 6 + 气压/环境/光 11 + 测距/闪电 3 + ADC/电源 11 + 气体/医疗/其他 5）+ **3 条总线**（`I2C`/`SPI`/`UART`）+ **9 个框架/工具驱动**（`Relay`/`dummy`/`Monitor`/`Kalman`/`Ema`/`bitcompat`/`Camera`/`Sim`/`SpiProbe`，即最后一节；2026-09-25 #8 起 Lua 协议驱动轨道已删，`LlmOpenAI`/`LlmDeepSeek`/`LlmAnthropic` 不再有对应 `.lua` 文件）。注意 `GPIO`/`PWM`/`Speaker` 是**系统接口/执行器驱动**、归在 49 里（不是总线）；`bitcompat` 是纯 Lua 兼容库、不在 `lib/` 下。`modules/lib/` 另有 30 个共享库（`find modules/lib -name '*.lua' | wc -l`，含 `asound`、`virtbus/regmap.lua` 与 `hal/` 下 5 个总线域分块），不计入 61。本页各节点名的模块集合以 `ls modules/*.lua` 为权威清单（controller-only 分支未随附旧版全仓文档一致性脚本；本页计数按上面的口径人工复核）。
+> **计数口径**（README 与架构页引用的数字按此推导，可复算）：`ls modules/*.lua` = 60 = **49 款器件/执行器/系统接口驱动**（本页前六节：舵机/输出 13 + IMU 6 + 气压/环境/光 11 + 测距/闪电 3 + ADC/电源 11 + 气体/医疗/其他 5）+ **3 条总线**（`I2C`/`SPI`/`UART`）+ **8 个框架/工具驱动**（`Relay`/`dummy`/`Monitor`/`Kalman`/`Ema`/`bitcompat`/`Sim`/`SpiProbe`，即最后一节；2026-09-25 #8 起 Lua 协议驱动轨道已删，`LlmOpenAI`/`LlmDeepSeek`/`LlmAnthropic` 不再有对应 `.lua` 文件）。注意 `GPIO`/`PWM`/`Speaker` 是**系统接口/执行器驱动**、归在 49 里（不是总线）；`bitcompat` 是纯 Lua 兼容库、不在 `lib/` 下。`modules/lib/` 另有 29 个共享库（`find modules/lib -name '*.lua' | wc -l`，含 `asound`、`virtbus/regmap.lua` 与 `hal/` 下 5 个总线域分块），不计入 60。本页各节点名的模块集合以 `ls modules/*.lua` 为权威清单（controller-only 分支未随附旧版全仓文档一致性脚本；本页计数按上面的口径人工复核）。
 
 ## 舵机 / 输出执行器
 
@@ -95,7 +95,6 @@
 | `Ema` | 指数移动平均（配 `alpha`∈(0,1]） |
 | `Monitor` | 消费 `$` 引用快照的观察/决策变量 |
 | `bitcompat` | Lua 5.1/5.3 位运算兼容库（非驱动） |
-| `Camera` | **摄像头驱动**：V4L2 mmap 取帧、只取硬件编码的 MJPEG（ffi，无第三方库）；`src=<图片>` 为仿真模式。调用参数可带 `width`/`height`（正整数，须同给同缺）：与上次请求不同即重开设备重协商 `VIDIOC_S_FMT`，返回表报**实际协商尺寸**（设备可能就近调档） |
 | `Sim` | **仿真器桥接驱动**：把语义动作以行文本发到外部 `mybot-sim` 的 AF_UNIX socket，只传「动作 + 速度」不传关节角。`range` 走独立 sensor socket；**仿真器缺席＝静默成功**（可视化从端不该打断动作脚本），感知侧相反。协议、动作码 0–10 与场景持久化见历史文档 [sim.md](sim.md)；本仓不包含仿真器服务端 |
 | `Nns` | **C++ 原生神经网络驱动**（`src/driver_nns.cpp`）：在结构 SQL 的 `Nns` 表中创建/加载 MLP，动作里做推理或训练；矩阵运算由 vendored `nn4cpp`（Eigen）完成，不经过 Lua |
 
@@ -167,11 +166,11 @@ nn.input0 nn.input1 nn.target0;   # 有 target -> 训练；无 target -> 推理
 硬件/总线驱动现使用 `require_driver` 声明式框架（见下 `drv_common` 公共原语表），
 框架自动处理 `arg_table` 入参校验与总线校验（`i2c_pair` / `fd≥0` 等），驱动只写
 业务闭包（`build`/`call` 接收 `ctx.fd`/`ctx.addr`）。非驱动模块（`Relay`/`dummy`/
-`Camera`/`GPIO`/`PWM` 等）仍用独立 `function build(data)` 模式，未经 `require_driver`
+`GPIO`/`PWM` 等）仍用独立 `function build(data)` 模式，未经 `require_driver`
 迁移。公共样板在 `modules/lib/drv_common.lua`。
 可机器核对的部分由 `luajit test/test_driver_contract.lua`（驱动入口契约 sweep）
 逐模块断言：能加载、三入口齐全、非表入参返回 ERR 契约表而非抛 Lua error——
-豁免只有 `bitcompat`（纯 Lua 库）与 `Camera`（头注声明不挂 `arg_table`）。
+豁免只有 `bitcompat`（纯 Lua 库）。
 `run_all.sh` 另有三道 grep lint（`arg_table` 首调用、模块路径 `__mpath` 引导、`data.` 裸读的 nan 回落）。
 
 ### 入口函数集

@@ -31,7 +31,7 @@ cmake --build build -j4
 ./build/mybot --help
 ```
 
-当前基线：**573 个 C++ 单测通过**；ctest 全部通过，`lua_test_camera_v4l2.lua` 在无 `/dev/video0` 的机器上自动跳过。
+当前基线：**573 个 C++ 单测通过**；ctest 全部通过。
 
 ## 快速开始
 

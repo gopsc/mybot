@@ -77,8 +77,6 @@ TCP 动作源、MCP/agent、Web SSH 与 sim 相关入口已从本分支移除；
 | `BOT4CJ_ALLOW_PTRACE` | 设为 `1` 时 `mybot` 启动不再执行 `prctl(PR_SET_DUMPABLE, 0)`，进程保持可被同 UID `ptrace`/core dump；仅调试用。sanitizer 构建编译期跳过这一步 |
 | `BOT4CJ_HAL_BACKEND` | **仅独立 LuaJIT 回退路径**：`modules/lib/hal_backend_<名>.lua`（缺省 `glibc`）。宿主运行期走 C++ HAL，不读本变量 |
 | `BOT4CJ_PWM_SYSFS_ROOT` | 宿主 C++ HAL 的 PWM sysfs 根目录，缺省 `/sys/class/pwm`；用于测试、容器或非标准挂载 |
-| `BOT4CJ_CAMERA_SRC_DIR` | 摄像头仿真来源的放行目录（冒号分隔）：结构脚本给 `Camera` 驱动传 `src` 时，路径必须落在这里面，否则驱动拒绝读取 |
-| `BOT4CJ_TEST_VIDEO` | 仅守门用：真机摄像头用例（`test_camera_v4l2.lua`）的设备路径，指定且存在时该用例不再按跳过计 |
 | `BOT4CJ_TRACE_FDS` | 仅守门用：`mybot_tests` 专用测试钩子（生产二进制不含） |
 
 ## 中断语义（单进程）

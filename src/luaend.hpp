@@ -32,7 +32,7 @@ int luaGlobalType(lua_State* L, const char* name);
  *      驱动可自行加载任意字符串代码；
  *   2. `luaL_loadfile` 接受 LuaJIT 预编译字节码——白名单只限路径，不区分
  *      源码与字节码，字节码加载器是经典 LuaJIT 攻击面；
- *   3. `ffi` 本身即完整逃逸通道（调任意 C 符号/mmap/fork）——HAL、V4L2 直驱
+ *   3. `ffi` 本身即完整逃逸通道（调任意 C 符号/mmap/fork）——HAL、原生外设直驱
  *      全依赖它，不可收紧。
  * 依据的威胁模型（docs/reference.md）：modules/ 下的 .lua 是信任级等同
  * mybot 用户的任意原生代码执行入口，本沙箱防「误用与路径穿越」，不对抗

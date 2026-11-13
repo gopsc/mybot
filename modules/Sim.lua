@@ -47,7 +47,7 @@ local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"
 dofile(mpath.resolve("lib/print_table.lua"))
 dofile(mpath.resolve("lib/drv_common.lua"))
 
--- AF_UNIX socket 公共模块：FFI 声明 + 连接工具（与 Camera.lua 共用，避免重复 cdef）
+-- AF_UNIX socket 公共模块：FFI 声明 + 连接工具（避免重复 cdef）
 local usock = dofile(mpath.resolve("lib/unix_socket_ffi.lua"))
 local ffi = require("ffi")
 

@@ -48,9 +48,8 @@ run_fixture_orphans() {
 run_const_checks() {
 	echo "----- const-check (系统常量自检) -----"
 	local const_dir="$1" ok=true out
-	# 三个自检二进制（ioctl/uart/v4l2）均无外部依赖，缺产物按「构建产物缺失」硬失败。
-	# 原第四个 test_curl_consts 随 Lua 协议驱动轨道删除（2026-09-25 #8）。
-	for prog in test_ioctl_nums test_uart_consts test_v4l2_consts; do
+	# 两个自检二进制（ioctl/uart）均无外部依赖，缺产物按「构建产物缺失」硬失败。
+	for prog in test_ioctl_nums test_uart_consts; do
 		local binp="$const_dir/$prog"
 		if [ ! -x "$binp" ]; then
 			artifact_missing "系统常量自检" "$prog" "$binp" "$tests_explicit"
