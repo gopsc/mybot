@@ -16,8 +16,16 @@ namespace bot {
  * 的次序（注释在头文件构造函数声明处）。 */
 RobotStruct::RobotStruct(bot::Reader& input)
 	: internals_(std::make_unique<Internals>(structures_, registry_, metas_, daemons_, hal_)) {
+	HALManager* previous = HALManager::current();
 	HALManager::setCurrent(&hal_);
-	structures_.load(input);
+	try {
+		structures_.load(input);
+	} catch (...) {
+		/* 构造失败时本对象不会走 ~RobotStruct；不恢复全局指针会让后续
+		 * openSandboxedState() 拿到已析构的 hal_。 */
+		HALManager::setCurrent(previous);
+		throw;
+	}
 }
 
 void RobotStruct::active() {

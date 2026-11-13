@@ -16,8 +16,10 @@ void RobotStruct::injectLuaDriver(const std::string& driverTable, const std::str
 	}
 
 	/* 注入只允许发生在 active() 之前；运行中的机器人必须使用 applySql，
-	 * 以保证完整的校验、装配和回滚语义。 */
-	if (!metas_.empty()) {
+	 * 以保证完整的校验、装配和回滚语义。这里用生命周期状态判定，不能用
+	 * metas_.empty()——只有 native 驱动的机器人 metas_ 也为空，后者会把
+	 * 已上电的注入静默吞掉。 */
+	if (state_ != LifecycleState::Loaded) {
 		throw IllegalArgumentException("injectLuaDriver must be called before active():"
 			" use the hot-SQL path (applySql) to add tables to a running robot");
 	}

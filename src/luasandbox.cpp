@@ -7,6 +7,7 @@
 
 #include "luaend.hpp"
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <exception>
@@ -126,9 +127,8 @@ static void wrapLoader(lua_State* L, const char* name) {
  * 首段猜测且无任何线索。单段路径找不到不告警（单根回退对单根配置语义等价，
  * 也是 .tmp 类测试夹具的常态）。每进程一次。 */
 static void warnMpathUnavailable(const char* why) {
-	static bool warned = false;
-	if (warned) { return; }
-	warned = true;
+	static std::atomic<bool> warned{false};
+	if (warned.exchange(true)) { return; }
 	std::fprintf(stderr,
 		"警告: 宿主未能注入 __mpath 模块路径解析器（%s）——"
 		"驱动将退回各自模块路径首段的单根猜测，':' 分隔多路径按序查找"

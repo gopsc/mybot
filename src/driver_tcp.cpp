@@ -168,12 +168,20 @@ public:
 		}
 		auto port = integer(data.find("port"), 1, 65535);
 		if (!port) { return error("Invalid Arguments: port (integer 1..65535)"); }
+		auto timeout = integer(data.find("timeout"), 1, kMaxTimeoutMs);
+		if (data.find("timeout") != nullptr && !timeout) {
+			return error("Invalid Arguments: timeout (integer 1..60000 ms)");
+		}
+		auto numRecv = integer(data.find("num_recv"), 1, kMaxBytes);
+		if (data.find("num_recv") != nullptr && !numRecv) {
+			return error("Invalid Arguments: num_recv (integer 1..512)");
+		}
 		Json closed = closeConnection();
 		if (!closed.isNull()) { return closed; }
 		host_ = host;
 		port_ = *port;
-		timeoutMs_ = 1000;
-		numRecv_ = 512;
+		timeoutMs_ = timeout ? *timeout : 1000;
+		numRecv_ = numRecv ? *numRecv : 512;
 		utf8Pending_.clear();
 		return metadata();
 	}

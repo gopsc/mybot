@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -30,10 +31,18 @@ Json ok() {
 
 int parseAddress(const Json* value, int fallback) {
 	if (value == nullptr || value->isNull() || value->isBool()) { return fallback; }
-	if (value->isInt()) { return static_cast<int>(value->getInt()); }
+	if (value->isInt()) {
+		const std::int64_t v = value->getInt();
+		if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max()) {
+			return fallback;
+		}
+		return static_cast<int>(v);
+	}
 	if (value->isFloat()) {
 		const double number = value->getFloat();
-		if (std::isfinite(number) && std::floor(number) == number) {
+		if (std::isfinite(number) && std::floor(number) == number
+				&& number >= static_cast<double>(std::numeric_limits<int>::min())
+				&& number <= static_cast<double>(std::numeric_limits<int>::max())) {
 			return static_cast<int>(number);
 		}
 		return fallback;

@@ -1,6 +1,7 @@
 #include "native_driver.hpp"
 
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -31,7 +32,11 @@ std::optional<int> integer(const Json* value) {
 	else if (value->isStr()) {
 		try { number = std::stod(value->getValue()); } catch (...) { return std::nullopt; }
 	} else { return std::nullopt; }
-	if (!std::isfinite(number) || std::floor(number) != number) { return std::nullopt; }
+	if (!std::isfinite(number) || std::floor(number) != number
+			|| number < static_cast<double>(std::numeric_limits<int>::min())
+			|| number > static_cast<double>(std::numeric_limits<int>::max())) {
+		return std::nullopt;
+	}
 	return static_cast<int>(number);
 }
 
