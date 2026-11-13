@@ -196,11 +196,18 @@ public:
 	 * 置位时刻的在途单次传输」）。
 	 * deadline/宽限语义与旧 waitUntil/awaitExit 一致：单守护 destroy 传
 	 * joinTimeout + 零宽限；断电屏障传全体共享 deadline（逐个累加会让 N 个
-	 * 守护的最坏退出延迟变成 N×joinTimeout）+ 封顶宽限。waitStart 仅用于
-	 * 弃管告警里的真实耗时统计。 */
+	 * 守护的最坏退出延迟变成 N×joinTimeout）+ **共享宽限 deadline**
+	 * （每守护各自 now+grace 会让最坏停机上界变成 N×grace；三参数重载
+	 * 让所有 missed 守护共用同一个宽限截止点）。waitStart 仅用于弃管告警
+	 * 里的真实耗时统计。 */
 	bool requestStopAndWait(const std::chrono::steady_clock::time_point& deadline);
 	bool finishTeardown(int64_t graceMs,
 			const std::chrono::steady_clock::time_point& waitStart);
+	/* 三参数重载：graceDeadline 是**绝对**宽限截止点（共享预算）；graceMs<=0
+	 * 时行为同两参数版本（跳过等待直接弃管）。 */
+	bool finishTeardown(int64_t graceMs,
+			const std::chrono::steady_clock::time_point& waitStart,
+			const std::chrono::steady_clock::time_point& graceDeadline);
 
 	/* 带自身超时等待线程退出并释放槽；超时则灭火 + 弃管——主线程交出自己的
 	 * 引用，槽由守护线程副本兜底到最后（2.4：所有权移交即引用计数自然交接）。

@@ -239,6 +239,14 @@ int64_t DaemonRunner::body(const std::string& chunk, const std::string& config, 
 			pthread_mutex_lock(mutexOf(slot.get()));
 			n = slot->count;
 			pthread_mutex_unlock(mutexOf(slot.get()));
+		} else {
+			/* chunk 连 load/setup 都没走通：宿主必须把失败写进槽，否则
+			 * readSample 看到 status=0 + count=0，消费方只得到「无样本」
+			 * 这类间接症状。失败的 chunk 自己设置的更具体码（-9/-8…）
+			 * 优先，不覆盖。 */
+			pthread_mutex_lock(mutexOf(slot.get()));
+			if (slot->status == 0) { slot->status = -8; }
+			pthread_mutex_unlock(mutexOf(slot.get()));
 		}
 	} catch (const std::exception& e) {
 		std::cerr << "[daemon] body aborted by exception: " << e.what()
@@ -377,17 +385,24 @@ bool DaemonRunner::requestStopAndWait(
 
 /* ---- finishTeardown：宽限 →（仍未退场）灭火 + 弃管（BQ-2）----
  * 只等 future、按需持锁灭火后弃管；graceMs<=0 = 不给宽限（单守护 destroy
- * 路径）。宽限内退场则消费 future（线程侧 set_value 的 try/catch 容忍
- * 「已消费」，两条路径都安全），其 daemon_cleanup 已在退场前照常执行。
- * 幂等：槽已交出（此前已收尾/弃管）直接返回 true。 */
+ * 路径）。三参数版本用**绝对** graceDeadline，供断电屏障让 N 个 missed
+ * 守护共享同一段宽限（两参数版本按 now+graceMs 生成）。宽限内退场则消费
+ * future（线程侧 set_value 的 try/catch 容忍「已消费」，两条路径都安全），
+ * 其 daemon_cleanup 已在退场前照常执行。幂等：槽已交出直接返回 true。 */
 bool DaemonRunner::finishTeardown(int64_t graceMs,
 		const std::chrono::steady_clock::time_point& waitStart) {
+	return finishTeardown(graceMs, waitStart,
+		std::chrono::steady_clock::now() + std::chrono::milliseconds(graceMs));
+}
+
+bool DaemonRunner::finishTeardown(int64_t graceMs,
+		const std::chrono::steady_clock::time_point& waitStart,
+		const std::chrono::steady_clock::time_point& graceDeadline) {
 	std::shared_ptr<DaemonSlot> slot = std::atomic_load(&slot_);
 	if (slot == nullptr) { return true; }	/* 已退场收尾或已弃管 */
 
 	if (spawned_.load() && fut_.valid() && graceMs > 0) {
-		std::future_status st = fut_.wait_until(
-			std::chrono::steady_clock::now() + std::chrono::milliseconds(graceMs));
+		std::future_status st = fut_.wait_until(graceDeadline);
 		if (st == std::future_status::ready) {
 			int64_t n = fut_.get();
 			std::cerr << "Daemon '" << name_ << "' exited within teardown grace"

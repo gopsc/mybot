@@ -80,6 +80,27 @@ mt::MatrixObject daemonDefs(const std::string& chunk) {
 	return fx::oneMatrix("@Daemon\nname chunk interval;\nd1 " + chunk + " 10;\n@\n");
 }
 
+/* BQ-2 二段宽限的**共享预算**（2026-11 补）：N 个 missed 守护必须共用同一个
+ * 宽限截止点；旧实现逐个 finishTeardown(now+grace) 会让最坏停机时间随守护数
+ * 线性增长。tick 睡 4s（无视 stop）确保两个守护都跨过「2s join + 0.8s 宽限」，
+ * 旧实现首守护等 0.8s、次守护再等 0.8s，总时长约 3.6s；共享实现约 2.8s。 */
+const char* const kLongTickRel = "test_daemon_long_tick.lua";
+void writeLongTickChunk() {
+	std::ofstream out(std::string(".tmp/") + kLongTickRel, std::ios::binary | std::ios::trunc);
+	out << "local ffi = require(\"ffi\")\n"
+	    << "ffi.cdef(\"int usleep(unsigned int usec);\")\n"
+	    << "function daemon_tick()\n"
+	    << "  ffi.C.usleep(4000000)\n"
+	    << "  return 1\n"
+	    << "end\n";
+}
+
+mt::MatrixObject daemonDefsTwo(const std::string& chunk) {
+	return fx::oneMatrix("@Daemon\nname chunk interval;\n"
+		"d1 " + chunk + " 10;\n"
+		"d2 " + chunk + " 10;\n@\n");
+}
+
 } // namespace
 
 /* ---------------- D/C4：parseInterval 边界表驱动（2026-09-21 补） ----------------
@@ -203,6 +224,36 @@ TH_TEST(daemon_finish_teardown_grace_path_returns_true) {
 	TH_CHECK(err.get("result")->getValue() == "ERR");
 	/* 幂等：线程已退场（future 已消费），再收尾直接 true */
 	TH_CHECK(registry.at(0)->finishTeardown(0, t0));
+}
+
+TH_TEST(daemon_stop_barrier_shares_grace_budget_across_missed_daemons) {
+	/* 共享宽限回归：两个卡在 4s tick 里的守护都错过 2s join 屏障，随后共享
+	 * 同一段 0.8s 宽限。旧实现逐个 finishTeardown(now+800ms) 会让第二个
+	 * 守护再等 0.8s（总时长 ~3.6s）；共享 deadline 一次用尽（~2.8s）。
+	 * 阈值取 3.3s：既避开时钟粒度，也把「N×宽限」的旧行为挡在外面。 */
+	setenv("BOT4CJ_MODULE_PATH", ".tmp", 1);
+	writeLongTickChunk();
+	mt::MatrixObject defs = daemonDefsTwo(kLongTickRel);
+	bot::DaemonRegistry registry;
+	std::unique_ptr<MtVars_Daemon> var1 = MtVars_Daemon::Factory(defs, 1, registry);
+	std::unique_ptr<MtVars_Daemon> var2 = MtVars_Daemon::Factory(defs, 2, registry);
+	var1->build();
+	var2->build();
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));	/* 让两线程都进入长拍（加载两个 Lua 状态留足余量） */
+	const auto t0 = std::chrono::steady_clock::now();
+	bot::DaemonRegistry::stopBarrier(registry.all(), 800, "test", "test still note");
+	const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - t0).count();
+	TH_CHECK_MSG(elapsed >= 2500,
+		"stopBarrier returned too early: " + std::to_string(elapsed) + "ms");
+	TH_CHECK_MSG(elapsed < 3300,
+		"grace budget was not shared across missed daemons: " + std::to_string(elapsed) + "ms");
+	TH_CHECK(!registry.at(0)->slotAlive());
+	TH_CHECK(!registry.at(1)->slotAlive());
+	TH_CHECK(registry.at(0)->quiesced());
+	TH_CHECK(registry.at(1)->quiesced());
+	/* 让 4s 长拍跑完，线程自然退场（避免 sanitizer 把仍在途的槽记为泄漏）。 */
+	std::this_thread::sleep_for(std::chrono::milliseconds(1500));
 }
 
 /* BQ-2：宽限耗尽 → 灭火 + 弃管（quiesce 先于 slot 交出置上）。

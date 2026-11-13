@@ -48,12 +48,15 @@ void DaemonRegistry::stopBarrier(const std::vector<std::shared_ptr<DaemonRunner>
 	}
 	if (missed.empty()) { return; }
 	const int64_t graceMs = std::min<int64_t>(budgetMs, graceCapMs);
+	/* 宽限是**共享**预算：从 stop 等待的 deadline 起算一次，不是每个
+	 * missed 守护各拿 now+graceMs（N 个卡死守护会变成 N×grace）。 */
+	const auto graceDeadline = deadline + std::chrono::milliseconds(graceMs);
 	std::cerr << label << ": " << missed.size()
 		<< " daemon(s) outlived the stop barrier, granting " << graceMs
 		<< "ms grace before hardware de-init" << std::endl;
 	std::size_t stillRunning = 0;
 	for (auto* d : missed) {
-		if (!d->finishTeardown(graceMs, waitStart)) { ++stillRunning; }
+		if (!d->finishTeardown(graceMs, waitStart, graceDeadline)) { ++stillRunning; }
 	}
 	if (stillRunning > 0) {
 		std::cerr << label << ": " << stillRunning
