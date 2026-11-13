@@ -276,6 +276,29 @@ TH_TEST(mtinclude_row_budget_rejects_before_reading) {
 		mtinclude::expandIncludes(mats, dir.path().string()));
 }
 
+TH_TEST(mtinclude_deep_fragment_chain_is_bounded_by_row_budget) {
+	/* 深层嵌套本身就是递归：终止性由「已展开文件表」保证，栈深度由行预算
+	 * 界定（每层递归至少消耗一行 @Merge）。这里把 32 层链摆满：
+	 *   main → f1 → f2 → … → f31 → f32(Action)
+	 * 共 1（main）+ 31（f1..f31）= 32 行，应成功；换成 main → f0 则
+	 * 1 + 32 = 33 行，必须在展开 f32 之前以行预算报错（不是栈溢出或
+	 * 无限递归）。 */
+	fx::TempDir dir("inc_deep_chain");
+	writeFile(dir, "f32.mt", "@Action\nd.x;\n1;\n@\n");
+	for (int i = 31; i >= 0; --i) {
+		writeFile(dir, "f" + std::to_string(i) + ".mt",
+			"@Merge\npath;\n  f" + std::to_string(i + 1) + ".mt;\n@\n");
+	}
+	auto ok = parseMain("@Merge\npath;\n  f1.mt;\n@\n");
+	mtinclude::expandIncludes(ok, dir.path().string());
+	TH_CHECK(ok.size() == 1);
+	TH_CHECK(fx::cell(ok[0], 1, 0) == "1");
+
+	auto tooDeep = parseMain("@Merge\npath;\n  f0.mt;\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "exceeding the limit of 32",
+		mtinclude::expandIncludes(tooDeep, dir.path().string()));
+}
+
 TH_TEST(mtinclude_total_byte_budget_rejects) {
 	fx::TempDir dir("inc_budget");
 	/* 两个各 ~4.6MiB 的文件：单文件不超 8MiB，合计超总预算。
@@ -548,6 +571,38 @@ TH_TEST(mtinclude_fragment_rejects_if_block) {
 		mtinclude::expandIncludes(mats2, dir.path().string()));
 }
 
+TH_TEST(mtinclude_fragment_rejects_include) {
+	/* @Include 只能出现在最外层：片段没有内容拷贝的落点。此前片段里的
+	 * @Include 被静默忽略（连目标文件都不读）——响亮拒绝，并指引用 @Merge。 */
+	fx::TempDir dir("inc_reject_include");
+	writeFile(dir, "frag.mt",
+		"@Include\npath;\n  missing.mt;\n@\n"
+		"@Action\nb.p;\n100;\n@\n");
+	auto mats = parseMain("@Merge\npath;\n frag.mt;\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "@Include 不支持出现在 @Merge 片段",
+		mtinclude::expandIncludes(mats, dir.path().string()));
+}
+
+TH_TEST(mtinclude_fragment_rejects_action_with_nested_blocks) {
+	/* 片段只按相位归并 @Action 的数据行：@Action 里再嵌 @if/@while/@Merge
+	 * 没有独立执行位置。修复前，主脚本没有 @Action 时这些子块会被整棵采纳
+	 * 并实际执行，有 @Action 时才在 mergeTwo 报「控制块操作数」——同一份
+	 * 片段因主脚本形状不同而两种结果。现在两种入口都先响亮拒绝。 */
+	fx::TempDir dir("inc_reject_compound");
+	writeFile(dir, "frag.mt",
+		"@Action\nb.p;\n100;\n"
+		"@if(k>0)\nc.p;\n200;\n@\n"
+		"@\n");
+	auto noMain = parseMain("@Merge\npath;\n frag.mt;\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "不能携带嵌套子块",
+		mtinclude::expandIncludes(noMain, dir.path().string()));
+	auto withMain = parseMain(
+		"@Action\na.x;\n1;\n@\n"
+		"@Merge\npath;\n frag.mt;\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "不能携带嵌套子块",
+		mtinclude::expandIncludes(withMain, dir.path().string()));
+}
+
 /* ---------------- @Include：C 式内容拷贝（2026-10-12，顶层专属）---------------- */
 
 TH_TEST(mtinclude_include_splices_target_content_inline) {
@@ -641,6 +696,27 @@ TH_TEST(mtinclude_merge_nested_phase_lags_target) {
 	TH_CHECK(fx::cell(act, 2, 1) == "100");	/* r=2: rn=1 → 目标首行 */
 }
 
+TH_TEST(mtinclude_merge_nested_consecutive_merges_accumulate) {
+	/* 连续多个 @Merge 块共享同一下表：pending 必须全部按声明序合并，
+	 * 不能只处理第一个；块序仍是「@Merge…@Merge…表」。 */
+	fx::TempDir dir("merge_nested_multi");
+	writeFile(dir, "b.mt", "@Action\nb1.p;\n10;\n@\n");
+	writeFile(dir, "c.mt", "@Action\nc1.p;\n20;\n@\n");
+	auto mats = parseMain(
+		"@if(k>0)\n"
+		"@Merge\npath;\n  b.mt;\n@\n"
+		"@Merge\npath;\n  c.mt;\n@\n"
+		"@Action\nx.p;\n1;\n@\n@\n");
+	mtinclude::expandIncludes(mats, dir.path().string());
+	TH_CHECK(mats[0].children().size() == 1);
+	const mt::MatrixObject& act = mats[0].children()[0];
+	TH_CHECK(act.cols() == 3);			/* x.p ∪ b1.p ∪ c1.p */
+	TH_CHECK(fx::cell(act, 0, 1) == "b1.p");
+	TH_CHECK(fx::cell(act, 0, 2) == "c1.p");
+	TH_CHECK(fx::cell(act, 1, 1) == "10");
+	TH_CHECK(fx::cell(act, 1, 2) == "20");
+}
+
 TH_TEST(mtinclude_merge_nested_recurses_into_grandchildren) {
 	/* 归并 pass 递归下钻：@while > @if > (@Merge + 表) 也能就地归并。 */
 	fx::TempDir dir("merge_nested_deep");
@@ -672,6 +748,50 @@ TH_TEST(mtinclude_merge_nested_rejects_scalar_in_target) {
 	writeFile(dir, "b.mt", "@Vars\nname v;\nk 5;\n@\n@Action\nb.p;\n100;\n@\n");
 	auto mats = parseMain("@if(k>0)\n@Merge\npath;\n  b.mt;\n@\n@Action\nx.p;\n1;\n@\n@\n");
 	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "目标只能是纯矩阵表",
+		mtinclude::expandIncludes(mats, dir.path().string()));
+}
+
+TH_TEST(mtinclude_merge_nested_rejects_directives_in_target) {
+	/* 目标文件里的指令/控制块不能当动作矩阵并入：@Include/@Merge 此前会
+	 * 被当普通矩阵合并，晚到派发期才以「Action column 'path' is not valid」
+	 * 暴露；空控制块则因没有 children 被当空叶子表静默吞掉。现在统一在
+	 * 展开期按名字拒绝。 */
+	fx::TempDir dir("merge_nested_directive");
+	writeFile(dir, "inc.mt", "@Include\npath;\n  missing.mt;\n@\n@Action\nb.p;\n100;\n@\n");
+	auto mats = parseMain(
+		"@if(k>0)\n@Merge\npath;\n  inc.mt;\n@\n@Action\nx.p;\n1;\n@\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "目标只能是纯矩阵表",
+		mtinclude::expandIncludes(mats, dir.path().string()));
+
+	writeFile(dir, "mrg.mt", "@Merge\npath;\n  inner.mt;\n@\n@Action\nb.p;\n100;\n@\n");
+	auto mats2 = parseMain(
+		"@if(k>0)\n@Merge\npath;\n  mrg.mt;\n@\n@Action\nx.p;\n1;\n@\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "含 @Merge",
+		mtinclude::expandIncludes(mats2, dir.path().string()));
+
+	writeFile(dir, "emptyif.mt", "@if(k>0)\n@\n@Action\nb.p;\n100;\n@\n");
+	auto mats3 = parseMain(
+		"@if(k>0)\n@Merge\npath;\n  emptyif.mt;\n@\n@Action\nx.p;\n1;\n@\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "含 @if(k>0)",
+		mtinclude::expandIncludes(mats3, dir.path().string()));
+
+	writeFile(dir, "compound.mt",
+		"@Action\nb.p;\n100;\n@if(k>0)\nc.p;\n2;\n@\n@\n");
+	auto mats4 = parseMain(
+		"@if(k>0)\n@Merge\npath;\n  compound.mt;\n@\n@Action\nx.p;\n1;\n@\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "含嵌套子块",
+		mtinclude::expandIncludes(mats4, dir.path().string()));
+}
+
+TH_TEST(mtinclude_merge_nested_rejects_empty_control_below) {
+	/* 「下表」是空控制块时，hasChildren() 为假——修复前会被当纯叶子表并入，
+	 * 合并后的动作挂在控制块网格上，执行器按名字只走 children，动作被静默
+	 * 丢弃（整段脚本 rc=0 但什么也没执行）。按名字识别并拒绝。 */
+	fx::TempDir dir("merge_nested_emptyctrl");
+	writeFile(dir, "b.mt", "@Action\nb.p;\n100;\n@\n");
+	auto mats = parseMain(
+		"@if(k>0)\n@Merge\npath;\n  b.mt;\n@\n@if(j>0)\n@\n@\n");
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "必须紧跟一张纯矩阵表",
 		mtinclude::expandIncludes(mats, dir.path().string()));
 }
 

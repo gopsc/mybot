@@ -282,6 +282,16 @@ bool looksLikeWhileBlock(const std::string& rawName) {
 	const std::string n = bot::trim(rawName);
 	return n == "while" || n.compare(0, 6, "while(") == 0;
 }
+
+/* 「指令/控制块」名判定（嵌套 @Merge 的操作数校验）：这些块不是纯动作矩阵，
+ * 不能作为 mergeTwo 的操作数；空控制块（例如只有 @if(...) / @ 两行）没有
+ * children，单看 hasChildren() 会被误当成空叶子表而静默吞掉。 */
+bool isDirectiveBlockName(const std::string& rawName) {
+	const std::string n = bot::trim(rawName);
+	if (n.empty()) { return false; }
+	return n == "Merge" || n == "Include" || mt::isControlBlockName(n)
+		|| mt::looksLikeNamedReflex(n) || mt::looksLikeNamedStruct(n);
+}
 } // namespace
 
 class Expander {
@@ -415,11 +425,16 @@ public:
 				out.push_back(std::move(m));
 				continue;
 			}
-			/* m 是紧邻 @Merge 之下的表：必须是纯矩阵叶子 */
-			if (m.hasChildren()) {
+			/* m 是紧邻 @Merge 之下的表：必须是纯矩阵叶子。空控制块
+			 * （如只有 @if(k>0) 与 @ 的退化块）没有 children，单看
+			 * hasChildren() 会把它当空叶子表并入，随后执行器按控制块
+			 * 只走 children，合并进来的动作会被静默丢弃——必须按名字
+			 * 识别并拒绝。 */
+			if (m.hasChildren() || isDirectiveBlockName(m.getName())) {
 				throw bot::IllegalArgumentException("@Merge 下面必须紧跟一张纯矩阵表："
-					"找到的却是控制块 @" + bot::trim(m.getName())
-					+ "（嵌套 @Merge 只把目标纯矩阵并入其下紧邻的叶子表）");
+					"找到的却是 @" + bot::trim(m.getName())
+					+ "（指令/控制块不能作为下表；嵌套 @Merge 只把目标纯矩阵"
+					"并入其下紧邻的叶子表）");
 			}
 			mt::MatrixObject acc = std::move(m);
 			std::string accPath = "<inline table>";
@@ -448,6 +463,21 @@ public:
 							throw bot::IllegalArgumentException("嵌套 @Merge 目标只能是纯矩阵表：'"
 								+ resolved + "' 含 @" + tn + "（@if/@while 子块内的 @Merge 不注册"
 								"标量，请把这些 @Alias/@Vars 挪到最外层，或用顶层 @Merge）");
+						}
+						/* @Merge/@Include/@if/@while/@Reflex/@Struct 是指令或
+						 * 控制块，不是动作矩阵。此前会把它们当空/普通矩阵并入，
+						 * 空控制块静默消失，@Merge/@Include 则晚到派发期才以
+						 * 「Action column 'path' is not valid」暴露——在展开
+						 * 期按名字拒绝，报错才指得准。 */
+						if (isDirectiveBlockName(tn)) {
+							throw bot::IllegalArgumentException("嵌套 @Merge 目标只能是纯矩阵表：'"
+								+ resolved + "' 含 @" + tn + "（指令/控制块不能作为归并"
+								"操作数；请先把这些块展开或留在最外层）");
+						}
+						if (t.hasChildren()) {
+							throw bot::IllegalArgumentException("嵌套 @Merge 目标只能是纯矩阵表：'"
+								+ resolved + "' 的 @" + tn + " 含嵌套子块（只有数据行"
+								"能按相位归并；控制块请留在主脚本）");
 						}
 						acc = mtmerge::mergeTwo(acc, t, spec.phase, accPath, resolved);
 						accPath = resolved;
@@ -523,17 +553,35 @@ private:
 
 		/* 片段层「疑似 @if 块」先行拒绝（判据与理由见 looksLikeIfBlock）：
 		 * 响亮报错优于静默丢弃——放进片段的 @if 永远不会执行。嵌套的
-		 * 子片段由各自递归的 expandFile 用同一判据检查。 */
+		 * 子片段由各自递归的 expandFile 用同一判据检查。
+		 * 同一趟还拒绝两类「看起来会生效、实际会被片段语义吞掉」的块：
+		 *   - @Include：内容拷贝没有落点（片段只贡献 @Alias/@Vars/@Action），
+		 *     此前会被静默忽略，连目标文件都不读；
+		 *   - 带子块的 @Action：片段的动作只按相位归并数据行，@Action 里
+		 *     再嵌 @if/@while/@Merge 时，主脚本无 @Action 会意外执行这些
+		 *     子块、有 @Action 则报「归并控制块」——两种结果都不该出现。 */
 		for (const auto& m : incParsed) {
-			if (looksLikeIfBlock(m.getName())) {
+			const std::string name = bot::trim(m.getName());
+			if (looksLikeIfBlock(name)) {
 				throw bot::IllegalArgumentException("@if 块不支持出现在 @Merge 片段 '"
 					+ resolved + "' 中：片段的 @Action 按相位归并进主脚本 @Action，"
 					"没有独立的执行位置；请把该 @if 块挪到主脚本");
 			}
-			if (looksLikeWhileBlock(m.getName())) {
+			if (looksLikeWhileBlock(name)) {
 				throw bot::IllegalArgumentException("@while 块不支持出现在 @Merge 片段 '"
 					+ resolved + "' 中：片段的 @Action 按相位归并进主脚本 @Action，"
 					"没有独立的执行位置；请把该 @while 块挪到主脚本");
+			}
+			if (name == "Include") {
+				throw bot::IllegalArgumentException("@Include 不支持出现在 @Merge 片段 '"
+					+ resolved + "' 中：@Include 只能出现在最外层（像 C 的 #include），"
+					"片段只贡献 @Alias/@Vars/@Action；要复用片段请改用 @Merge");
+			}
+			if (name == "Action" && m.hasChildren()) {
+				throw bot::IllegalArgumentException("@Merge 片段 '" + resolved
+					+ "' 的 @Action 不能携带嵌套子块（@if/@while/@Merge 等）："
+					"片段的动作只按相位归并数据行，控制块没有独立执行位置；"
+					"请把这些块挪到主脚本");
 			}
 		}
 
