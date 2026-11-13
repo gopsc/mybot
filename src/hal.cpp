@@ -29,6 +29,7 @@
 
 #include "ftdi.hpp"
 #include "util_env.hpp"
+#include "util_file.hpp"	/* FdGuard：shell 管道在异常/停机路径上也要关闭 */
 
 namespace bot {
 namespace {
@@ -326,6 +327,27 @@ std::size_t httpHeader(char* data, std::size_t size, std::size_t count, void* us
 	return total;
 }
 
+/* libcurl 进度回调：SIGINT/SIGTERM 后让在飞 HTTP 请求尽快返回，而不是
+ * 阻塞到 60s 的 HAL 上限。返回非 0 即 CURLE_ABORTED_BY_CALLBACK。 */
+int httpProgress(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
+	return stopRequested() ? 1 : 0;
+}
+
+/* shell 子进程的停机兜底：正常路径已 waitpid；异常（SIGINT/SIGTERM 的 checkStop）
+ * 或中途 return 时，析构负责杀整个会话组并回收，避免留下 setsid 后的孤儿命令。 */
+struct ShellChildGuard {
+	pid_t pid = -1;
+	bool reaped = false;
+
+	~ShellChildGuard() {
+		if (pid <= 0 || reaped) { return; }
+		::kill(-pid, SIGKILL);	/* 子进程 setsid 后是会话组长；杀整组 */
+		::kill(pid, SIGKILL);	/* 竞态：setsid 尚未完成时 -pid 可能不存在 */
+		int status = 0;
+		while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+	}
+};
+
 Json runShell(const std::string& command, int timeoutMs) {
 	if (command.empty() || command.find('\0') != std::string::npos) {
 		throw std::runtime_error("shell command must be nonempty text without NUL");
@@ -341,27 +363,30 @@ Json runShell(const std::string& command, int timeoutMs) {
 		if (outPipe[1] >= 0) { ::close(outPipe[1]); }
 		throw std::runtime_error("cannot create shell pipes: " + errText(code));
 	}
+	FdGuard outRead(outPipe[0]);
+	FdGuard outWrite(outPipe[1]);
+	FdGuard errRead(errPipe[0]);
+	FdGuard errWrite(errPipe[1]);
+
 	const pid_t pid = ::fork();
 	if (pid < 0) {
-		const int code = errno;
-		::close(outPipe[0]); ::close(outPipe[1]);
-		::close(errPipe[0]); ::close(errPipe[1]);
-		throw std::runtime_error("cannot fork shell: " + errText(code));
+		throw std::runtime_error("cannot fork shell: " + errText(errno));
 	}
+	ShellChildGuard child{pid};
 	if (pid == 0) {
 		::setsid();
-		::dup2(outPipe[1], STDOUT_FILENO);
-		::dup2(errPipe[1], STDERR_FILENO);
+		::dup2(outWrite.get(), STDOUT_FILENO);
+		::dup2(errWrite.get(), STDERR_FILENO);
 		::dup2(::open("/dev/null", O_RDONLY), STDIN_FILENO);
-		::close(outPipe[0]); ::close(outPipe[1]);
-		::close(errPipe[0]); ::close(errPipe[1]);
+		::close(outRead.get()); ::close(outWrite.get());
+		::close(errRead.get()); ::close(errWrite.get());
 		::execl("/bin/sh", "sh", "-c", command.c_str(), nullptr);
 		::_exit(127);
 	}
-	::close(outPipe[1]);
-	::close(errPipe[1]);
-	::fcntl(outPipe[0], F_SETFL, O_NONBLOCK);
-	::fcntl(errPipe[0], F_SETFL, O_NONBLOCK);
+	outWrite.close();
+	errWrite.close();
+	::fcntl(outRead.get(), F_SETFL, O_NONBLOCK);
+	::fcntl(errRead.get(), F_SETFL, O_NONBLOCK);
 
 	std::string out;
 	std::string err;
@@ -374,7 +399,7 @@ Json runShell(const std::string& command, int timeoutMs) {
 	while (true) {
 		checkStop();
 		char buffer[8192];
-		pollfd fds[2] = {{outPipe[0], POLLIN, 0}, {errPipe[0], POLLIN, 0}};
+		pollfd fds[2] = {{outRead.get(), POLLIN, 0}, {errRead.get(), POLLIN, 0}};
 		const int ready = ::poll(fds, 2, 10);
 		if (ready > 0) {
 			for (int i = 0; i < 2; ++i) {
@@ -391,11 +416,13 @@ Json runShell(const std::string& command, int timeoutMs) {
 			const pid_t result = ::waitpid(pid, &status, WNOHANG);
 			if (result == pid) {
 				exited = true;
+				child.reaped = true;
 				::kill(-pid, SIGKILL);
 			} else if (std::chrono::steady_clock::now() >= deadline) {
 				timedOut = true;
 				::kill(-pid, SIGKILL);
-				::waitpid(pid, &status, 0);
+				while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
+				child.reaped = true;
 				exited = true;
 			}
 		}
@@ -412,9 +439,6 @@ Json runShell(const std::string& command, int timeoutMs) {
 			break;
 		}
 	}
-	::close(outPipe[0]);
-	::close(errPipe[0]);
-
 	Json result = JsonObject();
 	result.put("result", JsonString(timedOut ? "ERR" : "OK"));
 	result.put("code", JsonInt(exited && WIFEXITED(status) ? WEXITSTATUS(status) : -1));
@@ -1274,6 +1298,9 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(resource.timeoutMs));
+	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, httpProgress);
+	curl_easy_setopt(curl, CURLOPT_XFERINFODATA, nullptr);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, httpWrite);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &capture);
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, httpHeader);
@@ -1288,6 +1315,9 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 	if (headerList != nullptr) { curl_slist_free_all(headerList); }
 	curl_easy_cleanup(curl);
+	if (code == CURLE_ABORTED_BY_CALLBACK && stopRequested()) {
+		throw std::runtime_error("HTTP request aborted: stop requested");
+	}
 	if (code != CURLE_OK) {
 		throw std::runtime_error(std::string("HTTP request failed: ")
 			+ curl_easy_strerror(code));

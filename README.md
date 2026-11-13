@@ -52,7 +52,7 @@ cmake --build build -j4
 cat scripts/relay-test.mt | ./build/mybot --robot=robots/relay-test.sql
 ```
 
-`--robot`/`--input` 是相对当前目录的路径；模块根默认 `./modules`，可用 `BOT4CJ_MODULE_PATH`（`:` 分隔）或环境变量覆盖。
+`--robot`/`--input` 是相对当前目录的路径；模块根优先 `./modules`（存在时），否则回退到可执行文件旁的 `../share/mybot/modules`（安装布局），也可用 `BOT4CJ_MODULE_PATH`（`:` 分隔）覆盖。
 
 ## CLI
 

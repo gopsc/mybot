@@ -202,7 +202,12 @@ static void restrictRequireLoaders(lua_State* L) {
 }
 
 static void injectModulePathResolver(lua_State* L) {
-	auto found = findExistingModule(modulePaths(), "lib/mpath.lua");
+	const std::string roots = modulePaths();
+	/* 把宿主解析出的模块根告诉 mpath.paths()：安装布局下没有 ./modules，
+	 * 仅靠环境变量或 ./modules 的旧回退会让驱动引导去错目录。 */
+	lua_pushlstring(L, roots.data(), roots.size());
+	lua_setglobal(L, "__mpath_roots");
+	auto found = findExistingModule(roots, "lib/mpath.lua");
 	if (!found) {
 		/* BQ-2：多段配置一段都找不到 = 「按序查找」承诺缺位，响亮；
 		 * 单段找不到 = 单根回退语义等价（测试夹具常态），保持静默。 */

@@ -72,7 +72,7 @@ TCP 动作源、MCP/agent、Web SSH 与 sim 相关入口已从本分支移除；
 
 | 变量 | 说明 |
 | --- | --- |
-| `BOT4CJ_MODULE_PATH` | 驱动模块目录（默认 `./modules`），`<矩阵名>.lua`、`lib/`、`@Daemon` chunk 都按它解析；支持 `:` 分隔多路径按序查找。宿主建沙箱时逐段探测 `lib/mpath.lua` 并注入 `__mpath`；脱离宿主直跑 `luajit test/*.lua` 时没有 `__mpath`，回退单根语义，请把含 `lib/` 的根放首位 |
+| `BOT4CJ_MODULE_PATH` | 驱动模块目录（默认优先 `./modules`，不存在则用安装布局的 `<prefix>/share/mybot/modules`），`<矩阵名>.lua`、`lib/`、`@Daemon` chunk 都按它解析；支持 `:` 分隔多路径按序查找。宿主建沙箱时逐段探测 `lib/mpath.lua` 并注入 `__mpath`；脱离宿主直跑 `luajit test/*.lua` 时没有 `__mpath`，回退单根语义，请把含 `lib/` 的根放首位 |
 | `BOT4CJ_DEBUG` | 设为 `1` 开启 call/build/destroy 的参数表、结果表与逐键值转储；缺省静默 |
 | `BOT4CJ_ALLOW_PTRACE` | 设为 `1` 时 `mybot` 启动不再执行 `prctl(PR_SET_DUMPABLE, 0)`，进程保持可被同 UID `ptrace`/core dump；仅调试用。sanitizer 构建编译期跳过这一步 |
 | `BOT4CJ_HAL_BACKEND` | **仅独立 LuaJIT 回退路径**：`modules/lib/hal_backend_<名>.lua`（缺省 `glibc`）。宿主运行期走 C++ HAL，不读本变量 |

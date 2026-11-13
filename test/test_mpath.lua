@@ -16,6 +16,15 @@ do
 	tester.check("缺省 resolve 找到 lib/mpath.lua", mp.resolve("lib/mpath.lua") == "./modules/lib/mpath.lua")
 end
 
+-- 1b) 宿主注入的 __mpath_roots：安装布局下没有 ./modules 时仍能解析
+do
+	_G.__mpath_roots = "/opt/mybot/share/mybot/modules"
+	local ps = mp.paths(nil)
+	tester.check("宿主 __mpath_roots 参与缺省解析",
+		#ps == 1 and ps[1] == "/opt/mybot/share/mybot/modules")
+	_G.__mpath_roots = nil
+end
+
 -- 2) 单路径向后兼容
 do
 	local ps = mp.paths("./modules")

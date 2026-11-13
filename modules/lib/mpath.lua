@@ -11,7 +11,9 @@ local mpath = {}
 -- 返回路径列表：按 ':' 拆分，去空去重保持顺序；空结果回退默认 "./modules"
 -- env 参数仅供测试直传注入；生产调用不传，读取 BOT4CJ_MODULE_PATH。
 function mpath.paths(env)
-	local raw = env or os.getenv("BOT4CJ_MODULE_PATH") or "./modules"
+	-- __mpath_roots：宿主解析出的模块根（安装布局可能不在 ./modules）；
+	-- 显式 env / 环境变量仍优先，独立 luajit 运行时回退到 ./modules。
+	local raw = env or os.getenv("BOT4CJ_MODULE_PATH") or __mpath_roots or "./modules"
 	local out, seen = {}, {}
 	for p in raw:gmatch("[^:]+") do
 		if not seen[p] then

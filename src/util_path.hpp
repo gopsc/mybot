@@ -2,22 +2,48 @@
 /* util_path.hpp —— 路径单点：Lua 驱动模块根目录搜索（BOT4CJ_MODULE_PATH）与相对路径
  * 安全判据（目录穿越/绝对路径/NUL）（自 util.hpp 拆出，2026-09-26 批次 3）。 */
 
+#include <array>
 #include <cstddef>
+#include <cstdlib>
 #include <fstream>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include <unistd.h>
+
 #include "util_env.hpp"	/* modulePaths 用 getEnvVar */
 
 namespace bot {
 
-/* N-19：Lua 驱动模块根目录——BOT4CJ_MODULE_PATH（':' 分段），缺省 ./modules。
- * 此前宿主三处各自读取（luaend 白名单 / daemonvar chunk / robot 驱动脚本），
- * 其中 luaend 还是手工 getenv、空串语义与另两处不一致，收敛单点。 */
+/* 安装布局下的模块根：<prefix>/bin/mybot → <prefix>/share/mybot/modules。
+ * 只读 /proc/self/exe，不依赖 CWD；找不到时返回空串。 */
+inline std::string installedModulePath() {
+	std::array<char, 4096> buffer{};
+	const ssize_t n = ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+	if (n <= 0) { return std::string(); }
+	std::string exe(buffer.data(), static_cast<std::size_t>(n));
+	const std::size_t slash = exe.rfind('/');
+	if (slash == std::string::npos) { return std::string(); }
+	const std::string candidate = exe.substr(0, slash) + "/../share/mybot/modules";
+	if (::access(candidate.c_str(), F_OK) != 0) { return std::string(); }
+	/* 规范化掉 bin/../share 里的 '..'：Lua 沙箱路径校验明确拒绝该分量。 */
+	std::array<char, 4096> resolved{};
+	if (::realpath(candidate.c_str(), resolved.data()) != nullptr) {
+		return std::string(resolved.data());
+	}
+	return candidate;
+}
+
+/* N-19：Lua 驱动模块根目录——BOT4CJ_MODULE_PATH（':' 分段）。
+ * 未显式设置时优先当前目录的 ./modules（仓库/开发用法），不存在再回退安装布局
+ * 的 share/mybot/modules；两者都没有则保留 ./modules 作为报错路径。 */
 inline std::string modulePaths() {
 	auto v = getEnvVar("BOT4CJ_MODULE_PATH");
-	return (v && !v->empty()) ? *v : "./modules";
+	if (v && !v->empty()) { return *v; }
+	if (::access("./modules", F_OK) == 0) { return "./modules"; }
+	const std::string installed = installedModulePath();
+	return installed.empty() ? "./modules" : installed;
 }
 
 /* ':' 分段切分模块路径：去空段、剥尾斜杠（审计 #7 同源：fail-closed 白名单

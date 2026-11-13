@@ -2,7 +2,7 @@
 
 > **清单与计数以 `modules/` 目录为准**（本页是速查索引，可能滞后于代码；`ls modules/*.lua` 即权威清单）。结构脚本里每张 `CREATE TABLE <矩阵名>` 对应加载 `modules/<矩阵名>.lua`。各驱动的协议细节与其内嵌 `<矩阵名>_VIRT` 仿真模型见 [virtbus.md](virtbus.md)。
 >
-> **计数口径**（README 与架构页引用的数字按此推导，可复算）：`ls modules/*.lua` = 61 = **49 款器件/执行器/系统接口驱动**（本页前六节：舵机/输出 13 + IMU 6 + 气压/环境/光 11 + 测距/闪电 3 + ADC/电源 11 + 气体/医疗/其他 5）+ **3 条总线**（`I2C`/`SPI`/`UART`）+ **9 个框架/工具驱动**（`Relay`/`dummy`/`Monitor`/`Kalman`/`Ema`/`bitcompat`/`Camera`/`Sim`/`SpiProbe`，即最后一节；2026-09-25 #8 起 Lua 协议驱动轨道已删，`LlmOpenAI`/`LlmDeepSeek`/`LlmAnthropic` 不再有对应 `.lua` 文件）。注意 `GPIO`/`PWM`/`Speaker` 是**系统接口/执行器驱动**、归在 49 里（不是总线）；`bitcompat` 是纯 Lua 兼容库、不在 `lib/` 下。`modules/lib/` 另有 30 个共享库（`find modules/lib -name '*.lua' | wc -l`，含 `asound`、`virtbus/regmap.lua` 与 `hal/` 下 5 个总线域分块），不计入 61。本页各节点名的模块集合与 `ls modules/*.lua` 双向核对（`scripts/check_doc_paths.py` 当前仍按旧版全仓路径检查，controller-only 分支需先修脚本才能作为守门证据）。
+> **计数口径**（README 与架构页引用的数字按此推导，可复算）：`ls modules/*.lua` = 61 = **49 款器件/执行器/系统接口驱动**（本页前六节：舵机/输出 13 + IMU 6 + 气压/环境/光 11 + 测距/闪电 3 + ADC/电源 11 + 气体/医疗/其他 5）+ **3 条总线**（`I2C`/`SPI`/`UART`）+ **9 个框架/工具驱动**（`Relay`/`dummy`/`Monitor`/`Kalman`/`Ema`/`bitcompat`/`Camera`/`Sim`/`SpiProbe`，即最后一节；2026-09-25 #8 起 Lua 协议驱动轨道已删，`LlmOpenAI`/`LlmDeepSeek`/`LlmAnthropic` 不再有对应 `.lua` 文件）。注意 `GPIO`/`PWM`/`Speaker` 是**系统接口/执行器驱动**、归在 49 里（不是总线）；`bitcompat` 是纯 Lua 兼容库、不在 `lib/` 下。`modules/lib/` 另有 30 个共享库（`find modules/lib -name '*.lua' | wc -l`，含 `asound`、`virtbus/regmap.lua` 与 `hal/` 下 5 个总线域分块），不计入 61。本页各节点名的模块集合以 `ls modules/*.lua` 为权威清单（controller-only 分支未随附旧版全仓文档一致性脚本；本页计数按上面的口径人工复核）。
 
 ## 舵机 / 输出执行器
 

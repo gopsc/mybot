@@ -10,11 +10,11 @@
  * 25.5 评估后**判不改文件名**（本文件只实现 ScriptLoader 一个类，名字却不叫
  * script_loader.cpp）：寄居理由三处已互相指认（本头注、script_loader.hpp 的
  * 「实现在 structure.cpp」、CMakeLists.txt 里 MYBOT_CORE_SOURCES 那条行尾注），
- * 改名买到的是「文件名 == 类名」这一点整齐，代价是全仓 6 处引用散在 6 个受版控
+ * 改名买到的是「文件名 == 类名」这一点整齐，代价是全仓 5 处引用散在 5 个受版控
  * 的文件里跟着改（CMakeLists.txt:99、hw_factory.cpp:2、robot.hpp:10、
- * script_loader.hpp:3、agentview.cpp:270 各一处，加上本文件头注），并且要给
- * scripts/check_doc_paths.py 的 DELETED_FILES 加一条旧名豁免——那张名单还带反向
- * 核对（旧名一旦又存在就判名单过期），等于为一次纯改名长期背一条豁免。
+ * script_loader.hpp:3 各一处，加上本文件头注），并且要在历史文档引用清单里
+ * 加一条旧名豁免——那份清单还带反向核对（旧名一旦又存在就判名单过期），
+ * 等于为一次纯改名长期背一条豁免。
  * 「头名 == 实现文件名」在本仓本就不是惯例：robot.hpp 声明的 RobotStruct 没有
  * robot.cpp，实现散在 robot_actions / robot_application / robot_driver /
  * robot_hotsql / robot_lifecycle 五个 .cpp 里；luaend.hpp 的声明实现在
