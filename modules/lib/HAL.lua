@@ -224,6 +224,27 @@ end
 function shell_run(fd, command, timeout_ms)
     return bridge("shell_run", tonumber(fd), command, timeout_ms)
 end
+-- Speaker/ALSA：宿主 C++ HAL 负责 PCM 设备生命周期与原始 S16_LE 写入；
+-- Lua 侧只合成波形块。独立 luajit 测试没有 __hal_call 时，asound.lua 回退
+-- 到 ffi 直驱 libasound（测试路径，不是 mybot 生产路径）。
+function speaker_open(device, rate)
+    return report(bridge("speaker_open", device, rate))
+end
+function speaker_write(h, data)
+    return bridge("speaker_write", tonumber(h), data)
+end
+function speaker_prepare(h)
+    return bridge("speaker_prepare", tonumber(h))
+end
+function speaker_drain(h)
+    return bridge("speaker_drain", tonumber(h))
+end
+function speaker_close(h)
+    return report(bridge("speaker_close", tonumber(h)))
+end
+function speaker_errmsg(rc)
+    return bridge("speaker_errmsg", tonumber(rc))
+end
 -- GPIO/PWM 走宿主 C++ HAL（gpiod uAPI / sysfs），与 i2c/spi/uart 同一条
 -- __hal_call 桥。返回码按 FFI 后端契约归一：失败 -1/false，成功 int/bool。
 function gpio_request_line(chip, offset, direction, default_value, active_low)
@@ -288,9 +309,6 @@ function pwm_unexport(chip, channel)
     return ok
 end
 
-for _, name in ipairs({ "speaker_open", "speaker_write", "speaker_close" }) do
-    _G[name] = unsupported(name)
-end
 for _, name in ipairs({ "open", "ioctl_i", "ioctl_p", "read", "write", "errno",
     "tcgetattr", "tcsetattr", "cfmakeraw", "cfsetispeed", "cfsetospeed", "tcflush" }) do
     HAL.sys[name] = unsupported("native " .. name)

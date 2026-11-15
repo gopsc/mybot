@@ -20,7 +20,7 @@
 | `GPIO` | Linux GPIO（gpiod uAPI v1，宿主 C++ HAL 提供 `/dev/gpiochipN` ioctl） |
 | `PWM` | Linux PWM（sysfs `/sys/class/pwm`，宿主 C++ HAL 提供；根目录可用 `BOT4CJ_PWM_SYSFS_ROOT` 覆盖） |
 | `H03ARR` | H03A 电机驱动 |
-| `Speaker` | 声卡音频输出（ALSA ffi 直驱，经 `lib/asound.lua`）：预设波形（sine/square/triangle/sawtooth/noise/silence）+ 音调 + 时长阻塞播放；`simulate='1'` 为仿真模式 |
+| `Speaker` | 声卡音频输出（ALSA）：宿主运行期经 C++ HAL 的 `speaker_*` 桥（动态 dlopen libasound，不引入构建依赖），独立 luajit 测试回退 `lib/asound.lua` 的 ffi 直驱。预设波形（sine/square/triangle/sawtooth/noise/silence）+ 音调 + 时长阻塞播放；`simulate='1'` 为仿真模式 |
 
 ## IMU / 姿态
 

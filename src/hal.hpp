@@ -8,6 +8,10 @@
  * GPIO/PWM 自 2026-11 起也走本层：GPIO 用 gpiod uAPI v1（/dev/gpiochipN
  * ioctl），PWM 用 Linux sysfs（/sys/class/pwm）。两者此前只在独立 luajit
  * 测试的 HAL_ffi 回退后端里可用，宿主运行期会报 unsupported。
+ *
+ * Speaker/ALSA 自 2026-11 起走本层：C++ 侧 dlopen libasound（不引入
+ * libasound2-dev 构建依赖），Lua 侧只合成 S16_LE 波形块；独立 luajit
+ * 测试仍可回退 modules/lib/asound.lua 的 ffi 路径。
  */
 
 #include <cstdint>
@@ -57,6 +61,9 @@ public:
 	static constexpr int kShellMaxOutBytes = 1024 * 1024;
 	static constexpr int kShellTimeoutMs = 60000;
 	static constexpr int kPwmMaxId = 65535;
+	/* Speaker：一次 speaker_write 的原始 S16_LE 单声道字节上限。Speaker.lua
+	 * 按 4096 帧（8192B）分块写，1 MiB 足够容纳整块且防止误传大缓冲区。 */
+	static constexpr int kSpeakerMaxBytes = 1024 * 1024;
 
 private:
 	struct Resource;
@@ -106,6 +113,15 @@ private:
 		const Json& headers, const Json& body);
 	Json opShellOpen(const Json& timeoutMs, int owner);
 	Json opShellRun(const Json& handle, const Json& command, const Json& timeoutMs);
+	/* Speaker/ALSA：宿主 C++ HAL 经 dlopen 动态加载 libasound，避免把 ALSA
+	 * 开发头文件变成构建依赖。Lua 侧只负责合成波形，PCM 设备生命周期与
+	 * 原始 S16_LE 写入在本层完成。 */
+	Json opSpeakerOpen(const Json& device, const Json& rate, int owner);
+	Json opSpeakerWrite(const Json& handle, const Json& data);
+	Json opSpeakerPrepare(const Json& handle);
+	Json opSpeakerDrain(const Json& handle);
+	Json opSpeakerClose(const Json& handle);
+	Json opSpeakerErrmsg(const Json& code);
 	Json opCloseHandle(const Json& handle);
 	Json opSleepMs(const Json& ms);
 

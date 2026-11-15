@@ -10,6 +10,7 @@
 | CMake ≥ 3.16、C++17 编译器 | g++ / clang++ | ✅ 必需 |
 | LuaJIT 2.1（`libluajit-5.1-dev`） | 驱动与独立 Lua 回归 | ✅ 必需 |
 | SQLite3、libcurl、libftdi1、libusb | 结构 SQL、HTTP、FTDI | ✅ 必需 |
+| libasound2 | `Speaker` 音频驱动；宿主 C++ HAL 运行期 `dlopen`，无需开发头文件 | ⭕ 可选 |
 | Python 3 | 仓库里的文档/协议校验脚本；不参与 `mybot` 运行期 | ⭕ 可选 |
 | `/dev/i2c-*`、`/dev/spidev*`、`/dev/gpiochip*`、`/sys/class/pwm` | 真机总线/执行器 | ⭕ 可选 |
 

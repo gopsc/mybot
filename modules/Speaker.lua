@@ -1,8 +1,10 @@
 -- Speaker 声卡播放 驱动模块（预设波形 + 音调 + 时长）
 -- bot4cj 仓颉语言机器人框架
 --
--- 经 libasound（ALSA）ffi 直驱宿主机声卡：给定波形名（preset）、音调
--- （freq，Hz 数字）与时长（delay，毫秒），在 call 期间合成并阻塞播放。
+-- 经 ALSA 播放宿主机声卡：给定波形名（preset）、音调（freq，Hz 数字）与
+-- 时长（delay，毫秒），在 call 期间合成并阻塞播放。宿主 mybot 下 PCM 设备
+-- 由 C++ HAL 的 speaker_* 桥持有（动态 dlopen libasound，不引入构建依赖）；
+-- 独立 luajit 测试回退到 lib/asound.lua 的 ffi 直驱路径。
 -- "default" 设备在 PipeWire/PulseAudio 桌面自动经兼容层混音路由，在树莓派
 -- 走 ALSA dmix/裸 hw——长驻进程持有设备不妨碍其他应用出声（直配 "hw:..."
 -- 除外，那是独占）。
@@ -63,11 +65,12 @@
 -- 顺延——列序即播放序，与舵机列同帧混排即「先出腿、后发声」。旋律不需要
 -- 新机制：.mt 的时间轴就是音序器，一行一音。
 --
--- 运行期依赖：libasound.so.2（缺失时 build 报错并提示安装，不静默降级）。
--- simulate='1' 时不加载 libasound、不真睡（E2E 快跑），每音打印锚点行
+-- 运行期依赖：libasound.so.2（宿主 C++ HAL 动态加载；缺失时 build 报错并
+-- 提示安装，不静默降级）。simulate='1' 时不打开 ALSA、不真睡（E2E 快跑），
+-- 每音打印锚点行
 -- `Speaker: wave=... freq=...Hz ...ms vol=...`，返回表带 simulated=true。
 --
--- 不声明 SINGLE_CONSUMER：无总线事务，PCM 句柄由本驱动独占自持（第二个
+-- 不声明 SINGLE_CONSUMER：无总线事务，PCM 句柄由本变量经 C++ HAL 资源独占持有（第二个
 -- Speaker 实例直配同一 "hw:x,y" 时由内核 -EBUSY 在 build 期拒绝）。
 
 -- 标准前导：HAL/print_table/drv_common 经 mpath 加载（modules/lib/）

@@ -17,6 +17,7 @@ sudo apt install cmake g++ ninja-build luajit libluajit-5.1-dev \
 - LuaJIT 2.1：驱动运行时
 - SQLite3：结构 SQL 的解析/执行库
 - libcurl：HTTP 驱动
+- libasound2（可选）：`Speaker` 音频驱动运行时依赖；宿主 C++ HAL 以 `dlopen` 加载，不参与构建
 - CLI11：命令行解析（已 vendored 在 `third_party/cli11`）
 - nn4cpp（可选）：`Nns` 原生神经网络驱动；默认检测同级 `../nn4cpp` 或
   `../botprj/nn4cpp`，也可用 `-DMYBOT_NN4CPP_DIR=...` 指定。Eigen 已 vendored
@@ -31,7 +32,7 @@ cmake --build build -j4
 ./build/mybot --help
 ```
 
-当前基线：**595 个 C++ 单测通过**；ctest 全部通过。
+当前基线：**599 个 C++ 单测通过**；ctest 全部通过。
 
 ## 快速开始
 
@@ -117,7 +118,7 @@ Structure SQL (SQLite3 + DSL 归一化) → MatrixObject 表
         ├── Lua 驱动（LuaJIT，modules/*.lua）
         └── 原生 C++ 驱动（Time/TCP/HTTP/Shell/Dev_enum/I2C_scan/LoopbackProbe）
         │
-        └── C++ HAL（I2C/SPI/UART/TCP/HTTP/Shell）
+        └── C++ HAL（I2C/SPI/UART/GPIO/PWM/TCP/HTTP/Shell/ALSA）
 ```
 
 - `src/sql_engine.cpp`：SQLite3 结构 SQL 加载器；`$var`、`$(expr)`、`-` 由归一化层保留为文本。
@@ -141,6 +142,7 @@ Structure SQL (SQLite3 + DSL 归一化) → MatrixObject 表
 - MT 带引号单元格（引号内空格、`;`、`#` 不分格）
 - 原生 Time/LoopbackProbe/Shell/HTTP/TCP/Dev_enum/I2C_scan 驱动
 - GPIO（gpiod uAPI v1）与 PWM（Linux sysfs）经宿主 C++ HAL
+- Speaker 音频（ALSA，宿主经 C++ HAL 的 `speaker_*`；独立 luajit 测试回退 ffi）
 - FTDI `ftdi://` I2C/SPI（libftdi1 MPSSE GPIO 位操作；SPI 支持 8 位字、mode 0..3、`?cs=0..4`）
 
 尚未提供：

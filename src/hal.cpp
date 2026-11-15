@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <linux/gpio.h>
 #include <linux/i2c-dev.h>
@@ -465,6 +466,76 @@ Json runShell(const std::string& command, int timeoutMs) {
 	return result;
 }
 
+/* ---- Speaker/ALSA 动态加载 ----
+ * 不引入 libasound2-dev 构建依赖：只用 dlopen/dlsym，按 ALSA 1.x 的稳定
+ * 公开 ABI 取函数。snd_pcm_t 保持不透明指针；枚举常量与 <alsa/asoundlib.h>
+ * 一致（PLAYBACK=0 / S16_LE=2 / RW_INTERLEAVED=3）。缺库时 ready()=false，
+ * speaker_open 会返回 ERR 并在 last_error 里给出安装提示。 */
+struct AlsaApi {
+	using PcmOpenFn = int (*)(void**, const char*, int, int);
+	using PcmSetParamsFn = int (*)(void*, int, int, unsigned int,
+		unsigned int, int, unsigned int);
+	using PcmWriteiFn = long (*)(void*, const void*, unsigned long);
+	using PcmPrepareFn = int (*)(void*);
+	using PcmDrainFn = int (*)(void*);
+	using PcmCloseFn = int (*)(void*);
+	using StrErrorFn = const char* (*)(int);
+
+	void* handle = nullptr;
+	PcmOpenFn pcmOpen = nullptr;
+	PcmSetParamsFn pcmSetParams = nullptr;
+	PcmWriteiFn pcmWritei = nullptr;
+	PcmPrepareFn pcmPrepare = nullptr;
+	PcmDrainFn pcmDrain = nullptr;
+	PcmCloseFn pcmClose = nullptr;
+	StrErrorFn strError = nullptr;
+
+	bool ready() const {
+		return handle != nullptr && pcmOpen != nullptr && pcmSetParams != nullptr
+			&& pcmWritei != nullptr && pcmPrepare != nullptr
+			&& pcmDrain != nullptr && pcmClose != nullptr && strError != nullptr;
+	}
+};
+
+template <typename Fn>
+void loadAlsaSymbol(void* handle, Fn& target, const char* name) {
+	static_assert(sizeof(Fn) == sizeof(void*),
+		"dlsym function pointer must fit in a data pointer");
+	void* symbol = ::dlsym(handle, name);
+	std::memcpy(&target, &symbol, sizeof(target));
+}
+
+const AlsaApi& alsaApi() {
+	static const AlsaApi api = [] {
+		AlsaApi out;
+		static const char* const names[] = { "libasound.so.2", "libasound.so" };
+		for (const char* name : names) {
+			out.handle = ::dlopen(name, RTLD_NOW | RTLD_LOCAL);
+			if (out.handle != nullptr) { break; }
+		}
+		if (out.handle == nullptr) { return out; }
+		loadAlsaSymbol(out.handle, out.pcmOpen, "snd_pcm_open");
+		loadAlsaSymbol(out.handle, out.pcmSetParams, "snd_pcm_set_params");
+		loadAlsaSymbol(out.handle, out.pcmWritei, "snd_pcm_writei");
+		loadAlsaSymbol(out.handle, out.pcmPrepare, "snd_pcm_prepare");
+		loadAlsaSymbol(out.handle, out.pcmDrain, "snd_pcm_drain");
+		loadAlsaSymbol(out.handle, out.pcmClose, "snd_pcm_close");
+		loadAlsaSymbol(out.handle, out.strError, "snd_strerror");
+		return out;
+	}();
+	return api;
+}
+
+std::string alsaErrorText(int rc) {
+	const int code = rc < 0 ? rc : -rc;
+	const AlsaApi& api = alsaApi();
+	if (api.strError != nullptr) {
+		const char* text = api.strError(code);
+		if (text != nullptr) { return std::string(text); }
+	}
+	return "ALSA error " + std::to_string(code);
+}
+
 } // namespace
 
 struct HALManager::Resource {
@@ -480,6 +551,9 @@ struct HALManager::Resource {
 	int timeoutMs = 10000;
 	std::vector<std::uint8_t> ring;
 	std::unique_ptr<FtdiBus> ftdi;
+	/* Speaker：ALSA PCM 句柄（snd_pcm_t*，保持不透明指针）。与 fd 一样由
+	 * closePcm/析构兜底关闭；closeResource 与 closeAll 不区分资源种类。 */
+	void* pcm = nullptr;
 	bool closed = false;
 	/* 操作期间防 close：所有 op 经 Lease 持本锁，closeResource 也持本锁。
 	 * recursive 允许 TCP 错误路径/GPIO free 在租约内 close。 */
@@ -500,7 +574,18 @@ struct HALManager::Resource {
 		::close(fd);
 		fd = -1;
 	}
-	~Resource() { closeFd(); }
+	/* 关闭 PCM 句柄；snd_pcm_close 失败也把指针置空，避免析构/closeAll
+	 * 重入时二次关闭。 */
+	void closePcm() {
+		if (pcm == nullptr) { return; }
+		const AlsaApi& api = alsaApi();
+		if (api.pcmClose != nullptr) { (void)api.pcmClose(pcm); }
+		pcm = nullptr;
+	}
+	~Resource() {
+		closeFd();
+		closePcm();
+	}
 };
 
 /* 租约构造：先锁 Resource，再检查 closed。lookup 已完成 map 查询并持有
@@ -577,6 +662,7 @@ std::int64_t HALManager::addBus(const char* kind, const std::string& path, int f
 void HALManager::closeResource(Resource& resource) {
 	std::lock_guard<std::recursive_mutex> guard(resource.mutex);
 	resource.closeFd();
+	resource.closePcm();
 	resource.ftdi.reset();
 	resource.closed = true;
 }
@@ -599,7 +685,9 @@ Json HALManager::call(const std::string& operation, const std::vector<Json>& arg
 		"pwm_set_polarity", "pwm_enable", "pwm_unexport",
 		"uart_open", "uart_write", "uart_read", "uart_flush", "virt_attach",
 		"tcp_open", "tcp_write", "tcp_read", "http_open", "http_request",
-		"shell_open", "shell_run", "close_handle", "sleep_ms",
+		"shell_open", "shell_run", "speaker_open", "speaker_write",
+		"speaker_prepare", "speaker_drain", "speaker_close", "speaker_errmsg",
+		"close_handle", "sleep_ms",
 	};
 	bool supported = false;
 	for (const char* name : known) {
@@ -683,6 +771,14 @@ Json HALManager::call(const std::string& operation, const std::vector<Json>& arg
 			return opShellRun(arg(0), arg(1),
 				args.size() > 2 ? arg(2) : JsonNull());
 		}
+		if (operation == "speaker_open") {
+			return opSpeakerOpen(arg(0), args.size() > 1 ? arg(1) : JsonInt(16000), owner);
+		}
+		if (operation == "speaker_write") { return opSpeakerWrite(arg(0), arg(1)); }
+		if (operation == "speaker_prepare") { return opSpeakerPrepare(arg(0)); }
+		if (operation == "speaker_drain") { return opSpeakerDrain(arg(0)); }
+		if (operation == "speaker_close") { return opSpeakerClose(arg(0)); }
+		if (operation == "speaker_errmsg") { return opSpeakerErrmsg(arg(0)); }
 		if (operation == "close_handle") { return opCloseHandle(arg(0)); }
 		if (operation == "sleep_ms") { return opSleepMs(arg(0)); }
 	} catch (const std::exception& exc) {
@@ -1445,6 +1541,116 @@ Json HALManager::opShellRun(const Json& handleValue, const Json& commandValue,
 			: asInt(timeoutValue, 1, kShellTimeoutMs, "shell timeout");
 	}
 	return runShell(command, timeoutMs);
+}
+
+Json HALManager::opSpeakerOpen(const Json& deviceValue, const Json& rateValue, int owner) {
+	const std::string device = asStr(deviceValue, "speaker device");
+	if (device.empty() || device.find('\0') != std::string::npos) {
+		throw std::runtime_error("speaker device must be a non-empty name without NUL");
+	}
+	const int rate = asInt(rateValue, 8000, 48000, "speaker rate");
+	const AlsaApi& api = alsaApi();
+	if (!api.ready()) {
+		throw std::runtime_error("libasound not found or missing required symbols (install libasound2 / alsa-lib)");
+	}
+	void* pcm = nullptr;
+	int rc = api.pcmOpen(&pcm, device.c_str(), 0 /* PLAYBACK */, 0);
+	if (rc < 0) {
+		throw std::runtime_error("snd_pcm_open('" + device + "'): " + alsaErrorText(rc));
+	}
+	/* S16_LE / RW_INTERLEAVED / 单声道 / 0.5s 缓冲：与 Speaker.lua 的
+	 * 波形块格式严格一致；soft_resample=1 允许设备做必要重采样。 */
+	rc = api.pcmSetParams(pcm, 2 /* S16_LE */, 3 /* RW_INTERLEAVED */, 1,
+		static_cast<unsigned int>(rate), 1, 500000);
+	if (rc < 0) {
+		const std::string message = "snd_pcm_set_params('" + device + "', rate="
+			+ std::to_string(rate) + "): " + alsaErrorText(rc);
+		(void)api.pcmClose(pcm);
+		throw std::runtime_error(message);
+	}
+	auto resource = std::make_unique<Resource>();
+	resource->kind = "speaker";
+	resource->backend = "alsa";
+	resource->path = device;
+	resource->pcm = pcm;
+	return JsonInt(add(std::move(resource), owner));
+}
+
+Json HALManager::opSpeakerWrite(const Json& handleValue, const Json& dataValue) {
+	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
+	const std::string raw = asStr(dataValue, "speaker data");
+	if (raw.empty() || raw.size() % 2 != 0 || raw.size() > kSpeakerMaxBytes) {
+		throw std::runtime_error("speaker data must be non-empty even-length PCM bytes (<= "
+			+ std::to_string(kSpeakerMaxBytes) + ")");
+	}
+	auto lease = acquire(handle, "speaker");
+	if (lease.resource->pcm == nullptr) {
+		throw std::runtime_error("speaker handle has no open PCM stream");
+	}
+	const AlsaApi& api = alsaApi();
+	if (!api.ready()) {
+		throw std::runtime_error("libasound not found or missing required symbols (install libasound2 / alsa-lib)");
+	}
+	const long frames = api.pcmWritei(lease.resource->pcm, raw.data(),
+		static_cast<unsigned long>(raw.size() / 2));
+	return JsonInt(static_cast<std::int64_t>(frames));
+}
+
+Json HALManager::opSpeakerPrepare(const Json& handleValue) {
+	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
+	auto lease = acquire(handle, "speaker");
+	if (lease.resource->pcm == nullptr) {
+		throw std::runtime_error("speaker handle has no open PCM stream");
+	}
+	const AlsaApi& api = alsaApi();
+	if (!api.ready()) {
+		throw std::runtime_error("libasound not found or missing required symbols (install libasound2 / alsa-lib)");
+	}
+	return JsonInt(static_cast<std::int64_t>(api.pcmPrepare(lease.resource->pcm)));
+}
+
+Json HALManager::opSpeakerDrain(const Json& handleValue) {
+	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
+	auto lease = acquire(handle, "speaker");
+	if (lease.resource->pcm == nullptr) {
+		throw std::runtime_error("speaker handle has no open PCM stream");
+	}
+	const AlsaApi& api = alsaApi();
+	if (!api.ready()) {
+		throw std::runtime_error("libasound not found or missing required symbols (install libasound2 / alsa-lib)");
+	}
+	return JsonInt(static_cast<std::int64_t>(api.pcmDrain(lease.resource->pcm)));
+}
+
+Json HALManager::opSpeakerClose(const Json& handleValue) {
+	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
+	std::shared_ptr<Resource> resource;
+	{
+		std::lock_guard<std::mutex> guard(mutex_);
+		auto found = handles_.find(handle);
+		if (found == handles_.end() || found->second->kind != "speaker") {
+			return JsonInt(-1);
+		}
+		resource = found->second;
+		handles_.erase(found);
+		owners_.erase(handle);
+	}
+	std::lock_guard<std::recursive_mutex> guard(resource->mutex);
+	if (resource->closed || resource->pcm == nullptr) {
+		resource->closed = true;
+		return JsonInt(-1);
+	}
+	const AlsaApi& api = alsaApi();
+	int rc = -1;
+	if (api.pcmClose != nullptr) { rc = api.pcmClose(resource->pcm); }
+	resource->pcm = nullptr;
+	resource->closed = true;
+	return JsonInt(rc);
+}
+
+Json HALManager::opSpeakerErrmsg(const Json& codeValue) {
+	const int code = asInt(codeValue, -1000000, 1000000, "speaker error code");
+	return JsonString(alsaErrorText(code));
 }
 
 Json HALManager::opCloseHandle(const Json& handleValue) {

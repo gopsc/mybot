@@ -2,10 +2,11 @@
 
 > 本文介绍 mybot 硬件抽象层的实现原理、接口契约与驱动沙箱。[README](../README.md) 只留入口链接，实现细节以本文为准。
 
-## 两条运行路径（2026-11 起）
+## 运行路径（2026-11 起）
 
 - **`mybot` 宿主运行期**：`modules/lib/HAL.lua` 在加载时捕获宿主注入的 `__hal_call`，随后所有物理操作进入 C++ `HALManager`（`src/hal.cpp`）。I2C/SPI/UART/TCP/HTTP/Shell/GPIO/PWM 都走这条路径；Lua 侧只保留参数归一化与驱动契约。
-- **独立 `luajit test/*.lua`**：没有宿主桥时 `HAL.lua` 回退到 `modules/lib/HAL_ffi.lua`。下文关于 ffi 直调 glibc、`BOT4CJ_HAL_BACKEND`、ioctl 常量与 ABI 尺寸断言的细节，**只适用于这条回退路径**；宿主运行期的 GPIO/PWM 已由 C++ HAL 提供。
+- **Speaker/ALSA**：宿主运行期同样走 `__hal_call` 的 `speaker_open` / `speaker_write` / `speaker_prepare` / `speaker_drain` / `speaker_close` / `speaker_errmsg`；C++ HAL 用 `dlopen` 动态加载 `libasound.so.2`（不引入 `libasound2-dev` 构建依赖），Lua 只合成 S16_LE 波形块。`modules/lib/asound.lua` 在无宿主桥时（独立 luajit 测试）才回退 ffi 直驱。
+- **独立 `luajit test/*.lua`**：没有宿主桥时 `HAL.lua` 回退到 `modules/lib/HAL_ffi.lua`。下文关于 ffi 直调 glibc、`BOT4CJ_HAL_BACKEND`、ioctl 常量与 ABI 尺寸断言的细节，**只适用于这条回退路径**；宿主运行期的 GPIO/PWM 与 Speaker 已由 C++ HAL 提供。
 
 ## 概述
 
@@ -44,8 +45,8 @@ UART 在门面内直接实现，GPIO/PWM 经 `__hal_call` 转 C++ HAL：
 表显式传入，域文件正文因此得以逐字搬迁。域之间零相互引用，加载顺序只要求在
 门面接线之后。定位方式与 `bus_contract` / 后端加载段同规（`BOT4CJ_MODULE_PATH`
 各段逐段探测 + 仓库缺省布局兜底），故多路径布局下的行为与拆分前一致。
-对驱动而言**接口零变化**：仍是 `dofile(mpath.resolve("lib/HAL.lua"))`，
-38 个总线全局函数与 `HAL.*` 全部字段照旧由该门面导出。
+对驱动而言**总线接口零变化**：仍是 `dofile(mpath.resolve("lib/HAL.lua"))`，
+38 个总线全局函数、`speaker_*` 与 `HAL.*` 全部字段由该门面导出。
 
 ## 各总线要点
 
@@ -56,6 +57,7 @@ UART 在门面内直接实现，GPIO/PWM 经 `__hal_call` 转 C++ HAL：
 | GPIO | 内核 gpiod uAPI v1（`/dev/gpiochipN` ioctl，deprecated 但全内核支持）；offset 必须为非负整数（小数会被 uint32 静默截断成另一个线号，显式拒绝） |
 | UART | termios raw 8N1 + 非阻塞（VMIN=0/VTIME=1）；另有多条易踩坑约束，见下方要点 |
 | PWM | sysfs（`/sys/class/pwm/pwmchipN/pwmM`）；宿主 C++ HAL 与 `HAL_ffi` 回退共用同一路径与写序：duty=0 → period → duty_cycle（否则降频被 EINVAL 拒绝）；export 前置校验 npwm 范围 |
+| Speaker/ALSA | 宿主 C++ HAL 用 `dlopen` 动态加载 `libasound.so.2`；`speaker_open` 固定 S16_LE / RW_INTERLEAVED / 单声道 / 0.5s 缓冲；`speaker_write` 收原始 S16_LE 字节（单次 ≤1 MiB），返回写入帧数或负 errno；`speaker_prepare` / `speaker_drain` / `speaker_close` 返回 ALSA rc |
 
 UART 的易踩坑约束：
 
@@ -71,7 +73,9 @@ UART 的易踩坑约束：
 | ---- | ---- |
 | `true` / `false` | `i2c_set_addr`、`i2c_write_reg`、`gpio_set_value`、`pwm_export`/`pwm_enable`/`pwm_set_polarity`/`pwm_unexport`（`pwm_config` 成功返回 `true, period_ns, duty_ns`） |
 | `0` / `-1` | `i2c_write_multi`、`i2c_write_reg16`、`spi_setup`、`spi_write`、`spi_write3`、`spi_write_multi`、`uart_close`、`uart_flush` |
-| 值 / `-1` | `i2c_read_reg`、`i2c_read_multi`、`i2c_read_reg16`、`i2c_read`、`spi_read`、`spi_read_multi`、`gpio_get_value`、`uart_open`（fd）、`gpio_request_line`（fd） |
+| 值 / `-1` | `i2c_read_reg`、`i2c_read_multi`、`i2c_read_reg16`、`i2c_read`、`spi_read`、`spi_read_multi`、`gpio_get_value`、`uart_open`（fd）、`gpio_request_line`（fd）、`speaker_open`（handle）、`speaker_write`（写入帧数） |
+| 0 / 负 errno | `speaker_prepare`、`speaker_drain`、`speaker_close`（ALSA rc；0 成功） |
+| 字符串 | `speaker_errmsg`（ALSA 错误码 → 文本） |
 | 表 / `nil` | `i2c_read_multi_bytes`、`i2c_read_bytes`、`spi_xfer_full`、`uart_read`（空表 = 超时无数据；`nil` = 读错误或参数非法） |
 | 无返回值 | `i2c_close`、`spi_close`、`gpio_free_line`、`milli_sleep`；`uart_write` 返回写入字节数或 `-1` |
 
