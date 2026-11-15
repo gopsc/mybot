@@ -34,14 +34,20 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
+#include "exec_budget.hpp"
+#include "nns_limits.hpp"
+#include "util_path.hpp"
 #include "util_str.hpp"
 
 #ifdef MYBOT_HAVE_NN4CPP
@@ -219,30 +225,72 @@ std::vector<std::string> splitNames(const std::string& text) {
 	return names;
 }
 
-bool parseLayers(const std::string& text, std::vector<std::int64_t>& layers,
-	std::string& message) {
-	layers.clear();
-	const std::vector<std::string> names = splitNames(text);
-	if (names.size() < 2) {
-		message = "layers must contain at least input and output sizes";
-		return false;
-	}
-	for (const std::string& name : names) {
-		errno = 0;
-		char* end = nullptr;
-		const long long value = std::strtoll(name.c_str(), &end, 10);
-		if (end != name.c_str() + name.size() || errno == ERANGE || value <= 0) {
-			message = "invalid layer size '" + name + "'";
-			return false;
-		}
-		layers.push_back(static_cast<std::int64_t>(value));
-	}
-	return true;
-}
-
 bool fileExists(const std::string& path) {
 	std::ifstream input(path, std::ios::binary);
 	return input.good();
+}
+
+/* 拒绝最后一段是符号链接的模型文件：即使路径通过了模型根前缀检查，
+ * 写/读时跟随链接仍可能落到根外（save 用 ofstream，会跟随）。 */
+bool isSymlinkPath(const std::string& path) {
+	std::error_code ec;
+	const auto status = std::filesystem::symlink_status(path, ec);
+	return !ec && std::filesystem::is_symlink(status);
+}
+
+/* 热 SQL：path 必须是模型根下的相对路径，解析后再做 canonical 前缀检查。
+ * weakly_canonical 会把已存在的目录/符号链接尽量解析掉，故子目录里的链接
+ * 无法把最终路径带出根外。启动期/直接调用保持既有语义（绝对路径与 CWD
+ * 相对路径都保留），这是 D3 的兼容边界。 */
+std::string resolveModelPath(const std::string& raw, bool hot, std::string& message) {
+	const std::string path = bot::trim(raw);
+	if (path.empty()) { return std::string(); }
+	if (path.find('\0') != std::string::npos) {
+		message = "path contains NUL";
+		return std::string();
+	}
+	if (!hot) {
+		/* 可信本地路径也拒绝目录穿越：绝对路径本身合法，但 '..' 会让
+		 * 模型指向任意位置，且与路径规范化无关。 */
+		if (hasDotDotComponent(path)) {
+			message = "path must not contain '..' components";
+			return std::string();
+		}
+		return path;
+	}
+	if (checkRelPath(path) != RelPathCheck::OK) {
+		message = "hot SQL Nns.path must be a relative path under the model root"
+			" (absolute paths, '.', '..' and NUL are rejected; set"
+			" BOT4CJ_MODEL_DIR or BOT4CJ_STATE_DIR to choose the root)";
+		return std::string();
+	}
+	const std::filesystem::path root = std::filesystem::weakly_canonical(modelRoot());
+	const std::filesystem::path full = std::filesystem::weakly_canonical(root / path);
+	auto rootIt = root.begin();
+	auto fullIt = full.begin();
+	for (; rootIt != root.end(); ++rootIt, ++fullIt) {
+		if (fullIt == full.end() || *rootIt != *fullIt) {
+			message = "hot SQL Nns.path escapes the model root '" + root.string()
+				+ "' after path resolution";
+			return std::string();
+		}
+	}
+	return full.string();
+}
+
+/* 保存前确保父目录存在（热插的模型根可能尚未创建）。只对确实是目录的
+ * 父路径调用 create_directories；失败如实返回。 */
+bool ensureModelParent(const std::string& path, std::string& message) {
+	const std::filesystem::path parent = std::filesystem::path(path).parent_path();
+	if (parent.empty()) { return true; }
+	std::error_code ec;
+	std::filesystem::create_directories(parent, ec);
+	if (ec) {
+		message = "cannot create model directory '" + parent.string()
+			+ "': " + ec.message();
+		return false;
+	}
+	return true;
 }
 
 Json vectorJson(const std::vector<double>& values) {
@@ -284,9 +332,11 @@ public:
 	Json call(const Json& data) override;
 	Json read(const Json& data) override;
 	Json destroy(const Json& data) override;
+	void setHotSql(bool hot) override { hot_ = hot; }
 
 private:
 	bool parseConfig(const Json& data, std::string& message);
+	bool saveNetwork(std::string& message) const;
 	std::shared_ptr<nn4cpp::Network> createNetwork(std::string& message) const;
 	std::shared_ptr<nn4cpp::Network> loadNetwork(std::string& message) const;
 	bool validateNetworkShape(const nn4cpp::Network& network, std::string& message);
@@ -300,6 +350,9 @@ private:
 
 	std::shared_ptr<nn4cpp::Network> network_;
 	std::string path_;
+	/* 热 SQL 装配期由 HwFactory::createNativeVars 置位：path 必须相对且落在
+	 * 模型根下，不能写任意绝对文件。 */
+	bool hot_ = false;
 	bool autosave_ = false;
 	bool built_ = false;
 	std::vector<std::int64_t> layers_;
@@ -316,7 +369,15 @@ private:
 };
 
 bool NnsDriver::parseConfig(const Json& data, std::string& message) {
-	path_ = metadataText(data, "path");
+	std::string rawPath = metadataText(data, "path");
+	if (rawPath == "-") { rawPath.clear(); }	/* 占位符 = 无模型文件 */
+	path_ = resolveModelPath(rawPath, hot_, message);
+	if (path_.empty() && !message.empty()) { return false; }
+	if (!path_.empty() && isSymlinkPath(path_)) {
+		message = "model path '" + path_ + "' is a symbolic link; refusing to"
+			" read or overwrite it";
+		return false;
+	}
 	autosave_ = false;
 	const std::string autosaveText = metadataText(data, "autosave");
 	if (!autosaveText.empty() && !parseBoolText(autosaveText, autosave_)) {
@@ -330,7 +391,7 @@ bool NnsDriver::parseConfig(const Json& data, std::string& message) {
 
 	layers_.clear();
 	const std::string layersText = metadataText(data, "layers");
-	if (!layersText.empty() && !parseLayers(layersText, layers_, message)) {
+	if (!layersText.empty() && !parseNnsLayers(layersText, layers_, message)) {
 		return false;
 	}
 
@@ -415,6 +476,22 @@ bool NnsDriver::parseConfig(const Json& data, std::string& message) {
 		}
 		seed_ = seed;
 	}
+	return true;
+}
+
+bool NnsDriver::saveNetwork(std::string& message) const {
+	if (network_ == nullptr) {
+		message = "network is not initialized";
+		return false;
+	}
+	/* 保存是写穿操作：符号链接可能把模型写到根外，热插相对路径解析后
+	 * 也不应跟随最后一段链接。 */
+	if (isSymlinkPath(path_)) {
+		message = "model path '" + path_ + "' is a symbolic link; refusing to overwrite it";
+		return false;
+	}
+	if (!ensureModelParent(path_, message)) { return false; }
+	network_->save(path_);
 	return true;
 }
 
@@ -545,8 +622,8 @@ Json NnsDriver::build(const Json& data) {
 		if (!validateNetworkShape(*network_, message)) {
 			return error("Nns: " + message);
 		}
-		if (!path_.empty()) {
-			network_->save(path_);
+		if (!path_.empty() && !saveNetwork(message)) {
+			return error("Nns: " + message);
 		}
 		built_ = true;
 		Json result = infoJson();
@@ -649,14 +726,19 @@ Json NnsDriver::train(const Json& data) {
 			repeatValue != nullptr && !repeatValue->isNull()) {
 		const auto value = numberValue(*repeatValue);
 		if (!value || *value < 1.0 || std::floor(*value) != *value
-				|| *value > 1000000.0) {
-			return error("Nns: repeat must be an integer in [1, 1000000]");
+				|| *value > static_cast<double>(kNnsMaxRepeat)) {
+			return error("Nns: repeat must be an integer in [1, "
+				+ std::to_string(kNnsMaxRepeat) + "]");
 		}
 		repeat = static_cast<std::int64_t>(*value);
 	}
 
 	double loss = 0.0;
 	for (std::int64_t i = 0; i < repeat; ++i) {
+		/* C++ 训练循环不受 Lua 指令钩子约束；每轮检查动作预算，使
+		 * --timeout / Ctrl-C 能中止长训练（ExecBudgetExceeded 在 call()
+		 * 里原样重抛，不折成普通 ERR）。 */
+		requireExecBudget();
 		loss = network_->train(inputMatrix, targetMatrix, discount);
 	}
 	lastLoss_ = loss;
@@ -669,7 +751,8 @@ Json NnsDriver::train(const Json& data) {
 
 	bool saved = false;
 	if (save) {
-		network_->save(path_);
+		std::string saveMessage;
+		if (!saveNetwork(saveMessage)) { return error("Nns: " + saveMessage); }
 		saved = true;
 	}
 
@@ -684,7 +767,8 @@ Json NnsDriver::saveModel() {
 	if (path_.empty()) {
 		return error("Nns: save requires a non-empty 'path' column");
 	}
-	network_->save(path_);
+	std::string message;
+	if (!saveNetwork(message)) { return error("Nns: " + message); }
 	Json result = ok();
 	result.put("path", JsonString(path_));
 	return result;
@@ -732,6 +816,10 @@ Json NnsDriver::call(const Json& data) {
 		if (command == "load") { return loadModel(); }
 		if (command == "info") { return infoJson(); }
 		return error("Nns: unknown command '" + command + "'");
+	} catch (const ExecBudgetExceeded&) {
+		/* 预算耗尽不是驱动失败：必须穿透 Native 的 ERR 折叠，让
+		 * ActionRunner 走 halt-on-error 而不是继续下一行。 */
+		throw;
 	} catch (const std::exception& exception) {
 		return error(std::string("Nns: ") + exception.what());
 	}
@@ -748,7 +836,10 @@ Json NnsDriver::read(const Json&) {
 Json NnsDriver::destroy(const Json&) {
 	try {
 		if (built_ && autosave_ && !path_.empty()) {
-			network_->save(path_);
+			std::string message;
+			if (!saveNetwork(message)) {
+				throw std::runtime_error(message);
+			}
 		}
 		network_.reset();
 		lastOutput_.reset();

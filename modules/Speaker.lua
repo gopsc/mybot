@@ -392,24 +392,43 @@ function call(data)
 		wave = WAVES[wname]
 	end
 
-	-- 块循环：填一块写一块；-EPIPE（underrun）prepare 后重写本块一次，
-	-- 仍失败如实报错（静默丢样本 = 播放时长悄悄变短）
+	-- 块循环：填一块写一块。snd_pcm_writei 可能只写一部分（返回 0 < w < n），
+	-- 必须按实际 w 从块内偏移补写，不能把整块当成已写——旧实现按 n 推进，
+	-- 静默丢掉 n-w 帧，播放时长/相位同时变短。-EPIPE（underrun）prepare 后
+	-- 从同一偏移重试一次；0 帧返回做有限次重试，避免忙等死循环。
 	local buf = asound.alloc(CHUNK)
 	local done = 0
 	while done < total do
 		local n = fill_chunk(buf, total, done, wave, phase, amp16, env_len)
-		local w = asound.write(pcm, buf, n)
-		if w == nil or w < 0 then
+		local off = 0
+		local zeroRetries = 0
+		while off < n do
+			local w = asound.write(pcm, buf, n - off, off)
 			local rc = (w == nil) and 0 or w
-			if rc == -asound.EPIPE then
+			if rc < 0 then
+				if rc ~= -asound.EPIPE then
+					return err("Speaker: snd_pcm_writei failed: " .. asound.errmsg(rc))
+				end
 				local pok = asound.prepare(pcm)
-				local w2 = (pok ~= nil and pok >= 0) and asound.write(pcm, buf, n) or nil
-				if w2 == nil or w2 < 0 then
+				if pok == nil or pok < 0 then
 					return err("Speaker: underrun recover failed: "
 						.. asound.errmsg(rc))
 				end
-			else
-				return err("Speaker: snd_pcm_writei failed: " .. asound.errmsg(rc))
+				w = asound.write(pcm, buf, n - off, off)
+				rc = (w == nil) and 0 or w
+				if rc <= 0 then
+					return err("Speaker: underrun recover failed: "
+						.. asound.errmsg(rc < 0 and rc or -asound.EPIPE))
+				end
+			elseif rc == 0 then
+				zeroRetries = zeroRetries + 1
+				if zeroRetries >= 3 then
+					return err("Speaker: snd_pcm_writei returned 0 frames repeatedly")
+				end
+			end
+			if rc > 0 then
+				off = off + rc			-- 只推进已写入的帧，剩余部分下一轮补写
+				zeroRetries = 0
 			end
 		end
 		done = done + n

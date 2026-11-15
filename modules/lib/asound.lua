@@ -134,15 +134,17 @@ function M.open_stream(device, rate)
 	return pcm
 end
 
--- 写一帧块（interleaved S16）。返回写入帧数，失败返回负 errno。
+-- 写一帧块（interleaved S16）。返回实际写入帧数（可能小于 frames），
+-- 失败返回负 errno。offset 是块内起始帧：驱动在部分写入后从该处补写剩余。
 -- underrun 恢复不在本层：-EPIPE 由驱动判 M.EPIPE 后调 prepare 再重试
 -- （放绑定层会让 mock 测不到驱动的恢复路径）。
-function M.write(pcm, buf, frames)
+function M.write(pcm, buf, frames, offset)
+	offset = offset or 0
 	if HOST then
 		-- 原始 S16_LE 字节直接过桥：避免 4096 个样本逐元素 JSON 化的开销。
-		return speaker_write(pcm, ffi.string(buf, frames * 2))
+		return speaker_write(pcm, ffi.string(buf + offset, frames * 2))
 	end
-	return tonumber(C.snd_pcm_writei(pcm, buf, frames))
+	return tonumber(C.snd_pcm_writei(pcm, buf + offset, frames))
 end
 
 -- underrun 后重新准备设备（驱动在 write 返回 -EPIPE 时调用）

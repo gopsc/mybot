@@ -26,12 +26,18 @@ Json ok() {
 
 std::optional<double> finiteNumber(const Json* value) {
 	if (value == nullptr) { return std::nullopt; }
-	if (value->isInt()) { return static_cast<double>(value->getInt()); }
-	if (value->isFloat()) { return value->getFloat(); }
-	if (value->isStr()) {
-		try { return std::stod(value->getValue()); } catch (...) { return std::nullopt; }
+	double number = 0;
+	if (value->isInt()) { number = static_cast<double>(value->getInt()); }
+	else if (value->isFloat()) { number = value->getFloat(); }
+	else if (value->isStr()) {
+		try { number = std::stod(value->getValue()); } catch (...) { return std::nullopt; }
+	} else {
+		return std::nullopt;
 	}
-	return std::nullopt;
+	/* nan/inf 必须在这里拒绝：调用方随后会 static_cast<int64_t>，
+	 * 越界 double→整数是 C++ 未定义行为（UBSan float-cast-overflow）。 */
+	if (!std::isfinite(number)) { return std::nullopt; }
+	return number;
 }
 
 std::string textValue(const Json& value) {
@@ -100,7 +106,11 @@ public:
 		if (baseValue == nullptr || !baseValue->isStr()) {
 			return error("Invalid Arguments: base (credential-free http(s):// URL)");
 		}
-		auto timeout = finiteNumber(data.find("timeout"));
+		const Json* timeoutValue = data.find("timeout");
+		auto timeout = finiteNumber(timeoutValue);
+		if (timeoutValue != nullptr && !timeoutValue->isNull() && !timeout) {
+			return error("Invalid Arguments: timeout (finite number, 1..60000 ms)");
+		}
 		if (!timeout) { timeout = 10000; }
 		if (*timeout < 1 || *timeout > 60000) {
 			return error("Invalid Arguments: timeout (1..60000 ms)");

@@ -223,14 +223,21 @@ Json lua_table_to_json(lua_State* L, int idx, int depth) {
 	if (!arrKeys.empty()) {
 		/* 必须排序拷贝后按其迭代（同原实现对拷贝排序） */
 		std::sort(arrKeys.begin(), arrKeys.end());
-		if (obj.objSize() > 0) {
-			/* 混合键表：整体转对象（数字键转字符串键），不丢字段 */
-			for (long long k : arrKeys) { obj.put(std::to_string(k), arrVals[k]); }
-			return obj;
+		/* 只有整数键恰好覆盖 1..N 连续区间时才转 JSON 数组。旧实现把所有
+		 * 整数键排序后直接压成数组：{[0]="zero",[2]="two"} 会变成
+		 * ["zero","two"]，键 0/2 静默丢失。稀疏表必须转对象字符串键。 */
+		bool contiguous = arrKeys.front() == 1;
+		for (std::size_t i = 0; contiguous && i < arrKeys.size(); ++i) {
+			if (arrKeys[i] != static_cast<long long>(i + 1)) { contiguous = false; }
 		}
-		Json arr = JsonArray();
-		for (long long k : arrKeys) { arr.add(arrVals[k]); }
-		return arr;
+		if (contiguous && obj.objSize() == 0) {
+			Json arr = JsonArray();
+			for (long long k : arrKeys) { arr.add(arrVals[k]); }
+			return arr;
+		}
+		/* 混合键/稀疏键：整体转对象（数字键转字符串键），不丢字段 */
+		for (long long k : arrKeys) { obj.put(std::to_string(k), arrVals[k]); }
+		return obj;
 	}
 	if (obj.objSize() > 0) { return obj; }
 	return JsonArray();			/* 空表 → 空数组 */
@@ -354,15 +361,29 @@ Json call_lua(lua_State* L, const Json& json) {
 				lua_pushvalue(L, -nret);	/* copy = 首个返回值（已判型为表） */
 				lua_pushnil(L);
 				while (lua_next(L, -2) != 0) {
-					int keyType = lua_type(L, -2);
-					if (keyType != LUA_TSTRING) {
+					const int keyType = lua_type(L, -2);
+					std::string key;
+					if (keyType == LUA_TSTRING) {
+						size_t keyLen = 0;
+						const char* keyPtr = lua_tolstring(L, -2, &keyLen);
+						key.assign(keyPtr != nullptr ? keyPtr : "", keyPtr != nullptr ? keyLen : 0);
+					} else if (keyType == LUA_TNUMBER) {
+						/* 顶层数字键不能静默丢弃：驱动若返回 {result="OK",[1]=42}
+						 * 旧实现直接跳过 42。这里转字符串键保留数据；数组式返回
+						 * 仍应放在 data 子表里，顶层契约是对象。 */
+						const double kd = lua_tonumber(L, -2);
+						if (doubleFitsInt64(kd)) {
+							const long long k = static_cast<long long>(kd);
+							key = (static_cast<double>(k) == kd)
+								? std::to_string(k) : std::to_string(kd);
+						} else {
+							key = std::to_string(kd);
+						}
+					} else {
 						logD([keyType] { return "Lua return field skipped: key type " + std::to_string(keyType); });
 						lua_pop(L, 1);		/* 弹出值，保留键供下一次 lua_next */
 						continue;
 					}
-					size_t keyLen = 0;
-					const char* keyPtr = lua_tolstring(L, -2, &keyLen);
-					std::string key(keyPtr != nullptr ? keyPtr : "", keyPtr != nullptr ? keyLen : 0);
 					Json val;
 					try {
 						val = lua_value_to_json(L, -1);

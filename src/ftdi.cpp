@@ -105,6 +105,16 @@ FtdiUrl parseFtdiUrl(const std::string& url, bool spi) {
 
 struct FtdiBus::Impl {
 	ftdi_context* ctx = nullptr;
+	/* 构造期在 ftdi_usb_open_desc 之后、FtdiBus 完整构造之前若 MPSSE 初始化
+	 * 抛异常，FtdiBus 的析构函数不会执行；Impl 的析构必须自己收口，否则
+	 * USB 设备保持打开、context 泄漏。 */
+	~Impl() {
+		if (ctx != nullptr) {
+			(void)ftdi_usb_close(ctx);
+			ftdi_free(ctx);
+			ctx = nullptr;
+		}
+	}
 	FtdiUrl url;
 	bool spi = false;
 	int mode = 0;

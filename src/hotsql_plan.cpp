@@ -18,6 +18,7 @@
 
 #include "expr.hpp"		/* Expression::parse / exprBody（$(...) 引用扫描） */
 #include "hw_factory.hpp"	/* HwFactory::precheckStructure（合并视图全结构判据） */
+#include "nns_limits.hpp"	/* Nns layers 边界（驱动与热插共用单点） */
 #include "util_except.hpp"	/* IllegalArgumentException / MemoryReader */
 #include "util_num.hpp"		/* isNumericLiteral（Number 列热插校验） */
 #include "util_path.hpp"	/* modulePaths / findExistingModule / checkRelPath */
@@ -125,6 +126,40 @@ void validateHotPathColumn(const mt::MatrixObject& st, std::size_t r,
 	}
 }
 
+/* Nns 行的模型路径与网络形状（2026-11-15 审计 M9）。热插输入不可信：
+ *   - path 只能是模型根下的相对路径（驱动在热插上下文里按 BOT4CJ_MODEL_DIR
+ *     或状态根解析；绝对路径/穿越会让 INSERT 直接覆盖任意宿主文件）；
+ *   - layers 必须在驱动同一份边界内（否则 createNetwork 按 Eigen 矩阵分配
+ *     巨量内存，可能 OOM）。
+ * 启动期结构脚本是可信文件，path 兼容保持由驱动侧（hot_=false）决定。 */
+void validateHotNnsColumns(const mt::MatrixObject& st, std::size_t r,
+		const std::string& tname) {
+	const std::int64_t idxPath = st.indexOfCol(0, "path");
+	if (idxPath >= 0) {
+		/* 用 inherited 而不是原始格：新行写 '-' 时实际会继承上一行的 path，
+		 * 必须在计划期按继承后的值判断，不能把 '-' 当作“无路径”放过。 */
+		const std::string path = trim(st.inherited(r, static_cast<std::size_t>(idxPath)));
+		if (!path.empty() && path != "-" && checkRelPath(path) != RelPathCheck::OK) {
+			throw IllegalArgumentException(concatMsg("热插表：表 '", tname, "' 第 ",
+				std::to_string(r), " 行的 path '", path,
+				"' 必须是模型根下的相对路径（热插不允许绝对路径/目录穿越；"
+				"根由 BOT4CJ_MODEL_DIR 或 BOT4CJ_STATE_DIR 指定）"));
+		}
+	}
+	const std::int64_t idxLayers = st.indexOfCol(0, "layers");
+	if (idxLayers >= 0) {
+		const std::string layers = trim(st.inherited(r, static_cast<std::size_t>(idxLayers)));
+		if (!layers.empty() && layers != "-") {
+			std::vector<std::int64_t> parsed;
+			std::string message;
+			if (!parseNnsLayers(layers, parsed, message)) {
+				throw IllegalArgumentException(concatMsg("热插表：表 '", tname, "' 第 ",
+					std::to_string(r), " 行的 layers '", layers, "' 无效：", message));
+			}
+		}
+	}
+}
+
 /* Daemon 行的 driver/devices 模块名：必须是安全标识符；devices 的每段
  * driver@addr... 也校验 driver 段。chunk 已在 validateHotNewRow 单独校验。 */
 void validateHotDaemonColumns(const mt::MatrixObject& st, std::size_t r,
@@ -199,6 +234,9 @@ void validateHotNewRow(const HwLookup& registry, const mt::MatrixObject& st,
 	}
 	if (tname == "I2C" || tname == "SPI" || tname == "UART") {
 		validateHotPathColumn(st, r, tname);
+	}
+	if (tname == "Nns") {
+		validateHotNnsColumns(st, r, tname);
 	}
 	if (tname == "Daemon") {
 		validateHotDaemonColumns(st, r, tname);
@@ -514,6 +552,32 @@ void HotSqlPlanner::checkMergedView(const HotSqlPlan::Deletes& delPlan,
 								val.substr(1), "'"));
 						}
 					}
+				}
+			}
+		}
+		/* @Daemon 的 sources 列不是 flow/$ 引用，但聚合守护会持有 peer 槽；
+		 * 删掉 peer 会让仍存活的聚合器永久失败（docs/daemon.md 的 status -11）。
+		 * 这不是悬垂指针，却是不可逆的依赖破坏，故在热删除预检中拒绝并点名。 */
+		for (const mt::MatrixObject& m : merged) {
+			if (m.rows() == 0 || trim(m.getName()) != "Daemon") { continue; }
+			const std::int64_t idxSources = m.indexOfCol(0, "sources");
+			const std::int64_t idxName = m.indexOfCol(0, "name");
+			if (idxSources < 0 || idxName < 0) { continue; }
+			for (std::size_t r = 1; r < m.rows(); ++r) {
+				const std::string sources = trim(m.inherited(r, static_cast<std::size_t>(idxSources)));
+				if (sources.empty() || sources == "-") { continue; }
+				const std::string owner = trim(m.inherited(r, static_cast<std::size_t>(idxName)));
+				std::size_t start = 0;
+				while (start <= sources.size()) {
+					const std::size_t sep = sources.find_first_of(",|", start);
+					const std::string peer = trim(sources.substr(start,
+						sep == std::string::npos ? std::string::npos : sep - start));
+					if (!peer.empty() && delPlan.doomedNames.count(peer) != 0) {
+						refErrors.push_back(concatMsg("表 'Daemon' 第 ", std::to_string(r),
+							" 行的守护 '", owner, "' 的 sources 引用待删守护 '", peer, "'"));
+					}
+					if (sep == std::string::npos) { break; }
+					start = sep + 1;
 				}
 			}
 		}

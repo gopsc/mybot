@@ -35,6 +35,24 @@ namespace bot {
 
 namespace {
 
+/* 热插批次上下文：原生驱动据此区分「可信启动脚本」与「不可信热插输入」
+ * （Nns.path 在热插期必须落在模型根下）。批次内所有装配/上电都发生在
+ * guard 生存期内，异常/回滚路径由析构无条件还原。 */
+class HotSqlModeGuard {
+public:
+	explicit HotSqlModeGuard(HwFactory& factory)
+		: factory_(factory), previous_(factory.hotSqlMode()) {
+		factory_.setHotSqlMode(true);
+	}
+	~HotSqlModeGuard() { factory_.setHotSqlMode(previous_); }
+	HotSqlModeGuard(const HotSqlModeGuard&) = delete;
+	HotSqlModeGuard& operator=(const HotSqlModeGuard&) = delete;
+
+private:
+	HwFactory& factory_;
+	bool previous_;
+};
+
 /* 热删除中途失败的报错文本拼装（拆自 executeHotDeletes，2026-09-26 批次 5）。
  * 口径：如实报「已删 N 个、M 个未删」+ 逐个点名 + 成因，并说明结构与注册表
  * 只反映已成功摘除的部分（不假装回滚——destroy 是物理断电，不可逆）。 */
@@ -182,6 +200,9 @@ std::string HotSqlService::summarizeHotOutcome(const CommitOutcome& committed,
 HotSqlService::CommitOutcome HotSqlService::commitHotBatch(
 		const HotSqlPlan::Deletes& delPlan,
 		HotSqlPlan::Insertions& insPlan, const HotDeleteOutcome& alreadyDeleted) {
+	/* 从增量装配到 build 全部在热插上下文内：Nns 等原生驱动在这里把
+	 * path 解释为模型根下的相对路径（启动期由 active() 走默认 false）。 */
+	HotSqlModeGuard hotMode(factory_);
 	CommitOutcome out;
 	const HwRegistry::Mark mark = registry_.mark();
 	const std::size_t metaMark = metas_.size();

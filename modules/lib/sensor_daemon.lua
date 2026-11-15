@@ -235,8 +235,19 @@ local function effective_bits(mode)
 	return (mode == "s16") and 16 or (mode == "" and sign or nil)
 end
 
+local function finite(v)
+	-- 驱动 prelude（drv_common）通常已定义 finite_of；保留一个等价兜底，
+	-- 避免自定义驱动未加载 drv_common 时本 chunk 直接因 nil 调用失败。
+	if type(finite_of) == "function" then return finite_of(v) end
+	local n = tonumber(v)
+	if n == nil or n ~= n or n == math.huge or n == -math.huge then return nil end
+	return n
+end
+
 local function conv(v, mode)
-	v = tonumber(v) or 0
+	-- 有限性而非 tonumber：NaN/Inf 是 number（truthy），tonumber(v) or 0
+	-- 会把非有限值原样带进槽；这里仅作最后一道兜底（字段检查已先行拒绝）。
+	v = finite(v) or 0
 	local bits = effective_bits(mode)
 	if bits == 16 then
 		v = math.floor(v) % 65536
@@ -332,7 +343,9 @@ function daemon_tick()
 		local missing = nil
 		local float_s16 = nil
 		for i = 1, #fields do
-			local raw = tonumber(s[fields[i]])
+			-- 与 @Action 数值格同一口径：tonumber 会放行 NaN/Inf，必须用
+			-- 有限性判据把它们当缺字段处理，不能发布给下游。
+			local raw = finite(s[fields[i]])
 			if raw == nil then
 				missing = (missing and (missing .. ", ") or "") .. tostring(fields[i])
 			elseif raw % 1 ~= 0 and effective_bits(field_modes[i]) == 16 then

@@ -25,12 +25,18 @@ Json ok() {
 
 std::optional<double> finiteNumber(const Json* value) {
 	if (value == nullptr) { return std::nullopt; }
-	if (value->isInt()) { return static_cast<double>(value->getInt()); }
-	if (value->isFloat()) { return value->getFloat(); }
-	if (value->isStr()) {
-		try { return std::stod(value->getValue()); } catch (...) { return std::nullopt; }
+	double number = 0;
+	if (value->isInt()) { number = static_cast<double>(value->getInt()); }
+	else if (value->isFloat()) { number = value->getFloat(); }
+	else if (value->isStr()) {
+		try { number = std::stod(value->getValue()); } catch (...) { return std::nullopt; }
+	} else {
+		return std::nullopt;
 	}
-	return std::nullopt;
+	/* nan/inf 必须在这里拒绝：调用方随后会 static_cast<int64_t>，
+	 * 越界 double→整数是 C++ 未定义行为（UBSan float-cast-overflow）。 */
+	if (!std::isfinite(number)) { return std::nullopt; }
+	return number;
 }
 
 class ShellDriver final : public NativeDriver {
@@ -38,7 +44,11 @@ public:
 	explicit ShellDriver(HALManager& hal) : hal_(hal) {}
 
 	Json build(const Json& data) override {
-		auto timeout = finiteNumber(data.find("timeout"));
+		const Json* timeoutValue = data.find("timeout");
+		auto timeout = finiteNumber(timeoutValue);
+		if (timeoutValue != nullptr && !timeoutValue->isNull() && !timeout) {
+			return error("Invalid Arguments: timeout (finite number, 1..60000 ms)");
+		}
 		if (!timeout) { timeout = 10000; }
 		if (*timeout < 1 || *timeout > 60000) {
 			return error("Invalid Arguments: timeout (1..60000 ms)");
@@ -66,7 +76,11 @@ public:
 		if (command.size() > 65536) {
 			return error("Invalid Arguments: cmd (over 65536 bytes)");
 		}
-		auto timeout = finiteNumber(data.find("timeout"));
+		const Json* timeoutValue = data.find("timeout");
+		auto timeout = finiteNumber(timeoutValue);
+		if (timeoutValue != nullptr && !timeoutValue->isNull() && !timeout) {
+			return error("Invalid Arguments: timeout (finite number, 1..60000 ms)");
+		}
 		if (!timeout) { timeout = timeoutMs_; }
 		if (*timeout < 1 || *timeout > 60000) {
 			return error("Invalid Arguments: timeout (1..60000 ms)");

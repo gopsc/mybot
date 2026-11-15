@@ -198,6 +198,11 @@ function P.publish(slot, vals)
 		if type(vals[i]) ~= "number" then
 			error("publish: vals[" .. i .. "] must be a number, got " .. type(vals[i]))
 		end
+		-- NaN/Inf 不是可用于闭环决策的采样；允许它们跨槽传播会把错误推迟到
+		-- 下游（某些消费者未必有 finite_of 防线），因此在入口显式拒绝。
+		if vals[i] ~= vals[i] or vals[i] == math.huge or vals[i] == -math.huge then
+			error("publish: vals[" .. i .. "] must be finite, got " .. tostring(vals[i]))
+		end
 	end
 	local m = slot_mutex(slot)
 	mutex_call("lock", m)

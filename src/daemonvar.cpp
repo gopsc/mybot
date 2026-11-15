@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -449,12 +450,20 @@ Json DaemonRunner::readSample() {
 	int32_t slotStatus = slot->status;
 	int32_t nv = nvals;
 	if (nv > slot->capacity) { nv = slot->capacity; }	/* ABI v2：按本槽容量截断 */
+	bool nonFinite = false;
 	for (int32_t k = 0; k < nv; ++k) {
-		double v = slot->values[k];
+		const double v = slot->values[k];
+		/* 与 P.publish 的入口检查互补：槽可能由自定义 chunk 直接写，
+		 * NaN/Inf 不能作为传感器读数流进动作参数。 */
+		if (!std::isfinite(v)) { nonFinite = true; }
 		arr.add(JsonFloat(v));
 		ret.put("v" + std::to_string(k), JsonFloat(v));
 	}
 	pthread_mutex_unlock(mutexOf(slot.get()));
+	if (nonFinite) {
+		throw std::runtime_error("daemon '" + name_
+			+ "' published a non-finite sample (NaN/Inf); refusing the snapshot");
+	}
 	/* N-27：守护 setup 失败绝不伪装成采样值。旧实现把失败码（-2/-8/-9…）发进
 	 * v0，下游 $ 引用无从甄别——配置错误会被当作温度做闭环，只有 count 停滞
 	 * 这种间接迹象。现在 status ≠ 0 直接抛错：这是**永久性**失败（守护不会
