@@ -153,6 +153,7 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 			if (c == '#') { frame.jsonComment = true; return count; }
 			if (c == '\n') {
 				frame.jsonStarted = true;
+				frame.jsonLineWs = true;
 				line_start_ = true;
 				return count + 1;
 			}
@@ -160,13 +161,24 @@ std::int64_t MatrixParser::next_(char c, std::int64_t count) {
 			throw bot::IllegalArgumentException(
 				"Struct JSON must start on the line after its declaration");
 		}
-		if (c == '@' && line_start_) {
+		/* JSON 行首缩进是无关空白；先跳过它，才能识别缩进的关闭 '@'
+		 * （旧实现把行首空格写进 jsonText，随后 '@' 被当 JSON 内容，报
+		 * 一个与真实成因无关的 JSON 解析错误）。 */
+		if (frame.jsonLineWs && (c == ' ' || c == '\t' || c == '\r')) {
+			return count;
+		}
+		if (c == '@' && frame.jsonLineWs) {
 			closeFrame();	/* closeFrame 内 parseJson，错误带 JSON 偏移 */
 			line_start_ = true;
 			return count;
 		}
+		frame.jsonLineWs = false;
 		frame.jsonText.push_back(c);
-		if (c == '\n') { line_start_ = true; return count + 1; }
+		if (c == '\n') {
+			frame.jsonLineWs = true;
+			line_start_ = true;
+			return count + 1;
+		}
 		line_start_ = false;
 		return count;
 	}
@@ -454,6 +466,12 @@ std::optional<MatrixObject> MatrixParser::parse() {
 		 * 掩盖真实成因；按 fail-fast 原则原样上抛。 */
 	}
 
+	if (scratch_.hasContent()) {
+		throw bot::IllegalArgumentException(
+			"top-level data outside any @block (stray data); every action/"
+			"declaration block must start with a line-level '@name' and end with a"
+			" matching bare '@'");
+	}
 	if (done_ && result_) { return std::move(*result_); }
 	return std::nullopt;
 }

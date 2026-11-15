@@ -289,7 +289,8 @@ bool looksLikeWhileBlock(const std::string& rawName) {
 bool isDirectiveBlockName(const std::string& rawName) {
 	const std::string n = bot::trim(rawName);
 	if (n.empty()) { return false; }
-	return n == "Merge" || n == "Include" || mt::isControlBlockName(n)
+	return n == "Merge" || n == "Include" || n == "Trigger" || n == "Reflex"
+		|| n == "Alias" || n == "Vars" || mt::isControlBlockName(n)
 		|| mt::looksLikeNamedReflex(n) || mt::looksLikeNamedStruct(n);
 }
 } // namespace
@@ -581,6 +582,16 @@ private:
 				throw bot::IllegalArgumentException("@Merge 片段 '" + resolved
 					+ "' 的 @Action 不能携带嵌套子块（@if/@while/@Merge 等）："
 					"片段的动作只按相位归并数据行，控制块没有独立执行位置；"
+					"请把这些块挪到主脚本");
+			}
+			/* 片段只贡献 @Alias/@Vars/@Action（以及递归 @Merge）。
+			 * 其余块——包括 @Struct/@Trigger/@Reflex(name)/未知拼写——不能被
+			 * 静默丢弃：否则片段里的定义/触发会消失而无任何报错。 */
+			if (name != "Alias" && name != "Vars" && name != "Action"
+					&& name != "Merge") {
+				throw bot::IllegalArgumentException("@Merge 片段 '" + resolved
+					+ "' 含不支持的指令/控制块 '@" + name
+					+ "'：片段只允许 @Alias/@Vars/@Action 与递归 @Merge；"
 					"请把这些块挪到主脚本");
 			}
 		}

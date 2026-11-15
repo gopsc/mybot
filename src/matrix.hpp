@@ -237,6 +237,11 @@ public:
 	}
 
 	bool hasRows() const { return !obj_.values_.empty(); }
+	/* 是否有任何未提交/已提交内容。解析器用它识别“顶层游离数据”：
+	 * 只有空白/注释不会留下内容，任意数据 cell 都会让它为真。 */
+	bool hasContent() const {
+		return !obj_.values_.empty() || !grp_.empty() || !tmp_.empty();
+	}
 
 	MatrixObject take() { return std::move(obj_); }
 };
@@ -312,6 +317,7 @@ class MatrixParser {
 		bool isStruct = false;		/* @Struct(name)：JSON 体，不是网格 */
 		bool jsonStarted = false;
 		bool jsonComment = false;	/* 声明行上的 # 注释 */
+		bool jsonLineWs = true;	/* 当前 JSON 行是否仍只有行首空白（用于识别缩进关闭 @） */
 		std::string jsonText;
 		MatrixBuilder self;		/* 叶子：网格（名字已置） */
 		std::vector<MatrixObject> children;	/* 控制/compound：按书写顺序的子块 */
