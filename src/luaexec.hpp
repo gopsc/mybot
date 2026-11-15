@@ -28,30 +28,10 @@
  * 调用量级下 JIT 根本没热身（1000 次以下 jit=on 反而更慢），实际无可损失。
  */
 
-#include <chrono>
-
+#include "exec_budget.hpp"
 #include "luaend.hpp"
 
 namespace bot {
-
-/* 预算耗尽时错误文案里的标记串。工具侧据此把「预算超时」与「驱动自身报错」
- * 分开——两者走同一条 ensureOk → runtime_error 通道，模型需要能分辨
- * 「该换个做法」还是「该重试」。 */
-extern const char* const kLuaExecBudgetMarker;
-
-/* 一次执行的预算。deadline 为 steady_clock 时刻；watchStop=true 时同时响应
- * Ctrl-C（stopRequested()），使失控驱动可被中断而不是只能连按两次强杀
- * （强杀会跳过 deactivate，把执行器留在带电状态）。 */
-struct LuaExecBudget {
-	std::chrono::steady_clock::time_point deadline;
-	bool watchStop = true;
-};
-
-/* 当前线程的预算指针（nullptr = 未武装 → 钩子立即返回）。
- * thread_local 而非全局态：与 src/luavar.hpp 的 topDepth 同款理由——工具调用
- * 是主线程的同步链，而守护线程各自独立，天然不受 agent 窗口影响。 */
-const LuaExecBudget* luaExecBudget();
-void setLuaExecBudget(const LuaExecBudget* budget);
 
 /* 给一个 Lua 状态机挂上/摘下执行预算钩子。arm 时一并关 JIT（见文件头），
  * disarm 时恢复 JIT 并摘钩子。幂等：重复 arm/disarm 安全。 */

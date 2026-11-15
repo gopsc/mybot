@@ -12,23 +12,9 @@ extern "C" {
 
 namespace bot {
 
-const char* const kLuaExecBudgetMarker = "动作脚本执行预算";
-
-namespace {
-
-/* 当前线程的预算指针。thread_local：工具调用在主线程的同步链上，
- * 守护线程（src/daemonvar.cpp 的 std::thread）看到的是自己那份 nullptr，
- * 因而守护驱动的挂死仍走既有的弃管路径，不被这里改变语义。 */
-thread_local const LuaExecBudget* t_budget = nullptr;
-
-} // namespace
-
-const LuaExecBudget* luaExecBudget() { return t_budget; }
-void setLuaExecBudget(const LuaExecBudget* budget) { t_budget = budget; }
-
 void luaExecCountHook(lua_State* L, lua_Debug* ar) {
 	(void)ar;
-	const LuaExecBudget* b = t_budget;
+	const LuaExecBudget* b = luaExecBudget();
 	if (b == nullptr) { return; }
 	/* Ctrl-C 优先：它给出的是「操作者要求停」，与「跑太久」是两件事，
 	 * 文案必须能分辨（两者都会中止本轮脚本，但后者提示改脚本/调预算）。 */

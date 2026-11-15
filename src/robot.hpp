@@ -23,6 +23,7 @@
 #include <string>
 
 #include "daemon_registry.hpp"
+#include "exec_budget.hpp"
 #include "hal.hpp"
 #include "hardware.hpp"
 #include "hw_registry.hpp"
@@ -140,7 +141,13 @@ public:
 	 * 不能被本机制静默废掉）。遍历 registry_.sequence()：一行 @Action 可能经
 	 * controller 转发/trigger 前置走到别的 lua_State，只挂被点名那一个会漏。 */
 	void armExecBudget(const LuaExecBudget* budget) {
+		/* 预算指针必须先于 Lua 钩子生效/撤销：hook 的判据是 thread_local
+		 * t_budget，而 armLuaExecState 只负责关 JIT + 装 hook。2026-11 审计
+		 * 发现 setter 从未被调用，整条 --timeout/首次 Ctrl-C 防线因此失效；
+		 * 这里成对设置，异常路径仍由调用方的下一次 armExecBudget(nullptr) 收口。 */
+		if (budget != nullptr) { setLuaExecBudget(budget); }
 		for (MatrixVars_Hardware* hv : registry_.sequence()) { hv->armExecBudget(budget); }
+		if (budget == nullptr) { setLuaExecBudget(nullptr); }
 	}
 
 	LifecycleState lifecycleState() const { return state_; }

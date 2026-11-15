@@ -118,6 +118,7 @@ set(MYBOT_CORE_SOURCES
   # ---- Lua 层：桥接、沙箱与执行预算 ----
   src/luabridge.cpp
   src/luasandbox.cpp
+  src/exec_budget.cpp
   src/luaexec.cpp
   # ---- C++ HAL：I2C/SPI/UART/TCP/HTTP/Shell 与权限门 ----
   src/hal.cpp

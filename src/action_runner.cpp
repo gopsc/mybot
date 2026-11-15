@@ -12,6 +12,7 @@
 #include <string_view>
 #include <utility>
 
+#include "exec_budget.hpp"
 #include "hw_factory.hpp"
 #include "util_env.hpp"
 #include "util_num.hpp"
@@ -135,6 +136,10 @@ void ActionRunner::dispatchMatrix(const mt::MatrixObject& actionDefs) {
 
 	std::vector<ColExprCache> exprCache(static_cast<std::size_t>(actionDefs.cols()));
 	for (std::int64_t i = 1; i < static_cast<std::int64_t>(actionDefs.rows()); ++i) {
+		/* --timeout 的墙钟预算：C++ 行循环也必须检查，不能只靠 Lua 钩子。
+		 * 无预算时 requireExecBudget() 是空操作；到点抛预算错误，动作链
+		 * halt-on-error，runRobotAndCleanup 仍会走 deactivate。 */
+		requireExecBudget();
 		/* D4：SIGINT/SIGTERM 后停止派发新动作帧，让 deactivate 清理链正常执行 */
 		if (stopRequested()) {
 			std::cerr << "Stop requested, halting action dispatch (row " << i << ")" << std::endl;
@@ -513,6 +518,8 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
 	}
 	bool sawActionable = false;
 	for (const mt::MatrixObject& m : seq) {
+		/* 每个块之前检查墙钟预算；@while 每轮也会再检查一次（见下方循环）。 */
+		requireExecBudget();
 		if (stopRequested()) { break; }	/* Ctrl-C：逐层及时跳出，不再进后续块 */
 		const std::string name = bot::trim(m.getName());
 		if (mt::namedReflexName(name)) { continue; }	/* 顶层定义，由 runAction 收集 */
@@ -543,6 +550,7 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
 			std::int64_t iters = 0;
 			bool stopped = false;
 			for (;;) {
+				requireExecBudget();
 				if (stopRequested()) { stopped = true; break; }
 				if (!evalIfCondition(*cond)) { break; }
 				execSequence(m.children());
@@ -560,6 +568,20 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
 			}
 			continue;
 		}
+		/* 普通 @Reflex / @Trigger 由 runReflex 统一执行，不是可执行块。 */
+		if (name == "Reflex" || name == "Trigger") { continue; }
+		/* 这两个指令块应在 mtinclude 展开阶段被消费；留到这里说明输入
+		 * 结构异常，不能静默跳过（否则整段动作可能无声丢失）。 */
+		if (name == "Merge" || name == "Include") {
+			throw IllegalArgumentException("Action block '@" + name
+				+ "' was not expanded; check @Merge/@Include placement");
+		}
+		/* 未知块名——最危险的是拼写错误（@Actoin/@iff/@whilee）。旧实现
+		 * 直接跳过，整块动作静默丢失；这里按 halt-on-error 拒绝。 */
+		throw IllegalArgumentException("Unknown action block '@" + name
+			+ "'. Known blocks: @Action, @Alias, @Vars, @Struct(name),"
+			" @if(...), @while(...), @Reflex, @Trigger, @Reflex(name),"
+			" @Merge, @Include");
 	}
 	return sawActionable;
 }
@@ -654,6 +676,50 @@ void ActionRunner::parseActionCell(Json& set, const mt::MatrixObject& actionDefs
  * 撤销绑定（不污染后续触发）。无 @Trigger 时反射惰性（不执行不校验）。 */
 namespace {
 
+/* 合并多个同名普通指令表（@Reflex / @Trigger）。旧实现用
+ * mt::findByName() 只取第一个，@Include/多块脚本中的后续块被静默忽略。
+ * 这里要求列头一致，按声明序追加数据行；行号保留原块行号，便于报错定位。
+ * 注意不检查 name 列唯一性：@Reflex 的同名多行本来就是“多拍”。 */
+std::optional<mt::MatrixObject> mergeDirectiveRows(
+		const std::vector<mt::MatrixObject>& seq, const std::string& want) {
+	const mt::MatrixObject* first = nullptr;
+	mt::MatrixBuilder out;
+	bool any = false;
+	for (const mt::MatrixObject& m : seq) {
+		if (bot::trim(m.getName()) != want) { continue; }
+		if (m.rows() == 0) {
+			throw IllegalArgumentException("@" + want + " block has no header");
+		}
+		if (first == nullptr) {
+			first = &m;
+			out.name(want);
+			for (std::size_t c = 0; c < m.cols(); ++c) { out.item(m(0, c)); }
+			out.line(0);
+		} else {
+			if (m.cols() != first->cols()) {
+				throw IllegalArgumentException("multiple @" + want
+					+ " blocks have different column counts; keep one table shape");
+			}
+			for (std::size_t c = 0; c < m.cols(); ++c) {
+				if (m(0, c) != (*first)(0, c)) {
+					throw IllegalArgumentException("multiple @" + want
+						+ " blocks have different columns at " + std::to_string(c)
+						+ " ('" + m(0, c) + "' vs '" + (*first)(0, c) + "')");
+				}
+			}
+		}
+		for (std::int64_t r = 1; r < static_cast<std::int64_t>(m.rows()); ++r) {
+			for (std::size_t c = 0; c < m.cols(); ++c) {
+				out.item(m(r, static_cast<std::int64_t>(c)));
+			}
+			out.line(r);
+		}
+		any = true;
+	}
+	if (!any) { return std::nullopt; }
+	return out.take();
+}
+
 /* ---- runReflex 的触发行解析（2026-09-29 A3 拆出，纯函数）----
  * 解析 `reflexName(k=v, k=v)`：无括号 = 无参数触发；k=v 两侧 trim、k 须为
  * 安全标识符、重复绑定拒绝、名字为空拒绝。报错文案与行号口径逐字保持
@@ -715,21 +781,23 @@ TriggerCall parseTriggerLine(const std::string& line, std::int64_t row) {
 } // namespace
 
 void ActionRunner::runReflex(std::vector<mt::MatrixObject>& actionMatrices) {
-	const mt::MatrixObject* trig = mt::findByName(actionMatrices, "Trigger");
-	if (trig == nullptr) { return; }	/* 无触发：反射惰性 */
+	auto trigOpt = mergeDirectiveRows(actionMatrices, "Trigger");
+	if (!trigOpt) { return; }	/* 无触发：反射惰性 */
+	const mt::MatrixObject& trig = *trigOpt;
 
-	const mt::MatrixObject* reflexDefs = mt::findByName(actionMatrices, "Reflex");
-	if (reflexDefs == nullptr) {
+	auto reflexOpt = mergeDirectiveRows(actionMatrices, "Reflex");
+	if (!reflexOpt) {
 		throw IllegalArgumentException("@Trigger 矩阵存在但没有任何 @Reflex 定义"
 			"（动作序列），请先用 @Reflex 表定义再触发");
 	}
-	const std::int64_t idxName = reflexDefs->requireCol(0, "name", "Reflex matrix");
+	const mt::MatrixObject& reflexDefs = *reflexOpt;
+	const std::int64_t idxName = reflexDefs.requireCol(0, "name", "Reflex matrix");
 
 	/* 反射分组（保序）：同 name 行 = 多拍 */
 	std::map<std::string, std::vector<std::int64_t>> groups;
 	std::vector<std::string> order;
-	for (std::int64_t i = 1; i < static_cast<std::int64_t>(reflexDefs->rows()); ++i) {
-		const std::string nm = bot::trim(reflexDefs->operator()(i, idxName));
+	for (std::int64_t i = 1; i < static_cast<std::int64_t>(reflexDefs.rows()); ++i) {
+		const std::string nm = bot::trim(reflexDefs.operator()(i, idxName));
 		if (nm.empty()) { continue; }
 		if (groups.find(nm) == groups.end()) { order.push_back(nm); }
 		groups[nm].push_back(i);
@@ -738,9 +806,9 @@ void ActionRunner::runReflex(std::vector<mt::MatrixObject>& actionMatrices) {
 		throw IllegalArgumentException("@Reflex 表没有任何定义行（列 0 = 反射名）");
 	}
 
-	const std::int64_t idxTrig = trig->requireCol(0, "trigger", "Trigger matrix");
-	for (std::int64_t i = 1; i < static_cast<std::int64_t>(trig->rows()); ++i) {
-		const std::string line = bot::trim(trig->inherited(i, idxTrig));
+	const std::int64_t idxTrig = trig.requireCol(0, "trigger", "Trigger matrix");
+	for (std::int64_t i = 1; i < static_cast<std::int64_t>(trig.rows()); ++i) {
+		const std::string line = bot::trim(trig.inherited(i, idxTrig));
 		if (line.empty()) { continue; }	/* 空行跳过（宽松） */
 		const TriggerCall call = parseTriggerLine(line, i);
 
@@ -756,28 +824,40 @@ void ActionRunner::runReflex(std::vector<mt::MatrixObject>& actionMatrices) {
 		/* 组装该反射的动作矩阵（列 1.. 为动作列；组内行序 = 拍序） */
 		mt::MatrixBuilder b;
 		b.name("Action");
-		const std::int64_t ncols = static_cast<std::int64_t>(reflexDefs->cols());
-		for (std::int64_t j = 1; j < ncols; ++j) { b.item(reflexDefs->operator()(0, j)); }
+		const std::int64_t ncols = static_cast<std::int64_t>(reflexDefs.cols());
+		for (std::int64_t j = 1; j < ncols; ++j) { b.item(reflexDefs.operator()(0, j)); }
 		b.line(1);
 		for (const std::int64_t row : git->second) {
-			for (std::int64_t j = 1; j < ncols; ++j) { b.item(reflexDefs->operator()(row, j)); }
+			for (std::int64_t j = 1; j < ncols; ++j) { b.item(reflexDefs.operator()(row, j)); }
 			b.line(row);
 		}
 		mt::MatrixObject actionDefs = b.take();
 
-		/* 子作用域：绑定临时别名 → 执行 → 撤销（异常路径同样撤销） */
+		/* 子作用域：绑定临时别名 → 执行 → 恢复。
+		 * ScopedNames 会保存同名会话变量的旧值（含顶层 @Alias/@Vars 与捕获），
+		 * 退出（含异常）时恢复；不能只 removeSessionOverride——那会把
+		 * 原先存在的别名一并删掉，污染后续触发/动作。
+		 * 与 callNamedReflex() 一致：参数不得替换 driver/daemon/flow reference。 */
 		std::vector<std::string> bound;
-		try {
-			for (const auto& kv : call.args) {
-				registry_.override(kv.first, MtVars_Alias::Make(kv.second));
-				bound.push_back(kv.first);
+		bound.reserve(call.args.size());
+		for (const auto& kv : call.args) {
+			if (!bot::isSafeIdent(kv.first)) {
+				throw IllegalArgumentException("Reflex parameter names must be safe identifiers");
 			}
-			dispatchMatrix(actionDefs);
-		} catch (...) {
-			for (const auto& k : bound) { registry_.removeSessionOverride(k); }
-			throw;
+			if (MatrixVars_Hardware* existing = registry_.find(kv.first); existing != nullptr) {
+				const std::string_view kind = existing->kindName();
+				if (kind != "alias" && kind != "vars") {
+					throw IllegalArgumentException("Trigger argument '" + kv.first
+						+ "' cannot replace a driver, daemon, struct or flow reference");
+				}
+			}
+			bound.push_back(kv.first);
 		}
-		for (const auto& k : bound) { registry_.removeSessionOverride(k); }
+		HwRegistry::ScopedNames scope(registry_, bound);
+		for (const auto& kv : call.args) {
+			registry_.override(kv.first, MtVars_Alias::Make(kv.second));
+		}
+		dispatchMatrix(actionDefs);
 	}
 }
 
