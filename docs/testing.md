@@ -203,6 +203,15 @@ agent 模式加载 Lua 协议驱动时经 ffi 拉起 libcurl → libcrypto，后
 `CRYPTO_malloc` 初始化残留。该驱动轨道与 `asan.supp` 已一并删除——现役 Rust agent
 用 rustls、不碰 OpenSSL，Lua 侧仅 `asound.lua`（ALSA）一条 ffi 依赖，无 libcrypto 路径。）
 
+系统 `libsqlite3` 较新版本在 `sqlite3_open` 时会做一次 FTS3 全局初始化，LSan 可能把它记为
+「间接泄漏」（调用栈全部落在 `libsqlite3.so`，无项目帧）。这是**系统库的环境性残留**，不是
+本仓库泄漏；本地复跑可用仓库外的抑制文件只过滤该库（项目代码泄漏仍须为 0）：
+
+```bash
+printf 'leak:libsqlite3\nleak:sqlite3\n' > /tmp/lsan-sqlite.supp
+LSAN_OPTIONS=suppressions=/tmp/lsan-sqlite.supp bash test/run_san.sh --asan-only
+```
+
 线程竞争用同一开关换 TSan：`-DMYBOT_SANITIZE=thread -B build-tsan`。注意 LuaJIT 是
 未插桩外部库，FFI 侧的槽访问不在 TSan 视野内——TSan 覆盖的是 C++ 侧并发路径
 （守护槽指针、信号标志、生命周期分支）。本机实测（树莓派 5 / 内核 6.18 aarch64）：

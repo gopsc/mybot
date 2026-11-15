@@ -236,6 +236,59 @@ tester.expect_err("underrun 二连如实报错", function()
 asound.write = mock_write
 log = {}
 
+-- 部分写入（2026-11-15 审计 M4）：writei 返回 0 < w < n 时必须从块内偏移
+-- 补写剩余，不能按请求帧数推进（旧实现静默丢掉 n-w 帧）。
+local partial_bad = false
+local partial_prev_end = 0
+asound.write = function(pcm, buf, n, offset)
+	offset = offset or 0
+	if offset ~= 0 and offset ~= partial_prev_end then partial_bad = true end
+	local take = math.min(n, 7)
+	frames = frames + take
+	partial_prev_end = (take == n) and 0 or (offset + take)
+	return take
+end
+reset()
+r = call({ note = 69, delay = 100 })		-- 1600 帧
+asound.write = mock_write
+check("部分写入补齐总帧数（1600）", r.result == "OK" and frames == 1600,
+	tostring(frames))
+check("部分写入补写偏移连续（无重复/跳帧）", not partial_bad)
+log = {}
+
+-- underrun 后重试只写入一部分：仍须继续补齐剩余帧
+local epipe_partial = true
+asound.write = function(pcm, buf, n, offset)
+	if epipe_partial then
+		epipe_partial = false
+		return -asound.EPIPE
+	end
+	local take = math.min(n, 5)
+	frames = frames + take
+	return take
+end
+reset()
+r = call({ note = 69, delay = 50 })		-- 800 帧
+asound.write = mock_write
+check("underrun 后部分写入仍补齐总帧数（800）",
+	r.result == "OK" and frames == 800, tostring(frames))
+log = {}
+
+-- writei 返回 0 不应静默推进；有限次重试后如实报错（不能忙等死循环）
+local zero_calls = 0
+asound.write = function(pcm, buf, n, offset)
+	zero_calls = zero_calls + 1
+	return 0
+end
+reset()
+r = call({ note = 69, delay = 100 })
+asound.write = mock_write
+check("write 返回 0 重试有限次后报错",
+	type(r) == "table" and r.result == "ERR"
+		and r.message:find("0 frames", 1, true) ~= nil and zero_calls == 3,
+	(type(r) == "table") and tostring(r.message) or tostring(r))
+log = {}
+
 asound.write = function(pcm, buf, n) return -77 end
 tester.expect_err("write 其他 errno 报 writei failed", function()
 	return call({ note = 69, delay = 100 }) end, "snd_pcm_writei failed")

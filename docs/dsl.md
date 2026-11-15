@@ -6,6 +6,8 @@
 
 由内置 SQL4cj 解析器（`src/sqlparse.cpp`）解析，支持 `--` 行注释与 `/* */` 块注释。一组 `CREATE TABLE / INSERT INTO`：每张表对应一类硬件（表名即矩阵名，决定加载哪个驱动，`modules/<矩阵名>.lua`），每行 INSERT 就是一个实例。C++ 原生驱动（如 `Time`/`Shell`/`Nns`）由宿主注册表直接装配，不要求有对应的 Lua 模块；`Nns` 的用法见 [drivers.md](drivers.md)。
 
+表名同时是模块文件名：只允许字母/数字/`_`/`-`，且以字母或 `_` 开头；`/`、`\`、`.`、`..`、NUL 在解析期拒绝（`isSafeModuleName`）。`@Daemon` 的 `chunk` 必须是模块根下的相对路径，绝对路径与 `..` 同样拒绝。结构脚本本身仍按可信本地文件处理；这条约束防的是「把结构脚本当数据转发/拼接」时路径逃出模块根。
+
 ```sql
 CREATE TABLE I2C (name String, path String);
 INSERT INTO I2C (name, path) VALUES ('i2c-1', '/dev/i2c-1');
@@ -243,7 +245,8 @@ blink(bright=1);
 ```
 
 - **`@Reflex`**：列 0 = `name`（反射名），列 1.. = 动作列（`<设备>.<参数>`，与 `@Action` 列头同构）；**同 name 多行 = 同一反射的多拍**，按行序执行。单元格语义与 `@Action` 是**同一份派发内核**：`$(...)` 表达式、`$var=field` 捕获格、`-` 继承照常可用。
-- **`@Trigger`**：列 0 = `trigger`；每行一个触发行 `reflexName(k=v, k=v)`，`v` 是实参文本（`k=v` 两侧 trim），**无括号 = 无参数触发**，空行跳过（宽松）。实参以**临时别名**注入会话覆盖层（子作用域）——反射动作行里的 `$(k)` 即取实参值，**无论成败出口撤销**、不污染后续触发。这与 `run_action_script` 工具的 `vars` 是同一套机制（[agent.md](agent.md) 工具表 `run_action_script` 行的「调用时临时注入会话别名」）。
+- **`@Trigger`**：列 0 = `trigger`；每行一个触发行 `reflexName(k=v, k=v)`，`v` 是实参文本（`k=v` 两侧 trim），**无括号 = 无参数触发**，空行跳过（宽松）。实参以**临时别名**注入会话覆盖层（子作用域）——反射动作行里的 `$(k)` 即取实参值。出口（含异常路径）**恢复同名既有别名**，而不是删除：脚本里原本有 `x` 时，`blink(x=1)` 结束后 `x` 仍是原值，后续触发/动作看不到实参泄漏。参数名不得替换 driver/daemon/struct/flow reference（只能遮蔽 `@Alias`/`@Vars`）。这与 `run_action_script` 工具的 `vars` 是同一套机制（[agent.md](agent.md) 工具表 `run_action_script` 行的「调用时临时注入会话别名」）。
+- **多块合并**：同一次 `run()` 里写多个**普通** `@Reflex`/`@Trigger` 块时，按声明序合并数据行（`@Reflex` 同 name 仍为多拍）；列头不一致即报错。`@Reflex(name)` 命名块仍各自独立。
 - **惰性**：没有 `@Trigger` 时 `@Reflex` 只是定义——不执行也不校验（反射行引用了未绑定变量也不报错）。
 - **顶层豁免**：整棵顶层序列没有任何可执行块（`@Action`/`@if`/`@while`）时，有 `@Trigger` 则脚本仍合法（反射独立成立），否则照常报 `No @Action matrix found`。
 - **只写主脚本**：`@Merge` 归并只从片段累加 `@Alias`/`@Vars`/`@Action`（见 [`@Merge` 内联归并](#merge-内联归并运行端动作脚本合并)），片段里的 `@Trigger`/`@Reflex` **不会进主脚本**；`@Include` 是内容拷贝，写在被拷贝文件里等效于写在原地。
@@ -513,4 +516,5 @@ path;
 - **归并 ⟂ 嵌套（核心不变量）**：`mergeTwo` 的操作数必须是**纯矩阵叶子表**——控制块（有 children）当归并操作数会被拒绝（其网格为空、体在 children，按网格行补 `-` 会静默丢弃 children）。归并与嵌套是两条正交能力，不得混用。
 - **子块内 `@Merge` = 位置局部归并**：控制块 children 里的 `@Merge`，把目标**纯矩阵**按声明序用 `mergeTwo`（复用相位补 `-`、设备集不相交、拒绝控制块操作数）并入**同序列里紧邻其下的那张叶子表**；连续多个 `@Merge` 累加进同一张下表，随后 `@Merge` 块被消费、从序列移除，**块序保持书写序**（`execSequence` 的交错执行依赖此序）。目标文件必须只含纯矩阵：携带 `@Alias`/`@Vars`（子块内不注册标量）、`@Merge`/`@Include` 等指令块或控制块即响亮拒绝；空控制块（如只有 `@if(...)` 与 `@` 的退化块）也按名字识别——只看 `children` 是否为空会把它当空叶子表并入，合并后的动作随后被执行器的控制块分支静默丢弃。归并 pass 递归下钻所有 children；子块内 `@Merge` 目标路径以**主脚本目录**为基准。
 - **顶层 `@Merge` 机制不变**：仍是累加器式（`@Alias`/`@Vars` 主从覆盖、合并 `@Action` 锚定、块重排），与子块内的位置局部归并是两条独立路径。
-- 回归：`matrix_*`（`test/cpp/test_matrix.cpp`，解析器 children 树/交错/叶子不可嵌套/多余裸 `@`/深度上限/EOF 未闭合）、`action_nesting_*`（`test/cpp/test_action_nesting.cpp`，执行器递归）、`mtmerge_merge_two_rejects_control_block_operand`（`test/cpp/test_mtmerge.cpp`，归并拒绝控制块操作数）、`mtinclude_merge_nested_*`（`test/cpp/test_mtinclude.cpp`，子块内位置局部归并的正/负路径）、`mtinclude_fragment_*`（片段拒绝 `@Include` 与带嵌套子块的 `@Action`）、`mtinclude_deep_fragment_chain_*`（32 层片段链与行预算边界）。
+- **未知块与游离数据响亮拒绝**：块名拼错（`@Actoin`/`@iff`）不再整块静默跳过——`execSequence` 只接受已知块，未知块名即报错并列出可用块；任何 `@block` 之外的顶层数据格（游离行）在解析期拒绝，不再被当作空脚本忽略。`@Merge` 片段只允许 `@Alias`/`@Vars`/`@Action`/递归 `@Merge`，其余指令/控制块在片段里即报错。
+- 回归：`audit_h4_*`（`test/cpp/test_audit_fixes.cpp`，未知块/游离数据/片段指令）、`matrix_*`（`test/cpp/test_matrix.cpp`，解析器 children 树/交错/叶子不可嵌套/多余裸 `@`/深度上限/EOF 未闭合）、`action_nesting_*`（`test/cpp/test_action_nesting.cpp`，执行器递归）、`mtmerge_merge_two_rejects_control_block_operand`（`test/cpp/test_mtmerge.cpp`，归并拒绝控制块操作数）、`mtinclude_merge_nested_*`（`test/cpp/test_mtinclude.cpp`，子块内位置局部归并的正/负路径）、`mtinclude_fragment_*`（片段拒绝 `@Include` 与带嵌套子块的 `@Action`）、`mtinclude_deep_fragment_chain_*`（32 层片段链与行预算边界）。

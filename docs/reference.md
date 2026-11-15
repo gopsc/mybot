@@ -22,7 +22,7 @@
 | --- | --- |
 | `--robot <path>` | **必选**，机器人结构脚本 `.sql` 路径。无参数直接运行 `mybot` 时打印帮助并退出 0；**给了其它参数却缺 `--robot` 时退出 2**。打不开或解析失败退出 1 |
 | `--input <path>` | 从文件读取动作脚本 `.mt`；不给则读 stdin |
-| `--timeout <sec>` | 动作脚本墙钟预算，`>0` 且 `<=3600`，缺省 180 |
+| `--timeout <sec>` | 动作脚本墙钟预算，`>0` 且 `<=3600`，缺省 180。预算是**整轮动作的墙钟上限**：Lua 指令钩子、C++ 动作行循环、`Timer`/HAL 阻塞调用都按剩余预算截断；到点以「动作脚本执行预算」错误中止本轮并仍走 `deactivate` 清理链 |
 | `--daemon-grace-ms <ms>` | 守护线程弃管后的二段停机宽限上限，`0..300000`，缺省 30000 |
 | `--var NAME=VALUE` | 会话别名注入（可重复）；`NAME` 须为安全标识符，重复定义退出 2 |
 | `--var-env NAME=ENVVAR` | 从环境变量读取会话别名（可重复）；变量未设置退出 2 |
@@ -56,6 +56,8 @@ TCP 动作源、MCP/agent、Web SSH 与 sim 相关入口已从本分支移除；
 ## 安全约束
 
 - 动作脚本只能**引入新的参数键**，不得覆盖结构脚本的元数据列（`fd` / `address` / `max` / `min` / `offset` 等），也不得占用触发器引用名
+- 结构脚本的表名同时是驱动模块名（`modules/<表名>.lua`）：只允许字母/数字/`_`/`-` 且以字母或 `_` 开头，路径分隔符、`.`、`..`、NUL 在解析期拒绝；`@Daemon` 的 `chunk` 必须是模块根下的相对路径（绝对路径/`..`/NUL 同样拒绝）
+- 热 SQL（`/sql`、`apply_sql`）按**不可信输入**处理：`Daemon.chunk` 必须是模块路径下已存在的相对路径；`Nns.path` 必须是模型根下的相对路径（见下方环境变量）；`layers` 受层数/单层/总参数上限约束
 - 单次输入上限 **8 MiB**：动作脚本（`.mt`）与结构脚本（`.sql`）统一适用，超限即拒绝并指明输入类别
 - `result` / `message` / `mode` 三个键名由框架保留，`.mt` 不得用作参数列（`MtVars_Lua::rejectReservedKeys`）
 - 物理 I2C/SPI/UART、非回环 HTTP/TCP、Shell 与 FTDI 默认允许；驱动沙箱禁用 shell 与任意文件读写，但这是**防误用护栏而非安全边界**——驱动可经 `require("ffi")` 直调 libc
@@ -79,13 +81,14 @@ TCP 动作源、MCP/agent、Web SSH 与 sim 相关入口已从本分支移除；
 | `BOT4CJ_HAL_BACKEND` | **仅独立 LuaJIT 回退路径**：`modules/lib/hal_backend_<名>.lua`（缺省 `glibc`）。宿主运行期走 C++ HAL，不读本变量 |
 | `BOT4CJ_PWM_SYSFS_ROOT` | 宿主 C++ HAL 的 PWM sysfs 根目录，缺省 `/sys/class/pwm`；用于测试、容器或非标准挂载 |
 | `BOT4CJ_STATE_DIR` | 宿主状态文件根目录（当前用于 SGP30 baseline）；缺省 `$XDG_STATE_HOME/mybot` 或 `$HOME/.local/state/mybot`，都未设置时 `./mybot-state`。只允许根下单个安全文件名（字母/数字/`_`/`-`/`.`），不接受目录或绝对路径 |
+| `BOT4CJ_MODEL_DIR` | `Nns` 模型根目录；缺省等于 `BOT4CJ_STATE_DIR`。启动期结构脚本的绝对路径/当前目录相对路径保持兼容；**热 SQL** 新增或改写的 `Nns.path` 必须是本根下的相对路径，解析后越出根（含符号链接）即拒绝 |
 | `BOT4CJ_TRACE_FDS` | 仅守门用：`mybot_tests` 专用测试钩子（生产二进制不含） |
 
 ## 中断语义（单进程）
 
 Ctrl-C / SIGINT / SIGTERM 首次到达时只置停止标志，主流程走正常清理链：
 
-1. 动作派发在行间检查停止标志，守护线程在两拍之间检查 `stop`；
+1. 动作派发在行间、Lua 指令钩子、`Timer`/HAL 阻塞循环里检查停止标志与执行预算，守护线程在两拍之间检查 `stop`；
 2. `runRobotAndCleanup` 调 `deactivate()`：守护停机 → 驱动逆序 `destroy` → HAL 关闭遗留句柄；
 3. 第二次信号恢复默认处置并重新触发，立即退出，**跳过清理，不能保证硬件安全停下**；驱动阻塞或守护拒绝退场时尤其要注意。
 

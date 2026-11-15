@@ -105,3 +105,9 @@ UART 的易踩坑约束：
 - **替换** Lua 文件搜索器与 C 搜索器为「返回说明性错误串」的桩，`package.loadlib` 置 `nil`，`package.path`/`cpath` 清空——于是任何按模块名加载文件的尝试都会失败，并给出 `sandbox: require() may only load preloaded/built-in modules ...`。
 
 驱动要用文件就必须走 `mpath.resolve` + `dofile`（同一套白名单判据）。注意本条收口的是**声明与实现的一致性**，不改变下面「沙箱不是安全边界」的结论。
+
+## HAL 生命周期与执行预算（2026-11-15 审计修复）
+
+- **跨 Lua 状态的生命周期**：`HALManager::currentShared()` 返回 `shared_ptr`；宿主建 Lua 状态时把强引用放进 `__hal_call` 的 userdata upvalue（`HalLifetime`），不再把裸指针塞进 upvalue。弃管守护线程即使晚于 `RobotStruct` 析构才退出，其 `daemon_cleanup` 仍能安全调用 `state_write`/`sleep_ms`/`close_handle`；`deactivate()` 已 `closeAll()`，对已关闭句柄的操作得到正常错误而不是 UAF。`RobotStruct` 构造期保存上一份 `current` 并在析构时恢复（多实例嵌套不再把全局指针留成悬垂）。
+- **执行预算穿透 HAL**：`--timeout` 的 `LuaExecBudget` 同时由 Lua 指令钩子、`ActionRunner` 行/块循环和 HAL 的 `sleep_ms`/UART/TCP/HTTP/Shell/Speaker 路径检查。HAL 超时取「用户请求值」与「预算剩余值」的较小者；预算到点抛 `ExecBudgetExceeded`，`HALManager::call` **原样重抛**，不折成 `-1`/`JsonNull`，因此动作链走 halt-on-error 并仍执行 `deactivate` 清理。
+- **边界**：预算只能打断「能回到用户态检查点」的调用。守护线程阻塞在不可中断的 ioctl/D 态、或驱动在 C 扩展内部长时间不返回时，用户态没有执行机会；这类情况仍需靠驱动自身的超时/子进程隔离，`--timeout` 不承诺硬实时中断。

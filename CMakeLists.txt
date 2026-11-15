@@ -283,6 +283,7 @@ add_executable(mybot_tests
   test/cpp/test_hal_state.cpp
   test/cpp/test_nns.cpp
   test/cpp/test_ftdi.cpp
+  test/cpp/test_audit_fixes.cpp
   src/mtmerge_core.cpp
   ${MYBOT_CORE_SOURCES}
 )

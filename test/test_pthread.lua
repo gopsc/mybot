@@ -36,6 +36,19 @@ do
 	check("latest 取最新值", vals[1] == 50, vals[1])
 end
 
+-- 非有限采样必须被 publish 入口拒绝（2026-11-15 审计 M8）
+do
+	local slot = P.slot_new()
+	local nan = 0 / 0
+	local inf = math.huge
+	local ok_nan = pcall(P.publish, slot, { nan })
+	local ok_inf = pcall(P.publish, slot, { inf })
+	check("publish 拒绝 NaN", not ok_nan)
+	check("publish 拒绝 Inf", not ok_inf)
+	local vals, count = P.latest(slot)
+	check("非有限值未写入槽", #vals == 0 and count == 0, #vals .. "/" .. count)
+end
+
 -- 超过 MAXVALS 截断
 do
 	local slot = P.slot_new()

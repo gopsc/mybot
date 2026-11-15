@@ -239,6 +239,35 @@ TH_TEST(nested_arrays_survive_the_conversion) {
 	TH_CHECK(w && w->at(1).isArr() && w->at(1).at(0).getInt() == 3);
 }
 
+/* 稀疏/0 基数字表不能被压成数组（2026-11-15 审计 M7） */
+TH_TEST(sparse_numeric_table_becomes_object_and_keeps_keys) {
+	State s;
+	s.chunk("T = { [0] = \"zero\", [2] = \"two\" }\n");
+	lua_getglobal(s.get(), "T");
+	const Json j = bot::lua_value_to_json(s.get(), -1);
+	lua_pop(s.get(), 1);
+	TH_CHECK(j.isObj());
+	TH_CHECK(j.get("0") && j.get("0")->getValue() == "zero");
+	TH_CHECK(j.get("2") && j.get("2")->getValue() == "two");
+}
+
+TH_TEST(contiguous_numeric_table_still_becomes_array) {
+	State s;
+	s.chunk("T = { \"a\", \"b\", \"c\" }\n");
+	lua_getglobal(s.get(), "T");
+	const Json j = bot::lua_value_to_json(s.get(), -1);
+	lua_pop(s.get(), 1);
+	TH_CHECK(j.isArr() && j.size() == 3 && j.at(1).getValue() == "b");
+}
+
+TH_TEST(top_level_numeric_return_key_is_not_dropped) {
+	State s;
+	s.chunk("function call(data) return { result = \"OK\", [1] = 42 } end\n");
+	const Json res = bot::call_lua(s.get(), callParams());
+	TH_CHECK(!isErr(res));
+	TH_CHECK(res.get("1") && res.get("1")->getInt() == 42);
+}
+
 /* ---------------- 2026-09-20 审计 C1：多值返回必须取「首个」 ---------------- */
 
 /* 驱动多返回值时，契约表是**第一个**返回值（Java/Cangjie 原版语义亦然：

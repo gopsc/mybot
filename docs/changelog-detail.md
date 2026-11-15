@@ -9,6 +9,29 @@
 
 ## v1.x（C++ 移植版）
 
+### 2026-11-15 审计修复：路径隔离 / 执行预算 / HAL 生命周期 / DSL 严格化
+
+- **结构路径隔离**：`CREATE TABLE` 表名同时是 `modules/<表名>.lua` 的模块名，现在只允许
+  字母/数字/`_`/`-`；`@Daemon` 的 `chunk` 必须是模块根下相对路径。启动期脚本不再能
+  用 `../`、绝对路径或带 `.` 的表名加载模块树外的 Lua。热 SQL 的 `Nns.path` 进一步
+  限制在 `BOT4CJ_MODEL_DIR`（缺省状态根）内，并拒绝符号链接与 `..`。
+- **`--timeout` 真正覆盖整轮动作**：预算指针此前从未被设置，Lua 死循环/首次 Ctrl-C
+  实际不受控。现在 Lua 指令钩子、C++ 动作行循环、`Timer`/HAL 阻塞调用共用同一 deadline；
+  到点抛 `ExecBudgetExceeded` 并仍执行 `deactivate` 清理。不可中断的 D 态 ioctl 仍是
+  已声明边界。
+- **HAL 生命周期**：`HALManager` 改由 `shared_ptr` 持有，Lua 的 `__hal_call` 捕获强引用；
+  弃管守护在 `RobotStruct` 析构后调用 HAL 不再 UAF。多 `RobotStruct` 嵌套会恢复上一份
+  `current`。
+- **DSL 严格化**：顶层游离数据、未知 `@block`（如 `@Actoin`）、`@Merge` 片段里的不支持
+  指令现在都响亮报错；多个普通 `@Reflex`/`@Trigger` 块按声明序合并；`@Trigger` 参数
+  出口恢复既有别名，且不得替换 driver/daemon/struct/flow reference。
+- **中危项**：Speaker 部分写入按实际帧数补写；HTTP/Shell 拒绝 NaN/Inf timeout；FTDI
+  构造失败关闭 context；稀疏/0 基 Lua 表转对象且保留顶层数字键；守护采样拒绝 NaN/Inf；
+  热删除拒绝仍被存活聚合器 `sources` 引用的 peer。
+- **回归**：`test/cpp/test_audit_fixes.cpp`、`test_luaend`、`test_pthread`、`test_speaker`
+  新增 27 条；C++ 单测 602 → 629，完整守门 259 通过 / 0 失败 / 0 跳过。ASan/UBSan
+  全量通过；TSan 在 aarch64 宿主仍受 `unsupported VMA range` 环境限制。
+
 ### 2026-09-29 三项安全收口：MCP 首帧共享密钥 / 停机灭火 / 信任前提体检
 
 - **MCP 首帧共享密钥 `BOT4CJ_MCP_TOKEN`（审计 P2-1）**：设了它，`SO_PEERCRED` 之上每条连接
