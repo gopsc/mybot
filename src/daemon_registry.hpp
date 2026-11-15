@@ -36,6 +36,10 @@ public:
 	/* 热插回滚：丢弃本批次新增的守护登记（尾部截断） */
 	void truncate(std::size_t n) { holders_.resize(n); }
 
+	/* 生命周期重置：deactivate() 的 stopBarrier 完成、变量 destroy 后调用。
+	 * 弃管线程仍持有自己的 runner/slot 强引用，这里只撤主线程的登记。 */
+	void clear() { holders_.clear(); }
+
 	/* ---- 守护退场屏障：deactivate（断电前）与热删除（摘件前）共用的同一套
 	 * 安全序列（2026-10-03 阶段 4 自 robot.cpp 自由函数迁入）----
 	 * 机械步骤：requestStop 全体 → 全体共享一个 deadline 等待（取各守护

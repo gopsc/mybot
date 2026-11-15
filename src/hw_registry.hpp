@@ -115,6 +115,13 @@ public:
 	/* 会话层规模（只读）。测试与诊断用：结构清单 byName() 不得因会话而增长。 */
 	std::size_t sessionSize() const { return session_.size(); }
 
+	/* ---- 生命周期重置：只给 deactivate() 用 ----
+	 * `deactivate()` 先按逆序 destroy()，再调用本方法把结构期所有权与名字索引
+	 * 整体清空，使 Inactive 状态下的重新 active() 可以从空注册表重新装配。
+	 * 调用前必须已完成 destroy()：本方法只撤所有权，不认识硬件；直接 clear
+	 * 未断电的变量会让执行器停在最后指令位置。 */
+	void clear();
+
 	/* 登记结构引用列指向的名字（controller/trigger，createLuaVars 装配期调用） */
 	void addFlowRef(const std::string& name) { flowRefs_.insert(name); }
 

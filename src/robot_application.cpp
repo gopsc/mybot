@@ -36,6 +36,10 @@ int runActionPipeline(RobotStruct& robot, const CliOptions& options) {
 	robot.armExecBudget(&budget);
 	try {
 		robot.run(*input, options.injectVars);
+		/* 最后一道预算检查：动作的最后一行可能阻塞到 deadline 之后才返回，
+		 * 且 HAL 读超时/驱动空结果可能把“预算已尽”伪装成普通的 timeout。
+		 * 不能在 disarm 之后才检查——那时 t_budget 已为空。 */
+		requireExecBudget();
 	} catch (...) {
 		robot.armExecBudget(nullptr);
 		throw;

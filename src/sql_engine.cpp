@@ -448,15 +448,38 @@ void validateNumberColumn(const std::string& table, const Column& column,
 	}
 }
 
+/* SQLite 资源守卫（审计修复）：readTables 的 Number 校验在行循环内抛异常，
+ * 旧实现只在该函数的正常出口与 NULL 值分支 finalize；剩下的异常路径会把
+ * sqlite3_stmt 留在活动状态，随后 sqlite3_close 返回 SQLITE_BUSY，整个连接
+ * （含 FTS3 初始化分配）泄漏。RAII 保证任何出口都 finalize；DbGuard 同理
+ * 保证连接在异常路径关闭。 */
+struct StmtGuard {
+	sqlite3_stmt* stmt = nullptr;
+	explicit StmtGuard(sqlite3_stmt* s) : stmt(s) {}
+	~StmtGuard() { if (stmt != nullptr) { sqlite3_finalize(stmt); } }
+	StmtGuard(const StmtGuard&) = delete;
+	StmtGuard& operator=(const StmtGuard&) = delete;
+	sqlite3_stmt* get() const { return stmt; }
+};
+
+struct DbGuard {
+	sqlite3* db = nullptr;
+	explicit DbGuard(sqlite3* handle) : db(handle) {}
+	~DbGuard() { if (db != nullptr) { sqlite3_close_v2(db); } }
+	DbGuard(const DbGuard&) = delete;
+	DbGuard& operator=(const DbGuard&) = delete;
+};
+
 std::deque<mt::MatrixObject> readTables(sqlite3* db, const std::vector<Table>& schema) {
 	std::deque<mt::MatrixObject> tables;
 	for (const Table& table : schema) {
 		const std::string sql = "SELECT * FROM " + quoteIdent(table.name) + " ORDER BY rowid";
-		sqlite3_stmt* stmt = nullptr;
-		if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+		sqlite3_stmt* raw = nullptr;
+		if (sqlite3_prepare_v2(db, sql.c_str(), -1, &raw, nullptr) != SQLITE_OK) {
 			throw IllegalArgumentException("SQL: cannot read table '" + table.name + "': "
 				+ std::string(sqlite3_errmsg(db)));
 		}
+		StmtGuard stmt(raw);
 		mt::MatrixBuilder builder;
 		builder.name(table.name);
 		std::vector<std::string> types;
@@ -468,12 +491,12 @@ std::deque<mt::MatrixObject> readTables(sqlite3* db, const std::vector<Table>& s
 		builder.columnTypes(std::move(types));
 		builder.line(1);
 		std::int64_t rowNumber = 1;
-		while (sqlite3_step(stmt) == SQLITE_ROW) {
+		int step = SQLITE_ROW;
+		while ((step = sqlite3_step(stmt.get())) == SQLITE_ROW) {
 			++rowNumber;
-			for (int index = 0; index < sqlite3_column_count(stmt); ++index) {
-				const unsigned char* text = sqlite3_column_text(stmt, index);
+			for (int index = 0; index < sqlite3_column_count(stmt.get()); ++index) {
+				const unsigned char* text = sqlite3_column_text(stmt.get(), index);
 				if (text == nullptr) {
-					sqlite3_finalize(stmt);
 					throw IllegalArgumentException("SQL: NULL value in table '" + table.name + "'");
 				}
 				const std::string value = reinterpret_cast<const char*>(text);
@@ -484,7 +507,10 @@ std::deque<mt::MatrixObject> readTables(sqlite3* db, const std::vector<Table>& s
 			}
 			builder.line(rowNumber);
 		}
-		sqlite3_finalize(stmt);
+		if (step != SQLITE_DONE) {
+			throw IllegalArgumentException("SQL: cannot read table '" + table.name + "': "
+				+ std::string(sqlite3_errmsg(db)));
+		}
 		tables.push_back(builder.take());
 	}
 	return tables;
@@ -514,69 +540,66 @@ std::deque<mt::MatrixObject> SqlEngine::loadStructure(const std::string& text) {
 	}
 	sqlite3* db = nullptr;
 	if (sqlite3_open(":memory:", &db) != SQLITE_OK) {
+		/* sqlite3_open 失败时仍可能分配了句柄，按 SQLite 文档关闭它。 */
+		if (db != nullptr) { sqlite3_close_v2(db); }
 		throw IllegalArgumentException("SQL: cannot open in-memory database");
 	}
+	DbGuard dbGuard(db);
 	std::vector<Table> schema;
-	try {
-		std::size_t start = 0;
-		while (start < text.size()) {
-			std::size_t end = std::string::npos;
-			std::string buffer;
-			for (std::size_t i = start; i < text.size(); ++i) {
-				buffer.push_back(text[i]);
-				if (text[i] == ';' && sqlite3_complete(buffer.c_str()) != 0) {
-					end = i + 1;
-					break;
-				}
-			}
-			if (end == std::string::npos) {
-				if (isBlank(text.substr(start))) { break; }
-				throw IllegalArgumentException(
-					"SQL: unexpected end of script (statements must end with ';')");
-			}
-			const std::string statement = text.substr(start, end - start);
-			start = end;
-			if (isBlank(statement)) { continue; }
-			std::size_t keywordPos = 0;
-			skipSpaceComments(statement, keywordPos);
-			const std::size_t keywordBegin = keywordPos;
-			while (keywordPos < statement.size()
-					&& std::isalpha(static_cast<unsigned char>(statement[keywordPos])) != 0) {
-				++keywordPos;
-			}
-			const std::string keyword = upper(statement.substr(
-				keywordBegin, keywordPos - keywordBegin));
-			if (keyword == "CREATE") {
-				Table table = processCreate(statement);
-				for (const Table& existing : schema) {
-					if (existing.name == table.name) {
-						throw IllegalArgumentException("SQL: duplicate CREATE TABLE '"
-							+ table.name + "'");
-					}
-				}
-				execute(db, normalizedCreate(table));
-				schema.push_back(std::move(table));
-			} else if (keyword == "INSERT") {
-				validateInsert(statement, schema);
-				execute(db, processInsert(statement));
-			} else {
-				if (keyword.empty()) {
-					throw IllegalArgumentException("SQL: unexpected ';'");
-				}
-				throw IllegalArgumentException("SQL: " + keyword
-					+ " cannot appear in a structure script; only CREATE TABLE and"
-					" INSERT INTO are allowed");
+	std::size_t start = 0;
+	while (start < text.size()) {
+		std::size_t end = std::string::npos;
+		std::string buffer;
+		for (std::size_t i = start; i < text.size(); ++i) {
+			buffer.push_back(text[i]);
+			if (text[i] == ';' && sqlite3_complete(buffer.c_str()) != 0) {
+				end = i + 1;
+				break;
 			}
 		}
-		/* 按 CREATE 声明序返回；schema 保留原始 String/Number 类型
-		 * （SQLite 侧统一建为 TEXT 以保留字面拼写）。 */
-		auto tables = readTables(db, schema);
-		sqlite3_close(db);
-		return tables;
-	} catch (...) {
-		sqlite3_close(db);
-		throw;
+		if (end == std::string::npos) {
+			if (isBlank(text.substr(start))) { break; }
+			throw IllegalArgumentException(
+				"SQL: unexpected end of script (statements must end with ';')");
+		}
+		const std::string statement = text.substr(start, end - start);
+		start = end;
+		if (isBlank(statement)) { continue; }
+		std::size_t keywordPos = 0;
+		skipSpaceComments(statement, keywordPos);
+		const std::size_t keywordBegin = keywordPos;
+		while (keywordPos < statement.size()
+				&& std::isalpha(static_cast<unsigned char>(statement[keywordPos])) != 0) {
+			++keywordPos;
+		}
+		const std::string keyword = upper(statement.substr(
+			keywordBegin, keywordPos - keywordBegin));
+		if (keyword == "CREATE") {
+			Table table = processCreate(statement);
+			for (const Table& existing : schema) {
+				if (existing.name == table.name) {
+					throw IllegalArgumentException("SQL: duplicate CREATE TABLE '"
+						+ table.name + "'");
+				}
+			}
+			execute(db, normalizedCreate(table));
+			schema.push_back(std::move(table));
+		} else if (keyword == "INSERT") {
+			validateInsert(statement, schema);
+			execute(db, processInsert(statement));
+		} else {
+			if (keyword.empty()) {
+				throw IllegalArgumentException("SQL: unexpected ';'");
+			}
+			throw IllegalArgumentException("SQL: " + keyword
+				+ " cannot appear in a structure script; only CREATE TABLE and"
+				" INSERT INTO are allowed");
+		}
 	}
+	/* 按 CREATE 声明序返回；schema 保留原始 String/Number 类型
+	 * （SQLite 侧统一建为 TEXT 以保留字面拼写）。 */
+	auto tables = readTables(db, schema);
+	return tables;
 }
 
 } // namespace bot

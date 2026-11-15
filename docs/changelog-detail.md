@@ -9,6 +9,20 @@
 
 ## v1.x（C++ 移植版）
 
+### 2026-11-15 审计后续修复：重上电 / SQLite RAII / 预算末端 / HTTP header
+
+- **生命周期**：`deactivate()` 清空硬件注册表、元数据与守护登记，`HALManager`
+  增加 `reopen()`，`Inactive -> active()` 现在可以真正重新装配并重新打开总线。
+- **SQLite 资源**：`SqlEngine` 用 RAII 管理 statement/连接；Number 校验失败的
+  异常路径不再泄漏 statement 导致 `sqlite3_close` 返回 BUSY；同时检查
+  `sqlite3_step` 的完成码。
+- **预算末端**：`--timeout` 在最后一行动作执行完后仍复核预算；UART/TCP 读写、
+  I2C/SPI 传输在被预算截断时抛 `ExecBudgetExceeded`，而不是伪装成普通超时/成功。
+- **HTTP header**：C++ HAL 拒绝 header 名/值中的 CR/LF/NUL 与非 token 字符，
+  阻止动作脚本通过 `headers` 参数注入额外 header 或拆分请求。
+- **回归**：新增 3 条 C++ 用例（重上电、末端预算、HTTP header 注入），
+  C++ 单测 629 → 632；ASan/UBSan 全量通过（含 LeakSanitizer）。
+
 ### 2026-11-15 审计修复：路径隔离 / 执行预算 / HAL 生命周期 / DSL 严格化
 
 - **结构路径隔离**：`CREATE TABLE` 表名同时是 `modules/<表名>.lua` 的模块名，现在只允许

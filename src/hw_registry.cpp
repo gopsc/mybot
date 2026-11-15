@@ -143,6 +143,16 @@ void HwRegistry::removeSessionOverride(const std::string& name) {
 	session_.erase(name);
 }
 
+void HwRegistry::clear() {
+	/* 所有权顺序：先断名字索引/销毁序里的裸指针视图，再析构 pool_ 里的对象。
+	 * 会话层只可能为空（deactivate 不在 run() 之内），防御性清一把。 */
+	session_.clear();
+	byName_.clear();
+	seq_.clear();
+	pool_.clear();
+	flowRefs_.clear();
+}
+
 /* N-15：表达式标识符求值器单点——三个调用面（元数据 $(...)、@Vars 装配、
  * 动作表达式列）此前各自内联同一形态的 lambda。 */
 namespace {

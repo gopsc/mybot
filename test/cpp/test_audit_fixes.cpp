@@ -473,3 +473,98 @@ TH_TEST(audit_h2_budget_interrupts_timer_sleep) {
 	robot.deactivate();
 	TH_CHECK_MSG(elapsed < 800, "Timer slept past the action budget");
 }
+
+/* 生命周期：deactivate() 后必须清空注册表/元数据/守护登记，并允许重新 active。
+ * 旧实现把变量对象留在三张表里，第二次 active() 直接撞
+ * "Duplicate hardware variable name"。 */
+TH_TEST(audit_lifecycle_can_reactivate_after_deactivate) {
+	bot::MemoryReader sr(
+		"CREATE TABLE I2C (name String, path String);\n"
+		"INSERT INTO I2C (name, path) VALUES ('i2c-1', 'virt-i2c');\n");
+	bot::RobotStruct robot(sr);
+	robot.active();
+	TH_CHECK(robot.registry().byName().size() == 1);
+	robot.deactivate();
+	TH_CHECK_MSG(robot.registry().byName().empty(),
+		"deactivate must clear the hardware registry for a later active()");
+	TH_CHECK(robot.metas().empty());
+	TH_CHECK(robot.daemons().size() == 0);
+
+	robot.active();	/* Inactive -> Active：HAL 必须 reopen，变量必须重新装配 */
+	TH_CHECK(robot.lifecycleState() == bot::RobotStruct::LifecycleState::Active);
+	TH_CHECK(robot.registry().byName().size() == 1);
+	robot.deactivate();
+}
+
+/* 预算最后一道检查：驱动绕过 Lua 钩子（ffi.usleep）阻塞到 deadline 之后
+ * 仍返回 result=OK 时，RobotStruct::run 不能在最后一帧后静默成功。 */
+TH_TEST(audit_budget_is_checked_after_the_last_action_row) {
+	fx::TempDir dir("audit_budget_final");
+	{
+		std::ofstream out(dir.path() / "BlockingDriver.lua",
+			std::ios::binary | std::ios::trunc);
+		out << "local ffi = require(\"ffi\")\n"
+		       "ffi.cdef(\"int usleep(unsigned int usec);\")\n"
+		       "function build(data) return { result = \"OK\" } end\n"
+		       "function call(data)\n"
+		       "  ffi.C.usleep(300000)\n"
+		       "  return { result = \"OK\" }\n"
+		       "end\n"
+		       "function destroy(data) return { result = \"OK\" } end\n";
+	}
+	fx::ModulePathGuard paths("./modules:" + dir.path().string());
+	bot::MemoryReader sr(
+		"CREATE TABLE BlockingDriver (name String);\n"
+		"INSERT INTO BlockingDriver (name) VALUES ('b0');\n");
+	bot::RobotStruct robot(sr);
+	robot.active();
+
+	bot::LuaExecBudget budget;
+	budget.deadline = std::chrono::steady_clock::now()
+		+ std::chrono::milliseconds(100);
+	budget.watchStop = true;
+	robot.armExecBudget(&budget);
+	bot::MemoryReader mt("@Action\nb0.ping;\n  1;\n@\n");
+	const auto started = std::chrono::steady_clock::now();
+	bool budget_reported = false;
+	try {
+		robot.run(mt);
+	} catch (const std::runtime_error& e) {
+		budget_reported = std::string(e.what()).find(bot::kLuaExecBudgetMarker)
+			!= std::string::npos;
+	}
+	const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+		std::chrono::steady_clock::now() - started).count();
+	robot.armExecBudget(nullptr);
+	robot.deactivate();
+	TH_CHECK_MSG(budget_reported,
+		"a driver blocking past the deadline returned OK and run() did not report the budget");
+	TH_CHECK_MSG(elapsed < 2000, "final budget check took too long");
+}
+
+/* HTTP header 注入：header 值里的 CR/LF 必须被 C++ HAL 拒绝，不能交给
+ * libcurl 拼成额外 header/请求。 */
+TH_TEST(audit_http_rejects_header_crlf) {
+	bot::HALManager hal;
+	bot::Json opened = hal.call("http_open",
+		{bot::JsonString("http://127.0.0.1:1"), bot::JsonInt(1000)});
+	TH_CHECK(opened.isInt());
+
+	auto requestWith = [&](const std::string& key, const std::string& value) {
+		bot::Json headers = bot::JsonObject();
+		headers.put(key, bot::JsonString(value));
+		return hal.call("http_request",
+			{opened, bot::JsonString("GET"), bot::JsonString("/"),
+			 headers, bot::JsonNull()});
+	};
+	auto isErr = [](const bot::Json& result) {
+		const bot::Json* status = result.isObj() ? result.find("result") : nullptr;
+		return status != nullptr && status->isStr()
+			&& status->getValue() == "ERR";
+	};
+
+	TH_CHECK_MSG(isErr(requestWith("X-Test", "1\r\nX-Evil: injected")),
+		"HTTP header value with CRLF was accepted");
+	TH_CHECK_MSG(isErr(requestWith("X-Test\r\nX-Evil", "1")),
+		"HTTP header name with CRLF was accepted");
+}

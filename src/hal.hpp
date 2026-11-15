@@ -46,6 +46,11 @@ public:
 	/* 关闭本管理器持有的全部句柄（deactivate 兜底）。 */
 	void closeAll();
 
+	/* 重新开放句柄申请（Inactive -> active() 生命周期）。
+	 * 只允许在 closeAll() 之后、句柄表为空时调用；closeAll() 置上的 closed_
+	 * 不是进程终态，而是“本次装配已断电”。 */
+	void reopen();
+
 	/* 当前 RobotStruct 的 HAL（Lua 状态创建时从这里取桥）。
 	 * 2026-11-15 审计修复：current 的返回值只供比较/诊断；需要跨 Lua 状态
 	 * 持有生命周期时必须用 currentShared()，不能把裸指针塞进 Lua upvalue。 */

@@ -48,6 +48,9 @@ public:
 	/* 热插回滚：丢弃本批次新增的登记（尾部截断） */
 	void truncate(std::size_t n) { providers_.resize(n); }
 
+	/* 生命周期重置：deactivate() 已 destroy 全部变量后调用，供重新 active()。 */
+	void clear() { providers_.clear(); }
+
 	/* 热删除：摘除指向被删行的提供者。判据是「矩阵 + 行号」而不是引用相等——
 	 * 矩阵是 deque 元素、地址稳定，故该判据精确且不受行数变化影响；传入的行号
 	 * 必须是**删除前的原始坐标**（行擦除会让坐标前移，故本调用须先于 shiftRowsAfter

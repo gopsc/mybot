@@ -27,6 +27,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <thread>
+#include <utility>
 #include <unistd.h>
 
 #include <curl/curl.h>
@@ -103,6 +104,30 @@ int asInt(const Json& value, int low, int high, const char* what) {
 std::string asStr(const Json& value, const char* what) {
 	if (!value.isStr()) { throw std::runtime_error(std::string(what) + " must be text"); }
 	return value.getValue();
+}
+
+/* HTTP header 名按 RFC 7230 token（ASCII 子集）。值只拒绝 CR/LF/NUL：
+ * 这三类是 header 注入/请求拆分的直接载体；其余可打印字节保留。 */
+bool isHttpHeaderToken(const std::string& name) {
+	if (name.empty()) { return false; }
+	for (char ch : name) {
+		const unsigned char c = static_cast<unsigned char>(ch);
+		const bool alnum = std::isalnum(c) != 0;
+		const bool punct = c == '!' || c == '#' || c == '$' || c == '%'
+			|| c == '&' || c == '\'' || c == '*' || c == '+' || c == '-'
+			|| c == '.' || c == '^' || c == '_' || c == '`' || c == '|' || c == '~';
+		if (!alnum && !punct) { return false; }
+	}
+	return true;
+}
+
+void rejectHttpLineBreaks(const std::string& text, const char* what) {
+	for (char ch : text) {
+		if (ch == '\r' || ch == '\n' || ch == '\0') {
+			throw std::runtime_error(std::string(what)
+				+ " must not contain CR, LF, or NUL (HTTP header/request injection)");
+		}
+	}
 }
 
 /* 数值入口：接受 Int/Float/数字字符串，拒绝非有限值。GPIO 默认电平与
@@ -309,6 +334,13 @@ int effectiveTimeoutMs(int requestedMs) {
 	if (remaining < 0) { return requestedMs; }
 	if (remaining == 0) { requireExecBudget(); }
 	return static_cast<int>(std::min<long long>(requestedMs, remaining));
+}
+
+/* 读/写被动作预算截短后到点：即使 duration_cast 让预算还剩不到 1ms，
+ * 也不能把“预算截断”伪装成普通 timeout/eof。 */
+[[noreturn]] void throwBudgetDeadline() {
+	throw ExecBudgetExceeded(std::string(kLuaExecBudgetMarker)
+		+ "：本轮动作脚本执行超时（deadline 已到）；阻塞 I/O 已被截断");
 }
 
 int pollFd(int fd, short events, int timeoutMs) {
@@ -962,6 +994,8 @@ Json HALManager::opI2cTransfer(const Json& handleValue, const Json& addressValue
 	if (::ioctl(resource.fd, I2C_RDWR, &data) < 0) {
 		throw std::runtime_error("I2C transfer failed: " + errText(errno));
 	}
+	/* ioctl 可能阻塞到预算之后才返回；不要把“预算已尽”折成一次成功读写。 */
+	requireExecBudget();
 	return bytesJson(readBuffer);
 }
 
@@ -1050,6 +1084,7 @@ Json HALManager::opSpiTransfer(const Json& handleValue, const Json& dataValue,
 	if (::ioctl(resource.fd, SPI_IOC_MESSAGE(1), &transfer) < 0) {
 		throw std::runtime_error("SPI transfer failed: " + errText(errno));
 	}
+	requireExecBudget();
 	return bytesJson(rx);
 }
 
@@ -1333,6 +1368,7 @@ Json HALManager::opUartWrite(const Json& handleValue, const Json& dataValue) {
 		}
 		sent += static_cast<std::size_t>(n);
 	}
+	requireExecBudget();
 	return JsonInt(static_cast<int>(sent));
 }
 
@@ -1341,8 +1377,9 @@ Json HALManager::opUartRead(const Json& handleValue, const Json& countValue,
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const int count = std::min(asInt(countValue, 1, kUartMaxBytes, "UART count"),
 		kUartMaxBytes);
-	const int timeoutMs = effectiveTimeoutMs(
-		asInt(timeoutValue, 0, kUartMaxMs, "UART timeout"));
+	const int requestedTimeoutMs = asInt(timeoutValue, 0, kUartMaxMs, "UART timeout");
+	const int timeoutMs = effectiveTimeoutMs(requestedTimeoutMs);
+	const bool budgetBound = timeoutMs < requestedTimeoutMs;
 	auto lease = acquire(handle, "uart");
 	Resource& resource = *lease.resource;
 	if (resource.backend == "loop" || resource.backend == "virtual") {
@@ -1373,6 +1410,14 @@ Json HALManager::opUartRead(const Json& handleValue, const Json& countValue,
 			throw std::runtime_error("UART read failed: " + errText(errno));
 		}
 	}
+	/* 到点返回空/部分字节前先复核预算：deadline 已过必须抛预算错误，
+	 * 不能把“预算截断”伪装成一次正常的读超时。budgetBound 覆盖
+	 * duration_cast 截断后 deadline 仍差不到 1ms 的边界。 */
+	if (budgetBound && static_cast<int>(out.size()) < count) {
+		requireExecBudget();
+		throwBudgetDeadline();
+	}
+	requireExecBudget();
 	return bytesJson(out);
 }
 
@@ -1442,8 +1487,9 @@ Json HALManager::opTcpWrite(const Json& handleValue, const Json& dataValue,
 		const Json& timeoutValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const std::vector<std::uint8_t> data = asBytes(dataValue, kTcpMaxBytes);
-	const int timeoutMs = effectiveTimeoutMs(
-		asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout"));
+	const int requestedTimeoutMs = asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout");
+	const int timeoutMs = effectiveTimeoutMs(requestedTimeoutMs);
+	const bool budgetBound = timeoutMs < requestedTimeoutMs;
 	auto lease = acquire(handle, "tcp");
 	Resource& resource = *lease.resource;
 	int sent = 0;
@@ -1454,7 +1500,16 @@ Json HALManager::opTcpWrite(const Json& handleValue, const Json& dataValue,
 			checkStop();
 			const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
 				deadline - std::chrono::steady_clock::now()).count();
-			if (remaining <= 0) { throw std::runtime_error("TCP send timed out"); }
+			if (remaining <= 0) {
+				/* 若超时是动作预算造成的，保持预算错误类型；普通 TCP 超时
+				 * 仍走下面的 ERR 契约。budgetBound 覆盖亚毫秒边界。 */
+				if (budgetBound) {
+					requireExecBudget();
+					throwBudgetDeadline();
+				}
+				requireExecBudget();
+				throw std::runtime_error("TCP send timed out");
+			}
 			if (pollFd(resource.fd, POLLOUT, static_cast<int>(std::min<long long>(remaining, 50))) <= 0) {
 				continue;
 			}
@@ -1467,6 +1522,7 @@ Json HALManager::opTcpWrite(const Json& handleValue, const Json& dataValue,
 			if (n == 0) { throw std::runtime_error("TCP connection closed during send"); }
 			sent += static_cast<int>(n);
 		}
+		requireExecBudget();
 		Json result = JsonObject();
 		result.put("result", JsonString("OK"));
 		result.put("sent", JsonInt(sent));
@@ -1487,8 +1543,9 @@ Json HALManager::opTcpRead(const Json& handleValue, const Json& countValue,
 		const Json& timeoutValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const int count = asInt(countValue, 1, kTcpMaxBytes, "TCP count");
-	const int timeoutMs = effectiveTimeoutMs(
-		asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout"));
+	const int requestedTimeoutMs = asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout");
+	const int timeoutMs = effectiveTimeoutMs(requestedTimeoutMs);
+	const bool budgetBound = timeoutMs < requestedTimeoutMs;
 	auto lease = acquire(handle, "tcp");
 	Resource& resource = *lease.resource;
 	const auto deadline = std::chrono::steady_clock::now()
@@ -1498,6 +1555,13 @@ Json HALManager::opTcpRead(const Json& handleValue, const Json& countValue,
 		const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
 			deadline - std::chrono::steady_clock::now()).count();
 		if (remaining <= 0) {
+			/* 预算到点必须抛 ExecBudgetExceeded；无预算时才是正常 TCP 读超时。
+			 * budgetBound 覆盖 duration_cast 截断后仍差不到 1ms 的边界。 */
+			if (budgetBound) {
+				requireExecBudget();
+				throwBudgetDeadline();
+			}
+			requireExecBudget();
 			Json result = JsonObject();
 			result.put("result", JsonString("OK"));
 			result.put("status", JsonString("timeout"));
@@ -1515,6 +1579,8 @@ Json HALManager::opTcpRead(const Json& handleValue, const Json& countValue,
 			throw std::runtime_error("TCP receive failed: " + errText(errno));
 		}
 		buffer.resize(static_cast<std::size_t>(n));
+		/* recv 也可能在预算到点后才返回；不要把它当成功后的普通数据/EOF。 */
+		requireExecBudget();
 		Json result = JsonObject();
 		result.put("result", JsonString("OK"));
 		if (n == 0) {
@@ -1530,6 +1596,7 @@ Json HALManager::opTcpRead(const Json& handleValue, const Json& countValue,
 
 Json HALManager::opHttpOpen(const Json& baseValue, const Json& timeoutValue, int owner) {
 	const std::string base = asStr(baseValue, "HTTP base");
+	rejectHttpLineBreaks(base, "HTTP base");
 	const int timeoutMs = asInt(timeoutValue, 1, kHttpTimeoutMs, "HTTP timeout");
 	if (base.rfind("http://", 0) != 0 && base.rfind("https://", 0) != 0) {
 		throw std::runtime_error("HTTP base requires an http(s):// URL with a host");
@@ -1549,6 +1616,7 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const std::string method = asStr(methodValue, "HTTP method");
 	std::string path = asStr(pathValue, "HTTP path");
+	rejectHttpLineBreaks(path, "HTTP path");
 	if (method != "GET" && method != "POST" && method != "PUT"
 			&& method != "DELETE" && method != "PATCH") {
 		throw std::runtime_error("HTTP method must be GET, POST, PUT, DELETE, or PATCH");
@@ -1557,6 +1625,23 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 		throw std::runtime_error("HTTP path must be relative to the declared base URL");
 	}
 	if (!path.empty() && path.front() != '/') { path = "/" + path; }
+	/* 先在分配 curl 句柄之前完成全部头校验：校验抛异常时不能留下半建的
+	 * curl handle/header list。 */
+	std::vector<std::pair<std::string, std::string>> headerPairs;
+	if (headersValue.isObj()) {
+		if (headersValue.objSize() > static_cast<std::size_t>(kHttpMaxHeaders)) {
+			throw std::runtime_error("HTTP headers exceed the entry ceiling");
+		}
+		for (const auto& entry : headersValue.items()) {
+			if (!isHttpHeaderToken(entry.first)) {
+				throw std::runtime_error("HTTP header name must be an RFC 7230 token"
+					" (no spaces, colons, CR/LF, NUL, or non-ASCII bytes)");
+			}
+			const std::string value = asStr(entry.second, "HTTP header value");
+			rejectHttpLineBreaks(value, "HTTP header value");
+			headerPairs.emplace_back(entry.first, value);
+		}
+	}
 	auto lease = acquire(handle, "http");
 	Resource& resource = *lease.resource;
 	const int requestTimeoutMs = effectiveTimeoutMs(resource.timeoutMs);
@@ -1564,15 +1649,9 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 	if (curl == nullptr) { throw std::runtime_error("cannot initialize libcurl"); }
 	HttpCapture capture;
 	curl_slist* headerList = nullptr;
-	if (headersValue.isObj()) {
-		if (headersValue.objSize() > static_cast<std::size_t>(kHttpMaxHeaders)) {
-			curl_easy_cleanup(curl);
-			throw std::runtime_error("HTTP headers exceed the entry ceiling");
-		}
-		for (const auto& entry : headersValue.items()) {
-			const std::string header = entry.first + ": " + entry.second.getValue();
-			headerList = curl_slist_append(headerList, header.c_str());
-		}
+	for (const auto& header : headerPairs) {
+		const std::string line = header.first + ": " + header.second;
+		headerList = curl_slist_append(headerList, line.c_str());
 	}
 	std::string body;
 	if (bodyValue.isStr()) { body = bodyValue.getValue(); }
@@ -1906,6 +1985,16 @@ void HALManager::closeAll() {
 		owners_.clear();
 	}
 	for (auto& entry : resources) { closeResource(*entry.second); }
+}
+
+void HALManager::reopen() {
+	std::lock_guard<std::mutex> guard(mutex_);
+	if (!closed_) { return; }
+	if (!handles_.empty()) {
+		throw std::runtime_error("HAL manager has live handles; cannot reopen"
+			" (closeAll must complete first)");
+	}
+	closed_ = false;
 }
 
 } // namespace bot

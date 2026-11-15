@@ -44,6 +44,9 @@ void RobotStruct::run(bot::Reader& input, const std::map<std::string, std::strin
 
 	internals_->runner.runAction(actionMatrices);
 	internals_->runner.runReflex(actionMatrices);
+	/* 直接调用 RobotStruct::run（不经过 CLI 的 runActionPipeline）时也要在
+	 * 最后一帧之后复核预算：最后一行可能阻塞到 deadline 才返回成功。 */
+	requireExecBudget();
 }
 
 } // namespace bot

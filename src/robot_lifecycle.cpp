@@ -34,6 +34,12 @@ void RobotStruct::active() {
 		throw IllegalArgumentException("机器人生命周期状态不允许 active()：当前状态非 Loaded/Inactive");
 	}
 
+	/* Inactive -> Active：deactivate() 已 closeAll 并把注册表清空；重新开放
+	 * HAL 句柄申请后，createHardVars() 才能重新 open 总线/设备。
+	 * 必须在 state_ 置 Active 之前完成——reopen 失败时保持 Inactive，
+	 * 不留下“状态说已上电、HAL 却仍关闭”的混合态。 */
+	if (state_ == LifecycleState::Inactive) { hal_->reopen(); }
+
 	/* 先标记为 Active：中途失败时析构仍会进入统一清理路径。 */
 	state_ = LifecycleState::Active;
 	deactivated_ = false;
@@ -74,6 +80,12 @@ void RobotStruct::deactivate() {
 		std::cerr << "Deactivate: " << failed << " of " << seq.size()
 			<< " hardware variable(s) failed to destroy (see warnings above)" << std::endl;
 	}
+	/* 生命周期重置：destroy 已逐个断电，这里撤所有权/名字索引/元数据/守护登记。
+	 * 顺序 = 注册表 → 元数据 → 守护登记；三者都只撤主线程视图，弃管线程仍持
+	 * 自己的 shared_ptr。清空后 Inactive -> active() 才能从空注册表重新装配。 */
+	registry_.clear();
+	metas_.clear();
+	daemons_.clear();
 	/* 驱动 destroy 正常会关闭自己的句柄；这里兜住 build 失败/异常路径遗留的。 */
 	if (hal_) { hal_->closeAll(); }
 	deactivated_ = true;
