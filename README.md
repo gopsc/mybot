@@ -121,6 +121,10 @@ Structure SQL (SQLite3 + DSL 归一化) → MatrixObject 表
         └── C++ HAL（I2C/SPI/UART/GPIO/PWM/TCP/HTTP/Shell/ALSA）
 ```
 
+逐层指令流、返回值合并、守护/热 SQL 时序与仿真链路见
+[docs/architecture.md](docs/architecture.md)；可交互的逐步演示见
+[docs/architecture_sim.html](docs/architecture_sim.html)（离线单文件，浏览器直接打开）。
+
 - `src/sql_engine.cpp`：SQLite3 结构 SQL 加载器；`$var`、`$(expr)`、`-` 由归一化层保留为文本。
 - `src/sqlparse.cpp`：旧 SQL4cj 解析器，仍服务热 SQL。
 - `src/hal.cpp`：C++ HAL。

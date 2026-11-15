@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mybot-cpp · 指令执行与响应仿真</title>
+<style>
+  :root {
+    --bg: #070b14;
+    --bg-2: #0b1220;
+    --panel: rgba(15, 23, 42, 0.82);
+    --panel-2: rgba(17, 28, 46, 0.92);
+    --line: rgba(148, 163, 184, 0.18);
+    --line-strong: rgba(148, 163, 184, 0.36);
+    --text: #e2e8f0;
+    --muted: #8fa3bd;
+    --dim: #64748b;
+    --cyan: #22d3ee;
+    --blue: #38bdf8;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --violet: #a78bfa;
+    --red: #f87171;
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
+    --mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body {
+    margin: 0;
+    color: var(--text);
+    background:
+      radial-gradient(1100px 600px at 12% -8%, rgba(34, 211, 238, 0.13), transparent 60%),
+      radial-gradient(900px 500px at 95% 8%, rgba(167, 139, 250, 0.12), transparent 58%),
+      linear-gradient(180deg, #070b14 0%, #080d18 55%, #060a12 100%);
+    font-family: "Noto Sans CJK SC", "WenQuanYi Micro Hei", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    line-height: 1.5;
+  }
+  code, pre, .mono { font-family: var(--mono); }
+  .app { max-width: 1500px; margin: 0 auto; padding: 26px 22px 40px; }
+  header { margin-bottom: 20px; }
+  .header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+  .eyebrow { color: var(--cyan); font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; }
+  h1 { margin: 4px 0 6px; font-size: clamp(25px, 3vw, 38px); letter-spacing: -0.02em; }
+  .lede { margin: 0; max-width: 900px; color: var(--muted); font-size: 14px; }
+  .status-chip {
+    display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px;
+    border: 1px solid rgba(52, 211, 153, 0.35); background: rgba(52, 211, 153, 0.08);
+    color: #a7f3d0; font-size: 12px; font-weight: 600; white-space: nowrap;
+  }
+  .status-chip .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6); animation: ping 2.2s infinite; }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); } 70% { box-shadow: 0 0 0 8px rgba(52, 211, 153, 0); } 100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); } }
+
+  .layout { display: grid; grid-template-columns: 382px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); }
+  .sidebar { padding: 18px; position: sticky; top: 16px; }
+  .stage { padding: 18px; min-width: 0; }
+  h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: 0.06em; color: #cbd5e1; text-transform: uppercase; }
+  h2 + .muted { margin-top: -4px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .tab {
+    appearance: none; border: 1px solid var(--line); background: rgba(30, 41, 59, 0.5); color: var(--text);
+    border-radius: 11px; padding: 9px 10px; text-align: left; cursor: pointer; font: inherit; transition: 0.18s ease;
+  }
+  .tab strong { display: block; font-size: 12.5px; }
+  .tab span { display: block; color: var(--dim); font-size: 10.5px; margin-top: 2px; }
+  .tab:hover { border-color: var(--line-strong); background: rgba(30, 41, 59, 0.8); }
+  .tab.active { border-color: rgba(34, 211, 238, 0.6); background: rgba(34, 211, 238, 0.1); box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.12); }
+  .tab.active strong { color: #cffafe; }
+  .scenario-desc { min-height: 58px; margin: 0 0 14px; font-size: 12.5px; color: var(--muted); }
+
+  .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn {
+    appearance: none; border: 1px solid var(--line-strong); background: rgba(30, 41, 59, 0.62);
+    color: var(--text); border-radius: 10px; padding: 9px 10px; font: inherit; font-size: 12.5px;
+    cursor: pointer; transition: 0.18s ease; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--cyan); background: rgba(34, 211, 238, 0.1); }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.primary { grid-column: 1 / -1; border-color: rgba(34, 211, 238, 0.55); background: linear-gradient(180deg, rgba(34, 211, 238, 0.2), rgba(34, 211, 238, 0.08)); color: #cffafe; font-weight: 700; }
+  .speed-row { display: flex; align-items: center; gap: 10px; margin: 13px 0 16px; color: var(--muted); font-size: 12px; }
+  .speed-row input { flex: 1; accent-color: var(--cyan); }
+  #speed-val { color: #cffafe; min-width: 40px; text-align: right; font-family: var(--mono); font-size: 11px; }
+
+  .code-wrap { margin-bottom: 16px; }
+  pre { margin: 0; white-space: pre; overflow: auto; }
+  .code {
+    border: 1px solid var(--line); border-radius: 12px; background: #060a12; padding: 10px 0;
+    max-height: 292px; font-size: 11px; line-height: 1.65; color: #cbd5e1;
+    white-space: pre; overflow: auto;
+  }
+  .code-line { display: block; padding: 0 12px 0 0; border-left: 2px solid transparent; }
+  .code-line .ln { display: inline-block; width: 34px; padding-right: 9px; text-align: right; color: #3f5068; user-select: none; }
+  .code-line.hl { background: rgba(34, 211, 238, 0.1); border-left-color: var(--cyan); }
+  .code-line.hl .ln { color: var(--cyan); }
+  .cmd { border: 1px solid var(--line); border-radius: 10px; background: #060a12; padding: 10px 12px; color: #a7f3d0; font-size: 10.5px; line-height: 1.6; }
+  .packet-box { border: 1px solid var(--line); border-radius: 12px; background: rgba(2, 6, 23, 0.55); padding: 12px; min-height: 92px; font-size: 12px; color: var(--muted); }
+  .packet-box .packet-title { display: flex; align-items: center; gap: 8px; color: var(--text); margin-bottom: 6px; }
+  .packet-box pre { margin-top: 8px; padding: 8px; border-radius: 8px; background: #050810; border: 1px solid var(--line); font-size: 10.5px; color: #bae6fd; max-height: 150px; }
+  .tag { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; border: 1px solid currentColor; white-space: nowrap; }
+  .tag.build { color: var(--green); } .tag.down { color: var(--cyan); } .tag.up { color: var(--amber); }
+  .tag.async { color: var(--violet); } .tag.error { color: var(--red); }
+
+  .stage-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+  .stage-head h2 { margin-bottom: 4px; }
+  .stage-head p { margin: 0; color: var(--muted); font-size: 12px; }
+  .progress { color: var(--cyan); font-family: var(--mono); font-size: 12px; padding: 6px 10px; border: 1px solid rgba(34, 211, 238, 0.3); border-radius: 999px; background: rgba(34, 211, 238, 0.06); white-space: nowrap; }
+
+  .board-wrap { position: relative; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(180deg, rgba(15, 23, 42, 0.55), rgba(2, 6, 23, 0.45)); padding: 12px 12px 14px; overflow: hidden; }
+  .lane-group { margin: 8px 0 14px; }
+  .lane-group:last-child { margin-bottom: 2px; }
+  .lane-label { display: flex; align-items: center; gap: 9px; margin: 0 0 6px; color: var(--dim); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+  .lane-label .badge { display: inline-flex; align-items: center; border-radius: 6px; padding: 1px 7px; border: 1px solid var(--line-strong); color: #cbd5e1; background: rgba(30, 41, 59, 0.5); letter-spacing: 0; text-transform: none; font-size: 10px; }
+  .lane { display: flex; align-items: stretch; gap: 7px; overflow-x: auto; padding: 2px 1px 6px; scrollbar-width: thin; }
+  .node {
+    position: relative; flex: 1 0 112px; min-width: 112px; max-width: 190px; padding: 9px 11px 9px;
+    border: 1px solid var(--line); border-radius: 11px; background: rgba(17, 28, 46, 0.8);
+    transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .node .kicker { display: block; color: var(--dim); font-size: 9.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+  .node strong { display: block; margin-top: 2px; font-size: 12px; font-weight: 650; color: #dbeafe; }
+  .node small { display: block; margin-top: 2px; color: #6f819b; font-size: 10.5px; line-height: 1.35; }
+  .node.visited { border-color: rgba(148, 163, 184, 0.28); }
+  .node.active { transform: translateY(-2px); background: rgba(30, 41, 59, 0.95); }
+  .node.active.build { border-color: var(--green); box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.15), 0 8px 24px rgba(52, 211, 153, 0.12); }
+  .node.active.down { border-color: var(--cyan); box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.15), 0 8px 24px rgba(34, 211, 238, 0.14); }
+  .node.active.up { border-color: var(--amber); box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.15), 0 8px 24px rgba(251, 191, 36, 0.12); }
+  .node.active.async { border-color: var(--violet); box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.15), 0 8px 24px rgba(167, 139, 250, 0.13); }
+  .node.active.error { border-color: var(--red); box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.16), 0 8px 24px rgba(248, 113, 113, 0.14); }
+  .arrow { display: flex; align-items: center; justify-content: center; flex: 0 0 14px; color: #3f5068; font-size: 15px; user-select: none; }
+  .arrow.up { color: rgba(251, 191, 36, 0.55); }
+  .packet-dot {
+    position: absolute; left: 0; top: 0; width: 13px; height: 13px; border-radius: 50%;
+    background: var(--cyan); opacity: 0; pointer-events: none; z-index: 6;
+    box-shadow: 0 0 18px var(--cyan); transition: left 0.45s linear, top 0.45s linear, opacity 0.18s ease;
+  }
+
+  .hardware-panel { margin-top: 14px; border: 1px solid var(--line); border-radius: 15px; background: rgba(2, 6, 23, 0.45); padding: 13px; }
+  .hw-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+  .hw-title h2 { margin: 0; }
+  .hw-title .hint { color: var(--dim); font-size: 10.5px; }
+  .hw-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(250px, 0.8fr); gap: 12px; }
+  .hw-relay { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; }
+  .relay-card, .timer-card, .reg-card, .daemon-card, .slot-card, .error-banner { border: 1px solid var(--line); border-radius: 12px; background: rgba(15, 23, 42, 0.7); padding: 12px; }
+  .relay-card { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; }
+  .relay-led { width: 54px; height: 54px; border-radius: 50%; border: 2px solid #243248; background: radial-gradient(circle at 35% 30%, #263449, #0b1220 70%); transition: 0.15s ease; }
+  .relay-led.on { background: radial-gradient(circle at 35% 30%, #fef08a, #f59e0b 60%, #b45309); border-color: #fbbf24; box-shadow: 0 0 24px rgba(251, 191, 36, 0.8); }
+  .relay-name { font-family: var(--mono); font-size: 11px; color: #cbd5e1; }
+  .relay-sub { color: var(--dim); font-size: 10px; }
+  .timer-row { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 11.5px; margin-bottom: 7px; }
+  .timer-row strong { color: #cffafe; font-family: var(--mono); font-weight: 500; }
+  .meter { height: 10px; border-radius: 999px; background: #0a101c; border: 1px solid #223046; overflow: hidden; }
+  .meter > span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #22d3ee, #34d399); }
+  .timer-row.muted { margin: 9px 0 0; color: var(--dim); font-size: 10.5px; }
+
+  .hw-servo { display: grid; grid-template-columns: minmax(220px, 0.9fr) minmax(0, 1.1fr); gap: 12px; }
+  .servo-gauge { position: relative; border: 1px solid var(--line); border-radius: 12px; background: rgba(15, 23, 42, 0.7); padding: 6px 8px 2px; }
+  .servo-gauge svg { display: block; width: 100%; height: auto; }
+  .servo-value { position: absolute; left: 0; right: 0; bottom: 12px; text-align: center; font-family: var(--mono); color: #cffafe; font-size: 24px; }
+  .servo-value small { font-size: 12px; color: var(--muted); margin-left: 2px; }
+  .reg-head, .daemon-head, .slot-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; color: #cbd5e1; font-size: 11px; }
+  .chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 1px 7px; color: var(--muted); font-size: 9.5px; font-family: var(--mono); }
+  .reg-list { display: flex; flex-direction: column; gap: 5px; max-height: 166px; overflow: auto; }
+  .reg-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; align-items: baseline; padding: 4px 6px; border-radius: 7px; background: rgba(2, 6, 23, 0.45); border: 1px solid rgba(148, 163, 184, 0.1); }
+  .reg-row .reg { color: var(--cyan); font-family: var(--mono); font-size: 10.5px; }
+  .reg-row .bytes { color: #dbeafe; font-family: var(--mono); font-size: 10.5px; overflow-wrap: anywhere; }
+  .reg-row .note { grid-column: 2; color: var(--dim); font-size: 9.5px; }
+  .reg-empty { color: var(--dim); font-size: 10.5px; padding: 8px 0; }
+
+  .hw-daemon { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(190px, 0.65fr); gap: 12px; }
+  .daemon-card { min-width: 0; }
+  #daemon-chart { display: block; width: 100%; height: 150px; border-radius: 8px; background: #050a13; border: 1px solid rgba(148, 163, 184, 0.12); }
+  .daemon-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 9px; }
+  .daemon-stats div { border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; background: rgba(2, 6, 23, 0.35); }
+  .daemon-stats span { display: block; color: var(--dim); font-size: 9.5px; }
+  .daemon-stats strong { display: block; color: #cffafe; font-family: var(--mono); font-size: 12.5px; font-weight: 500; margin-top: 2px; }
+  .slot-grid { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-family: var(--mono); font-size: 10px; color: var(--dim); }
+  .slot-grid span:nth-child(even) { color: #cbd5e1; text-align: right; }
+
+  .hw-error { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(220px, 0.9fr); gap: 12px; }
+  .error-banner { display: flex; gap: 12px; align-items: flex-start; border-color: rgba(248, 113, 113, 0.45); background: rgba(127, 29, 29, 0.16); }
+  .error-icon { flex: 0 0 34px; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: rgba(248, 113, 113, 0.14); border: 1px solid rgba(248, 113, 113, 0.5); color: var(--red); font-weight: 800; }
+  .error-banner strong { display: block; color: #fecaca; font-size: 13px; }
+  .error-banner p { margin: 4px 0 0; color: #fca5a5; font-family: var(--mono); font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
+
+  .hw-output { margin-top: 11px; border: 1px solid var(--line); border-radius: 10px; background: #050a12; padding: 9px 11px; }
+  .output-label { display: block; color: var(--dim); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 5px; }
+  #hw-output { color: #a7f3d0; font-size: 10.5px; line-height: 1.55; max-height: 96px; }
+
+  .log-panel { margin-top: 14px; border: 1px solid var(--line); border-radius: 15px; background: rgba(2, 6, 23, 0.45); padding: 12px; }
+  .log-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .log-head h2 { margin: 0; }
+  .log { max-height: 260px; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 3px; }
+  .log-empty, .log-done { color: var(--dim); font-size: 11.5px; padding: 12px 4px; }
+  .log-done { color: #a7f3d0; }
+  .log-item { border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 8px; background: rgba(15, 23, 42, 0.55); padding: 7px 9px; }
+  .log-item.build { border-left-color: var(--green); } .log-item.down { border-left-color: var(--cyan); }
+  .log-item.up { border-left-color: var(--amber); } .log-item.async { border-left-color: var(--violet); }
+  .log-item.error { border-left-color: var(--red); background: rgba(127, 29, 29, 0.12); }
+  .log-top { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; color: #dbeafe; font-size: 11px; }
+  .log-num { font-family: var(--mono); color: var(--dim); font-size: 10px; }
+  .log-detail { color: var(--muted); font-size: 10.5px; margin-top: 3px; }
+  .log-item pre { margin-top: 5px; padding: 6px 7px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.12); background: #050810; color: #bae6fd; font-size: 10px; max-height: 120px; }
+
+  .footer-note { margin-top: 14px; color: var(--dim); font-size: 10.5px; text-align: center; }
+  .footer-note code { color: #94a3b8; }
+
+  @media (max-width: 1120px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { position: static; }
+    .tabs { grid-template-columns: repeat(4, 1fr); }
+  }
+  @media (max-width: 760px) {
+    .app { padding: 16px 12px 26px; }
+    .tabs { grid-template-columns: 1fr 1fr; }
+    .hw-grid, .hw-relay, .hw-servo, .hw-daemon, .hw-error { grid-template-columns: 1fr; }
+    .lane { gap: 5px; }
+    .node { flex-basis: 104px; min-width: 104px; }
+    .arrow { flex-basis: 9px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="header-row">
+      <div>
+        <div class="eyebrow">mybot-cpp · controller-only</div>
+        <h1>指令执行与响应仿真</h1>
+        <p class="lede">
+          从结构 SQL、动作脚本，到 Lua/C++ 驱动、HAL、内核或 virtbus，再沿调用栈返回。
+          选择一条链路，点击“运行”逐步查看。页面是离线单文件，不连接任何设备。
+        </p>
+      </div>
+      <div class="status-chip"><span class="pulse"></span>离线演示 · 无硬件</div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="panel sidebar">
+      <h2>1. 选择链路</h2>
+      <div class="tabs" id="tabs"></div>
+      <p class="scenario-desc" id="scenario-desc"></p>
+
+      <div class="controls">
+        <button class="btn primary" id="btn-play" type="button">▶ 运行</button>
+        <button class="btn" id="btn-pause" type="button" disabled>⏸ 暂停</button>
+        <button class="btn" id="btn-step" type="button">⏭ 单步</button>
+        <button class="btn" id="btn-reset" type="button">↺ 重置</button>
+      </div>
+      <div class="speed-row">
+        <span>速度</span>
+        <input id="speed" type="range" min="0.5" max="3" step="0.5" value="1">
+        <span id="speed-val">1.0×</span>
+      </div>
+
+      <h2>2. 当前脚本</h2>
+      <div class="code-wrap"><pre class="code" id="code"></pre></div>
+
+      <h2>3. 当前报文</h2>
+      <div class="packet-box" id="packet">等待运行…</div>
+
+      <h2>4. 真实运行</h2>
+      <pre class="cmd" id="cmd"></pre>
+    </aside>
+
+    <main class="panel stage">
+      <div class="stage-head">
+        <div>
+          <h2>指令流</h2>
+          <p>蓝色＝装配，青色＝下行，琥珀＝上行，紫色＝异步，红色＝错误。</p>
+        </div>
+        <div class="progress" id="progress">0 / 0</div>
+      </div>
+
+      <div class="board-wrap" id="board-wrap">
+        <div class="packet-dot" id="packet-dot"></div>
+
+        <div class="lane-group">
+          <div class="lane-label"><span class="badge">装配期</span> 结构脚本 → 变量对象</div>
+          <div class="lane" id="lane-build">
+            <div class="node" data-node="sql"><span class="kicker">.sql</span><strong>结构脚本</strong><small>表 = 零件类型</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="sqle"><span class="kicker">C++</span><strong>SqlEngine</strong><small>SQLite3 + 归一化</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="store"><span class="kicker">C++</span><strong>StructureStore</strong><small>MatrixObject 表</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="factory"><span class="kicker">C++</span><strong>HwFactory</strong><small>装配 / 引用校验</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="registry"><span class="kicker">C++</span><strong>HwRegistry</strong><small>变量 / 会话覆盖</small></div>
+          </div>
+        </div>
+
+        <div class="lane-group">
+          <div class="lane-label"><span class="badge">动作期</span> .mt → 驱动 → 物理边界</div>
+          <div class="lane" id="lane-exec">
+            <div class="node" data-node="mt"><span class="kicker">.mt</span><strong>动作脚本</strong><small>一行 = 一帧</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="parse"><span class="kicker">C++</span><strong>MatrixParser</strong><small>块 / 矩阵 / 继承</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="runner"><span class="kicker">C++</span><strong>ActionRunner</strong><small>ActionPlan 逐行派发</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="driver"><span class="kicker">Lua / C++</span><strong>驱动</strong><small>build / call / destroy</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="hal"><span class="kicker">C++</span><strong>HALManager</strong><small>__hal_call 物理入口</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="device"><span class="kicker">Linux / virtbus</span><strong>内核 / 设备</strong><small>ioctl / sysfs / 模型</small></div>
+          </div>
+        </div>
+
+        <div class="lane-group">
+          <div class="lane-label"><span class="badge">响应</span> 返回值 → 合并 / 捕获 / 输出</div>
+          <div class="lane" id="lane-resp">
+            <div class="node" data-node="dev-up"><span class="kicker">设备</span><strong>读 / 写结果</strong><small>errno / 数据</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="hal-up"><span class="kicker">HAL</span><strong>Json 结果</strong><small>数组 / 对象 / null</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="drv-up"><span class="kicker">驱动</span><strong>返回表</strong><small>result / message / 字段</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="merge"><span class="kicker">框架</span><strong>ensureOk + 合并</strong><small>controller / 捕获</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="out"><span class="kicker">输出</span><strong>stdout / 下一帧</strong><small>JSON / 变量</small></div>
+          </div>
+        </div>
+
+        <div class="lane-group">
+          <div class="lane-label"><span class="badge">异步</span> 守护线程 → 共享槽 → 消费</div>
+          <div class="lane" id="lane-async">
+            <div class="node" data-node="daemon"><span class="kicker">std::thread</span><strong>@Daemon</strong><small>独立 lua_State + tick</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="slot"><span class="kicker">共享内存</span><strong>DaemonSlot</strong><small>mutex / count / values</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="filter"><span class="kicker">Lua</span><strong>Ema / Kalman</strong><small>引用快照滤波</small></div>
+            <div class="arrow">→</div>
+            <div class="node" data-node="consume"><span class="kicker">Lua</span><strong>Monitor / 动作</strong><small>$ad0 → 决策</small></div>
+          </div>
+        </div>
+      </div>
+
+      <section class="hardware-panel">
+        <div class="hw-title">
+          <h2>硬件 / 模型视图</h2>
+          <span class="hint">这是页面模拟，不代表真实设备</span>
+        </div>
+        <div id="hardware"></div>
+        <div class="hw-output">
+          <span class="output-label">stdout / stderr</span>
+          <pre id="hw-output">—</pre>
+        </div>
+      </section>
+
+      <section class="log-panel">
+        <div class="log-head">
+          <h2>执行时间线</h2>
+          <button class="btn" id="btn-clear" type="button">清空</button>
+        </div>
+        <div class="log" id="log"><div class="log-empty">点击“运行”开始；也可以“单步”逐条查看。</div></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="footer-note">
+    这是 <code>docs/architecture.md</code> 的可交互配套页；真实链路参数以仓库代码与
+    <code>bash test/run_all.sh</code> 结果为准。
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const DIR_COLOR = { build: '#34d399', down: '#22d3ee', up: '#fbbf24', async: '#a78bfa', error: '#f87171' };
+  const DIR_LABEL = { build: '装配', down: '下行', up: '上行', async: '异步', error: '错误' };
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function escapeHtml(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function nodeEl(key) { return $('[data-node="' + key + '"]'); }
+
+  let hw = null;
+  let state = {
+    key: 'relay',
+    steps: [],
+    stepIndex: -1,
+    playing: false,
+    timer: null,
+    speed: 1,
+    visited: new Set()
+  };
+
+  /* ---------------- 代码与命令行 ---------------- */
+
+  const CODE = {
+    relay: [
+      '-- robots/relay-test.sql',
+      'CREATE TABLE Timer (name String);',
+      "INSERT INTO Timer (name) VALUES ('timer-0');",
+      '',
+      'CREATE TABLE Relay (',
+      '    name       String,',
+      '    controller String,',
+      '    note       String',
+      ');',
+      'INSERT INTO Relay (name, controller, note)',
+      "  VALUES ('relay0', 'timer-0', 'hello-relay');",
+      '',
+      '# scripts/relay-test.mt',
+      '@Action',
+      'relay0.test;',
+      '      200;',
+      '@'
+    ],
+    servo: [
+      '-- robots/test/pca9685_virt.sql',
+      'CREATE TABLE I2C (name String, path String, proto String);',
+      'INSERT INTO I2C (name, path, proto)',
+      "  VALUES ('i2c-v', '/dev/i2c-99', 'virt');",
+      '',
+      'CREATE TABLE PCA9685 (',
+      '    name String, I2C String, address String,',
+      '    channel String, proto String',
+      ');',
+      'INSERT INTO PCA9685 (name, I2C, address, channel, proto)',
+      "  VALUES ('pca-0', '$i2c-v', '0x40', '0', 'virt');",
+      '',
+      'CREATE TABLE Timer (name String);',
+      "INSERT INTO Timer (name) VALUES ('t0');",
+      '',
+      '# scripts/test/pca9685_virt.mt',
+      '@Action',
+      'pca-0.angle  t0.delay;',
+      '        90        50;',
+      '        45        50;',
+      '       135        50;',
+      '        90        50;',
+      '@'
+    ],
+    daemon: [
+      '-- robots/test/ads1015_virt.sql（节选）',
+      'CREATE TABLE Daemon (',
+      '    name String, chunk String, driver String, proto String,',
+      '    path String, addr String, interval String, fields String, sign String',
+      ');',
+      'INSERT INTO Daemon (name, chunk, driver, proto, path, addr, interval, fields, sign)',
+      "  VALUES ('ad0', 'lib/sensor_daemon.lua', 'ADS1015', 'virt',",
+      "          '/dev/i2c-1', '0x48', '20', 'voltage:f', '16');",
+      '',
+      'CREATE TABLE Ema (name String, alpha String, src String, field String);',
+      "INSERT INTO Ema (name, alpha, src, field) VALUES ('ev', '0.2', '$ad0', 'v0');",
+      '',
+      'CREATE TABLE Monitor (name String, src String);',
+      "INSERT INTO Monitor (name, src) VALUES ('mon0', '$ad0');",
+      "INSERT INTO Monitor (name, src) VALUES ('monf', '$ev');",
+      '',
+      '# scripts/test/ads1015_virt.mt（节选）',
+      '@Action',
+      't0.delay  ev.out  mon0.go  monf.go;',
+      '   2000       -        -         -   ;',
+      '     50       -        -         -   ;'
+    ],
+    error: [
+      '-- robots/test/pca9685_badchan.sql',
+      "CREATE TABLE I2C (name String, path String, proto String);",
+      "INSERT INTO I2C (name, path, proto) VALUES ('i2c-v', '/dev/i2c-99', 'virt');",
+      '',
+      'CREATE TABLE PCA9685 (',
+      '    name String, I2C String, address String,',
+      '    channel String, proto String',
+      ');',
+      'INSERT INTO PCA9685 (name, I2C, address, channel, proto)',
+      "  VALUES ('pca-0', '$i2c-v', '0x40', '17', 'virt');",
+      '',
+      '# scripts/test/pca9685_badchan.mt',
+      '@Action',
+      'pca-0.angle;',
+      '        90;',
+      '@'
+    ]
+  };
+
+  const CMD = {
+    relay: './build/mybot --robot=robots/relay-test.sql \\\n  --input=scripts/relay-test.mt',
+    servo: './build/mybot --robot=robots/test/pca9685_virt.sql \\\n  --input=scripts/test/pca9685_virt.mt',
+    daemon: './build/mybot --robot=robots/test/ads1015_virt.sql \\\n  --input=scripts/test/ads1015_virt.mt',
+    error: './build/mybot --robot=robots/test/pca9685_badchan.sql \\\n  --input=scripts/test/pca9685_badchan.mt\n# 预期 rc=1，且没有任何 PWM 寄存器写入'
+  };
+
+  /* ---------------- 场景定义 ---------------- */
+
+  const SCENARIOS = {
+    relay: {
+      label: 'Relay 转发',
+      sub: '纯软件链路',
+      hw: 'relay',
+      desc: '没有真实硬件：Relay 把 test 转成 delay，controller 列把「元数据 ∪ 返回值」转发给 Timer。适合先看清框架的装配、派发、转发和返回。',
+      code: CODE.relay,
+      cmd: CMD.relay,
+      steps: [
+        {
+          phase: '装配', title: '读取结构脚本', dir: 'build', route: ['sql', 'sqle'], codeLine: 2, duration: 950,
+          detail: 'LimitedReader 先挡住 >8 MiB；SqlEngine 做词法与表名安全校验，再把 CREATE/INSERT 交给 SQLite3。',
+          payload: '--robot=robots/relay-test.sql\n结构脚本 489 B / 动作脚本 293 B < 8 MiB\n表名 Timer / Relay → isSafeModuleName OK',
+          apply: () => hw.output('读取结构脚本：OK')
+        },
+        {
+          phase: '装配', title: '读回 MatrixObject', dir: 'build', route: ['sqle', 'store'], codeLine: 10, duration: 950,
+          detail: 'SQLite3 执行归一化后的语句；按 CREATE 声明序读回每张表。行 0 是列头，行 1..N 是实例。',
+          payload: '2 张表 / 2 行实例\nTimer: name\nRelay: name, controller, note\n$ / $(...) / - 仍为文本',
+          apply: () => hw.output('StructureStore: Timer(1) + Relay(1)')
+        },
+        {
+          phase: '装配', title: '解析引用列', dir: 'build', route: ['store', 'factory'], codeLine: 10, duration: 950,
+          detail: 'controller 列不是普通数据：HwFactory 把它登记成流引用，并校验目标 timer-0 已声明。note 保持普通元数据。',
+          payload: 'flow refs: relay0 → timer-0\nmetadata relay0: { note: "hello-relay" }',
+          apply: () => hw.output('引用校验：relay0 → timer-0')
+        },
+        {
+          phase: '装配', title: '装配并 build', dir: 'build', route: ['factory', 'registry'], codeLine: 2, duration: 1000,
+          detail: 'timer-0 / relay0 各建一个独立 lua_State；active() 按声明序 build。Timer 与 Relay 都是纯软件模块，build 无副作用。',
+          payload: 'timer-0 (Lua Timer) build → {result:"OK"}\nrelay0 (Lua Relay) build → {result:"OK"}',
+          apply: () => { hw.output('build 顺序：timer-0 → relay0\n{"result":"OK"}'); hw.idle(); }
+        },
+        {
+          phase: '动作', title: '解析动作脚本', dir: 'down', route: ['mt', 'parse'], codeLine: 14, duration: 850,
+          detail: 'MatrixParser 把 .mt 解析成块/表格；本脚本只有一个 @Action 块、1 行数据、1 列。',
+          payload: 'blocks: [Action]\ncolumns: relay0.test\nrows: 1',
+          apply: () => hw.output('MatrixParser: Action 1×1')
+        },
+        {
+          phase: '动作', title: '生成 ActionPlan', dir: 'down', route: ['parse', 'runner'], codeLine: 15, duration: 850,
+          detail: '列头 relay0.test 切成设备 relay0、参数 test；检查同一 (设备,参数) 没有重复列。',
+          payload: 'devices: [relay0]\nparams: [test]\nduplicate (device,param): none',
+          apply: () => hw.output('ActionPlan: relay0.test')
+        },
+        {
+          phase: '动作', title: '派发第 1 帧', dir: 'down', route: ['runner', 'driver'], codeLine: 16, duration: 900,
+          detail: 'ActionRunner 按设备首次出现顺序派发：play("relay0", {test: 200})。',
+          payload: 'row 1 / 1\nplay(relay0, {"test":200})',
+          apply: () => { hw.output('dispatch row 1 → relay0.test=200'); hw.command(); }
+        },
+        {
+          phase: '驱动', title: 'Relay.call()', dir: 'down', route: ['driver'], codeLine: 16, duration: 900,
+          detail: '元数据 note 与动作参数 test 合并后进入 Lua。Relay 走 finite_of，把 test 转成 delay 返回。',
+          payload: 'call({ note:"hello-relay", test:200, mode:"call" })\nfinite_of(200) → 200\nreturn { delay:200 }',
+          apply: () => hw.output('Relay: test=200 note=hello-relay -> delay=200\n{"delay":200}')
+        },
+        {
+          phase: '转发', title: 'controller 转发', dir: 'down', route: ['driver', 'registry'], codeLine: 10, duration: 950,
+          detail: 'payload = 原始 metadata ∪ 本驱动返回表（不是动作参数对象）。按 controller 列声明序扇出到 timer-0。',
+          payload: 'payload = {"note":"hello-relay","delay":200}\ntimer-0.play(payload)',
+          apply: () => hw.output('forward → timer-0: {"note":"hello-relay","delay":200}')
+        },
+        {
+          phase: '驱动', title: 'Timer.call()', dir: 'down', route: ['registry', 'driver'], codeLine: 2, duration: 850,
+          detail: 'Timer 从 payload 取 delay=200，校验有限、非负、未超 usleep 上限，然后走 HAL 的 sleep_ms。',
+          payload: 'delay = 200 → ms = 200\nmilli_sleep(200)',
+          apply: () => { hw.output('Timer: delay=200 → sleep_ms(200)'); hw.busy(200); }
+        },
+        {
+          phase: 'HAL', title: '进入 HAL', dir: 'down', route: ['driver', 'hal'], codeLine: 2, duration: 850,
+          detail: 'milli_sleep 是 HAL 的阻塞入口之一；C++ HAL 会按 --timeout 的剩余预算截断。',
+          payload: 'HALManager::call("sleep_ms", [200])\nbudget remaining = 180000 ms',
+          apply: () => hw.output('HAL sleep_ms(200)')
+        },
+        {
+          phase: '物理', title: '内核阻塞', dir: 'down', route: ['hal', 'device'], codeLine: 2, duration: 950,
+          detail: '没有真实设备，但 HAL 仍然走真实的 nanosleep 路径；这一步耗时 200ms。',
+          payload: 'nanosleep(200ms)\n→ 200ms elapsed',
+          apply: () => hw.busy(200)
+        },
+        {
+          phase: '响应', title: '返回 HAL', dir: 'up', route: ['dev-up', 'hal-up'], codeLine: 2, duration: 750,
+          detail: 'sleep_ms 返回 null（JsonNull）；HAL 不产生业务数据。',
+          payload: 'null',
+          apply: () => hw.output('HAL → Timer: null')
+        },
+        {
+          phase: '响应', title: 'Timer 返回', dir: 'up', route: ['hal-up', 'drv-up'], codeLine: 2, duration: 800,
+          detail: 'Timer.call 返回带 slept 的成功表；结果沿 Lua C API 回到 MtVars_Lua。',
+          payload: '{"slept":200,"result":"OK"}',
+          apply: () => { hw.done(); hw.output('{"slept":200,"result":"OK"}'); }
+        },
+        {
+          phase: '响应', title: '契约检查 + 合并', dir: 'up', route: ['drv-up', 'merge'], codeLine: 16, duration: 800,
+          detail: 'ensureOk 检查 result=OK。relay0 有 controller，所以 callImpl 返回 controller 的最后结果。',
+          payload: 'ensureOk: OK\nreturn controller result',
+          apply: () => hw.output('ensureOk OK → 本帧完成')
+        },
+        {
+          phase: '收尾', title: 'stdout + 清理', dir: 'up', route: ['merge', 'out'], codeLine: 17, duration: 1000,
+          detail: '动作结束；析构/deactivate 逆序 destroy 两个变量，HAL closeAll。没有硬件被真正驱动。',
+          payload: 'stdout: {"slept":200,"result":"OK"}\ndeactivate: relay0.destroy → timer-0.destroy → closeAll',
+          apply: () => hw.output('{"slept":200,"result":"OK"}\n[deactivate] destroy 逆序 → closeAll')
+        }
+      ]
+    },
+
+    servo: {
+      label: 'PCA9685 舵机',
+      sub: '虚拟 I2C 写路径',
+      hw: 'servo',
+      desc: '跑真实 PCA9685.lua，只把 I2C 换成 virtbus 内存模型。观察角度如何变成 12 位 PWM 计数、再变成 4 字节寄存器写入。',
+      code: CODE.servo,
+      cmd: CMD.servo,
+      steps: [
+        {
+          phase: '装配', title: '读取结构脚本', dir: 'build', route: ['sql', 'sqle'], codeLine: 2, duration: 900,
+          detail: 'I2C 总线行声明 proto=virt；PCA9685 行用 $i2c-v 引用总线。表名安全校验通过。',
+          payload: 'I2C: i2c-v (/dev/i2c-99, virt)\nPCA9685: pca-0 @0x40, channel=0\nTimer: t0',
+          apply: () => hw.output('结构装载：I2C + PCA9685 + Timer')
+        },
+        {
+          phase: '装配', title: '装配引用', dir: 'build', route: ['sqle', 'store'], codeLine: 10, duration: 850,
+          detail: 'MatrixObject 保留 $i2c-v 文本；装配期解析引用，把总线变量的 fd 传给器件变量。',
+          payload: 'PCA9685.I2C = "$i2c-v" → I2C(i2c-v)\nproto=virt → virt_prepare 前置',
+          apply: () => hw.output('引用：pca-0 → i2c-v')
+        },
+        {
+          phase: '装配', title: '虚拟总线注入', dir: 'build', route: ['store', 'factory'], codeLine: 3, duration: 950,
+          detail: 'drv_common / require_driver 在碰总线前调用 virt_prepare：加载 lib/virtbus.lua，挂载 PCA9685_VIRT。',
+          payload: 'VIRTUAL HARDWARE -- NO REAL DEVICE\nbus: virt\nmodel: PCA9685 @0x40',
+          apply: () => hw.output(' [drv_common] VIRTUAL HARDWARE -- NO REAL DEVICE (bus)\n [drv_common] VIRTUAL HARDWARE -- NO REAL DEVICE (PCA9685 @0x40)')
+        },
+        {
+          phase: '装配', title: 'PCA9685.build()', dir: 'build', route: ['factory', 'registry'], codeLine: 6, duration: 1050,
+          detail: '真实驱动初始化：RESTART、等 5ms、SLEEP、写 PRESCALE=121（50Hz）、AI|RESTART、再等 5ms。',
+          payload: '0x00 ← 0x80  MODE1 RESTART\n0x00 ← 0x10  MODE1 SLEEP\n0xFE ← 0x79  PRESCALE 121\n0x00 ← 0xA0  AI|RESTART',
+          apply: () => {
+            hw.resetRegs();
+            hw.addReg('0x00', '0x80', 'MODE1 RESTART');
+            hw.addReg('0x00', '0x10', 'MODE1 SLEEP');
+            hw.addReg('0xFE', '0x79', 'PRESCALE = 121 (50 Hz)');
+            hw.addReg('0x00', '0xA0', 'MODE1 AI|RESTART');
+            hw.output('PCA9685 build → {"result":"OK"}');
+          }
+        },
+        {
+          phase: '动作', title: '解析动作列', dir: 'down', route: ['mt', 'parse'], codeLine: 18, duration: 850,
+          detail: '两列：pca-0.angle 与 t0.delay；四行数据。设备首次出现序为 pca-0 → t0。',
+          payload: 'columns: pca-0.angle, t0.delay\nrows: 4\ndevices order: [pca-0, t0]',
+          apply: () => hw.output('ActionPlan: pca-0.angle + t0.delay')
+        },
+        {
+          phase: '动作', title: '第 1 帧：派发', dir: 'down', route: ['runner', 'driver'], codeLine: 19, duration: 900,
+          detail: 'play(pca-0, {angle: 90})。channel 来自结构元数据（0），action 只传角度。',
+          payload: 'row 1 / 4\nplay(pca-0, {"angle":90})',
+          apply: () => hw.output('dispatch pca-0.angle=90')
+        },
+        {
+          phase: '驱动', title: '角度 → PWM 计数', dir: 'down', route: ['driver'], codeLine: 19, duration: 950,
+          detail: 'width = 0.5 + 2.0 × 90/180 = 1.5ms；offval = floor(1.5 × 4096 / 20) = 307 = 0x0133。',
+          payload: 'angle=90 → width=1.5 ms\noffval=307 (0x0133)\noff_lo=0x33, off_hi=0x01',
+          apply: () => { hw.setAngle(90); hw.addReg('0x06', '00 00 33 01', 'ch0 angle=90 → off=307'); hw.output('PCA9685 call → {"result":"OK"}'); }
+        },
+        {
+          phase: 'HAL', title: 'I2C_RDWR 写事务', dir: 'down', route: ['driver', 'hal', 'device'], codeLine: 6, duration: 1050,
+          detail: 'HAL 组装单次 I2C_RDWR 事务（寄存器指针 0x06 + 4 字节数据）；virtbus 模型逐事务校验。',
+          payload: 'i2c_write_multi(fd, 0x06, 0x00, 0x00, 0x33, 0x01)\n→ HALManager::call("i2c_transfer", ...)\n→ PCA9685_VIRT',
+          apply: () => hw.output('I2C write: reg 0x06 ← 00 00 33 01\nvirtbus: ACK')
+        },
+        {
+          phase: '响应', title: '返回并计时', dir: 'up', route: ['drv-up', 'merge', 'out'], codeLine: 19, duration: 900,
+          detail: 'PCA9685 返回 {result:"OK"}；下一列 t0.delay=50 让本帧再睡 50ms。',
+          payload: '{"result":"OK"}\n{"slept":50,"result":"OK"}',
+          apply: () => hw.output('{"result":"OK"}\n{"slept":50,"result":"OK"}')
+        },
+        {
+          phase: '动作', title: '后续 3 帧', dir: 'down', route: ['runner', 'driver'], codeLine: 20, duration: 1350,
+          detail: '45° → 204 (0xCC)、135° → 409 (0x199)、90° → 307；每帧之间 Timer 睡 50ms。',
+          payload: '45°  → 00 00 CC 00\n135° → 00 00 99 01\n90°  → 00 00 33 01',
+          apply: () => {
+            hw.setAngle(45); hw.addReg('0x06', '00 00 CC 00', 'ch0 angle=45 → off=204');
+            setTimeout(() => { hw.setAngle(135); hw.addReg('0x06', '00 00 99 01', 'ch0 angle=135 → off=409'); }, 420);
+            setTimeout(() => { hw.setAngle(90); hw.addReg('0x06', '00 00 33 01', 'ch0 angle=90 → off=307'); }, 840);
+            hw.output('45° → 00 00 CC 00\n135° → 00 00 99 01\n90° → 00 00 33 01');
+          }
+        },
+        {
+          phase: '收尾', title: 'destroy + close', dir: 'up', route: ['merge', 'out'], codeLine: 6, duration: 950,
+          detail: 'deactivate 逆序 destroy：PCA9685 尽力写 MODE1 RESTART，然后 HAL 关闭 I2C 句柄。',
+          payload: '0x00 ← 0x80  destroy: MODE1 RESTART\ni2c_close(fd)\ncloseAll()',
+          apply: () => { hw.addReg('0x00', '0x80', 'destroy: MODE1 RESTART'); hw.output('destroy: MODE1=0x80\ni2c close → closeAll'); }
+        }
+      ]
+    },
+
+    daemon: {
+      label: '守护采样',
+      sub: '异步共享槽',
+      hw: 'daemon',
+      desc: 'ADS1015 走虚拟总线持续采样，守护线程写入共享槽；主线程动作通过 $ad0 引用读快照，再经 Ema/Monitor 消费。注意两条时间线。',
+      code: CODE.daemon,
+      cmd: CMD.daemon,
+      steps: [
+        {
+          phase: '装配', title: '解析守护配置', dir: 'build', route: ['sql', 'sqle'], codeLine: 2, duration: 900,
+          detail: 'Daemon 行声明 chunk、driver、proto、interval、fields；加载期校验 proto=virt、fields=voltage:f、sign=16。',
+          payload: 'daemon ad0: interval=20ms\nchunk=lib/sensor_daemon.lua\ndriver=ADS1015, proto=virt',
+          apply: () => hw.output('解析 Daemon：ad0 / ADS1015 / virt / 20ms')
+        },
+        {
+          phase: '装配', title: '登记消费者', dir: 'build', route: ['sqle', 'store'], codeLine: 11, duration: 850,
+          detail: 'Ema 的 src="$ad0"、Monitor 的 src="$ad0"/"$ev" 都是引用；装配期登记，不复制数据。',
+          payload: 'ev.src = $ad0 (v0)\nmon0.src = $ad0\nmonf.src = $ev',
+          apply: () => hw.output('引用：ev → $ad0, mon0 → $ad0, monf → $ev')
+        },
+        {
+          phase: '装配', title: '启动守护线程', dir: 'build', route: ['factory', 'registry'], codeLine: 7, duration: 1000,
+          detail: 'DaemonRunner 创建共享槽（capacity=64）和独立 lua_State；setup 一次，之后逐拍 daemon_tick。',
+          payload: 'DaemonSlot: mutex / count=0 / nvals=0 / values* / capacity=64 / stop=0 / status=0\npthread_create(daemon_body)',
+          apply: () => { hw.reset(); hw.output('Daemon ad0 spawned, config: interval=20;'); }
+        },
+        {
+          phase: '异步', title: '第一拍采样', dir: 'async', route: ['daemon', 'slot'], codeLine: 7, duration: 950,
+          detail: 'sensor_daemon setup 加载 ADS1015 与 virt 模型；build 写 CONFIG。第一拍读 AIN0，publish 到共享槽。',
+          payload: 'ADS1015.build → CONFIG=0x4583\ncall → voltage=1.650 V\npublish({v0=1.650}) → count=1',
+          apply: () => { hw.pushSample(1.650, 1, 1.650, 'HIGH'); hw.output('Daemon publishes=1\nv0=1.650 V'); }
+        },
+        {
+          phase: '主线程', title: '预热等待', dir: 'down', route: ['runner', 'driver'], codeLine: 22, duration: 1100,
+          detail: '主线程 t0.delay=2000 给守护留出采样窗口；守护每 20ms 一拍，期间 count 持续增长。',
+          payload: 'Timer.sleep(2000)\ndaemon tick × ~132\ncount → 133',
+          apply: () => {
+            let c = hw.count();
+            for (let i = 0; i < 132; i++) {
+              c += 1;
+              const v = 1.65 + 0.25 * Math.sin(c / 5.1);
+              hw.pushSample(v, c, c === 1 ? v : hw.ema() * 0.8 + v * 0.2, v > 1.72 ? 'HIGH' : 'LOW');
+            }
+            hw.output('Timer slept 2000ms；守护 count≈133');
+          }
+        },
+        {
+          phase: '主线程', title: 'Ema 消费快照', dir: 'up', route: ['slot', 'filter'], codeLine: 12, duration: 950,
+          detail: 'ev.out 播放 Ema：先通过 $ad0 引用读一次守护快照（持槽锁），再按 alpha=0.2 做一阶低通。',
+          payload: 'read($ad0) → v0=1.858, count=134\nout = 0.8*prev + 0.2*v0 = 1.659',
+          apply: () => { hw.pushSample(1.858, hw.count() + 1, 1.659, 'HIGH'); hw.output('ev.out → out=1.659, v0=1.858'); }
+        },
+        {
+          phase: '主线程', title: 'Monitor 原始值', dir: 'up', route: ['filter', 'consume'], codeLine: 16, duration: 900,
+          detail: 'mon0.go 读取 $ad0 的原始快照，count 一起返回；Monitor 按阈值给出 level。',
+          payload: 'mon0.go → {v0:1.895, count:136, level:"HIGH"}',
+          apply: () => { hw.pushSample(1.895, hw.count() + 2, 1.706, 'HIGH'); hw.output('mon0 → {"v0":1.895,"count":136,"level":"HIGH"}'); }
+        },
+        {
+          phase: '主线程', title: 'Monitor 滤波值', dir: 'up', route: ['filter', 'consume'], codeLine: 17, duration: 900,
+          detail: 'monf.go 读取 $ev，拿到滤波后的 out 与 level；一条动作里可以同时消费 raw 与 filtered。',
+          payload: 'monf.go → {v0:1.706, out:1.706, level:"HIGH"}',
+          apply: () => { hw.pushSample(1.881, hw.count() + 3, 1.741, 'HIGH'); hw.output('monf → {"out":1.706,"v0":1.706,"level":"HIGH"}'); }
+        },
+        {
+          phase: '响应', title: 'stdout 结果', dir: 'up', route: ['merge', 'out'], codeLine: 22, duration: 900,
+          detail: '每个动作帧按设备首次出现顺序输出；守护的 count 与主线程拍点无关，所以两次读数之间可能差很多。',
+          payload: '{"result":"OK","level":"HIGH","out":1.858,"v0":1.858,"count":134}\n{"out":1.659,"result":"OK",...}',
+          apply: () => hw.output('{"result":"OK","level":"HIGH","out":1.858,"v0":1.858,"count":134}\n{"out":1.659,"result":"OK","level":"HIGH"}')
+        },
+        {
+          phase: '收尾', title: '停机屏障', dir: 'async', route: ['daemon', 'slot'], codeLine: 7, duration: 1050,
+          detail: 'deactivate 先置 stop，统一等待退场，再逆序 destroy；宽限内退出的守护不置 quiesce，cleanup 还能正常关总线。',
+          payload: 'stop=1 → daemon_cleanup → join count=139\nquiesce=0\ndestroy ADS1015 → i2c close',
+          apply: () => { hw.setSlot({ count: hw.count(), stop: 1, quiesce: 0 }); hw.output('Daemon ad0 joined, total publishes=139\n[deactivate] destroy → closeAll'); }
+        }
+      ]
+    },
+
+    error: {
+      label: '错误契约',
+      sub: 'ERR → rc=1',
+      hw: 'error',
+      desc: '结构脚本把 channel 写成 17。驱动必须在写总线之前守卫住；ERR 表沿调用栈变成异常，动作中止，但 deactivate 仍然执行。',
+      code: CODE.error,
+      cmd: CMD.error,
+      steps: [
+        {
+          phase: '装配', title: '结构装载', dir: 'build', route: ['sql', 'sqle'], codeLine: 3, duration: 900,
+          detail: 'channel 是结构元数据，加载期只校验它是文本；17 不在这一层被拒绝，因为通道范围属于驱动器件的知识。',
+          payload: 'PCA9685: pca-0\nchannel = "17"\nproto = virt',
+          apply: () => hw.output('结构装载：channel=17（尚未校验范围）')
+        },
+        {
+          phase: '装配', title: 'build 成功', dir: 'build', route: ['factory', 'registry'], codeLine: 6, duration: 950,
+          detail: 'build 只用 fd/address 初始化芯片，不碰 channel；所以上电成功，问题留到 call 才暴露。',
+          payload: '0x00 ← 0x80 RESTART\n0xFE ← 0x79 PRESCALE\n0x00 ← 0xA0 AI|RESTART',
+          apply: () => {
+            hw.resetRegs();
+            hw.addReg('0x00', '0x80', 'MODE1 RESTART');
+            hw.addReg('0xFE', '0x79', 'PRESCALE = 121');
+            hw.addReg('0x00', '0xA0', 'MODE1 AI|RESTART');
+            hw.output('PCA9685 build → {"result":"OK"}');
+          }
+        },
+        {
+          phase: '动作', title: '派发 angle=90', dir: 'down', route: ['runner', 'driver'], codeLine: 15, duration: 900,
+          detail: 'ActionPlan 正常建立：设备 pca-0、参数 angle；动作层不知道 channel 非法。',
+          payload: 'play(pca-0, {"angle":90})',
+          apply: () => hw.output('dispatch pca-0.angle=90')
+        },
+        {
+          phase: '错误', title: '驱动守卫', dir: 'error', route: ['driver'], codeLine: 9, duration: 1050,
+          detail: 'PCA9685.call 先 finite_of(channel)，再 floor，然后检查 0..15。17 越界，在 i2c_write_multi 之前返回 ERR。',
+          payload: 'channel=17 → floor=17\n17 > 15 → return err("Invalid Argument: channel (out of range 0-15)")\n没有 PWM 寄存器写入',
+          apply: () => { hw.setError('Invalid Argument: channel (out of range 0-15)'); hw.output('return {result:"ERR", message:"Invalid Argument: channel (out of range 0-15)"}\nI2C writes: none'); }
+        },
+        {
+          phase: '错误', title: 'ensureOk 抛异常', dir: 'error', route: ['drv-up', 'merge'], codeLine: 15, duration: 900,
+          detail: '返回值是表但 result=ERR，ensureOk 抛异常；dispatchMatrix 停止后续单元格/行，不再派发。',
+          payload: 'Hardware call failed (call ./modules/PCA9685.lua):\n  Invalid Argument: channel (out of range 0-15)',
+          apply: () => hw.output('Aborted: Hardware call failed (call ./modules/PCA9685.lua): Invalid Argument: channel (out of range 0-15)')
+        },
+        {
+          phase: '收尾', title: '仍然清理', dir: 'error', route: ['merge', 'out'], codeLine: 9, duration: 950,
+          detail: 'runRobotAndCleanup 捕获异常后仍调用 deactivate：destroy 尽力写 MODE1 RESTART，HAL closeAll；退出码 1。',
+          payload: 'destroy: MODE1=0x80\ni2c close → closeAll\nrc=1',
+          apply: () => { hw.addReg('0x00', '0x80', 'destroy: MODE1 RESTART'); hw.output('destroy: MODE1=0x80\n[deactivate] closeAll\nrc=1'); }
+        }
+      ]
+    }
+  };
+
+  /* ---------------- 硬件视图 ---------------- */
+
+  function setOutput(text) {
+    const el = $('#hw-output');
+    if (el) { el.textContent = text; }
+  }
+
+  function setupHardware(mode) {
+    const host = $('#hardware');
+    hw = {};
+    if (mode === 'relay') {
+      host.innerHTML = [
+        '<div class="hw-relay">',
+        '  <div class="relay-card">',
+        '    <div class="relay-led" id="relay-led"></div>',
+        '    <div class="relay-name">Relay <code>relay0</code></div>',
+        '    <div class="relay-sub">controller → timer-0</div>',
+        '  </div>',
+        '  <div class="timer-card">',
+        '    <div class="timer-row"><span>Timer <code>timer-0</code></span><strong id="timer-ms">0 ms</strong></div>',
+        '    <div class="meter"><span id="timer-fill"></span></div>',
+        '    <div class="timer-row muted"><span id="timer-state">idle</span><span>note: hello-relay</span></div>',
+        '  </div>',
+        '</div>'
+      ].join('');
+      const led = $('#relay-led');
+      const fill = $('#timer-fill');
+      const ms = $('#timer-ms');
+      const status = $('#timer-state');
+      hw = {
+        reset() {
+          led.classList.remove('on');
+          fill.style.transition = 'none'; fill.style.width = '0%';
+          ms.textContent = '0 ms'; status.textContent = 'idle';
+          setOutput('—');
+        },
+        command() { status.textContent = 'command received'; },
+        busy(msValue) {
+          status.textContent = 'sleeping';
+          ms.textContent = msValue + ' ms';
+          led.classList.add('on');
+          fill.style.transition = 'none'; fill.style.width = '0%';
+          void fill.offsetWidth;
+          fill.style.transition = 'width ' + msValue + 'ms linear';
+          fill.style.width = '100%';
+          setTimeout(() => { led.classList.remove('on'); }, msValue);
+        },
+        done() {
+          status.textContent = 'done';
+          ms.textContent = '200 ms';
+          fill.style.transition = 'none'; fill.style.width = '100%';
+          led.classList.remove('on');
+        },
+        idle() { led.classList.remove('on'); },
+        output(text) { setOutput(text); }
+      };
+      hw.reset();
+      return;
+    }
+
+    if (mode === 'servo') {
+      host.innerHTML = [
+        '<div class="hw-servo">',
+        '  <div class="servo-gauge">',
+        '    <svg viewBox="0 0 260 150" aria-label="舵机角度">',
+        '      <path d="M30 125 A100 100 0 0 1 230 125" fill="none" stroke="#1e293b" stroke-width="14" stroke-linecap="round"/>',
+        '      <path d="M30 125 A100 100 0 0 1 130 25" fill="none" stroke="#22d3ee" stroke-width="4" stroke-linecap="round" opacity="0.55"/>',
+        '      <path d="M130 25 A100 100 0 0 1 230 125" fill="none" stroke="#f59e0b" stroke-width="4" stroke-linecap="round" opacity="0.55"/>',
+        '      <line id="needle" x1="130" y1="120" x2="130" y2="45" stroke="#f8fafc" stroke-width="3" stroke-linecap="round" transform="rotate(-90 130 120)"/>',
+        '      <circle cx="130" cy="120" r="8" fill="#0b1220" stroke="#94a3b8" stroke-width="2"/>',
+        '      <text x="30" y="145" fill="#64748b" font-size="10" text-anchor="middle">0°</text>',
+        '      <text x="130" y="14" fill="#64748b" font-size="10" text-anchor="middle">90°</text>',
+        '      <text x="230" y="145" fill="#64748b" font-size="10" text-anchor="middle">180°</text>',
+        '    </svg>',
+        '    <div class="servo-value"><span id="servo-angle">—</span><small>°</small></div>',
+        '  </div>',
+        '  <div class="reg-card">',
+        '    <div class="reg-head"><span>PCA9685 @ 0x40</span><span class="chip">proto=virt</span></div>',
+        '    <div class="reg-list" id="reg-list"><div class="reg-empty">等待 build 写入…</div></div>',
+        '  </div>',
+        '</div>'
+      ].join('');
+      const needle = $('#needle');
+      const angleEl = $('#servo-angle');
+      const regList = $('#reg-list');
+      hw = {
+        reset() {
+          needle.setAttribute('transform', 'rotate(-90 130 120)');
+          angleEl.textContent = '—';
+          regList.innerHTML = '<div class="reg-empty">等待 build 写入…</div>';
+          setOutput('—');
+        },
+        setAngle(angle) {
+          angleEl.textContent = String(angle);
+          needle.setAttribute('transform', 'rotate(' + (angle - 90) + ' 130 120)');
+        },
+        addReg(reg, bytes, note) {
+          const empty = regList.querySelector('.reg-empty');
+          if (empty) { empty.remove(); }
+          const row = document.createElement('div');
+          row.className = 'reg-row';
+          row.innerHTML = '<span class="reg">' + escapeHtml(reg) + '</span><span class="bytes">' + escapeHtml(bytes) + '</span><span class="note">' + escapeHtml(note) + '</span>';
+          regList.appendChild(row);
+          regList.scrollTop = regList.scrollHeight;
+        },
+        resetRegs() { regList.innerHTML = '<div class="reg-empty">等待 build 写入…</div>'; },
+        output(text) { setOutput(text); }
+      };
+      hw.reset();
+      return;
+    }
+
+    if (mode === 'daemon') {
+      host.innerHTML = [
+        '<div class="hw-daemon">',
+        '  <div class="daemon-card">',
+        '    <div class="daemon-head"><span>ADS1015 · AIN0 · 正弦模型</span><span class="chip" id="daemon-count">count 0</span></div>',
+        '    <canvas id="daemon-chart" width="760" height="190"></canvas>',
+        '    <div class="daemon-stats">',
+        '      <div><span>voltage</span><strong id="daemon-voltage">—</strong></div>',
+        '      <div><span>EMA α=0.2</span><strong id="daemon-ema">—</strong></div>',
+        '      <div><span>Monitor</span><strong id="daemon-level">—</strong></div>',
+        '    </div>',
+        '  </div>',
+        '  <div class="slot-card">',
+        '    <div class="slot-title"><span>共享槽</span><span class="chip">ABI v2 · 96B 头</span></div>',
+        '    <div class="slot-grid">',
+        '      <span>mutex</span><span>pthread_mutex</span>',
+        '      <span>count</span><span id="slot-count">0</span>',
+        '      <span>nvals</span><span>1</span>',
+        '      <span>values*</span><span>v0</span>',
+        '      <span>capacity</span><span>64</span>',
+        '      <span>stop</span><span id="slot-stop">0</span>',
+        '      <span>status</span><span>0</span>',
+        '      <span>quiesce</span><span id="slot-quiesce">0</span>',
+        '    </div>',
+        '  </div>',
+        '</div>'
+      ].join('');
+      const canvas = $('#daemon-chart');
+      const ctx = canvas.getContext('2d');
+      let samples = [];
+      let emaSeries = [];
+      let countValue = 0;
+      let emaValue = null;
+      let levelValue = '—';
+      let voltageValue = null;
+
+      function draw() {
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = '#050a13';
+        ctx.fillRect(0, 0, w, h);
+        const padL = 34, padR = 12, padT = 12, padB = 22;
+        const plotW = w - padL - padR, plotH = h - padT - padB;
+        const yMin = 1.35, yMax = 1.95;
+        const xAt = (i, n) => padL + (n <= 1 ? 0 : (i / (n - 1)) * plotW);
+        const yAt = (v) => padT + (1 - (v - yMin) / (yMax - yMin)) * plotH;
+        ctx.strokeStyle = 'rgba(148,163,184,0.12)';
+        ctx.lineWidth = 1;
+        for (let g = 0; g <= 4; g++) {
+          const y = padT + (g / 4) * plotH;
+          ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+        }
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10px monospace';
+        ctx.fillText('1.95', 4, padT + 4);
+        ctx.fillText('1.35', 4, h - padB + 4);
+        if (samples.length < 1) {
+          ctx.fillStyle = '#334155';
+          ctx.font = '12px sans-serif';
+          ctx.fillText('等待守护 publish…', padL + 12, padT + plotH / 2);
+          return;
+        }
+        const n = samples.length;
+        // voltage
+        ctx.beginPath();
+        samples.forEach((v, i) => { const x = xAt(i, n), y = yAt(v); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        // ema
+        if (emaSeries.length > 1) {
+          ctx.beginPath();
+          emaSeries.forEach((v, i) => { const x = xAt(i, n), y = yAt(v); if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+          ctx.strokeStyle = '#fbbf24';
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([4, 4]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        // last point
+        const lx = xAt(n - 1, n), ly = yAt(samples[n - 1]);
+        ctx.beginPath(); ctx.arc(lx, ly, 4, 0, Math.PI * 2); ctx.fillStyle = '#22d3ee'; ctx.fill();
+      }
+
+      hw = {
+        reset() {
+          samples = []; emaSeries = []; countValue = 0; emaValue = null; levelValue = '—'; voltageValue = null;
+          draw();
+          $('#daemon-count').textContent = 'count 0';
+          $('#daemon-voltage').textContent = '—';
+          $('#daemon-ema').textContent = '—';
+          $('#daemon-level').textContent = '—';
+          $('#slot-count').textContent = '0';
+          $('#slot-stop').textContent = '0';
+          $('#slot-quiesce').textContent = '0';
+          setOutput('—');
+        },
+        pushSample(v, count, ema, level) {
+          samples.push(v);
+          if (samples.length > 48) { samples.shift(); }
+          emaSeries.push(ema);
+          if (emaSeries.length > 48) { emaSeries.shift(); }
+          countValue = count;
+          voltageValue = v;
+          emaValue = ema;
+          levelValue = level || levelValue;
+          $('#daemon-count').textContent = 'count ' + count;
+          $('#slot-count').textContent = String(count);
+          $('#daemon-voltage').textContent = v.toFixed(3) + ' V';
+          $('#daemon-ema').textContent = ema == null ? '—' : ema.toFixed(3) + ' V';
+          $('#daemon-level').textContent = levelValue;
+          draw();
+        },
+        count() { return countValue; },
+        ema() { return emaValue == null ? 0 : emaValue; },
+        setSlot(updates) {
+          if (updates.count != null) { $('#slot-count').textContent = String(updates.count); }
+          if (updates.stop != null) { $('#slot-stop').textContent = String(updates.stop); }
+          if (updates.quiesce != null) { $('#slot-quiesce').textContent = String(updates.quiesce); }
+        },
+        output(text) { setOutput(text); }
+      };
+      hw.reset();
+      return;
+    }
+
+    if (mode === 'error') {
+      host.innerHTML = [
+        '<div class="hw-error">',
+        '  <div class="error-banner">',
+        '    <div class="error-icon">!</div>',
+        '    <div><strong>ERR 契约</strong><p id="error-msg">等待派发…</p></div>',
+        '  </div>',
+        '  <div class="reg-card">',
+        '    <div class="reg-head"><span>PCA9685 @ 0x40</span><span class="chip">proto=virt</span></div>',
+        '    <div class="reg-list" id="error-reg-list"><div class="reg-empty">build 写入…</div></div>',
+        '  </div>',
+        '</div>'
+      ].join('');
+      const msg = $('#error-msg');
+      const regList = $('#error-reg-list');
+      hw = {
+        reset() {
+          msg.textContent = '等待派发…';
+          regList.innerHTML = '<div class="reg-empty">build 写入…</div>';
+          setOutput('—');
+        },
+        setError(text) { msg.textContent = text; },
+        addReg(reg, bytes, note) {
+          const empty = regList.querySelector('.reg-empty');
+          if (empty) { empty.remove(); }
+          const row = document.createElement('div');
+          row.className = 'reg-row';
+          row.innerHTML = '<span class="reg">' + escapeHtml(reg) + '</span><span class="bytes">' + escapeHtml(bytes) + '</span><span class="note">' + escapeHtml(note) + '</span>';
+          regList.appendChild(row);
+        },
+        resetRegs() { regList.innerHTML = '<div class="reg-empty">build 写入…</div>'; },
+        output(text) { setOutput(text); }
+      };
+      hw.reset();
+      return;
+    }
+  }
+
+  /* ---------------- 代码渲染 / 高亮 ---------------- */
+
+  function renderCode(lines) {
+    const el = $('#code');
+    el.innerHTML = lines.map((line, i) => {
+      return '<span class="code-line" data-line="' + (i + 1) + '"><span class="ln">' + (i + 1) + '</span>' + escapeHtml(line) + '</span>';
+    }).join('');
+  }
+
+  function highlightCode(lineNo) {
+    $$('.code-line').forEach((line) => line.classList.remove('hl'));
+    if (!lineNo) { return; }
+    const target = $('.code-line[data-line="' + lineNo + '"]');
+    if (target) {
+      target.classList.add('hl');
+      const wrap = target.closest('.code');
+      if (wrap) {
+        const top = target.offsetTop - wrap.clientHeight / 2;
+        wrap.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+      }
+    }
+  }
+
+  /* ---------------- 时间线 / 报文 ---------------- */
+
+  function logEmpty() {
+    $('#log').innerHTML = '<div class="log-empty">点击“运行”开始；也可以“单步”逐条查看。</div>';
+  }
+
+  function clearLog() {
+    logEmpty();
+  }
+
+  function logStep(step, index) {
+    const log = $('#log');
+    if (log.querySelector('.log-empty') || log.querySelector('.log-done')) { log.innerHTML = ''; }
+    const item = document.createElement('div');
+    item.className = 'log-item ' + step.dir;
+    item.innerHTML =
+      '<div class="log-top"><span class="log-num">' + String(index + 1).padStart(2, '0') + '</span>' +
+      '<span class="tag ' + step.dir + '">' + DIR_LABEL[step.dir] + '</span>' +
+      '<strong>' + escapeHtml(step.title) + '</strong></div>' +
+      '<div class="log-detail">' + escapeHtml(step.detail || '') + '</div>' +
+      (step.payload ? '<pre>' + escapeHtml(step.payload) + '</pre>' : '');
+    log.appendChild(item);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function updatePacket(step) {
+    const box = $('#packet');
+    box.innerHTML =
+      '<div class="packet-title"><span class="tag ' + step.dir + '">' + DIR_LABEL[step.dir] + '</span>' +
+      '<strong>' + escapeHtml(step.title) + '</strong></div>' +
+      '<div>' + escapeHtml(step.detail || '') + '</div>' +
+      (step.payload ? '<pre>' + escapeHtml(step.payload) + '</pre>' : '');
+  }
+
+  /* ---------------- 节点高亮与动画 ---------------- */
+
+  function nodeCenter(key) {
+    const node = nodeEl(key);
+    const wrap = $('#board-wrap');
+    if (!node || !wrap) { return { x: 0, y: 0 }; }
+    const r = node.getBoundingClientRect();
+    const w = wrap.getBoundingClientRect();
+    return { x: r.left - w.left + r.width / 2, y: r.top - w.top + r.height / 2 };
+  }
+
+  function highlightNodes(route, dir) {
+    $$('.node').forEach((node) => {
+      node.classList.remove('active', 'build', 'down', 'up', 'async', 'error');
+    });
+    (route || []).forEach((key) => {
+      const node = nodeEl(key);
+      if (!node) { return; }
+      node.classList.add('active', dir, 'visited');
+      state.visited.add(key);
+    });
+  }
+
+  function animateRoute(route, dir, duration) {
+    const dot = $('#packet-dot');
+    if (!dot || !route || route.length === 0) { return; }
+    const points = route.map(nodeCenter);
+    const color = DIR_COLOR[dir] || DIR_COLOR.down;
+    dot.style.background = color;
+    dot.style.boxShadow = '0 0 18px ' + color;
+    if (points.length === 1) {
+      dot.style.transition = 'none';
+      dot.style.left = points[0].x + 'px';
+      dot.style.top = points[0].y + 'px';
+      dot.style.opacity = '1';
+      setTimeout(() => { dot.style.opacity = '0'; }, Math.min(420, duration));
+      return;
+    }
+    const segment = Math.max(90, duration / (points.length - 1));
+    let i = 0;
+    const move = () => {
+      if (i >= points.length - 1) {
+        setTimeout(() => { dot.style.opacity = '0'; }, Math.min(180, segment));
+        return;
+      }
+      const a = points[i];
+      const b = points[i + 1];
+      dot.style.transition = 'none';
+      dot.style.left = a.x + 'px';
+      dot.style.top = a.y + 'px';
+      dot.style.opacity = '1';
+      void dot.offsetWidth;
+      dot.style.transition = 'left ' + segment + 'ms linear, top ' + segment + 'ms linear';
+      dot.style.left = b.x + 'px';
+      dot.style.top = b.y + 'px';
+      i += 1;
+      setTimeout(move, segment);
+    };
+    move();
+  }
+
+  /* ---------------- 播放控制 ---------------- */
+
+  function updateButtons() {
+    $('#btn-play').disabled = state.playing;
+    $('#btn-pause').disabled = !state.playing;
+    $('#btn-step').disabled = state.playing;
+  }
+
+  function applyStep(step, index) {
+    state.stepIndex = index;
+    $('#progress').textContent = (index + 1) + ' / ' + state.steps.length;
+    updatePacket(step);
+    highlightCode(step.codeLine);
+    highlightNodes(step.route, step.dir);
+    animateRoute(step.route, step.dir, Math.min(1100, step.duration || 800));
+    if (typeof step.apply === 'function') {
+      try { step.apply(); } catch (err) { setOutput('仿真脚本错误：' + err.message); }
+    }
+    logStep(step, index);
+  }
+
+  function pause() {
+    state.playing = false;
+    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
+    updateButtons();
+  }
+
+  function play() {
+    if (state.playing) { return; }
+    if (!state.steps.length) { return; }
+    if (state.stepIndex >= state.steps.length - 1) {
+      resetScenario(state.key);
+    }
+    state.playing = true;
+    updateButtons();
+    const tick = () => {
+      if (!state.playing) { return; }
+      const next = state.stepIndex + 1;
+      if (next >= state.steps.length) {
+        state.playing = false;
+        updateButtons();
+        const log = $('#log');
+        const done = document.createElement('div');
+        done.className = 'log-done';
+        done.textContent = '演示结束。点“重置”可以再看一遍，或切换其它链路。';
+        log.appendChild(done);
+        log.scrollTop = log.scrollHeight;
+        return;
+      }
+      applyStep(state.steps[next], next);
+      const wait = Math.max(260, (state.steps[next].duration || 800) / state.speed);
+      state.timer = setTimeout(tick, wait);
+    };
+    tick();
+  }
+
+  function stepOnce() {
+    if (state.playing) { pause(); }
+    const next = state.stepIndex + 1;
+    if (next >= state.steps.length) { return; }
+    applyStep(state.steps[next], next);
+  }
+
+  function resetScenario(key) {
+    pause();
+    const scenario = SCENARIOS[key];
+    if (!scenario) { return; }
+    state.key = key;
+    state.steps = scenario.steps;
+    state.stepIndex = -1;
+    state.visited.clear();
+    $('#progress').textContent = '0 / ' + scenario.steps.length;
+    clearLog();
+    highlightCode(0);
+    $$('.node').forEach((node) => {
+      node.classList.remove('active', 'visited', 'build', 'down', 'up', 'async', 'error');
+    });
+    const dot = $('#packet-dot');
+    dot.style.opacity = '0';
+    setupHardware(scenario.hw);
+    $('#packet').textContent = '等待运行…';
+    updateButtons();
+  }
+
+  function loadScenario(key) {
+    const scenario = SCENARIOS[key];
+    if (!scenario) { return; }
+    state.key = key;
+    state.steps = scenario.steps;
+    $$('.tab').forEach((tab) => tab.classList.toggle('active', tab.dataset.key === key));
+    $('#scenario-desc').textContent = scenario.desc;
+    renderCode(scenario.code);
+    $('#cmd').textContent = scenario.cmd;
+    resetScenario(key);
+  }
+
+  /* ---------------- 初始化 ---------------- */
+
+  function buildTabs() {
+    const tabs = $('#tabs');
+    Object.keys(SCENARIOS).forEach((key) => {
+      const scenario = SCENARIOS[key];
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'tab';
+      button.dataset.key = key;
+      button.innerHTML = '<strong>' + escapeHtml(scenario.label) + '</strong><span>' + escapeHtml(scenario.sub) + '</span>';
+      button.addEventListener('click', () => loadScenario(key));
+      tabs.appendChild(button);
+    });
+  }
+
+  $('#btn-play').addEventListener('click', play);
+  $('#btn-pause').addEventListener('click', pause);
+  $('#btn-step').addEventListener('click', stepOnce);
+  $('#btn-reset').addEventListener('click', () => resetScenario(state.key));
+  $('#btn-clear').addEventListener('click', clearLog);
+  $('#speed').addEventListener('input', (event) => {
+    state.speed = Number(event.target.value) || 1;
+    $('#speed-val').textContent = state.speed.toFixed(1) + '×';
+  });
+
+  window.addEventListener('resize', () => {
+    const dot = $('#packet-dot');
+    if (dot) { dot.style.opacity = '0'; }
+  });
+
+  buildTabs();
+  loadScenario('relay');
+})();
+</script>
+</body>
+</html>

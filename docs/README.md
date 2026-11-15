@@ -6,7 +6,7 @@
 
 | 你是 | 建议顺序 |
 | ---- | -------- |
-| 第一次上手 | [README 快速开始](../README.md#快速开始) → [DSL 参考](dsl.md) → [驱动清单](drivers.md) |
+| 第一次上手 | [README 快速开始](../README.md#快速开始) → [指令执行与响应架构](architecture.md) → [DSL 参考](dsl.md) → [驱动清单](drivers.md) |
 | 接硬件 / 写驱动 | [HAL](hal.md) → [驱动清单](drivers.md)（驱动契约）→ [虚拟总线](virtbus.md) → [开发与贡献](development.md) |
 | 用守护线程做后台采样 | [@Daemon 守护线程](daemon.md) → [虚拟总线](virtbus.md)（`proto=virt`） |
 | 排障 | [已知限制与 FAQ](faq.md) → [命令行与环境变量参考](reference.md) |
@@ -23,6 +23,8 @@
 
 ## 机制深入
 
+- [指令执行与响应架构](architecture.md)——从结构 SQL/动作脚本到驱动、HAL、内核或 virtbus，再沿调用栈返回的完整链路；含装配/动作/守护/错误时序图与代码地图
+- [可交互指令流仿真](architecture_sim.html)——离线单文件 HTML，逐步演示 Relay 转发、PCA9685 虚拟 I2C、守护采样与 ERR 契约四条链路
 - [@Daemon 守护线程](daemon.md)——并发模型、万能采样 chunk、滤波器链路、采样→滤波→消费闭环
 - [HAL 硬件抽象层](hal.md)——宿主 C++ HAL（`__hal_call`）与独立 LuaJIT 回退后端、I2C_RDWR 原子事务、GPIO/PWM、驱动沙箱
 - [虚拟总线 virtbus](virtbus.md)——无真机验证驱动链路的完整参考手册（含器件模型库与回归清单）
