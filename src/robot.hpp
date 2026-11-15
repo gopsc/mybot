@@ -43,6 +43,14 @@ public:
 	enum class LifecycleState { Loaded, Active, Deactivating, Inactive };
 
 private:
+	/* C++ HAL：I2C/SPI/UART/TCP/HTTP/Shell 的唯一物理边界。Lua 状态创建时
+	 * 通过 HALManager::currentShared() 取一份强引用并注入 __hal_call，故弃管
+	 * 守护线程即使晚于 RobotStruct 退出，也不会拿到已析构的 HAL。
+	 * 声明在四个域门面之前 = 析构顺序上 HAL 最后退出（成员逆序析构）。 */
+	std::shared_ptr<HALManager> hal_;
+	/* 构造期保存的上一份 current（多 RobotStruct 嵌套时析构恢复），同时
+	 * 用 shared_ptr 保证它在本对象存活期间不被提前释放。 */
+	std::shared_ptr<HALManager> previousHal_;
 	/* 结构矩阵域（2026-10-03 阶段 4）：matrix 表的所有权与读写入口。容器选型
 	 * （deque，元素引用稳定）是域内不变式，见 structure_store.hpp 头注释。 */
 	StructureStore structures_;
@@ -54,9 +62,6 @@ private:
 	 * build 前统一校验 $ 引用存在性；热删除/整表撤下期摘除与重锚定
 	 * （详见 meta_registry.hpp）。 */
 	MetaRegistry metas_;
-	/* C++ HAL：I2C/SPI/UART/TCP/HTTP/Shell 的唯一物理边界。Lua 状态创建时
-	 * 通过 HALManager::current() 取到本对象并注入 __hal_call。 */
-	HALManager hal_;
 
 	/* 装配机械（HwFactory / ActionRunner / HotSqlService）整体住进私有装配体
 	 * （Internals，定义在 robot_internals.hpp）；三个执行器是门面的实现细节，

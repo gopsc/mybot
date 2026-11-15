@@ -11,6 +11,8 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -315,9 +317,25 @@ void sandbox_lua(lua_State* L) {
  * HAL.lua（portable 版）在加载时捕获该全局并立即清除。只有宿主设置了
  * HALManager::current() 时才注入；独立 luajit 测试没有宿主，HAL.lua 会
  * 回退到 HAL_ffi.lua。 */
+/* __hal_call 的 upvalue：不是裸 HALManager*，而是 shared_ptr 持有者。
+ * 弃管守护的 Lua 状态可能晚于 RobotStruct 析构才 lua_close；shared_ptr 保证
+ * 它在此期间仍能安全调用 close_handle/sleep_ms 等 HAL 操作（deactivate 已
+ * closeAll，操作只会得到 closed 错误，而不是 UAF）。 */
+struct HalLifetime {
+	std::shared_ptr<HALManager> hal;
+};
+
+static int halLifetimeGc(lua_State* L) {
+	auto* holder = static_cast<HalLifetime*>(lua_touserdata(L, 1));
+	if (holder != nullptr) { holder->~HalLifetime(); }
+	return 0;
+}
+
 static int halCallLua(lua_State* L) {
-	auto* hal = static_cast<HALManager*>(lua_touserdata(L, lua_upvalueindex(1)));
-	if (hal == nullptr) { return luaL_error(L, "HAL is not attached to this Lua state"); }
+	auto* holder = static_cast<HalLifetime*>(lua_touserdata(L, lua_upvalueindex(1)));
+	if (holder == nullptr || holder->hal == nullptr) {
+		return luaL_error(L, "HAL is not attached to this Lua state");
+	}
 	if (lua_gettop(L) < 1 || lua_type(L, 1) != LUA_TSTRING) {
 		return luaL_error(L, "HAL operation name must be a string");
 	}
@@ -331,7 +349,7 @@ static int halCallLua(lua_State* L) {
 	}
 	Json result;
 	try {
-		result = hal->call(lua_tostring(L, 1), args);
+		result = holder->hal->call(lua_tostring(L, 1), args);
 		push_json_to_lua(L, result);
 	} catch (const std::exception& exc) {
 		return luaL_error(L, "HAL call failed: %s", exc.what());
@@ -344,10 +362,19 @@ lua_State* openSandboxedState() {
 	if (L != nullptr) {
 		luaL_openlibs(L);
 		sandbox_lua(L);
-		if (HALManager* hal = HALManager::current(); hal != nullptr) {
-			lua_pushlightuserdata(L, hal);
+		if (std::shared_ptr<HALManager> hal = HALManager::currentShared(); hal != nullptr) {
+			auto* holder = static_cast<HalLifetime*>(lua_newuserdata(L, sizeof(HalLifetime)));
+			new (holder) HalLifetime{std::move(hal)};
+			lua_newtable(L);
+			lua_pushcfunction(L, halLifetimeGc);
+			lua_setfield(L, -2, "__gc");
+			lua_setmetatable(L, -2);
+			/* 闭包捕获 userdata 的副本；原 userdata 留在栈上作为 GC 锚点，
+			 * 赋值后弹掉。closed state 时 __gc 释放 shared_ptr。 */
+			lua_pushvalue(L, -1);
 			lua_pushcclosure(L, halCallLua, 1);
 			lua_setglobal(L, "__hal_call");
+			lua_pop(L, 1);
 		}
 	}
 	return L;

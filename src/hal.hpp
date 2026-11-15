@@ -46,9 +46,12 @@ public:
 	/* 关闭本管理器持有的全部句柄（deactivate 兜底）。 */
 	void closeAll();
 
-	/* 当前 RobotStruct 的 HAL（Lua 状态创建时从这里取桥）。 */
+	/* 当前 RobotStruct 的 HAL（Lua 状态创建时从这里取桥）。
+	 * 2026-11-15 审计修复：current 的返回值只供比较/诊断；需要跨 Lua 状态
+	 * 持有生命周期时必须用 currentShared()，不能把裸指针塞进 Lua upvalue。 */
 	static HALManager* current();
-	static void setCurrent(HALManager* hal);
+	static std::shared_ptr<HALManager> currentShared();
+	static void setCurrent(std::shared_ptr<HALManager> hal);
 
 	static constexpr int kUartMaxBytes = 512;
 	static constexpr int kUartMaxMs = 60000;

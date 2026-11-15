@@ -15,15 +15,16 @@ namespace bot {
 /* 装配机械的定义见 robot_internals.hpp；本处只负责「先四域、后机械、再装载」
  * 的次序（注释在头文件构造函数声明处）。 */
 RobotStruct::RobotStruct(bot::Reader& input)
-	: internals_(std::make_unique<Internals>(structures_, registry_, metas_, daemons_, hal_)) {
-	HALManager* previous = HALManager::current();
-	HALManager::setCurrent(&hal_);
+	: hal_(std::make_shared<HALManager>()),
+	  internals_(std::make_unique<Internals>(structures_, registry_, metas_, daemons_, *hal_)) {
+	previousHal_ = HALManager::currentShared();
+	HALManager::setCurrent(hal_);
 	try {
 		structures_.load(input);
 	} catch (...) {
 		/* 构造失败时本对象不会走 ~RobotStruct；不恢复全局指针会让后续
 		 * openSandboxedState() 拿到已析构的 hal_。 */
-		HALManager::setCurrent(previous);
+		HALManager::setCurrent(std::move(previousHal_));
 		throw;
 	}
 }
@@ -74,7 +75,7 @@ void RobotStruct::deactivate() {
 			<< " hardware variable(s) failed to destroy (see warnings above)" << std::endl;
 	}
 	/* 驱动 destroy 正常会关闭自己的句柄；这里兜住 build 失败/异常路径遗留的。 */
-	hal_.closeAll();
+	if (hal_) { hal_->closeAll(); }
 	deactivated_ = true;
 	state_ = LifecycleState::Inactive;
 }
@@ -86,7 +87,12 @@ RobotStruct::~RobotStruct() {
 		std::cerr << "Deactivate: failed during destruction"
 			<< " (hardware may remain energized)" << std::endl;
 	}
-	if (HALManager::current() == &hal_) { HALManager::setCurrent(nullptr); }
+	/* 恢复构造前的 current（多 RobotStruct 嵌套），并释放本对象对 HAL 的
+	 * 全局强引用。Lua 状态里各自持有一份 shared_ptr；弃管守护晚退场也不会
+	 * 解引用已释放对象。 */
+	if (HALManager::current() == hal_.get()) {
+		HALManager::setCurrent(std::move(previousHal_));
+	}
 }
 
 } // namespace bot

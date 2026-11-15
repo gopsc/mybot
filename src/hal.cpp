@@ -31,15 +31,20 @@
 
 #include <curl/curl.h>
 
+#include "exec_budget.hpp"
 #include "ftdi.hpp"
 #include "util_env.hpp"
 #include "util_file.hpp"	/* FdGuard：shell 管道在异常/停机路径上也要关闭 */
+#include "util_path.hpp"	/* stateRoot：状态根与 Nns 模型根共用单点 */
 
 namespace bot {
 namespace {
 
 thread_local std::string g_lastError;
-HALManager* g_current = nullptr;
+/* 全局 current 只由主线程在 RobotStruct 构造/析构时改写；Lua 状态可能由
+ * 弃管守护线程延长，故用 shared_ptr 保存所有权，读取时在锁内拷贝。 */
+std::mutex g_currentMutex;
+std::shared_ptr<HALManager> g_current;
 
 constexpr int kMaxHandle = (1 << 30);
 
@@ -170,14 +175,9 @@ std::string pwmAttrPath(int chip, int channel, const char* attribute) {
  * 由 BOT4CJ_STATE_DIR 指定（缺省 $XDG_STATE_HOME/mybot 或
  * $HOME/.local/state/mybot）。文件打开走 O_NOFOLLOW，拒绝最后一段软链。 */
 std::string stateDir() {
-	if (auto v = getEnvVar("BOT4CJ_STATE_DIR"); v && !v->empty()) { return *v; }
-	if (auto v = getEnvVar("XDG_STATE_HOME"); v && !v->empty()) {
-		return *v + "/mybot";
-	}
-	if (auto v = getEnvVar("HOME"); v && !v->empty()) {
-		return *v + "/.local/state/mybot";
-	}
-	return "./mybot-state";
+	/* 判据与 Nns 模型根共用 util_path.hpp 的 stateRoot()：路径规则只允许
+	 * 有一份实现，否则 state_read 与模型保存会落到不同目录。 */
+	return stateRoot();
 }
 
 bool isSafeStateName(const std::string& name) {
@@ -300,6 +300,17 @@ void checkStop() {
 	}
 }
 
+/* 动作预算与 HAL 超时的交集：无预算时原样返回；有预算时取剩余值，且到点
+ * 立即抛 ExecBudgetExceeded。HALManager::call 对预算错误必须原样重抛，
+ * 不能折成 -1/JsonNull（见 exec_budget.hpp）。 */
+int effectiveTimeoutMs(int requestedMs) {
+	requireExecBudget();
+	const long long remaining = execBudgetRemainingMs();
+	if (remaining < 0) { return requestedMs; }
+	if (remaining == 0) { requireExecBudget(); }
+	return static_cast<int>(std::min<long long>(requestedMs, remaining));
+}
+
 int pollFd(int fd, short events, int timeoutMs) {
 	pollfd pfd{fd, events, 0};
 	return ::poll(&pfd, 1, timeoutMs);
@@ -402,10 +413,11 @@ std::size_t httpHeader(char* data, std::size_t size, std::size_t count, void* us
 	return total;
 }
 
-/* libcurl 进度回调：SIGINT/SIGTERM 后让在飞 HTTP 请求尽快返回，而不是
- * 阻塞到 60s 的 HAL 上限。返回非 0 即 CURLE_ABORTED_BY_CALLBACK。 */
+/* libcurl 进度回调：SIGINT/SIGTERM 或动作预算到点后让在飞 HTTP 请求尽快
+ * 返回，而不是阻塞到 60s 的 HAL 上限。返回非 0 即 CURLE_ABORTED_BY_CALLBACK。 */
 int httpProgress(void*, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
-	return stopRequested() ? 1 : 0;
+	if (stopRequested()) { return 1; }
+	return execBudgetRemainingMs() == 0 ? 1 : 0;
 }
 
 /* shell 子进程的停机兜底：正常路径已 waitpid；异常（SIGINT/SIGTERM 的 checkStop）
@@ -521,6 +533,9 @@ Json runShell(const std::string& command, int timeoutMs) {
 	result.put("out", JsonString(out));
 	result.put("err", JsonString(err));
 	if (timedOut) {
+		/* 若超时来自动作预算而非用户 timeout，抛预算错误而不是一张普通
+		 * ERR 表——上层能据此区分「命令太慢」与「整轮动作到点」。 */
+		requireExecBudget();
 		result.put("message", JsonString("command timed out after "
 			+ std::to_string(timeoutMs) + " ms"));
 	}
@@ -669,11 +684,18 @@ HALManager::~HALManager() {
 }
 
 HALManager* HALManager::current() {
+	std::lock_guard<std::mutex> guard(g_currentMutex);
+	return g_current.get();
+}
+
+std::shared_ptr<HALManager> HALManager::currentShared() {
+	std::lock_guard<std::mutex> guard(g_currentMutex);
 	return g_current;
 }
 
-void HALManager::setCurrent(HALManager* hal) {
-	g_current = hal;
+void HALManager::setCurrent(std::shared_ptr<HALManager> hal) {
+	std::lock_guard<std::mutex> guard(g_currentMutex);
+	g_current = std::move(hal);
 }
 
 std::shared_ptr<HALManager::Resource> HALManager::lookup(
@@ -844,6 +866,10 @@ Json HALManager::call(const std::string& operation, const std::vector<Json>& arg
 		if (operation == "state_write") { return opStateWrite(arg(0), arg(1)); }
 		if (operation == "close_handle") { return opCloseHandle(arg(0)); }
 		if (operation == "sleep_ms") { return opSleepMs(arg(0)); }
+	} catch (const ExecBudgetExceeded&) {
+		/* 预算耗尽不是普通 HAL 失败：必须穿透 call() 的错误折叠，让
+		 * halCallLua 折成 Lua error / Native 驱动直接中止动作链。 */
+		throw;
 	} catch (const std::exception& exc) {
 		const std::string message = operation + ": " + exc.what();
 		g_lastError = message;
@@ -899,6 +925,7 @@ Json HALManager::opI2cTransfer(const Json& handleValue, const Json& addressValue
 	if (write.empty() && readCount == 0) {
 		throw std::runtime_error("empty I2C transaction");
 	}
+	requireExecBudget();
 	auto lease = acquire(handle, "i2c");
 	Resource& resource = *lease.resource;
 	if (resource.backend == "virtual") {
@@ -1001,6 +1028,7 @@ Json HALManager::opSpiTransfer(const Json& handleValue, const Json& dataValue,
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const std::vector<std::uint8_t> data = asBytes(dataValue, 64, 1);
 	const int delay = asInt(delayValue, 0, 65535, "SPI delay");
+	requireExecBudget();
 	auto lease = acquire(handle, "spi");
 	Resource& resource = *lease.resource;
 	if (resource.backend == "virtual") {
@@ -1290,6 +1318,7 @@ Json HALManager::opUartWrite(const Json& handleValue, const Json& dataValue) {
 	}
 	std::size_t sent = 0;
 	while (sent < data.size()) {
+		requireExecBudget();
 		checkStop();
 		const ssize_t n = ::write(resource.fd, data.data() + sent, data.size() - sent);
 		if (n < 0) {
@@ -1312,7 +1341,8 @@ Json HALManager::opUartRead(const Json& handleValue, const Json& countValue,
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const int count = std::min(asInt(countValue, 1, kUartMaxBytes, "UART count"),
 		kUartMaxBytes);
-	const int timeoutMs = asInt(timeoutValue, 0, kUartMaxMs, "UART timeout");
+	const int timeoutMs = effectiveTimeoutMs(
+		asInt(timeoutValue, 0, kUartMaxMs, "UART timeout"));
 	auto lease = acquire(handle, "uart");
 	Resource& resource = *lease.resource;
 	if (resource.backend == "loop" || resource.backend == "virtual") {
@@ -1362,7 +1392,8 @@ Json HALManager::opTcpOpen(const Json& hostValue, const Json& portValue,
 		const Json& timeoutValue, int owner) {
 	const std::string host = asStr(hostValue, "TCP host");
 	const int port = asInt(portValue, 1, 65535, "TCP port");
-	const int timeoutMs = asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout");
+	const int timeoutMs = effectiveTimeoutMs(
+		asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout"));
 	addrinfo hints{};
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
@@ -1383,8 +1414,10 @@ Json HALManager::opTcpOpen(const Json& hostValue, const Json& portValue,
 		if (rc == 0) { break; }
 		if (errno != EINPROGRESS) { lastError = errno; ::close(fd); fd = -1; continue; }
 		const int ready = pollFd(fd, POLLOUT, timeoutMs);
-		if (ready == 0) {
-			lastError = ETIMEDOUT;
+		if (ready <= 0) {
+			/* -1（EINTR 等）绝不能当作「可写」继续 getsockopt：非阻塞连接
+			 * 尚未完成时 SO_ERROR 可能仍是 0，旧实现会把半开连接当成功。 */
+			lastError = (ready == 0) ? ETIMEDOUT : errno;
 			::close(fd); fd = -1;
 			continue;
 		}
@@ -1409,7 +1442,8 @@ Json HALManager::opTcpWrite(const Json& handleValue, const Json& dataValue,
 		const Json& timeoutValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const std::vector<std::uint8_t> data = asBytes(dataValue, kTcpMaxBytes);
-	const int timeoutMs = asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout");
+	const int timeoutMs = effectiveTimeoutMs(
+		asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout"));
 	auto lease = acquire(handle, "tcp");
 	Resource& resource = *lease.resource;
 	int sent = 0;
@@ -1437,6 +1471,10 @@ Json HALManager::opTcpWrite(const Json& handleValue, const Json& dataValue,
 		result.put("result", JsonString("OK"));
 		result.put("sent", JsonInt(sent));
 		return result;
+	} catch (const ExecBudgetExceeded&) {
+		/* 预算超时不是 TCP 链路失败：保持异常类型，让 Lua/Native 驱动
+		 * 走 halt-on-error，而不是把它折成一张普通 ERR 表。 */
+		throw;
 	} catch (const std::exception& exc) {
 		closeResource(resource);
 		Json result = errorObjectSent("tcp_write: " + std::string(exc.what())
@@ -1449,7 +1487,8 @@ Json HALManager::opTcpRead(const Json& handleValue, const Json& countValue,
 		const Json& timeoutValue) {
 	const std::int64_t handle = asInt(handleValue, 0, kMaxHandle, "handle");
 	const int count = asInt(countValue, 1, kTcpMaxBytes, "TCP count");
-	const int timeoutMs = asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout");
+	const int timeoutMs = effectiveTimeoutMs(
+		asInt(timeoutValue, 1, kTcpMaxMs, "TCP timeout"));
 	auto lease = acquire(handle, "tcp");
 	Resource& resource = *lease.resource;
 	const auto deadline = std::chrono::steady_clock::now()
@@ -1520,6 +1559,7 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 	if (!path.empty() && path.front() != '/') { path = "/" + path; }
 	auto lease = acquire(handle, "http");
 	Resource& resource = *lease.resource;
+	const int requestTimeoutMs = effectiveTimeoutMs(resource.timeoutMs);
 	CURL* curl = curl_easy_init();
 	if (curl == nullptr) { throw std::runtime_error("cannot initialize libcurl"); }
 	HttpCapture capture;
@@ -1541,7 +1581,7 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(resource.timeoutMs));
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, static_cast<long>(requestTimeoutMs));
 	curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
 	curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, httpProgress);
 	curl_easy_setopt(curl, CURLOPT_XFERINFODATA, nullptr);
@@ -1559,8 +1599,13 @@ Json HALManager::opHttpRequest(const Json& handleValue, const Json& methodValue,
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
 	if (headerList != nullptr) { curl_slist_free_all(headerList); }
 	curl_easy_cleanup(curl);
-	if (code == CURLE_ABORTED_BY_CALLBACK && stopRequested()) {
-		throw std::runtime_error("HTTP request aborted: stop requested");
+	if (code == CURLE_ABORTED_BY_CALLBACK) {
+		if (stopRequested()) {
+			throw std::runtime_error("HTTP request aborted: stop requested");
+		}
+		/* 进度回调也会因预算到点返回非 0；有预算时这里抛
+		 * ExecBudgetExceeded，无预算则继续走下面的普通错误路径。 */
+		requireExecBudget();
 	}
 	/* 写回调超限返回 0 时 libcurl 会折成 CURLE_WRITE_ERROR；先判体积
 	 * 才能给出真正的成因（不是笼统的 "Failed writing received data"）。 */
@@ -1603,7 +1648,7 @@ Json HALManager::opShellRun(const Json& handleValue, const Json& commandValue,
 			? lease.resource->timeoutMs
 			: asInt(timeoutValue, 1, kShellTimeoutMs, "shell timeout");
 	}
-	return runShell(command, timeoutMs);
+	return runShell(command, effectiveTimeoutMs(timeoutMs));
 }
 
 Json HALManager::opSpeakerOpen(const Json& deviceValue, const Json& rateValue, int owner) {
@@ -1646,6 +1691,7 @@ Json HALManager::opSpeakerWrite(const Json& handleValue, const Json& dataValue) 
 		throw std::runtime_error("speaker data must be non-empty even-length PCM bytes (<= "
 			+ std::to_string(kSpeakerMaxBytes) + ")");
 	}
+	requireExecBudget();
 	auto lease = acquire(handle, "speaker");
 	if (lease.resource->pcm == nullptr) {
 		throw std::runtime_error("speaker handle has no open PCM stream");
@@ -1656,6 +1702,7 @@ Json HALManager::opSpeakerWrite(const Json& handleValue, const Json& dataValue) 
 	}
 	const long frames = api.pcmWritei(lease.resource->pcm, raw.data(),
 		static_cast<unsigned long>(raw.size() / 2));
+	requireExecBudget();
 	return JsonInt(static_cast<std::int64_t>(frames));
 }
 
@@ -1823,13 +1870,25 @@ Json HALManager::opSleepMs(const Json& msValue) {
 		try { ms = std::stod(msValue.getValue()); } catch (...) { ms = 0; }
 	}
 	if (!std::isfinite(ms) || ms <= 0) { return JsonInt(0); }
-	const auto deadline = std::chrono::steady_clock::now()
+	const bool hasBudget = execBudgetRemainingMs() >= 0;
+	requireExecBudget();
+	auto deadline = std::chrono::steady_clock::now()
 		+ std::chrono::milliseconds(static_cast<long long>(std::min(ms, 4294967.0)));
+	if (hasBudget) {
+		const auto budgetDeadline = luaExecBudget()->deadline;
+		if (budgetDeadline < deadline) { deadline = budgetDeadline; }
+	}
 	while (true) {
 		checkStop();
+		requireExecBudget();
 		const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
 			deadline - std::chrono::steady_clock::now()).count();
-		if (remaining <= 0) { return JsonInt(0); }
+		if (remaining <= 0) {
+			/* 预算比请求的延迟更短：到点以预算错误中止动作链，不能
+			 * 静默把 5000ms 的 Timer 截成 1000ms 后仍报成功。 */
+			if (hasBudget) { requireExecBudget(); }
+			return JsonInt(0);
+		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(
 			std::min<long long>(remaining, 50)));
 	}
