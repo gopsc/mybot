@@ -31,6 +31,11 @@ public:
 		ok.put("result", JsonString("OK"));
 		return ok;
 	}
+
+	/* 热 SQL 装配上下文：HotSqlService 在提交批次期间置位，默认 no-op。
+	 * 需要区分「启动期可信结构脚本」与「不可信热插输入」的驱动覆写本方法
+	 * （当前只有 Nns：热插的 path 必须落在模型根下）。 */
+	virtual void setHotSql(bool) {}
 };
 
 using NativeDriverFactory = std::function<std::unique_ptr<NativeDriver>(HALManager&)>;

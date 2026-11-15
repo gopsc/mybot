@@ -15,6 +15,8 @@
 #include "flowcolumn.hpp"
 
 #include <algorithm>
+#include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -22,7 +24,9 @@
 #include <utility>
 
 #include "util_file.hpp"
+#include "util_num.hpp"
 #include "util_path.hpp"
+#include "util_str.hpp"
 
 namespace bot {
 
@@ -151,19 +155,33 @@ bool declaresSingleConsumer(const std::string& path) {
 	return false;
 }
 
-/* 地址归一化：'0x48' 与 '72' 必须落到同一个键。解析不出来就按原串（去空白）用，
- * 宁可多一个键（漏判一次）也不要把两个不同地址并成一个（误报）。 */
+/* 地址归一化：'0x48' / '72' / '72.0' / '4.8e1' / 尾随空白必须落到同一个键。
+ * 旧实现只做整数 strtoll，Lua 侧 tonumber 接受的浮点/科学计数法（以及
+ * "\n" 等空白）会保留原串，导致同一物理地址绕过 SINGLE_CONSUMER 判据。
+ * 先整数全串，再按 Lua tonumber 的数值语义解析浮点；只接受有限整数。
+ * 真解析不出来的原串保留——这类值最终会被 HAL 的地址校验拒绝，不能把它们
+ * 合并成某个合法地址。 */
 std::string normalizeAddress(const std::string& raw) {
-	std::string s = raw;
-	s.erase(0, s.find_first_not_of(" \t"));
-	s.erase(s.find_last_not_of(" \t") + 1);
+	const std::string s = trim(raw);
 	if (s.empty() || s == "-") { return std::string(); }
 	const char* begin = s.c_str();
 	char* end = nullptr;
+	errno = 0;
 	const int base = (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) ? 16 : 10;
-	const long long v = std::strtoll(begin, &end, base);
-	if (end == begin || *end != '\0') { return s; }
-	return std::to_string(static_cast<long long>(v));	/* 十进制规范形 */
+	const long long integer = std::strtoll(begin, &end, base);
+	if (end != begin && *end == '\0' && errno == 0) {
+		return std::to_string(integer);
+	}
+	errno = 0;
+	const double number = std::strtod(begin, &end);
+	if (end != begin && *end == '\0' && errno == 0 && std::isfinite(number)
+			&& std::floor(number) == number && doubleFitsInt64(number)) {
+		/* 与 Lua tonumber 的常见十进制/科学计数法输入对齐；超出 int64
+		 * 的值交给 HAL 的 asInt 拒绝，不在这里做截断（double→int64 的
+		 * 越界转换是 UB）。 */
+		return std::to_string(static_cast<long long>(number));
+	}
+	return s;
 }
 
 /* 结构脚本里的总线引用带 $ 前缀（'$i2c-1'），映射键用裸名 */
@@ -538,6 +556,12 @@ FlowRowRefs parseFlowRow(const mt::MatrixObject& matrix, std::int64_t i, const s
 
 void HwFactory::createLuaVars(const mt::MatrixObject& matrix, const std::string& mtName,
 		std::int64_t fromRow) {
+	/* 防御性第二道：SqlEngine 已在结构解析期校验表名；这里仍拒绝非安全
+	 * 模块名，避免未来新增结构 SQL 入口或 ScriptLoader 路径绕过。 */
+	if (!isSafeModuleName(mtName)) {
+		throw IllegalArgumentException("Hardware table '" + mtName
+			+ "' is not a safe module name; refusing to resolve modules/<table>.lua");
+	}
 	std::int64_t idxName = matrix.requireCol(0, "name", "Table");
 	std::string modulePath = modulePaths();	/* N-19：模块根目录单点 */
 	std::string scriptPath = firstExistingModule(modulePath, mtName + ".lua");
@@ -568,6 +592,8 @@ void HwFactory::createNativeVars(const mt::MatrixObject& matrix, const std::stri
 		if (driver == nullptr) {
 			throw IllegalArgumentException("No native driver registered for table '" + mtName + "'");
 		}
+		/* 只在热插批次内收紧资源路径；启动期结构脚本按可信本地路径处理。 */
+		driver->setHotSql(hotSqlMode_);
 		registry_.add(name, MtVars_Native::Factory(std::move(driver), name,
 			[metaProv](bool forDestroy) {
 				return forDestroy ? metaProv->collectForDestroy() : metaProv->collect();

@@ -31,6 +31,10 @@ class HwFactory {
 	DaemonRegistry& daemons_;
 	MetaRegistry& metas_;
 	HALManager& hal_;
+	/* 热 SQL 提交期标志：HotSqlService 在装配批次前置位、结束后还原。
+	 * 原生驱动据此收紧来自不可信输入的资源路径（Nns.path）。启动期结构
+	 * 脚本保持可信本地路径语义。 */
+	bool hotSqlMode_ = false;
 
 	/* 重名前置判重（资源泄漏防线：Lua 状态机/共享槽先申请，此处先确认可注册）。
 	 * 文案走 duplicateHwNameMsg 单点：本检查是 HwRegistry::add 的**提前版**，同一次
@@ -94,6 +98,10 @@ public:
 			MetaRegistry& metas,
 			HALManager& hal)
 		: registry_(registry), daemons_(daemons), metas_(metas), hal_(hal) {}
+
+	/* 热 SQL 装配上下文（RAII 由 HotSqlService 负责还原）。 */
+	void setHotSqlMode(bool hot) { hotSqlMode_ = hot; }
+	bool hotSqlMode() const { return hotSqlMode_; }
 
 	/* 全部硬变量创建：声明序，Alias/Vars/Lua/Daemon 分派 */
 	void createHardVars(const std::deque<mt::MatrixObject>& matrices);

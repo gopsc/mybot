@@ -35,6 +35,27 @@ inline std::string installedModulePath() {
 	return candidate;
 }
 
+/* 宿主状态根：BOT4CJ_STATE_DIR > $XDG_STATE_HOME/mybot >
+ * $HOME/.local/state/mybot > ./mybot-state。hal.cpp 的 state_read/state_write
+ * 与 Nns 模型根共用本单点，避免两处各自实现导致漂移。 */
+inline std::string stateRoot() {
+	if (auto v = getEnvVar("BOT4CJ_STATE_DIR"); v && !v->empty()) { return *v; }
+	if (auto v = getEnvVar("XDG_STATE_HOME"); v && !v->empty()) {
+		return *v + "/mybot";
+	}
+	if (auto v = getEnvVar("HOME"); v && !v->empty()) {
+		return *v + "/.local/state/mybot";
+	}
+	return "./mybot-state";
+}
+
+/* Nns 等模型文件的根：显式 BOT4CJ_MODEL_DIR 优先，否则落在状态根下。
+ * 热 SQL 的相对 path 按本根解析（绝对路径在热插路径被拒绝）。 */
+inline std::string modelRoot() {
+	if (auto v = getEnvVar("BOT4CJ_MODEL_DIR"); v && !v->empty()) { return *v; }
+	return stateRoot();
+}
+
 /* N-19：Lua 驱动模块根目录——BOT4CJ_MODULE_PATH（':' 分段）。
  * 未显式设置时优先当前目录的 ./modules（仓库/开发用法），不存在再回退安装布局
  * 的 share/mybot/modules；两者都没有则保留 ./modules 作为报错路径。 */

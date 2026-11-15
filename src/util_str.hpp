@@ -88,6 +88,24 @@ bool anyWordOf(const std::string& name, Pred pred) {
 	return false;
 }
 
+/* ---- 安全模块名判定 ----
+ * 结构 SQL 的表名会被拼成 modules/<表名>.lua 并交给 LuaJIT 直接 loadfile，
+ * 因此它同时是“驱动模块文件名”而不是任意 SQL 标识符。允许字母/数字/下划线/
+ * 连字符（仓库内驱动名均落在该集合），但拒绝路径分隔符、'.'、'\\' 与 NUL：
+ * 这样 "../evil"、"/tmp/evil"、"a/b" 等无法越出模块根。
+ * 注意不要把本判据和 isSafeIdent 混用：表达式标识符不允许连字符，而模块名
+ * 允许（如历史/第三方驱动）；二者共用会制造新的不可引用变量。 */
+inline bool isSafeModuleName(const std::string& s) {
+	if (s.empty()) { return false; }
+	const unsigned char first = static_cast<unsigned char>(s[0]);
+	if (!(std::isalpha(first) != 0 || s[0] == '_')) { return false; }
+	for (char c : s) {
+		const unsigned char u = static_cast<unsigned char>(c);
+		if (!(std::isalnum(u) != 0 || c == '_' || c == '-')) { return false; }
+	}
+	return true;
+}
+
 inline std::string trim(const std::string& s) {
 	std::size_t b = 0, e = s.size();
 	while (b < e && (s[b] == ' ' || s[b] == '\t' || s[b] == '\r' || s[b] == '\n')) ++b;

@@ -36,11 +36,29 @@ std::string firstExistingModule(const std::string& paths, const std::string& rel
 }
 
 std::string resolveDaemonChunk(const std::string& chunk, const std::string& modulePath) {
-	if (chunk.rfind('/', 0) == 0) { return chunk; }
-	if (chunk.rfind(modulePath + "/", 0) == 0) { return chunk; }
-	/* 阶段 5：旧写法（"modules/..."，不带 "./"）兼容分支经全仓 robots/、
-	 * docs/ 核查无依赖，已删除——这类 chunk 现走 firstExistingModule，
-	 * 按普通相对 chunk 在模块路径下解析。 */
+	/* 启动期结构脚本同样按“数据”处理（docs/reference.md）：chunk 只能是
+	 * 模块根下的相对路径。旧实现放行绝对路径与 modulePath 前缀（后者还可
+	 * 夹带 ".."），等于让结构 SQL 直接选择任意 Lua 文件执行。热插路径早已
+	 * 在 HotSqlPlanner 里做同等限制，这里补齐启动期。 */
+	if (chunk.empty()) {
+		throw IllegalArgumentException("Daemon chunk is empty; expected a relative path"
+			" under the module root (e.g. 'lib/daemon_probe.lua')");
+	}
+	switch (checkRelPath(chunk)) {
+	case RelPathCheck::OK:
+		break;
+	case RelPathCheck::ABSOLUTE:
+		throw IllegalArgumentException("Daemon chunk must be relative to the module root,"
+			" absolute path rejected: " + chunk);
+	case RelPathCheck::NUL:
+		throw IllegalArgumentException("Daemon chunk contains NUL: " + chunk);
+	case RelPathCheck::EMPTY_OR_DOT:
+		throw IllegalArgumentException("Daemon chunk contains an empty or '.' segment: "
+			+ chunk);
+	case RelPathCheck::DOTDOT:
+		throw IllegalArgumentException("Daemon chunk must not traverse outside the module"
+			" root: " + chunk);
+	}
 	return firstExistingModule(modulePath, chunk);
 }
 

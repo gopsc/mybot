@@ -361,6 +361,14 @@ Table processCreate(const std::string& statement) {
 	pos += 5;
 	Table table;
 	table.name = readIdentifier(statement, pos, "table name");
+	/* 表名同时是 modules/<表名>.lua 的模块名。结构脚本按“数据”处理时
+	 * （docs/reference.md），带路径/穿越的表名会让 active() 直接加载模块树
+	 * 外的 Lua 代码。这里在解析期拒绝，HwFactory 侧另有一道防御性检查。 */
+	if (!isSafeModuleName(table.name)) {
+		throw IllegalArgumentException("SQL: table name '" + table.name
+			+ "' is not a safe module name (letters/digits/_/-, starting with a letter or _;"
+			" path separators, '.', '..' and NUL are rejected)");
+	}
 	skipSpaceComments(statement, pos);
 	if (pos >= statement.size() || statement[pos] != '(') {
 		throw IllegalArgumentException("SQL: expected '(' after table name");
