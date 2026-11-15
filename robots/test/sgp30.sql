@@ -2,8 +2,9 @@
  * SGP30 空气质量测试（配套 sgp30.mt）
  * 直连变量（sgp30-0）单次读 + 万能守护（sgp-d0）连续采样双路径
  * SGP30 要求采样间隔 >= 1s，否则内部基线算法失效——两路节拍均按 1s 配
- * baseline 列 = 基线持久化文件路径：build 恢复 + call 每小时存盘 + destroy 存盘；
- * 守护路径下基线持久化可用（驱动自己写文件），湿度补偿不可用（引用机制不走守护）
+ * baseline 列 = 基线持久化文件名（BOT4CJ_STATE_DIR 根下；build 恢复 +
+ * call 每小时存盘 + destroy 存盘）；守护路径下基线持久化可用（Daemon 额外列
+ * 透传），湿度补偿不可用（引用机制不走守护）
  * 湿度补偿（可选）：先起 SHT3X 守护（fields=T|RH），再把 sht 列填守护名、
  * t_field/rh_field 填 v0/v1（直连路径每次 play 注入实时快照）
  */
@@ -13,7 +14,7 @@ CREATE TABLE I2C (
 );
 INSERT INTO I2C (name, path) VALUES ('i2c-1', '/dev/i2c-1');
 
-/* SGP30：地址固定 0x58；baseline 列填 '-' 关闭持久化（或给路径开启） */
+/* SGP30：地址固定 0x58；baseline 列填 '-' 关闭持久化（或给文件名开启） */
 CREATE TABLE SGP30 (
 	name     String,
 	I2C      String,
@@ -26,8 +27,10 @@ CREATE TABLE SGP30 (
 INSERT INTO SGP30 (name, I2C, address, baseline, sht, t_field, rh_field)
   VALUES ('sgp30-0', '$i2c-1', '0x58', '-', '-', '-', '-');
 -- 开启持久化 + 湿度补偿示例（需同文件先定义 sht-d0 守护）：
+-- baseline 是 BOT4CJ_STATE_DIR（缺省 $XDG_STATE_HOME/mybot 或
+-- $HOME/.local/state/mybot）根下的单个文件名，不是任意绝对路径。
 -- INSERT INTO SGP30 (name, I2C, address, baseline, sht, t_field, rh_field)
---   VALUES ('sgp30-0', '$i2c-1', '0x58', '/tmp/sgp30-baseline.bin', 'sht-d0', 'v0', 'v1');
+--   VALUES ('sgp30-0', '$i2c-1', '0x58', 'sgp30-baseline.bin', 'sht-d0', 'v0', 'v1');
 
 CREATE TABLE Timer (
 	name String

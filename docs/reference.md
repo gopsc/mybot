@@ -78,6 +78,7 @@ TCP 动作源、MCP/agent、Web SSH 与 sim 相关入口已从本分支移除；
 | `BOT4CJ_ALLOW_PTRACE` | 设为 `1` 时 `mybot` 启动不再执行 `prctl(PR_SET_DUMPABLE, 0)`，进程保持可被同 UID `ptrace`/core dump；仅调试用。sanitizer 构建编译期跳过这一步 |
 | `BOT4CJ_HAL_BACKEND` | **仅独立 LuaJIT 回退路径**：`modules/lib/hal_backend_<名>.lua`（缺省 `glibc`）。宿主运行期走 C++ HAL，不读本变量 |
 | `BOT4CJ_PWM_SYSFS_ROOT` | 宿主 C++ HAL 的 PWM sysfs 根目录，缺省 `/sys/class/pwm`；用于测试、容器或非标准挂载 |
+| `BOT4CJ_STATE_DIR` | 宿主状态文件根目录（当前用于 SGP30 baseline）；缺省 `$XDG_STATE_HOME/mybot` 或 `$HOME/.local/state/mybot`，都未设置时 `./mybot-state`。只允许根下单个安全文件名（字母/数字/`_`/`-`/`.`），不接受目录或绝对路径 |
 | `BOT4CJ_TRACE_FDS` | 仅守门用：`mybot_tests` 专用测试钩子（生产二进制不含） |
 
 ## 中断语义（单进程）

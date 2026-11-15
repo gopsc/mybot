@@ -279,6 +279,7 @@ add_executable(mybot_tests
   test/cpp/test_sql_engine.cpp
   test/cpp/test_native_drivers.cpp
   test/cpp/test_hal_speaker.cpp
+  test/cpp/test_hal_state.cpp
   test/cpp/test_nns.cpp
   test/cpp/test_ftdi.cpp
   src/mtmerge_core.cpp

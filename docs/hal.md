@@ -58,6 +58,7 @@ UART 在门面内直接实现，GPIO/PWM 经 `__hal_call` 转 C++ HAL：
 | UART | termios raw 8N1 + 非阻塞（VMIN=0/VTIME=1）；另有多条易踩坑约束，见下方要点 |
 | PWM | sysfs（`/sys/class/pwm/pwmchipN/pwmM`）；宿主 C++ HAL 与 `HAL_ffi` 回退共用同一路径与写序：duty=0 → period → duty_cycle（否则降频被 EINVAL 拒绝）；export 前置校验 npwm 范围 |
 | Speaker/ALSA | 宿主 C++ HAL 用 `dlopen` 动态加载 `libasound.so.2`；`speaker_open` 固定 S16_LE / RW_INTERLEAVED / 单声道 / 0.5s 缓冲；`speaker_write` 收原始 S16_LE 字节（单次 ≤1 MiB），返回写入帧数或负 errno；`speaker_prepare` / `speaker_drain` / `speaker_close` 返回 ALSA rc |
+| 宿主状态文件 | `state_read` / `state_write` 只操作 `BOT4CJ_STATE_DIR` 根下的单个安全文件名（拒绝目录/绝对路径/`..`/NUL），打开走 `O_NOFOLLOW`，新建文件 0600；`state_read` 返回字节数组（缺失为 null），`state_write` 接收字节数组；单文件 ≤64 KiB。当前用于 SGP30 baseline 持久化 |
 
 UART 的易踩坑约束：
 
@@ -74,9 +75,9 @@ UART 的易踩坑约束：
 | `true` / `false` | `i2c_set_addr`、`i2c_write_reg`、`gpio_set_value`、`pwm_export`/`pwm_enable`/`pwm_set_polarity`/`pwm_unexport`（`pwm_config` 成功返回 `true, period_ns, duty_ns`） |
 | `0` / `-1` | `i2c_write_multi`、`i2c_write_reg16`、`spi_setup`、`spi_write`、`spi_write3`、`spi_write_multi`、`uart_close`、`uart_flush` |
 | 值 / `-1` | `i2c_read_reg`、`i2c_read_multi`、`i2c_read_reg16`、`i2c_read`、`spi_read`、`spi_read_multi`、`gpio_get_value`、`uart_open`（fd）、`gpio_request_line`（fd）、`speaker_open`（handle）、`speaker_write`（写入帧数） |
-| 0 / 负 errno | `speaker_prepare`、`speaker_drain`、`speaker_close`（ALSA rc；0 成功） |
+| 0 / 负 errno | `speaker_prepare`、`speaker_drain`、`speaker_close`（ALSA rc；0 成功）、`state_write`（0 成功，-1 失败） |
 | 字符串 | `speaker_errmsg`（ALSA 错误码 → 文本） |
-| 表 / `nil` | `i2c_read_multi_bytes`、`i2c_read_bytes`、`spi_xfer_full`、`uart_read`（空表 = 超时无数据；`nil` = 读错误或参数非法） |
+| 表 / `nil` | `i2c_read_multi_bytes`、`i2c_read_bytes`、`spi_xfer_full`、`uart_read`（空表 = 超时无数据；`nil` = 读错误或参数非法）、`state_read`（字节数组；文件不存在为 `nil`） |
 | 无返回值 | `i2c_close`、`spi_close`、`gpio_free_line`、`milli_sleep`；`uart_write` 返回写入字节数或 `-1` |
 
 完整语义以 `modules/lib/HAL.lua` 与 `modules/lib/hal/*.lua` 各函数注释为准。`virtbus.lua` 逐函数复刻上述契约（含失败返回值），供无硬件 E2E 使用。

@@ -17,6 +17,7 @@
 -- 的 AH 湿度命令（独立公式交叉、去重重发/坏帧重试）、测量 6 字节帧与
 -- CRC_OK 降级、启动相→成熟切换、负路径；HAL.sys 内存文件 mock 下的基线
 -- 周期存盘/destroy 存盘/重建恢复/全 0 不覆盖；destroy 零事务。
+-- 宿主 state_read/state_write 分支见 test_sgp30_host_state.lua。
 
 local tester = dofile("test/lib/tester.lua")
 local check, expect_ok, expect_err = tester.check, tester.expect_ok, tester.expect_err

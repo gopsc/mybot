@@ -245,6 +245,15 @@ end
 function speaker_errmsg(rc)
     return bridge("speaker_errmsg", tonumber(rc))
 end
+-- 宿主状态文件：只接受 BOT4CJ_STATE_DIR 根下的单个安全文件名。state_read
+-- 返回字节数组（文件不存在返回 nil），state_write 接收字节数组并返回 0/-1。
+-- 这是 SGP30 baseline 等小型持久化状态的受控出口；不是通用文件 API。
+function state_read(name)
+    return bridge("state_read", name)
+end
+function state_write(name, data)
+    return report(bridge("state_write", name, data))
+end
 -- GPIO/PWM 走宿主 C++ HAL（gpiod uAPI / sysfs），与 i2c/spi/uart 同一条
 -- __hal_call 桥。返回码按 FFI 后端契约归一：失败 -1/false，成功 int/bool。
 function gpio_request_line(chip, offset, direction, default_value, active_low)

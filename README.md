@@ -32,7 +32,7 @@ cmake --build build -j4
 ./build/mybot --help
 ```
 
-当前基线：**599 个 C++ 单测通过**；ctest 全部通过。
+当前基线：**602 个 C++ 单测通过**；ctest 全部通过。
 
 ## 快速开始
 

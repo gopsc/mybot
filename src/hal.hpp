@@ -64,6 +64,9 @@ public:
 	/* Speaker：一次 speaker_write 的原始 S16_LE 单声道字节上限。Speaker.lua
 	 * 按 4096 帧（8192B）分块写，1 MiB 足够容纳整块且防止误传大缓冲区。 */
 	static constexpr int kSpeakerMaxBytes = 1024 * 1024;
+	/* 宿主状态文件（当前用于 SGP30 baseline 的 6 字节持久化）：单文件上限。
+	 * 路径只允许 state 根下的单个文件名，不允许目录/绝对路径/traversal。 */
+	static constexpr int kStateMaxBytes = 64 * 1024;
 
 private:
 	struct Resource;
@@ -122,6 +125,10 @@ private:
 	Json opSpeakerDrain(const Json& handle);
 	Json opSpeakerClose(const Json& handle);
 	Json opSpeakerErrmsg(const Json& code);
+	/* 宿主状态文件：仅允许 BOT4CJ_STATE_DIR 根下的单个安全文件名。
+	 * state_read 返回字节数组（缺失返回 null），state_write 接收字节数组。 */
+	Json opStateRead(const Json& name);
+	Json opStateWrite(const Json& name, const Json& data);
 	Json opCloseHandle(const Json& handle);
 	Json opSleepMs(const Json& ms);
 

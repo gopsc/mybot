@@ -1,6 +1,7 @@
 #include "hal.hpp"
 
 #include <algorithm>
+#include <array>
 #include <arpa/inet.h>
 #include <cctype>
 #include <cerrno>
@@ -9,6 +10,7 @@
 #include <cstring>
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <filesystem>
 #include <linux/gpio.h>
 #include <linux/i2c-dev.h>
 #include <linux/i2c.h>
@@ -19,6 +21,7 @@
 #include <signal.h>
 #include <stdexcept>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <termios.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -159,6 +162,64 @@ std::string pwmChipPath(int chip, const char* attribute) {
 std::string pwmAttrPath(int chip, int channel, const char* attribute) {
 	return pwmRoot() + "/pwmchip" + std::to_string(chip)
 		+ "/pwm" + std::to_string(channel) + "/" + attribute;
+}
+
+/* ---- 宿主状态文件（SGP30 baseline 等小型持久化状态）----
+ * 只允许 state 根下的**单个安全文件名**：拒绝绝对路径、目录分隔符、'.'/'..'
+ * 与 NUL。这样即使结构 SQL / 热 SQL 提供了恶意值，也无法越出根目录；根目录
+ * 由 BOT4CJ_STATE_DIR 指定（缺省 $XDG_STATE_HOME/mybot 或
+ * $HOME/.local/state/mybot）。文件打开走 O_NOFOLLOW，拒绝最后一段软链。 */
+std::string stateDir() {
+	if (auto v = getEnvVar("BOT4CJ_STATE_DIR"); v && !v->empty()) { return *v; }
+	if (auto v = getEnvVar("XDG_STATE_HOME"); v && !v->empty()) {
+		return *v + "/mybot";
+	}
+	if (auto v = getEnvVar("HOME"); v && !v->empty()) {
+		return *v + "/.local/state/mybot";
+	}
+	return "./mybot-state";
+}
+
+bool isSafeStateName(const std::string& name) {
+	if (name.empty() || name.size() > 128 || name == "." || name == "..") {
+		return false;
+	}
+	for (char ch : name) {
+		const unsigned char c = static_cast<unsigned char>(ch);
+		if (!(std::isalnum(c) != 0 || ch == '_' || ch == '-' || ch == '.')) {
+			return false;
+		}
+	}
+	return true;
+}
+
+std::string stateFilePath(const std::string& name) {
+	if (!isSafeStateName(name)) {
+		throw std::runtime_error("state file name must be a single safe component"
+			" (letters/digits/_/-/.), got '" + name + "'");
+	}
+	return (std::filesystem::path(stateDir()) / name).string();
+}
+
+void ensureStateDir() {
+	const std::filesystem::path root(stateDir());
+	std::error_code ec;
+	const bool existed = std::filesystem::exists(root, ec);
+	if (ec) {
+		throw std::runtime_error("cannot inspect state directory '" + root.string()
+			+ "': " + ec.message());
+	}
+	if (!existed) {
+		std::filesystem::create_directories(root, ec);
+		if (ec) {
+			throw std::runtime_error("cannot create state directory '" + root.string()
+				+ "': " + ec.message());
+		}
+		(void)::chmod(root.c_str(), 0700);
+	}
+	if (!std::filesystem::is_directory(root, ec) || ec) {
+		throw std::runtime_error("state path is not a directory: '" + root.string() + "'");
+	}
 }
 
 bool readSysfs(const std::string& path, std::string& out) {
@@ -687,7 +748,7 @@ Json HALManager::call(const std::string& operation, const std::vector<Json>& arg
 		"tcp_open", "tcp_write", "tcp_read", "http_open", "http_request",
 		"shell_open", "shell_run", "speaker_open", "speaker_write",
 		"speaker_prepare", "speaker_drain", "speaker_close", "speaker_errmsg",
-		"close_handle", "sleep_ms",
+		"state_read", "state_write", "close_handle", "sleep_ms",
 	};
 	bool supported = false;
 	for (const char* name : known) {
@@ -779,6 +840,8 @@ Json HALManager::call(const std::string& operation, const std::vector<Json>& arg
 		if (operation == "speaker_drain") { return opSpeakerDrain(arg(0)); }
 		if (operation == "speaker_close") { return opSpeakerClose(arg(0)); }
 		if (operation == "speaker_errmsg") { return opSpeakerErrmsg(arg(0)); }
+		if (operation == "state_read") { return opStateRead(arg(0)); }
+		if (operation == "state_write") { return opStateWrite(arg(0), arg(1)); }
 		if (operation == "close_handle") { return opCloseHandle(arg(0)); }
 		if (operation == "sleep_ms") { return opSleepMs(arg(0)); }
 	} catch (const std::exception& exc) {
@@ -1651,6 +1714,88 @@ Json HALManager::opSpeakerClose(const Json& handleValue) {
 Json HALManager::opSpeakerErrmsg(const Json& codeValue) {
 	const int code = asInt(codeValue, -1000000, 1000000, "speaker error code");
 	return JsonString(alsaErrorText(code));
+}
+
+Json HALManager::opStateRead(const Json& nameValue) {
+	const std::string name = asStr(nameValue, "state file name");
+	const std::string path = stateFilePath(name);
+	const int fd = ::open(path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+	if (fd < 0) {
+		if (errno == ENOENT) { return JsonNull(); }
+		throw std::runtime_error("state_read('" + name + "'): " + errnoText(errno));
+	}
+	FdGuard guard(fd);
+	struct stat st{};
+	if (::fstat(fd, &st) != 0) {
+		throw std::runtime_error("state_read('" + name + "'): fstat failed: " + errnoText(errno));
+	}
+	if (!S_ISREG(st.st_mode)) {
+		throw std::runtime_error("state_read('" + name + "'): not a regular file");
+	}
+	if (st.st_size > kStateMaxBytes) {
+		throw std::runtime_error("state_read('" + name + "'): file exceeds "
+			+ std::to_string(kStateMaxBytes) + " bytes");
+	}
+	std::string data;
+	data.reserve(static_cast<std::size_t>(st.st_size));
+	std::array<char, 4096> buffer{};
+	for (;;) {
+		const ssize_t n = ::read(fd, buffer.data(), buffer.size());
+		if (n < 0) {
+			if (errno == EINTR) { continue; }
+			throw std::runtime_error("state_read('" + name + "'): read failed: " + errnoText(errno));
+		}
+		if (n == 0) { break; }
+		data.append(buffer.data(), static_cast<std::size_t>(n));
+		if (data.size() > static_cast<std::size_t>(kStateMaxBytes)) {
+			throw std::runtime_error("state_read('" + name + "'): file exceeds "
+				+ std::to_string(kStateMaxBytes) + " bytes");
+		}
+	}
+	Json out = JsonArray();
+	for (unsigned char byte : data) { out.add(JsonInt(byte)); }
+	return out;
+}
+
+Json HALManager::opStateWrite(const Json& nameValue, const Json& dataValue) {
+	const std::string name = asStr(nameValue, "state file name");
+	const std::string path = stateFilePath(name);
+	if (!dataValue.isArr()
+			|| dataValue.size() > static_cast<std::size_t>(kStateMaxBytes)) {
+		throw std::runtime_error("state_write('" + name + "'): data must be a byte array"
+			" of at most " + std::to_string(kStateMaxBytes) + " bytes");
+	}
+	std::string bytes;
+	bytes.reserve(dataValue.size());
+	for (std::size_t i = 0; i < dataValue.size(); ++i) {
+		const Json& item = dataValue.at(i);
+		if (!item.isInt() || item.getInt() < 0 || item.getInt() > 255) {
+			throw std::runtime_error("state_write('" + name + "'): data["
+				+ std::to_string(i) + "] must be an integer 0..255");
+		}
+		bytes.push_back(static_cast<char>(item.getInt()));
+	}
+	ensureStateDir();
+	const int fd = ::open(path.c_str(),
+		O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+	if (fd < 0) {
+		throw std::runtime_error("state_write('" + name + "'): " + errnoText(errno));
+	}
+	FdGuard guard(fd);
+	std::size_t written = 0;
+	while (written < bytes.size()) {
+		const ssize_t n = ::write(fd, bytes.data() + written, bytes.size() - written);
+		if (n < 0) {
+			if (errno == EINTR) { continue; }
+			throw std::runtime_error("state_write('" + name + "'): write failed: "
+				+ errnoText(errno));
+		}
+		if (n == 0) {
+			throw std::runtime_error("state_write('" + name + "'): short write");
+		}
+		written += static_cast<std::size_t>(n);
+	}
+	return JsonInt(0);
 }
 
 Json HALManager::opCloseHandle(const Json& handleValue) {

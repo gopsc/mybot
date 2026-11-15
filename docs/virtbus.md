@@ -617,7 +617,7 @@ vbus.attach("MPU6050@0x68", 0x68, imu)
 
 ### `sgp30_virt`：首个 16 位命令字带读写数据载荷/IAQ 启动相/基线持久化命令式 I2C E2E
 
-- **守护**：CO2EQ:f/TVOC:f/CRC_OK 三字段（湿度补偿与 baseline 路径在守护原始串不可用，本用例不配）
+- **守护**：CO2EQ:f/TVOC:f/CRC_OK 三字段（湿度补偿不可用；baseline 可由 Daemon 额外列透传，本用例未配）
 - **build**：Measure_test 0x2032→222ms 真实睡眠→3B 自检字+CRC 兼在位甄别→Init_air_quality 0x2003→12ms
 - **call**：Measure 0x2008→14ms 真实等待→6B 双 CRC 帧解析（坏 CRC 不报错仅 CRC_OK=0 降级）
 - **模型**：真算 CRC-8/写载荷内嵌 CRC 逐字校验/三应答门 220·12·10ms/15s IAQ 启动相与 400~700ppm、40~200ppb 正弦
@@ -846,12 +846,12 @@ fd 生命周期回归（审计缺口 #4）：用 `virtbus.fd_count()` 快照在�
 - **call**：双段 0x48,00,58,00+双 3B 读与 20ms 节拍、ffi int64 独立参考复算暖机/低温二阶/极低温追加项三分支逐位对照/OSR 降档 0x40/0x50 与 2ms/p0=1000 海拔/virt_tick 两拍/八路负路径
 - **destroy**：零事务（旧 312 行手写全局桩整体替换）
 
-### `test/test_sgp30.lua`（LuaJIT，146 断言）——首个 16 位命令字带读写载荷/IAQ 启动相/基线持久化命令式器件
+### `test/test_sgp30.lua`（LuaJIT，150 断言）——首个 16 位命令字带读写载荷/IAQ 启动相/基线持久化命令式器件
 
 - **模型**：CRC-8 真算向量与模型/驱动/测试三方交叉/三应答门 220·12·10ms 边界与读后失效/15s 启动相 400/0 强制与成熟切换/帧长表（纯命令 2B/SET_AH 恰 5B/SET_BASE 恰 8B）/写载荷内嵌 CRC 逐字校验（坏 CRC 不更新 AH/基线）/AH ticks Sensirion 公式独立复算/六类钩子/reset 保留钩子/virt_tick 确定性峰点
 - **build**：「0x2032→222ms→3B 自检→0x2003→12ms」234ms 序列与基线恢复（无文件/坏 CRC/短文件/全 0 四跳过分支）及非 table/缺 fd/缺 addr/fd=99/自检写读失败/坏自检字/corrupt CRC/Init 写失败负路径
 - **call**：启动相与成熟测量/AH 补偿 5B 帧与同值去重变化重发/写失败下拍重试/RH 越界/坏 CRC 降级/测量写读失败
-- **基线持久化**：3600s 周期落盘 6B/60s 不重复/destroy 再存/重建 Set_baseline 8B 与存盘逐字节一致/全 0 不落盘（HAL.sys 内存文件 mock + os.time 桩；旧 337 行手写桩整体替换）
+- **基线持久化**：3600s 周期落盘 6B/60s 不重复/destroy 再存/重建 Set_baseline 8B 与存盘逐字节一致/全 0 不落盘（HAL.sys 内存文件 mock + os.time 桩；旧 337 行手写桩整体替换）；宿主运行期的 state_read/state_write 路径由 `test/cpp/test_hal_state.cpp` 覆盖
 
 ### `test/test_ina219.lua`（LuaJIT，137 断言）——首个字寻址 16 位寄存器器件
 

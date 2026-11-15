@@ -18,13 +18,15 @@
 --     VALUES ('sgp30-0', 'i2c-1', '0x58', '-', '-', '-', '-');
 --
 -- 列说明：
---   baseline = 基线持久化文件路径（'-' 或缺省 = 不持久化，向后兼容）。
+--   baseline = 基线持久化文件名（'-' 或缺省 = 不持久化，向后兼容）。
+--     宿主 mybot 下文件名落在 BOT4CJ_STATE_DIR（缺省
+--     $XDG_STATE_HOME/mybot 或 $HOME/.local/state/mybot，都未设时
+--     ./mybot-state）根目录；只接受单个安全文件名，不允许目录/绝对路径。
+--     C++ HAL 的 state_read/state_write 负责 O_NOFOLLOW 打开与 0600 创建；
+--     独立 luajit 测试仍用 HAL.sys 的 ffi open/read/write mock（无宿主状态根）。
 --     build 自检通过后若文件存在且 CRC 合法则 Set_baseline 恢复（免约 12h
 --     重学习）；call 期间每 3600s 自动 Get_baseline 存盘一次，destroy 再存
---     一次；两字均 0（尚未学习）不存盘。NOTE: 框架沙箱中和的是 Lua stdlib
---     的 io.*，本驱动经 HAL.sys（ffi open/read/write，HAL 本就 cdef 了这批
---     原语，走同一间接层可离线 mock）读写该 6 字节小文件——能力层级与总线
---     访问相同，路径属结构脚本配置，可信度同 I2C 的 /dev/i2c-N。
+--     一次；两字均 0（尚未学习）不存盘。
 --   sht/t_field/rh_field = 湿度补偿（可选）：sht 填另一硬件变量名（通常是
 --     SHT3X 守护），经引用机制每次 play 注入其实时快照；t_field/rh_field
 --     填快照里的温度(°C)/相对湿度(%)键名（守护发布为 v0/v1...）。齐备时
@@ -47,6 +49,9 @@ local HAL = dofile(mpath.resolve("lib/HAL.lua"))
 dofile(mpath.resolve("lib/drv_common.lua"))
 local bitc = dofile(mpath.resolve("bitcompat.lua"))
 local ffi = require("ffi")		-- 基线文件缓冲区（HAL 已完成 cdef）
+-- 宿主运行期使用 C++ HAL 的受限状态文件出口（BOT4CJ_STATE_DIR 根下的单个
+-- 文件名）；独立 luajit 测试没有这两个全局，继续走 HAL.sys 的 ffi mock。
+local HOST_STATE = type(state_read) == "function" and type(state_write) == "function"
 local unpack = unpack or table.unpack		-- LuaJIT 5.1 / Lua 5.4 双兼容
 
 -- 调试开关：传感器周期读取，默认关闭逐次打印
@@ -81,7 +86,7 @@ local O_WRONLY_CREAT_TRUNC = 1 + 0x40 + 0x200
 local FILE_MODE = 0x1A4
 
 -- 模块级配置（build 写入，跨 call 保持于状态机内存，destroy 后废弃）
-local baseline_path		-- 基线文件路径（nil = 不持久化）
+local baseline_path		-- 基线状态文件名（nil = 不持久化）
 local last_save_s		-- 上次存盘时刻（os.time 秒）
 local last_ah_ticks		-- 上次下发的绝对湿度 ticks（nil = 尚未下发）
 
@@ -132,6 +137,16 @@ local function baseline_save(fd)
 	local b, w1, w2 = baseline_get_raw(fd)
 	if b == nil then dbg("SGP30 baseline: read failed, skip save") return end
 	if w1 == 0 and w2 == 0 then dbg("SGP30 baseline: all-zero, skip save") return end
+	if HOST_STATE then
+		local n = state_write(baseline_path, b)
+		if n == 0 then
+			last_save_s = os.time()
+			dbg("SGP30 baseline saved: " .. baseline_path)
+		else
+			dbg("SGP30 baseline: state write failed")
+		end
+		return
+	end
 	local ffd = HAL.sys.open(baseline_path, O_WRONLY_CREAT_TRUNC + HAL.O_CLOEXEC, FILE_MODE)
 	if ffd < 0 then dbg("SGP30 baseline: open for write failed") return end
 	local buf = ffi.new("uint8_t[6]")
@@ -148,14 +163,24 @@ end
 
 -- 恢复（build 调用）：文件不存在/短文件/CRC 不合法/全 0 都安全跳过
 local function baseline_restore(fd)
-	local ffd = HAL.sys.open(baseline_path, O_RDONLY + HAL.O_CLOEXEC)
-	if ffd < 0 then return "no file" end
-	local buf = ffi.new("uint8_t[6]")
-	local n = HAL.sys.read(ffd, buf, 6)
-	HAL.sys.close(ffd)
-	if n ~= 6 then return "no/bad file" end
-	local b = {}
-	for i = 0, 5 do b[i + 1] = tonumber(buf[i]) end
+	local b
+	if HOST_STATE then
+		local raw = state_read(baseline_path)
+		if raw == -1 then
+			error("SGP30 baseline state read failed: " .. tostring(HAL.last_error()))
+		end
+		if type(raw) ~= "table" or #raw ~= 6 then return "no/bad file" end
+		b = raw
+	else
+		local ffd = HAL.sys.open(baseline_path, O_RDONLY + HAL.O_CLOEXEC)
+		if ffd < 0 then return "no file" end
+		local buf = ffi.new("uint8_t[6]")
+		local n = HAL.sys.read(ffd, buf, 6)
+		HAL.sys.close(ffd)
+		if n ~= 6 then return "no/bad file" end
+		b = {}
+		for i = 0, 5 do b[i + 1] = tonumber(buf[i]) end
+	end
 	local w1 = b[1] * 256 + b[2]
 	local w2 = b[4] * 256 + b[5]
 	if crc8(w1) ~= b[3] or crc8(w2) ~= b[6] then return "bad CRC" end

@@ -77,7 +77,7 @@
 
 | 驱动 | 说明 |
 | --- | --- |
-| `SGP30` | 空气质量 CO2eq/TVOC（I2C） |
+| `SGP30` | 空气质量 CO2eq/TVOC（I2C）；baseline 持久化经宿主 `BOT4CJ_STATE_DIR` 下的受限状态文件 |
 | `SDS011` | 激光颗粒物（UART） |
 | `MHZ19` | CO2 红外（UART） |
 | `MAX30102` | 心率/血氧 PPG（环形 FIFO） |
