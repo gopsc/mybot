@@ -801,6 +801,20 @@ def test_bad_or_oversized_utf8_inputs(workspace, capsys, data, target):
     assert code == 1 and not result["ok"]
 
 
+def test_cli_runs_included_merge_from_declaring_directory(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (tmp_path / "main.mt").write_text("@Include\npath;\nsub/part.mt;\n@\n", encoding="utf-8")
+    (sub / "part.mt").write_text("@Merge\npath;\nleaf.mt;\n@\n@Action\nrelay0.test;\n1;\n@\n",
+                                  encoding="utf-8")
+    (sub / "leaf.mt").write_text("@Action\ntimer-0.delay;\n1;\n@\n", encoding="utf-8")
+    (tmp_path / "leaf.mt").write_text("@Action\ntimer-0.delay;\n99;\n@\n", encoding="utf-8")
+    result = run_cli(tmp_path, "run", "--robot", ASSETS / "robots/relay-test.sql",
+                     "--input", "main.mt", "--timeout", "10")
+    assert result.returncode == 0, result.stderr
+    assert [output["slept"] for output in json.loads(result.stdout)["outputs"]] == [1, 1]
+
+
 def test_text_sql_limit_and_json_helpers(workspace, capsys):
     code, result, _ = invoke(capsys, "query", "--robot", workspace / "robot.sql", "--sql", "x" * (MAX_BODY + 1))
     assert code == 1 and "byte limit" in result["error"]["message"]

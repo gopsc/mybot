@@ -343,6 +343,7 @@ frag/beep.mt  5;
   `@Reflex(name)` 等定义；只能出现在最外层，不能放进任何 body。
   只能引用**动作脚本所在目录内**的相对 `.mt` 路径（拒绝绝对路径、`..`、反斜杠、冒号、
   软链/junction）；循环引用报错，非递归重复复制合法，但复制后定义重名仍报错。
+  Include 和 Merge 的相对路径始终以声明该指令的文件所在目录为基准；被 Include 的块保留此来源，包括 body 内的局部 Merge。
 - 顶层 `@Merge`：列允许 `path` 与可选 `phase`（整数，行相位偏移，不是时间或并行执行）。
   从片段合并 `@Alias` / `@Vars` / `@Action`，并保留 `@Struct(name)` 声明
   （片段里只允许这些块加顶层 `@Merge` 引用，Reflex 定义应使用 Include 导入）：

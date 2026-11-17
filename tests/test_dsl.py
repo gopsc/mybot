@@ -1138,6 +1138,47 @@ def test_include_copy_repeated_once_named_files_and_nested_relative_paths(tmp_pa
     assert matrices[0].children[0].header == ["a.p"]
 
 
+@pytest.mark.parametrize("parent", [None, "Action", "if(1>0)", "Reflex(step)"])
+def test_included_merges_keep_their_declaring_directory(tmp_path, parent):
+    sub = tmp_path / "sub"
+    deep = sub / "deep"
+    deep.mkdir(parents=True)
+    (deep / "leaf.mt").write_text(block("Action", "b.p", "2"), encoding="utf-8")
+    (tmp_path / "leaf.mt").write_text(block("Action", "wrong.p", "99"), encoding="utf-8")
+    contents = block("Merge", "path", "leaf.mt") + block("Action", "a.p", "1")
+    if parent is not None:
+        contents = body(parent, contents)
+    (deep / "part.mt").write_text(contents, encoding="utf-8")
+    (sub / "mid.mt").write_text(block("Include", "path", "deep/part.mt"), encoding="utf-8")
+    expected = expand(contents, deep)
+    actual = expand(block("Include", "path", "sub/mid.mt"), tmp_path)
+    assert actual == expected
+
+
+def test_sibling_includes_keep_separate_nested_merge_origins(tmp_path):
+    includes, expected = [], []
+    for name, value in (("a", "1"), ("b", "2")):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "leaf.mt").write_text(block("Action", name + "_leaf.p", value), encoding="utf-8")
+        contents = body("if(1>0)", block("Merge", "path", "leaf.mt"), block("Action", name + ".p", value))
+        (folder / "part.mt").write_text(contents, encoding="utf-8")
+        includes.append(block("Include", "path", name + "/part.mt"))
+        expected.extend(expand(contents, folder))
+    assert expand("".join(includes), tmp_path) == expected
+
+
+def test_root_and_included_top_level_merges_keep_separate_origins(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "leaf.mt").write_text(block("Action", "b.p", "2"), encoding="utf-8")
+    (tmp_path / "leaf.mt").write_text(block("Action", "c.p", "3"), encoding="utf-8")
+    (sub / "part.mt").write_text(block("Merge", "path", "leaf.mt") + block("Action", "a.p", "1"),
+                                  encoding="utf-8")
+    matrices = expand(block("Include", "path", "sub/part.mt") + block("Merge", "path", "leaf.mt"), tmp_path)
+    assert matrices[0].rows == [["a.p", "b.p", "c.p"], ["1", "2", "3"]]
+
+
 def test_merge_phase_padding_inherited_phase_and_anchor(tmp_path):
     (tmp_path / "b.mt").write_text(block("Action", "b.p", "100", "200"), encoding="utf-8")
     (tmp_path / "c.mt").write_text(block("Action", "c.p", "7"), encoding="utf-8")
