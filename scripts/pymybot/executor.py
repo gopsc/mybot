@@ -25,7 +25,7 @@ from .hardware import Budget, ensure_ok, safe_ident
 from .include import MAX_INCLUDE_BYTES, _Expander, expand_includes
 from .matrix import is_control, parse_matrices, reflex_name
 from .robot import MAX_BINDING_BYTES, Robot
-from .security import MAX_BODY, SecurityError, checked_text, dumps
+from .security import MAX_BODY, SecurityError, checked_text, dumps, read_file
 from .sql import parse_sql
 
 MAX_LIST = 1000
@@ -55,12 +55,6 @@ def _identity(info):
     return info.st_dev, info.st_ino
 
 
-def _version(info):
-    # On Windows/Python 3.12 stat().ctime can be birth time while fstat().ctime
-    # is change time. Compare ctime only within the same kind of stat below.
-    return _identity(info), info.st_size, info.st_mtime_ns
-
-
 def _no_links(path):
     # FILE_ATTRIBUTE_REPARSE_POINT also catches junctions on Python 3.11.
     for part in (path, *path.parents):
@@ -83,28 +77,9 @@ def _relative(value):
 
 
 def _read_stable(path, check, cap=MAX_BODY):
-    check()
-    before = path.stat()
-    if not stat.S_ISREG(before.st_mode):
-        raise SecurityError("Expected a regular file")
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    fd = os.open(path, flags)
-    with os.fdopen(fd, "rb") as stream:
-        opened = os.fstat(stream.fileno())
-        check()
-        if not stat.S_ISREG(opened.st_mode) or _version(before) != _version(opened):
-            raise SecurityError("File changed while opening")
-        data = stream.read(cap + 1)
-        after = os.fstat(stream.fileno())
-    check()
-    current = path.stat()
-    if (_version(before) != _version(after) or _version(before) != _version(current)
-            or before.st_ctime_ns != current.st_ctime_ns
-            or opened.st_ctime_ns != after.st_ctime_ns):
-        raise SecurityError("File changed while reading")
-    if len(data) > cap:
-        raise SecurityError("File exceeds input limit")
-    return checked_text(data.decode("utf-8"), cap)
+    # Single shared implementation: O_NOFOLLOW plus before/after open and
+    # post-read identity, size and timestamp comparisons live in security.py.
+    return read_file(path, cap, check)
 
 
 class _Scripts:

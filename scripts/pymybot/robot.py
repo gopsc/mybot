@@ -220,7 +220,12 @@ class Robot:
                         consumers.append((driver, path, address, f"{name}[{index}]"))
             for driver, bus_path, address, consumer in consumers:
                 path = self._module(driver + ".lua") if table.name == "Daemon" else self._driver(driver)
-                source = path.read_text(encoding="utf-8")
+                # Bounded read, matching native.compile_driver's 8 MiB ceiling.
+                with path.open("rb") as stream:
+                    raw = stream.read(MAX_SCRIPT_BYTES + 1)
+                if len(raw) > MAX_SCRIPT_BYTES:
+                    raise ScriptError(f"Driver source exceeds {MAX_SCRIPT_BYTES} bytes: {path}")
+                source = raw.decode("utf-8")
                 if not re.search(r"^[ \t]*SINGLE_CONSUMER\b", source, re.MULTILINE):
                     continue
                 try:

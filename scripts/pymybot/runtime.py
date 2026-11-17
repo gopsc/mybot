@@ -5,6 +5,7 @@ import ipaddress
 import math
 import os
 import re
+import socket
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -45,7 +46,14 @@ lua_type = _LUA_MODULE.lua_type
 
 
 def _loopback_base(base):
-    """True when base is an http(s) URL whose host is a loopback address."""
+    """True when base is an http(s) URL whose host is a loopback address.
+
+    IP literals use the same ``is_loopback`` semantics as the TCP gate, so every
+    127.0.0.0/8 address and ::1 is accepted. The ``localhost`` name is resolved
+    and every resulting address must be loopback; other hostnames always require
+    --allow-hardware. Resolution happens at open time only: a DNS change after
+    the open is not re-checked per request.
+    """
     if not isinstance(base, str):
         return False
     try:
@@ -53,7 +61,23 @@ def _loopback_base(base):
         parts.port  # property access raises ValueError on malformed ports
     except ValueError:
         return False
-    return parts.scheme in {"http", "https"} and parts.hostname in {"127.0.0.1", "localhost", "::1"}
+    if parts.scheme not in {"http", "https"}:
+        return False
+    host = parts.hostname
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        pass
+    if host != "localhost":
+        return False
+    try:
+        infos = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80),
+                                   type=socket.SOCK_STREAM)
+        return bool(infos) and all(ipaddress.ip_address(info[4][0]).is_loopback for info in infos)
+    except (OSError, ValueError):
+        return False
 
 
 _BOOTSTRAP = r'''
