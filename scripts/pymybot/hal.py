@@ -7,6 +7,8 @@ Handles are process-local logical IDs, not operating-system file descriptors.
 from __future__ import annotations
 
 import errno
+from functools import partial
+import http.client
 import importlib
 import ipaddress
 import math
@@ -56,6 +58,55 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 _HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
+def _connect_pinned(addresses, destination, timeout, source_address):
+    error = None
+    for address in addresses:
+        family = socket.AF_INET if ipaddress.ip_address(address).version == 4 else socket.AF_INET6
+        connection = None
+        try:
+            connection = socket.socket(family, socket.SOCK_STREAM)
+            if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                connection.settimeout(timeout)
+            if source_address is not None:
+                connection.bind(source_address)
+            connection.connect((address, destination[1]))
+            return connection
+        except OSError as exc:
+            error = exc
+            if connection is not None:
+                connection.close()
+        except BaseException:
+            if connection is not None:
+                connection.close()
+            raise
+    raise error
+
+
+def _pinned_connection(kind, addresses, host, **kwargs):
+    connection = kind(host, **kwargs)
+    # Preserve Host and TLS identity while bypassing DNS during socket creation.
+    connection._create_connection = partial(_connect_pinned, addresses)
+    return connection
+
+
+class _PinnedHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, addresses):
+        super().__init__()
+        self.connection = partial(_pinned_connection, http.client.HTTPConnection, addresses)
+
+    def http_open(self, request):
+        return self.do_open(self.connection, request)
+
+
+class _PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, addresses):
+        super().__init__()
+        self.connection = partial(_pinned_connection, http.client.HTTPSConnection, addresses)
+
+    def https_open(self, request):
+        return self.do_open(self.connection, request, context=self._context)
+
+
 class HALManager:
     """Shared, reference-counted buses with per-bus transaction locks.
 
@@ -97,7 +148,7 @@ class HALManager:
         self._owners: dict[int, object] = {}
 
     def call(self, operation: str, *args, cancel_check=None,
-             owner=None) -> dict | list[int] | int | str | None:
+             owner=None, loopback_addresses=None) -> dict | list[int] | int | str | None:
         """Dispatch, returning scalars/lists/dicts/None (never device objects).
 
         Open/setup/write/close failures return -1; transfer/read failures None;
@@ -119,6 +170,8 @@ class HALManager:
             try:
                 if self._closed:
                     raise RuntimeError("HAL manager is closed")
+                if operation == "http_open":
+                    return self._http_open(*args, loopback_addresses=loopback_addresses)
                 return getattr(self, "_" + operation)(*args)
             except Exception as exc:
                 if context.cancelled:
@@ -645,14 +698,20 @@ class HALManager:
             path = path.rstrip("/") or "/"
         return urlunsplit((u.scheme, u.netloc, path, "", ""))
 
-    def _http_open(self, base, timeout_ms=10000):
+    def _http_open(self, base, timeout_ms=10000, *, loopback_addresses=None):
         base = self._http_base(base)
         timeout_ms = self._integer(timeout_ms, 1, self.HTTP_TIMEOUT_MS)
+        opener = _HTTP_OPENER
+        if loopback_addresses is not None:
+            addresses = tuple(ipaddress.ip_address(address) for address in loopback_addresses)
+            if not addresses or not all(address.is_loopback for address in addresses):
+                raise ValueError("Pinned HTTP addresses must be nonempty and loopback-only")
+            addresses = tuple(map(str, addresses))
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect,
+                                                _PinnedHTTPHandler(addresses), _PinnedHTTPSHandler(addresses))
         with self._lock:
-            # Validation only: HTTP has no persistent connection to establish,
-            # requests happen per http_request call.
             return self._register(_Resource("http", None, "urllib", None,
-                                            base=base, timeout=timeout_ms))
+                                            base=base, timeout=timeout_ms, opener=opener))
 
     def _http_request(self, handle, method, path, headers=None, body=None):
         if not isinstance(method, str) or method.upper() not in {"GET", "POST", "PUT", "DELETE", "PATCH"}:
@@ -687,7 +746,7 @@ class HALManager:
             for key, value in headers.items():
                 request.add_header(key, value)
             try:
-                response = _HTTP_OPENER.open(request, timeout=r.state["timeout"] / 1000)
+                response = r.state["opener"].open(request, timeout=r.state["timeout"] / 1000)
             except urllib.error.HTTPError as error:
                 # 4xx/5xx (and 3xx, since redirects are refused) are responses.
                 with error:

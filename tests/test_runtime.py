@@ -258,21 +258,21 @@ def test_http_gate_loopback_without_allow_hardware(tmp_path):
 
 
 def test_http_gate_loopback_semantics_match_tcp():
-    from pymybot.runtime import _loopback_base
+    from pymybot.runtime import _loopback_addresses
 
     # Every 127.0.0.0/8 literal is loopback, not just 127.0.0.1.
     for base in ("http://127.0.0.1/", "http://127.0.0.2:8000/", "http://127.255.255.254/",
                  "http://[::1]:8000/", "https://localhost:8443/api"):
-        assert _loopback_base(base) is True
+        assert _loopback_addresses(base)
     for base in ("http://192.168.1.5/", "http://0.0.0.0/", "https://example.com/",
                  "http://localhost.evil.com/", "loop://", "not a url", None, 5):
-        assert _loopback_base(base) is False
+        assert _loopback_addresses(base) == ()
 
 
 def test_http_gate_rejects_localhost_resolving_offloop(monkeypatch):
     import socket as socket_module
 
-    from pymybot.runtime import _loopback_base
+    from pymybot.runtime import _loopback_addresses
 
     real = socket_module.getaddrinfo
 
@@ -282,13 +282,32 @@ def test_http_gate_rejects_localhost_resolving_offloop(monkeypatch):
         return real(host, port, *args, **kwargs)
 
     monkeypatch.setattr(socket_module, "getaddrinfo", poisoned)
-    assert _loopback_base("http://localhost:8000/") is False
+    assert _loopback_addresses("http://localhost:8000/") == ()
 
     def broken(host, port, *args, **kwargs):
         raise OSError("resolver failure")
 
     monkeypatch.setattr(socket_module, "getaddrinfo", broken)
-    assert _loopback_base("http://localhost:8000/") is False
+    assert _loopback_addresses("http://localhost:8000/") == ()
+
+
+@pytest.mark.parametrize("addresses", [(), ("127.0.0.1", "192.0.2.20")])
+def test_http_gate_rejects_empty_or_mixed_localhost_results(monkeypatch, addresses):
+    import socket
+    from pymybot.runtime import _loopback_addresses
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda host, port, **kwargs: [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port)) for address in addresses])
+    assert _loopback_addresses("http://localhost") == ()
+
+
+def test_http_literal_addresses_do_not_use_dns(monkeypatch):
+    import socket
+    from pymybot.runtime import _loopback_addresses
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *args, **kwargs: pytest.fail("Unexpected DNS lookup"))
+    assert _loopback_addresses("http://127.0.0.2") == ("127.0.0.2",)
+    assert _loopback_addresses("https://[::1]") == ("::1",)
 
 
 def test_http_gate_offloop_open_with_allow_hardware(tmp_path):
