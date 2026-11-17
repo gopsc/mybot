@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib
 import importlib.util
 import json
 import os
@@ -22,19 +21,14 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def preflight(mode):
-    if mode == "base":
-        for optional in ("pydantic_ai", "langchain", "langgraph", "PySide6"):
-            require(importlib.util.find_spec(optional) is None,
-                    f"Base CI must not have {optional} installed")
-        if sys.platform.startswith("linux"):
-            require(importlib.util.find_spec("smbus2") is not None,
-                    "Linux base install must include smbus2")
-    else:
-        # Missing MCP dependencies must fail rather than silently skip tests.
-        for name in ("pytest", "mcp", "pymybot.mcp_server"):
-            importlib.import_module(name)
-    print(f"{mode} dependency preflight passed", flush=True)
+def preflight():
+    for optional in ("pydantic_ai", "langchain", "langgraph", "PySide6"):
+        require(importlib.util.find_spec(optional) is None,
+                f"Base CI must not have {optional} installed")
+    if sys.platform.startswith("linux"):
+        require(importlib.util.find_spec("smbus2") is not None,
+                "Linux base install must include smbus2")
+    print("base dependency preflight passed", flush=True)
 
 
 CONTROLLER_ASSETS = Path("assets")
@@ -106,7 +100,7 @@ def installed_smoke(manifest_path):
     require(not Path.cwd().resolve().is_relative_to(source), "Smoke cwd is inside the checkout")
     require(all(not Path(path).resolve().is_relative_to(source) for path in sys.path),
             "Checkout leaked into the smoke import path")
-    preflight("base")
+    preflight()
 
     import pymybot
     from pymybot.cli import default_scripts_dir
@@ -158,13 +152,13 @@ def installed_smoke(manifest_path):
                            "--input", str(assets / "scripts" / "uart-loopback.mt"), "--timeout", "10"])
     require([item.get("rx") for item in native.get("outputs", [])] == [0, 127, 255],
             "Packaged Python drivers did not complete UART loopback")
-    preflight("base")
+    preflight()
     print(f"Verified {len(actual)} packaged assets and the CLI from {package}", flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("base", "mcp", "wheel", "installed"))
+    parser.add_argument("mode", choices=("base", "wheel", "installed"))
     parser.add_argument("--manifest", type=Path, help="internal: expected assets for the installed verifier")
     args = parser.parse_args()
     if args.mode == "installed":
@@ -174,7 +168,7 @@ def main():
     elif args.mode == "wheel":
         wheel_smoke()
     else:
-        preflight(args.mode)
+        preflight()
 
 
 if __name__ == "__main__":

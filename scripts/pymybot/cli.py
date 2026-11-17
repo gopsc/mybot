@@ -120,7 +120,6 @@ def parser():
         "run": "Activate, execute an action script and deactivate (virtual-only by default)",
         "sample": "Activate and read a named variable; activation itself may write to devices",
         "apply-sql": "Apply SQL to a temporarily active robot; does not write the structure file",
-        "mcp": "Standard MCP stdio server for MCP clients (read-only unless --allow-execution)",
         "doctor": "Check the interpreter, optional dependencies and bundled assets without touching hardware",
         "new": "Create a runnable robot SQL/MT/driver skeleton in the current directory",
         "assets": "List, read, write and delete bundled robots/modules/scripts asset files",
@@ -156,25 +155,6 @@ def parser():
             deleter.add_argument("--path", required=True, metavar="REL",
                                  help="path relative to the kind's asset root")
             deleter.add_argument("--yes", action="store_true", help="confirm permanent deletion")
-            continue
-        if name == "mcp":
-            command.add_argument("--robot", required=True, metavar="FILE",
-                                 help="structure SQL file (at most 8 MiB)")
-            command.add_argument("--module-path", action="append", metavar="DIR",
-                                 help="trusted Lua module root; repeatable")
-            command.add_argument("--scripts-dir", default=default_scripts_dir(), metavar="DIR",
-                                 help="trusted .mt script root; default: packaged assets/scripts, else source scripts")
-            command.add_argument("--allow-execution", action="store_true",
-                                 help="permit action scripts and variable reads; "
-                                      "static tools stay available either way")
-            command.add_argument("--allow-hardware", action="store_true",
-                                 help="permit physical devices; requires --allow-execution")
-            command.add_argument("--timeout", type=positive_timeout, default=180, metavar="SECONDS",
-                                 help=f"cooperative execution budget, >0 and <={MAX_TIMEOUT} (default: 180)")
-            command.add_argument("--var", type=variable, action="append", default=[], metavar="NAME=VALUE",
-                                 help="session alias binding and Alias/Vars structure override; repeatable")
-            command.add_argument("--var-env", type=variable_env, action="append", default=[], metavar="NAME=ENVVAR",
-                                 help="session alias binding read from an environment variable at run time; repeatable")
             continue
         if name == "discover":
             command.add_argument("--buses", default="all",
@@ -231,8 +211,6 @@ def parse_args(argv=None):
         args.robot = resolve_asset_relative(args.robot, "robots")
     if getattr(args, "input", None):
         args.input = resolve_asset_relative(args.input, "scripts")
-    if args.command == "mcp" and args.allow_hardware and not args.allow_execution:
-        raise UsageError("--allow-hardware requires --allow-execution")
     return args
 
 
@@ -337,10 +315,6 @@ def doctor():
         ("pyftdi", "pyftdi", "I2C/SPI"),
         ("PIL", "pillow", "image codecs"),
     ]
-    optional = [
-        ("mcp", "mcp", "MCP server", "pip install pymybot[mcp]"),
-    ]
-
     def module_check(module, distribution, label, *, optional_check=False, hint=""):
         entry = {"name": module, "label": label, "optional": optional_check}
         try:
@@ -360,8 +334,6 @@ def doctor():
         return entry
 
     checks = [module_check(module, distribution, label) for module, distribution, label in required]
-    checks.extend(module_check(module, distribution, label, optional_check=True, hint=hint)
-                  for module, distribution, label, hint in optional)
     if checks[0]["status"] == "ok":
         try:
             from .runtime import LUA_BACKEND, LUA_FFI
@@ -476,18 +448,6 @@ def execute(args, stop):
             raise UsageError(str(exc)) from None
     if args.command == "scripts":
         return list_scripts(args.scripts_dir or default_scripts_dir())
-    if args.command == "mcp":
-        try:
-            from .mcp_server import run_server
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(f"MCP dependencies unavailable ({exc}); install pymybot[mcp] "
-                               "(source checkout: pip install -e '.[mcp]')") from exc
-        bindings = session_bindings(args)
-        return run_server(stop, robot_path=args.robot, scripts_dir=args.scripts_dir,
-                          module_paths=args.module_path,
-                          vars=bindings, allow_execution=args.allow_execution,
-                          allow_hardware=args.allow_hardware,
-                          timeout=args.timeout)
     bindings = session_bindings(args)
     action, base_dir, matrices = None, None, None
     if getattr(args, "input", None):
@@ -577,36 +537,24 @@ def main(argv=None):
     stop = threading.Event()
     handlers = {}
     args = None
-    # Detect the protocol command before parsing: even usage errors must not
-    # write CLI JSON onto the MCP channel.
-    requested = list(sys.argv[1:] if argv is None else argv)
-    protocol = bool(requested) and requested[0] == "mcp"
     try:
         args = parse_args(argv)
-        # MCP reserves stdout for JSON-RPC: no final CLI JSON on that channel.
-        protocol = args.command == "mcp"
-        if (args.command in {"run", "sample", "apply-sql", "mcp"}
+        if (args.command in {"run", "sample", "apply-sql"}
                 and threading.current_thread() is threading.main_thread()):
             for sig in (signal.SIGINT, signal.SIGTERM):
                 handlers[sig] = signal.signal(sig, lambda *_: stop.set())
         # Python prints and Lua diagnostics must not contaminate the JSON channel.
         with redirect_stdout(sys.stderr):
             result = execute(args, stop)
-        if protocol:
-            return 0
         output = dumps({"ok": True, "command": args.command, **result})
         code = 0
     except KeyboardInterrupt:
         stop.set()
-        if protocol:
-            return 130
         output = dumps({"ok": False, "error": {"type": "KeyboardInterrupt", "message": "Interrupted"}})
         code = 130
     except Exception as exc:
         print(f"pymybot: {exc}", file=sys.stderr)
         code = 2 if isinstance(exc, UsageError) else 1
-        if protocol:
-            return code
         output = dumps({"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)}})
     finally:
         for sig, handler in handlers.items():

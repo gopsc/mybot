@@ -2,9 +2,9 @@
 
 Source: This is the authoritative controller security document; enforcement lives in `scripts/pymybot/`.
 
-pymybot is a local robot controller, not a multi-tenant service. It exposes two
-entry points: the Python CLI and the MCP stdio server. This document describes
-the trust boundaries the code tries to enforce and the limits the operator must
+pymybot is a local robot controller, not a multi-tenant service. Its CLI and
+direct Python use share the same `Robot` runtime. This document describes the
+trust boundaries the code tries to enforce and the limits the operator must
 accept.
 
 ## Assets
@@ -19,18 +19,14 @@ accept.
 flowchart LR
     SCRIPT["SQL / MT / Python / Lua<br/>(operator-authored)"] --> RUNTIME["Robot runtime"]
     CLI["CLI operator"] --> RUNTIME
-    MCP["MCP client<br/>(untrusted requests)"] --> SERVER["pymybot mcp<br/>+ RobotExecutor"]
-    SERVER -->|"launch gates"| RUNTIME
     RUNTIME --> HAL
     HAL --> DEV[Devices / network / shell]
     OPERATOR["Operator"] -->|"launch flags"| CLI
-    OPERATOR -->|"launch flags"| SERVER
 ```
 
 | Boundary | Rule |
 | --- | --- |
 | Hardware gate | `--allow-hardware` is the only switch that opens physical I2C/SPI/UART devices, non-loopback HTTP/TCP and the Shell driver. Virtual buses (`proto='virt'`, `virt-*`), `loop://` UART and loopback HTTP/TCP stay available without it. |
-| MCP client → pymybot | Requests are untrusted input. `pymybot mcp` is read-only unless the operator passes `--allow-execution`; `--allow-hardware` is separate and requires `--allow-execution`. Tool arguments, read-only SQL and `.mt` paths are validated and bounded; resources never grant execution. |
 | Controller → network | TCP accepts only IPv4/IPv6 literals and has no implicit reconnect or replay. HTTP redirects are refused; URL credentials/query/fragment are rejected. |
 | Shell driver → host | The Shell ordinary-table driver runs commands with the host account's privileges and is not a sandbox; it requires `--allow-hardware`. Output is capped and the process tree is killed best-effort on timeout. |
 | Scripts → Python / Lua | Both are trusted in-process code. Python imports/direct native I/O are unrestricted; LuaJIT FFI is available when the `lupa` wheel includes LuaJIT (otherwise a standard-Lua fallback has no FFI). Neither is a security sandbox. |
@@ -80,17 +76,17 @@ tokens) are ordinary operator data.
   these regularly in long loops. Timeouts/cancellation cannot forcibly interrupt
   a blocking native call **or an uncooperative Python loop**. They are not a hard
   execution limit or a safety stop.
-- The CLI's SIGINT/SIGTERM stop and MCP request cancellation are best-effort
-  operator stops: they set the stop flag, call optional driver `safe()` in
-  reverse activation order, then release handles. The MCP `deactivate` tool is
-  ordinary cleanup and does not call `safe()`. None of these is a hardware
-  emergency stop and none must be used as a safety-rated interlock. A blocked
-  native call can delay them indefinitely; keep a physical E-stop and
-  independent safety circuit for any machine that needs one.
+- The CLI's SIGINT/SIGTERM stop is best-effort: it sets the stop flag and
+  attempts `Robot.abort()`, calling optional driver `safe()` in reverse
+  activation order before releasing handles. Ordinary cleanup uses `deactivate()`
+  without `safe()`. Neither is a hardware emergency stop or a safety-rated
+  interlock. A blocked native call can delay them indefinitely; keep a physical
+  E-stop and independent safety circuit for any machine that needs one.
 - A dispatched action is never claimed to be rolled back. If an exception
   occurs after dispatch, the result is “unknown”; the operator must inspect the
-  robot. The MCP executor additionally latches a fault and refuses further work
-  until the operator restarts the process; nothing retries automatically.
+  robot. Ordinary errors do not latch a fault in `Robot`, and the CLI performs
+  destroy-only cleanup; nothing retries automatically. `Robot.abort()` does
+  latch the aborted state: replace that `Robot` before further control.
 - Shell timeouts kill the process tree best-effort; descendants that escape to a
   new session are not guaranteed to be killed.
 - `--allow-hardware` is a capability switch, not a safety certification.
@@ -105,10 +101,8 @@ a minimal reproduction. Do not open a public issue for an exploitable problem.
 
 - Run as a dedicated unprivileged user; grant serial/FTDI/`i2c`/`spi` access
   explicitly.
-- Leave `--allow-hardware` off unless the run needs physical devices; run the MCP
-  server without `--allow-execution` unless a client must act on the robot.
-- Scope each `pymybot mcp` process to one robot and one scripts root; restart it
-  to clear a latched fault.
+- Leave `--allow-hardware` off unless the run needs gated HAL operations
+  (physical devices, non-loopback network or the Shell driver).
 - Review every Python/Lua driver and its imports before use; keep trusted module
   roots (`--module-path`) out of untrusted-writable locations.
 - Install from a pinned artifact and verify its SHA-256 when one is published.

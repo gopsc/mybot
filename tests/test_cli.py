@@ -42,7 +42,6 @@ def test_doctor_reports_dependencies_and_assets(capsys):
     checks = {item["name"]: item["status"] for item in payload["checks"]}
     assert checks["lupa"] == "ok"
     assert checks["sqlparse"] == "ok"
-    assert checks["mcp"] in {"ok", "warning"}
     assert "PySide6.QtWidgets" not in checks and "tkinter" not in checks
     if sys.platform.startswith("linux"):
         # smbus2 is a base dependency; spidev stays an opt-in extra.
@@ -75,8 +74,8 @@ def test_doctor_reports_standard_lua_fallback(monkeypatch, capsys):
     assert checks["lua.ffi"]["status"] == "warning"
 
 
-@pytest.mark.parametrize("module, status", [("serial", "missing"), ("mcp", "warning")])
-def test_doctor_reports_import_failure(monkeypatch, capsys, module, status):
+def test_doctor_reports_import_failure(monkeypatch, capsys):
+    module = "serial"
     real = cli.importlib.import_module
 
     def fake(name, package=None):
@@ -88,10 +87,8 @@ def test_doctor_reports_import_failure(monkeypatch, capsys, module, status):
     code = cli.main(["doctor"])
     payload = json.loads(capsys.readouterr().out)
     check = next(item for item in payload["checks"] if item["name"] == module)
-    assert code == 0 and check["status"] == status and check["error"] == "ImportError"
-    assert payload["healthy"] is (status == "warning")
-    if module == "mcp":
-        assert "pymybot[mcp]" in check["hint"]
+    assert code == 0 and check["status"] == "missing" and check["error"] == "ImportError"
+    assert payload["healthy"] is False
 
 
 @pytest.mark.parametrize("module, required", [("smbus2", True), ("spidev", False)])
@@ -764,7 +761,7 @@ def test_apply_sql_is_ephemeral_and_cleans_up(workspace, capsys):
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("flag", ["--mcp-backend", "--mcp-port", "--tcp", "--agent-shell", "--audit-log", "--config", "--allow-hard"])
+@pytest.mark.parametrize("flag", ["--tcp", "--agent-shell", "--audit-log", "--config", "--allow-hard"])
 def test_no_legacy_backend_flags_or_abbreviations(workspace, flag):
     result = run_cli(workspace, "check", "--robot", "robot.sql", flag)
     assert result.returncode == 2
@@ -775,9 +772,8 @@ def test_help_errors_and_module_entrypoint(workspace):
     help_result = run_cli(workspace, "--help")
     assert help_result.returncode == 0 and "FFI" in help_result.stdout
     assert "malicious-code isolation" in help_result.stdout
-    assert "mcp" in help_result.stdout
+    assert "discover" in help_result.stdout
     assert "--no-gui" not in help_result.stdout and "--no-agent" not in help_result.stdout
-    assert "--mcp-backend" not in help_result.stdout
     sample_help = run_cli(workspace, "sample", "--help")
     assert "activation itself may write" in sample_help.stdout
     # A bare invocation is an argparse error: JSON envelope on stdout, diagnosis on stderr.
@@ -814,6 +810,34 @@ def test_text_sql_limit_and_json_helpers(workspace, capsys):
     with pytest.raises(SecurityError):
         read_file(workspace)
     assert checked_text("x" * MAX_BODY) == "x" * MAX_BODY
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_bounded_read_rejects_file_changes(tmp_path, monkeypatch, replace):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    path = tmp_path / "input.txt"
+    path.write_text("original", encoding="utf-8")
+    original = os.fdopen
+
+    @contextmanager
+    def fdopen(*args, **kwargs):
+        with original(*args, **kwargs) as stream:
+            def read(count):
+                data = stream.read(count)
+                if replace:
+                    replacement = tmp_path / "replacement.txt"
+                    replacement.write_bytes(data)
+                    replacement.replace(path)
+                else:
+                    path.write_bytes(data + b" changed")
+                return data
+            yield SimpleNamespace(fileno=stream.fileno, read=read)
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    with pytest.raises(SecurityError, match="File changed while reading"):
+        read_file(path)
 
 
 def test_windowed_build_replaces_missing_console_streams():

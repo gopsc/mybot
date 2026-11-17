@@ -11,15 +11,13 @@ Source: This is the authoritative controller testing document; fixtures and test
 | Virtual devices | `tests/fixtures/virt/*.sql` + `*.mt` | Real driver build/call/destroy paths without hardware |
 | Robot integration | `tests/test_robot.py`, `tests/test_daemon.py` | Activation, inheritance, controllers, sampling |
 | Native drivers | `tests/test_native.py` | Compile-only validation, per-row modules and the Driver context |
-| MCP / executor | `tests/test_mcp_server.py` | A real stdio MCP client, permissions, script resources and receipts |
 | CLI | `tests/test_cli.py` | Command dispatch, JSON envelope and exit codes |
 | Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
 | Docs/skill sync | `tests/test_docs_skill_sync.py`, `tools/check_docs_skill_sync.py` | Skill links/paths resolve, references declare and register their authority |
 
 The suite must run without physical hardware: virtual fixtures, `proto='virt'`
-and `loop://` transports cover device paths. The only optional runtime dependency
-the suite needs is the MCP SDK; `tests/test_mcp_server.py` skips itself when the
-`mcp` extra is absent, so install `.[mcp,test]` to run the full suite.
+and `loop://` transports cover device paths. Install `.[test]` for the runtime
+and test dependencies.
 
 ## General commands
 

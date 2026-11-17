@@ -1,6 +1,6 @@
 ---
 name: hardware-controller
-description: 通过自包含的 pymybot Runtime 控制与编程机器人：Structure SQL 声明硬件，Python/Lua driver 实现设备，MT action 描述时序。用于硬件检查、动作执行、传感器采样、静态校验、MCP 集成、驱动开发与控制器排障；当用户提到机器人控制、硬件、I2C/SPI/UART 设备、动作脚本或 hardware-controller 时使用。
+description: 通过自包含的 pymybot Runtime 控制与编程机器人：Structure SQL 声明硬件，Python/Lua driver 实现设备，MT action 描述时序。用于硬件检查、动作执行、传感器采样、静态校验、驱动开发与控制器排障；当用户提到机器人控制、硬件、I2C/SPI/UART 设备、动作脚本或 hardware-controller 时使用。
 ---
 
 # Hardware Controller
@@ -9,7 +9,7 @@ description: 通过自包含的 pymybot Runtime 控制与编程机器人：Struc
 
 ## 1. 入口
 
-先安装 Runtime 依赖（核心依赖必装；`mcp` 等可选依赖在文件内以注释列出，按需取消注释）：
+先安装 Runtime 依赖（核心依赖必装；可选依赖在文件内以注释列出，按需取消注释）：
 
 ```sh
 pip install -r scripts/requirements.txt
@@ -27,7 +27,7 @@ python scripts/hardware_controller.py <command> [options]
 python -m pymybot <command> [options]
 ```
 
-MCP 入口见第 5 节。每个命令在 stdout 输出**恰好一行 JSON**，诊断写 stderr。
+这些 CLI 入口与 Python 调用共享同一套 `Robot` Runtime。每个命令在 stdout 输出**恰好一行 JSON**，诊断写 stderr。
 
 ## 2. 子命令速查
 
@@ -45,7 +45,6 @@ MCP 入口见第 5 节。每个命令在 stdout 输出**恰好一行 JSON**，�
 | `assets list/read` | 查看或读取内置 robots/modules/scripts 资产 | 否 |
 | `assets write/delete` | 新建、覆盖或删除内置资产脚本 | 否 |
 | `new` | 为用户自己的项目生成 `robots/`、`scripts/`、`modules/` 骨架 | 否 |
-| `mcp` | 把控制器暴露给 MCP 客户端（只读默认） | 视开关 |
 
 所有命令在 stdout 输出**恰好一行 JSON**；诊断写 stderr。退出码非零表示命令失败，但动作已派发后的异常代表“结果未知”，不要自动重试，也不要声称已回滚。
 
@@ -103,7 +102,7 @@ python scripts/hardware_controller.py doctor
 - `--timeout` 单位为秒，默认 180。
 - 物理设备必须显式加 `--allow-hardware`；`proto='virt'`、`loop://` 和回环 HTTP/TCP 不需要。
 - 先用虚拟结构验证全链路，再写真机结构；两者分别命名，不要用同一份 SQL 切换。
-- 动作派发后发生异常时，运行时会锁存“结果未知”，必须新建会话后重新确认现场。
+- 动作派发后发生异常时，按“结果未知”处理：先确认现场，不自动重试，也不声称回滚。CLI 在普通动作错误时做去激活清理，不会自动锁存故障；信号中断会尝试 `Robot.abort()`，被 abort 的 Robot 不可复用。Python 调用方需管理清理。
 
 ### 3.5 `sample`
 
@@ -162,25 +161,7 @@ python scripts/hardware_controller.py doctor
 - I2C、SPI、UART、TCP、HTTP、Shell 的普通表 driver 使用 Python；其他传感器 Lua driver、共享 Lua 库和 Lua Daemon 保持 Lua。
 - Python/Lua driver 都是可信进程内代码，不是沙箱。`check` 只编译 Python 源码，不执行导入、构造器或生命周期方法。
 
-## 5. MCP
-
-在仓库根目录（或已安装的环境）直接使用标准模块入口：
-
-```sh
-python -m pymybot mcp --robot assets/robots/relay-test.sql --scripts-dir assets/scripts
-```
-
-在仓库根目录也可用自包含入口：
-
-```sh
-python scripts/hardware_controller.py mcp \
-  --robot assets/robots/relay-test.sql \
-  --scripts-dir assets/scripts
-```
-
-MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物理硬件另需 `--allow-hardware`。工具、资源和客户端配置见 `references/mcp.md`。
-
-## 6. 三层脚本开发
+## 5. 三层脚本开发
 
 三层模型：`robots/*.sql` 结构（舞台：声明零件与接线）→ `modules/*.py` 或 `*.lua` 驱动（演员：build/call/destroy，可加 safe）→ `scripts/*.mt` 动作（剧本：一行一拍）。
 
@@ -218,11 +199,10 @@ MCP 默认只读。执行动作和读取变量需要 `--allow-execution`；物�
 11. 使用顶层 `@Reflex(name)` 命名块，无 `name` 列，可声明多个但不得重名或嵌套声明；仅由 `reflexName.varName` 表头调用。MT `@Trigger` 和旧无名 `@Reflex` 在解析时拒绝；SQL trigger 完全保留。
 12. `Alias`/`Vars`/`Struct` 可声明在顶层或任意 Action/控制块/Reflex body：每个 body 是块级词法作用域，进入时统一注册、退出（含异常/取消）恢复，内层可遮蔽外层同名声明；driver/daemon/flow 引用不可遮蔽。Reflex 根 body 的默认值、参数及内部捕获逐次调用隔离；完整规则见 `references/action-mt.md` 第 6、7 节。
 
-## 7. References
+## 6. References
 
 - 架构与 Runtime flow：[architecture.md](references/architecture.md)
 - CLI 命令与 JSON 契约：[cli.md](references/cli.md)
-- MCP 配置、工具和资源：[mcp.md](references/mcp.md)
 - 安全与权限：[security.md](references/security.md)
 - 测试与虚拟设备：[testing.md](references/testing.md)
 - 结构 SQL 文法：[structure-sql.md](references/structure-sql.md)

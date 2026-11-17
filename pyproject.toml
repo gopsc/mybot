@@ -36,8 +36,6 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=9.1.1,<10", "ruff>=0.17,<1"]
-# MCP 2 renamed the low-level Server API; the server targets the 1.x contract.
-mcp = ["mcp>=1.30,<2"]
 # spidev publishes source-first releases for most Linux/Python combinations, so
 # it stays opt-in; smbus2 is pure Python and ships as a base Linux dependency.
 linux = ["spidev>=3.6,<4; sys_platform == 'linux'"]

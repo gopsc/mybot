@@ -319,25 +319,6 @@ def test_native_uart_example_and_borrowed_handle():
     assert not robot.hal._handles
 
 
-def test_executor_can_sample_and_run_native_drivers():
-    import asyncio
-    from pymybot.executor import RobotExecutor
-
-    async def scenario():
-        executor = RobotExecutor(ASSETS / "robots" / "uart-loopback.sql",
-                                 scripts_dir=ASSETS / "scripts")
-        try:
-            await executor.start()
-            sampled = await executor.call("read_variables", {"names": ["echo"]})
-            assert sampled["ok"], sampled
-            assert sampled["data"]["echo"]["rx"] == 0
-            action = await executor.call("run_action_script", {"script": "uart-loopback.mt"})
-            assert action["ok"], action
-        finally:
-            await executor.close()
-    asyncio.run(scenario())
-
-
 @pytest.mark.parametrize("config", [
     "chunk String, driver String, fields String); INSERT INTO Daemon(name,chunk,driver,fields) "
     "VALUES('worker','lib/sensor_daemon.lua','Probe','value');",

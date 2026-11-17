@@ -3,8 +3,8 @@
 Source: This is the authoritative controller architecture document; the implementation lives in `scripts/pymybot/`.
 
 pymybot separates *what the robot is* from *how a part is driven* and *what
-should happen over time*. One Runtime serves exactly two entry points: the
-Python CLI and the MCP stdio server.
+should happen over time*. The CLI and direct Python use share the same `Robot`
+runtime.
 
 ## Three layers
 
@@ -74,12 +74,11 @@ different source.
 
 ## Runtime flow
 
-The CLI drives `Robot` directly; the MCP server submits the same operations to a
-`RobotExecutor` owner thread, which serialises them.
+The CLI drives `Robot` directly in-process; Python callers use the same runtime.
 
 ```mermaid
 sequenceDiagram
-    participant CLI as CLI / MCP
+    participant CLI
     participant Robot
     participant Registry
     participant Driver as Python / Lua driver
@@ -106,9 +105,8 @@ sequenceDiagram
 
 Key invariants:
 
-- The whole CLI command emits exactly **one JSON line** on stdout. The MCP
-  server instead reserves stdout for JSON-RPC. In both cases diagnostics go to
-  stderr; Lua `print` and the Python driver's default `print` are redirected.
+- The whole CLI command emits exactly **one JSON line** on stdout. Diagnostics
+  go to stderr; Lua `print` and the Python driver's default `print` are redirected.
   Trusted Python code must keep direct/imported-library output off stdout too.
 - `check`, `discover`, `hardware`, `scripts`, `query`, `doctor`, `new` and
   `assets` never activate drivers. Python source is compiled without execution;
@@ -118,8 +116,11 @@ Key invariants:
   write to hardware.
 - Driver calls are serialised per robot; daemon sampling uses dedicated worker
   threads with independent Lua states.
-- An exception after an action starts is latched as “result unknown”; the
-  runtime never claims a rollback.
+- After an action is dispatched, an exception leaves its physical result
+  unknown: inspect the robot before retrying; the runtime never claims a
+  rollback or retries automatically. Ordinary errors do not latch a fault in
+  `Robot`; the CLI deactivates it. `Robot.abort()` does latch the aborted state
+  and requires a new `Robot` before further control.
 
 ## Python package map
 
@@ -143,18 +144,14 @@ Key invariants:
 | `scripts/pymybot/errors.py` | Controller exception hierarchy |
 | `scripts/pymybot/process.py` | Platform shell-command and process-tree helpers used by the HAL Shell driver |
 | `scripts/pymybot/scaffold.py` | `pymybot new` SQL/MT/Python skeleton generator |
-| `scripts/pymybot/executor.py` | Single-owner `Robot` runtime that serialises MCP work on one thread |
-| `scripts/pymybot/mcp_server.py` | Standard MCP stdio server over the executor (read-only by default) |
 
 ## Entry points
 
 ```mermaid
 flowchart TB
     U[Operator] --> C[CLI]
-    M[MCP client] -->|stdio JSON-RPC| X[MCP server]
     C --> R[Robot]
-    X --> E[RobotExecutor<br/>owner thread]
-    E --> R
+    P[Python caller] --> R
     R --> D[Python / Lua drivers]
     D --> H[HAL]
 ```
@@ -163,11 +160,9 @@ flowchart TB
   prints one JSON line; it never starts a server or a model. It is the automation
   entry point and is also available from the repository root as
   `python scripts/hardware_controller.py`.
-- **MCP server mode** is a protocol adapter over `RobotExecutor`: a plain
-  owner-thread runtime with no model, no approval callback and no tool loop. The
-  operator fixes execution and hardware switches at launch, stdout carries only
-  MCP JSON-RPC, and each process controls one structure file. `--allow-hardware`
-  requires `--allow-execution`.
+- **Python callers** use `pymybot.robot.Robot` in-process with the same structure
+  validation, drivers and HAL. Callers manage activation, execution and cleanup;
+  the CLI's JSON envelope and signal handling belong to the CLI wrapper.
 
 ## Asset and path resolution
 
@@ -183,7 +178,6 @@ on the current working directory. Packaging is described by `pyproject.toml` and
 ## Further reading
 
 - [CLI reference](cli.md)
-- [MCP server](mcp.md)
 - [Security model](security.md)
 - [Testing](testing.md)
 - [Scripting reference](../SKILL.md)
