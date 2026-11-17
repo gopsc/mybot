@@ -50,7 +50,7 @@ pymybot = "pymybot.cli:main"
 
 [tool.setuptools]
 packages = ["pymybot"]
-package-dir = { "" = "scripts" }
+package-dir = { pymybot = "scripts/pymybot" }
 
 [tool.setuptools.package-data]
 pymybot = ["py.typed"]
