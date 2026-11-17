@@ -530,6 +530,8 @@ class Robot:
                 try:
                     var.destroy()
                 except Exception as exc:
+                    if var.kind == "daemon" and not var._done.is_set():
+                        raise DriverError(f"Hot deletion failed at '{name}'; worker retained until exit: {exc}") from exc
                     failure = exc
                 self.registry.remove(name)
                 self._metas.pop(name, None)
@@ -622,10 +624,14 @@ class Robot:
             except BaseException as exc:
                 for name in reversed(list(self.registry)):
                     if name not in before:
+                        variable = self.registry.require(name)
                         try:
-                            self.registry.require(name).destroy()
+                            variable.destroy()
                         except Exception as cleanup_error:
                             print(f"Rollback warning: {cleanup_error}", file=sys.stderr)
+                            if variable.kind == "daemon" and not variable._done.is_set():
+                                self.state = "Deactivating"
+                                continue
                         self.registry.remove(name)
                         self._metas.pop(name, None)
                 self._refresh_flow_refs()

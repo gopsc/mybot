@@ -120,6 +120,105 @@ def test_sources_must_be_previous_daemons_and_keep_strong_references():
         agg.bridge("capacity", 999999999)
 
 
+def test_hot_delete_retains_worker_until_it_exits(tmp_path):
+    from pymybot.robot import Robot
+
+    (tmp_path / "probe.lua").write_text("function daemon_tick() end\n")
+    entered, release = threading.Event(), threading.Event()
+    runtimes = []
+
+    def tick(daemon):
+        entered.set()
+        assert release.wait(3)
+
+    def factory(**kwargs):
+        runtime = FakeRuntime(**kwargs, tick=tick)
+        runtimes.append(runtime)
+        return runtime
+
+    robot = Robot(
+        "CREATE TABLE Daemon(name String,chunk String,proto String,path String);"
+        "INSERT INTO Daemon(name,chunk,proto,path) VALUES('worker','probe.lua','uart','/dev/test-only');",
+        module_paths=[tmp_path])
+    robot._new_runtime = factory
+    robot.deactivate_grace_ms = 10
+    robot.active()
+    worker = robot.registry["worker"]
+    try:
+        assert entered.wait(2)
+        with pytest.raises(DriverError, match="teardown timed out"):
+            robot.apply_sql("DELETE FROM Daemon WHERE name='worker';")
+        assert robot.registry["worker"] is worker and not worker._done.is_set()
+        assert not runtimes[0].closed.is_set()
+        for name in ("worker", "replacement"):
+            with pytest.raises(ScriptError):
+                robot.apply_sql(
+                    "INSERT INTO Daemon(name,chunk,proto,path) "
+                    f"VALUES('{name}','probe.lua','uart','/dev/test-only');")
+        assert len(runtimes) == 1
+        release.set()
+        assert worker._done.wait(2)
+        robot.apply_sql("DELETE FROM Daemon WHERE name='worker';")
+        robot.apply_sql("INSERT INTO Daemon(name,chunk,proto,path) "
+                        "VALUES('worker','probe.lua','uart','/dev/test-only');")
+        assert robot.registry["worker"] is not worker
+    finally:
+        release.set()
+        robot.deactivate()
+        assert worker._done.wait(2)
+
+
+def test_failed_hot_insert_retains_exiting_worker(tmp_path, monkeypatch):
+    from pymybot.robot import Robot
+
+    (tmp_path / "probe.lua").write_text("function daemon_tick() end\n")
+    entered, release = threading.Event(), threading.Event()
+    workers = []
+
+    def tick(daemon):
+        entered.set()
+        assert release.wait(3)
+
+    def factory(**kwargs):
+        workers.append(kwargs["daemon"])
+        return FakeRuntime(**kwargs, tick=tick)
+
+    robot = Robot("CREATE TABLE Daemon(name String,chunk String);", module_paths=[tmp_path])
+    robot._new_runtime = factory
+    robot.deactivate_grace_ms = 10
+    monkeypatch.setattr(DaemonVariable, "destroy_timeout", 0.01)
+    original = DaemonVariable.build
+
+    def build(daemon):
+        if daemon.name == "bad":
+            assert entered.wait(2)
+            raise DriverError("synthetic later build failure")
+        original(daemon)
+
+    monkeypatch.setattr(DaemonVariable, "build", build)
+    robot.active()
+    try:
+        with pytest.raises(DriverError, match="synthetic later build failure"):
+            robot.apply_sql("INSERT INTO Daemon(name,chunk) VALUES('worker','probe.lua');"
+                            "INSERT INTO Daemon(name,chunk) VALUES('bad','probe.lua');")
+        assert robot.state == "Deactivating"
+        assert robot.registry["worker"] is workers[0]
+        with pytest.raises(ScriptError, match="active robot"):
+            robot.apply_sql("INSERT INTO Daemon(name,chunk) VALUES('replacement','probe.lua');")
+        robot.deactivate()
+        with pytest.raises(DriverError, match="still exiting"):
+            robot.active()
+        release.set()
+        assert workers[0]._done.wait(2)
+        robot.active()
+        assert not list(robot.registry)
+    finally:
+        release.set()
+        robot.deactivate()
+        for worker in workers:
+            assert worker._done.wait(2)
+
+
 def test_slot_snapshot_validation_and_counter_wrap():
     slot = Slot(2)
     slot.publish([1, 2, 3])
