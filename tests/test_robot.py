@@ -152,6 +152,37 @@ def test_injected_alias_and_scope_on_failure(modules):
         assert "x" not in robot.registry
 
 
+@pytest.mark.parametrize("kind", ["lua", "python", "daemon"])
+@pytest.mark.parametrize("binding", [False, True])
+def test_session_scalars_cannot_redirect_devices(modules, kind, binding):
+    if kind == "lua":
+        sql = probe_sql()
+    else:
+        sql = "CREATE TABLE Probe(name String,fail String);"
+        if kind == "python":
+            (modules[0] / "Native.py").write_text('''
+class Driver:
+    def __init__(self, context): self.context = context
+    def build(self, data): return {"result": "OK"}
+    def call(self, data): return {"result": "OK"}
+''')
+            sql += "CREATE TABLE Native(name String); INSERT INTO Native(name) VALUES('dev');"
+        else:
+            (modules[0] / "worker.lua").write_text("function daemon_tick() end\n")
+            sql += "CREATE TABLE Daemon(name String,chunk String);"
+            sql += "INSERT INTO Daemon(name,chunk) VALUES('dev','worker.lua');"
+    sql += "INSERT INTO Probe(name,fail) VALUES('second','no');"
+    with Robot(sql, module_paths=modules) as robot:
+        original = robot.registry["dev"]
+        script = "@Action\ndev.value;\n1;\n@\n"
+        if not binding:
+            script = "@Alias\nname alias;\ndev second;\n@\n" + script
+        with pytest.raises(ScriptError, match="Cannot override hardware variable"):
+            robot.run(script, vars={"dev": "second"} if binding else None)
+        assert robot.registry["dev"] is original
+        assert robot.registry["second"].read()["count"] == 0
+
+
 def test_invalid_reference_rejected_before_activation(modules):
     robot = Robot("CREATE TABLE Probe(name String, src String); INSERT INTO Probe(name,src) VALUES('dev','$absent');", module_paths=modules)
     with pytest.raises(ScriptError, match="undefined"):

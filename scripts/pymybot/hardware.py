@@ -200,6 +200,8 @@ class Registry:
         if name in self.flow_refs:
             raise ScriptError(f"Cannot override '{name}': referenced by controller/trigger")
         existing = self.get(name)
+        if existing is not None and existing.kind not in {"alias", "vars", "struct"}:
+            raise ScriptError(f"Cannot override hardware variable '{name}' with a session scalar")
         if (not shadow_struct and existing is not None and existing.kind == "struct"
                 and variable.kind != "struct"):
             raise ScriptError(f"Cannot replace Struct '{name}' with another variable type")
