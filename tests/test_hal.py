@@ -756,6 +756,33 @@ def test_shell_run_timeout_kills_and_reports_partial_output(manager):
     assert "partial-out" in out["out"]
 
 
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_shell_cleans_process_group_after_parent_exit(manager, monkeypatch, cancelled):
+    from tempfile import TemporaryFile
+    import pymybot.hal as hal
+
+    handle = manager.call("shell_open", 1000)
+    cleaned = []
+    with TemporaryFile() as stdout, TemporaryFile() as stderr:
+        child = SimpleNamespace(stdout=stdout, stderr=stderr, returncode=0,
+                                poll=lambda: 0, wait=lambda timeout=None: 0)
+        monkeypatch.setattr(hal.subprocess, "Popen", lambda *args, **kwargs: child)
+        monkeypatch.setattr(hal, "read_pipe", lambda pipe: b"")
+        monkeypatch.setattr(hal, "kill_tree", lambda process: cleaned.append(process))
+
+        def check():
+            if cancelled:
+                raise BudgetExceeded("Test cancellation")
+
+        if cancelled:
+            with pytest.raises(BudgetExceeded):
+                manager.call("shell_run", handle, "test-command", cancel_check=check)
+        else:
+            assert manager.call("shell_run", handle, "test-command", cancel_check=check)["result"] == "OK"
+        assert cleaned == [child]
+        assert stdout.closed and stderr.closed
+
+
 def test_shell_run_caps_output_streams(manager):
     handle = manager.call("shell_open", 20000)
     size = HALManager.SHELL_MAX_OUT_BYTES + 4096

@@ -746,6 +746,7 @@ class HALManager:
                 raise IOError(f"cannot start the platform shell: {exc}") from exc
             timed_out = False
             truncated = False
+            tree_cleaned = False
             try:
                 pipes = [child.stdout, child.stderr]
                 if os.name != "nt":
@@ -771,10 +772,12 @@ class HALManager:
                             # The shell is gone; kill leftovers so pipes reach EOF.
                             exited_at = now
                             kill_tree(child)
+                            tree_cleaned = True
                         elif now >= deadline:
                             timed_out = True
                             exited_at = now
                             kill_tree(child)
+                            tree_cleaned = True
                     if exited_at is not None:
                         if not active:
                             break
@@ -789,7 +792,7 @@ class HALManager:
                         except subprocess.TimeoutExpired:
                             pass
             finally:
-                if child.poll() is None:
+                if not tree_cleaned:
                     kill_tree(child)
                 try:
                     child.wait(timeout=3)
