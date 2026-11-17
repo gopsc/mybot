@@ -594,7 +594,8 @@ class Robot:
                 if overlap:
                     raise ScriptError(f"Cannot delete/update {sorted(overlap)}: still referenced by '{name}'")
             budget.check()
-            delete_first = bool(updates)
+            # Retiring daemons retain device ownership until their workers exit.
+            delete_first = bool(updates) or any(self.registry.require(name).kind == "daemon" for name in removed)
             if delete_first:
                 self._remove_variables(removed, budget)
             before = set(self.registry)

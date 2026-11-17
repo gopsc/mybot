@@ -168,6 +168,67 @@ def test_hot_delete_retains_worker_until_it_exits(tmp_path):
         assert worker._done.wait(2)
 
 
+@pytest.mark.parametrize("prior_timeout", [False, True])
+def test_renamed_daemon_is_not_built_before_old_worker_exits(tmp_path, monkeypatch, prior_timeout):
+    from pymybot.robot import Robot
+
+    (tmp_path / "probe.lua").write_text("function daemon_tick() end\n")
+    entered, release, replacement_tick = threading.Event(), threading.Event(), threading.Event()
+    created, overlaps, runtimes = [], [], []
+
+    def tick(daemon):
+        if daemon.name == "old":
+            entered.set()
+            assert release.wait(3)
+        else:
+            overlaps.append(not runtimes[0].closed.is_set())
+            replacement_tick.set()
+
+    def factory(**kwargs):
+        created.append(kwargs["daemon"].name)
+        runtime = FakeRuntime(**kwargs, tick=tick)
+        runtimes.append(runtime)
+        return runtime
+
+    original = DaemonVariable.build
+
+    def build(daemon):
+        original(daemon)
+        if daemon.name == "replacement":
+            assert replacement_tick.wait(2)
+
+    monkeypatch.setattr(DaemonVariable, "build", build)
+    robot = Robot(
+        "CREATE TABLE Daemon(name String,chunk String,proto String,path String);"
+        "INSERT INTO Daemon(name,chunk,proto,path) VALUES('old','probe.lua','uart','/dev/test-only');",
+        module_paths=[tmp_path])
+    robot._new_runtime = factory
+    robot.deactivate_grace_ms = 10
+    robot.active()
+    old = robot.registry["old"]
+    replacement = ("DELETE FROM Daemon WHERE name='old';"
+                   "INSERT INTO Daemon(name,chunk,proto,path) "
+                   "VALUES('replacement','probe.lua','uart','/dev/test-only');")
+    try:
+        assert entered.wait(2)
+        if prior_timeout:
+            with pytest.raises(DriverError, match="teardown timed out"):
+                robot.apply_sql("DELETE FROM Daemon WHERE name='old';")
+        with pytest.raises(DriverError, match="teardown timed out"):
+            robot.apply_sql(replacement)
+        assert created == ["old"] and overlaps == []
+        assert robot.registry["old"] is old
+        release.set()
+        assert old._done.wait(2)
+        robot.apply_sql(replacement)
+        assert created == ["old", "replacement"] and not any(overlaps)
+        assert "old" not in robot.registry and "replacement" in robot.registry
+    finally:
+        release.set()
+        robot.deactivate()
+        assert old._done.wait(2)
+
+
 def test_failed_hot_insert_retains_exiting_worker(tmp_path, monkeypatch):
     from pymybot.robot import Robot
 
