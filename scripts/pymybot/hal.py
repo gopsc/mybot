@@ -53,7 +53,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_HTTP_OPENER = urllib.request.build_opener(_NoRedirect)
+_HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 class HALManager:

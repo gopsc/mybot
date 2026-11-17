@@ -637,6 +637,34 @@ def test_http_open_rejects_invalid_bases(manager):
     assert manager.call("http_open", "http://127.0.0.1:1/", 60001) == -1
 
 
+def test_http_ignores_environment_proxies(monkeypatch, httpd):
+    import runpy
+    import urllib.request
+
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {
+        "http": "http://192.0.2.20:8123", "https": "http://192.0.2.20:8123"})
+    monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
+    connect = socket.create_connection
+    attempts = []
+
+    def loopback_only(address, *args, **kwargs):
+        attempts.append(address)
+        if address[0] != "127.0.0.1":
+            raise OSError("Test blocked a non-loopback connection")
+        return connect(address, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "create_connection", loopback_only)
+    module = runpy.run_path(str(ROOT / "scripts/pymybot/hal.py"), run_name="pymybot._proxy_test")
+    manager = module["HALManager"]()
+    try:
+        handle = manager.call("http_open", httpd, 1000)
+        result = manager.call("http_request", handle, "GET", "/echo")
+        assert result["result"] == "OK" and result["status"] == 200
+        assert attempts and all(host == "127.0.0.1" for host, _ in attempts)
+    finally:
+        manager.close()
+
+
 def test_http_request_roundtrip_status_and_redirects(manager, httpd):
     handle = manager.call("http_open", httpd + "/base/", 2000)
     assert handle >= 0
