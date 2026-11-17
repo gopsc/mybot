@@ -46,7 +46,8 @@ nonempty dictionary of JSON-compatible values; `result` may be omitted, or be
 order with a fresh bounded budget, then destroys every driver. It is not a
 hardware emergency stop: a blocking native call or uncooperative Python loop can
 still delay it. An aborted `Robot` is latched and must be replaced, not
-reactivated.
+reactivated. A stop during activation also runs available `safe()` hooks before
+destroying partially built drivers and latches the aborted state.
 
 `context.call(operation, *args)` uses existing HAL operations (for example,
 `uart_read`, `i2c_transfer`, `close_handle`) with the same permissions, handle

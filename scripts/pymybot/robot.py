@@ -316,7 +316,10 @@ class Robot:
                     Budget(self.stop_event).check()
                     var.build()
             except BaseException:
-                self.deactivate()
+                if self.stop_event.is_set():
+                    self.abort("activation-stopped")
+                else:
+                    self.deactivate()
                 raise
         return self
 

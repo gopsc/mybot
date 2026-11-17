@@ -133,6 +133,47 @@ function destroy(data) return {result="OK"} end
     assert "LUA-SAFE safe lua-stop" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("during_build", [False, True])
+def test_activation_stop_runs_safe_before_destroy(tmp_path, during_build):
+    (tmp_path / "Probe.py").write_text("pass\n")
+    events = []
+
+    class Runtime:
+        def load(self, path):
+            pass
+
+        def has_function(self, name):
+            return True
+
+        def call(self, name, data, budget=None):
+            events.append((name, data.get("tag")))
+            if name == "build" and data["tag"] == ("b" if during_build else "a"):
+                robot.stop_event.set()
+                if during_build:
+                    raise BudgetExceeded("Stop requested during build")
+            return {"result": "OK"}
+
+        def close(self):
+            events.append(("close", None))
+
+    robot = Robot(
+        "CREATE TABLE Probe(name String,tag String);"
+        "INSERT INTO Probe(name,tag) VALUES('a','a');"
+        "INSERT INTO Probe(name,tag) VALUES('b','b');", module_paths=[tmp_path])
+    robot._new_python_runtime = Runtime
+    with pytest.raises(BudgetExceeded):
+        robot.active()
+    assert robot.state == "Aborted"
+    assert [tag for event, tag in events if event == "safe"] == (["b", "a"] if during_build else ["a"])
+    safe_indices = [i for i, (event, _) in enumerate(events) if event == "safe"]
+    destroy_indices = [i for i, (event, _) in enumerate(events) if event == "destroy"]
+    assert max(safe_indices) < min(destroy_indices)
+    receipt = robot.abort("again")
+    assert receipt["safe_failures"] == [] and receipt["destroy_failures"] == []
+    with pytest.raises(ScriptError, match="aborted"):
+        robot.active()
+
+
 @pytest.mark.parametrize("language", ["py", "lua"])
 def test_cleanup_budget_reaches_bus_dependencies(tmp_path, capsys, language):
     (tmp_path / "Bus.py").write_text('''
