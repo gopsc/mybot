@@ -174,6 +174,42 @@ def test_activation_stop_runs_safe_before_destroy(tmp_path, during_build):
         robot.active()
 
 
+@pytest.mark.parametrize("during_build", [False, True])
+def test_hot_insert_stop_runs_safe_before_rollback(tmp_path, during_build):
+    (tmp_path / "Probe.py").write_text("pass\n")
+    events = []
+
+    class Runtime:
+        def load(self, path):
+            pass
+
+        def has_function(self, name):
+            return True
+
+        def call(self, name, data, budget=None):
+            events.append((name, data.get("tag")))
+            if name == "build" and data["tag"] == ("b" if during_build else "a"):
+                robot.stop_event.set()
+                if during_build:
+                    raise BudgetExceeded("Stop requested during hot insertion")
+            return {"result": "OK"}
+
+        def close(self):
+            events.append(("close", None))
+
+    robot = Robot("CREATE TABLE Probe(name String,tag String);", module_paths=[tmp_path])
+    robot._new_python_runtime = Runtime
+    robot.active()
+    with pytest.raises(BudgetExceeded):
+        robot.apply_sql("INSERT INTO Probe(name,tag) VALUES('a','a');"
+                        "INSERT INTO Probe(name,tag) VALUES('b','b');")
+    assert robot.state == "Aborted"
+    assert [tag for event, tag in events if event == "safe"] == (["b", "a"] if during_build else ["a"])
+    assert max(i for i, (event, _) in enumerate(events) if event == "safe") < min(
+        i for i, (event, _) in enumerate(events) if event == "destroy")
+    assert robot.abort("again")["safe_failures"] == []
+
+
 @pytest.mark.parametrize("language", ["py", "lua"])
 def test_cleanup_budget_reaches_bus_dependencies(tmp_path, capsys, language):
     (tmp_path / "Bus.py").write_text('''

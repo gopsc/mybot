@@ -622,6 +622,9 @@ class Robot:
                     self._remove_variables(removed, budget)
                 budget.check()
             except BaseException as exc:
+                if self.stop_event.is_set():
+                    self.abort("hot-sql-stopped")
+                    raise
                 for name in reversed(list(self.registry)):
                     if name not in before:
                         variable = self.registry.require(name)
