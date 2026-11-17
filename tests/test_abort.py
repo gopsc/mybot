@@ -133,6 +133,68 @@ function destroy(data) return {result="OK"} end
     assert "LUA-SAFE safe lua-stop" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("language", ["py", "lua"])
+def test_cleanup_budget_reaches_bus_dependencies(tmp_path, capsys, language):
+    (tmp_path / "Bus.py").write_text('''
+class Driver:
+    def __init__(self, context): self.context = context
+    def build(self, data): return {"result": "OK"}
+    def call(self, data):
+        self.context.check()
+        return {"result": "OK", "fd": 17}
+''')
+    (tmp_path / "Bridge.lua").write_text('''
+function call(data)
+    assert(data.fd == 17, "bridge missing fd")
+    return {result="OK", fd=data.fd}
+end
+function build(data) return call(data) end
+''')
+    source = '''
+class Driver:
+    def __init__(self, context): self.context = context
+    def build(self, data):
+        assert data["fd"] == 17
+        return {"result": "OK"}
+    def call(self, data): return {"result": "OK"}
+    def safe(self, data):
+        self.context.check()
+        assert data["fd"] == 17
+        print("safe fd=17")
+        return {"result": "OK"}
+    def destroy(self, data):
+        self.context.check()
+        assert data["fd"] == 17
+        print("destroy fd=17")
+        return {"result": "OK"}
+''' if language == "py" else '''
+function build(data) assert(data.fd == 17); return {result="OK"} end
+function call(data) return {result="OK"} end
+function safe(data)
+    assert(data.fd == 17, "safe missing fd")
+    print("safe fd=17")
+    return {result="OK"}
+end
+function destroy(data)
+    assert(data.fd == 17, "destroy missing fd")
+    print("destroy fd=17")
+    return {result="OK"}
+end
+'''
+    (tmp_path / ("Device." + language)).write_text(source)
+    robot = Robot(
+        "CREATE TABLE Bus(name String); INSERT INTO Bus(name) VALUES('bus');"
+        "CREATE TABLE Bridge(name String,I2C String); INSERT INTO Bridge(name,I2C) VALUES('bridge','$bus');"
+        "CREATE TABLE Device(name String,I2C String); INSERT INTO Device(name,I2C) VALUES('device','$bridge');",
+        module_paths=[tmp_path])
+    robot.active()
+    receipt = robot.abort("test-stop")
+    assert receipt["safe_failures"] == []
+    assert receipt["destroy_failures"] == []
+    diagnostics = capsys.readouterr().err
+    assert "safe fd=17" in diagnostics and "destroy fd=17" in diagnostics
+
+
 def test_safe_failure_is_reported_but_destroy_still_runs(tmp_path):
     modules = tmp_path / "modules"
     modules.mkdir()

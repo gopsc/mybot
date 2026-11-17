@@ -274,7 +274,7 @@ class Metadata:
             else:
                 self.static[column] = value
 
-    def collect(self, for_destroy=False, *, for_build=False):
+    def collect(self, for_destroy=False, *, for_build=False, budget=None):
         with depth_guard("metadata"):
             result = self.static.copy()
             for column, expression in self.expressions:
@@ -289,7 +289,8 @@ class Metadata:
             for column, name in self.references:
                 try:
                     target = self.registry.require(name)
-                    value = target.read()
+                    value = (target.read(budget=budget) if budget is not None and isinstance(target, DriverVariable)
+                             else target.read())
                     if target.kind in {"vars", "alias"}:
                         result[column] = value
                     elif isinstance(value, dict):
@@ -347,10 +348,12 @@ class DriverVariable(Variable):
                     result = ensure_ok(target.play(payload.copy()), f"controller {target.name}")
             return result
 
-    def read(self):
+    def read(self, *, budget=None):
         if self.runtime is None:
             raise DriverError(f"'{self.name}' not built or already destroyed")
-        return self.runtime.call("read" if self.runtime.has_function("read") else "call", self.metadata.collect(), budget=self.budget)
+        budget = budget if budget is not None else self.budget
+        data = self.metadata.collect(budget=budget)
+        return self.runtime.call("read" if self.runtime.has_function("read") else "call", data, budget=budget)
 
     def has_safe(self):
         return self.runtime is not None and self.runtime.has_function("safe")
@@ -364,10 +367,11 @@ class DriverVariable(Variable):
         """
         if self.runtime is None or not self.runtime.has_function("safe"):
             return
-        data = self.metadata.collect(for_destroy=True)
+        budget = Budget(timeout=max(0.1, float(timeout)))
+        data = self.metadata.collect(for_destroy=True, budget=budget)
         data["mode"] = "safe"
         data.setdefault("reason", str(reason)[:256])
-        result = self.runtime.call("safe", data, budget=Budget(timeout=max(0.1, float(timeout))))
+        result = self.runtime.call("safe", data, budget=budget)
         ensure_ok(result, f"safe {self.name}")
 
     def destroy(self):
@@ -376,6 +380,8 @@ class DriverVariable(Variable):
         runtime, self.runtime = self.runtime, None
         try:
             if runtime.has_function("destroy"):
-                ensure_ok(runtime.call("destroy", self.metadata.collect(True)), f"destroy {self.name}")
+                budget = Budget(timeout=30)
+                data = self.metadata.collect(for_destroy=True, budget=budget)
+                ensure_ok(runtime.call("destroy", data, budget=budget), f"destroy {self.name}")
         finally:
             runtime.close()
