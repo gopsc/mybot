@@ -1,19 +1,17 @@
 """Read-only host discovery: enumerate UART, FTDI, I2C and SPI devices.
 
-I2C/SPI/UART enumeration is delegated to the bundled ``Dev_enum`` driver so
-the CLI, the Skill and MT actions share one implementation. FTDI USB adapters
-are listed through pyftdi and mapped to the ``ftdi://`` URLs the HAL accepts.
-Nothing is opened unless ``--probe`` is set, and even then serial ports are
-only opened and closed without writing.
+I2C/SPI/UART enumeration uses the trusted in-package ``dev_enum`` module (the
+``Dev_enum`` asset driver forwards to it), so a read-only command never executes
+a writable asset file. FTDI USB adapters are listed through pyftdi and mapped to
+the ``ftdi://`` URLs the HAL accepts. Nothing is opened unless ``--probe`` is
+set, and even then serial ports are only opened and closed without writing.
 """
 from __future__ import annotations
 
-import importlib.util
 import sys
 from types import SimpleNamespace
 
 from .hardware import ensure_ok
-from .paths import asset_path
 
 BUSES = ("i2c", "spi", "uart", "ftdi")
 MAX_HINTS = 64
@@ -45,15 +43,9 @@ def _platform_name():
 
 
 def _load_dev_enum():
-    """Import the bundled Dev_enum driver from the packaged module assets."""
-    module_path = asset_path("modules") / "Dev_enum.py"
-    try:
-        spec = importlib.util.spec_from_file_location("pymybot_discover_dev_enum", module_path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    except OSError as exc:
-        raise DiscoveryError(f"Cannot load the bundled Dev_enum driver: {exc}") from None
-    return module
+    """Return the trusted in-package enumeration module, never the asset copy."""
+    from . import dev_enum
+    return dev_enum
 
 
 def _enumerate_ftdi():

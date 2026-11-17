@@ -194,7 +194,9 @@ pymybot discover --probe               # also open/close each real UART port
 ```
 
 Read-only host enumeration shared with the hardware-controller skill:
-I2C/SPI/UART come from the bundled `Dev_enum` driver, FTDI USB adapters are
+I2C/SPI/UART come from the trusted in-package `dev_enum` implementation (the
+bundled `Dev_enum` driver is a thin forwarder to it, so this read-only command
+never executes a writable asset file), FTDI USB adapters are
 listed by pyftdi and mapped to HAL-ready `ftdi://` URLs, and `hints` maps every
 found device to the `CREATE TABLE UART/I2C/SPI` declaration that uses it.
 Nothing is opened unless `--probe` is set; probing never writes, but an open
