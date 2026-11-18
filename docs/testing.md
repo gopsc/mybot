@@ -139,6 +139,7 @@ cd build && ctest -R 'lua_|cpp_unit'         # 只跑 Lua 段 + C++ 单测
 6. **@Merge 相位语义**（`@Action` 两两归并时相位 0/±1 对齐、负相位丢行告警、前导 `-` 的设备在运行端被跳过）
 7. **输入边界加固**，覆盖：
    - 未知 `--key` 退出码 2、动作脚本/结构脚本超 8 MiB 上限
+   - 多模块路径按序解析，以及从不含 `modules/` 的空工作目录运行暂存安装布局，验证二进制能通过 `/proc/self/exe` 找到同前缀的 `share/mybot/modules`
    - `@Daemon` 驱动误配无 `build` 时的回滚路径
    - `mode` 键不得改写 controller 派发目标；驱动 `call()` 漏写 `return` 不得被当成成功；驱动返回自引用表须清晰报错而非宿主栈溢出
 8. **守护 tick 故障注入**（总线持续 NACK → 驱动 ERR → 守护不发布、`count` 停滞，主流程仍正常 join）

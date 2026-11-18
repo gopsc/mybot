@@ -34,6 +34,22 @@ run_one_hardening() {
         fi
 }
 
+run_installed_layout_smoke() {
+        local root
+        root="$(pwd)/.tmp/installed-layout"
+        rm -rf "$root" || return 1
+        mkdir -p "$root/bin" "$root/share/mybot" "$root/empty" || return 1
+        cp "$bin" "$root/bin/mybot" || return 1
+        cp -a modules robots scripts "$root/share/mybot/" || return 1
+        (
+                cd "$root/empty" || exit 1
+                env -u BOT4CJ_MODULE_PATH timeout "$HARDENING_TIMEOUT" \
+                        "$root/bin/mybot" \
+                        --robot="$root/share/mybot/robots/relay-test.sql" \
+                        --input="$root/share/mybot/scripts/relay-test.mt"
+        )
+}
+
 run_one_daemon_nack() {
         echo "----- daemon_nack (守护 tick 故障注入) -----"
         if [ ! -x "$bin" ]; then

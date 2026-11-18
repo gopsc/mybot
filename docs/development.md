@@ -110,7 +110,7 @@ cd build && ctest --output-on-failure -R cpp_unit
 
 ### 一、驱动是什么
 
-一个 Lua 文件 = 一类硬件。结构脚本里 `CREATE TABLE Buzzer ...`，框架按表名在 `modules/` 下找 `Buzzer.lua`（目录由 `BOT4CJ_MODULE_PATH` 指定；未设置时优先 `./modules`，不存在则回退安装布局的 `share/mybot/modules`，冒号分隔多段逐段探测）；矩阵每一行的 `name` 列成为一个硬件变量实例（如 `relay0`、`timer-0`），结构脚本里其他列的值按列名进入驱动的 data 表。
+一个 Lua 文件 = 一类硬件。结构脚本里 `CREATE TABLE Buzzer ...`，框架按表名在 `modules/` 下找 `Buzzer.lua`（目录由 `BOT4CJ_MODULE_PATH` 指定，冒号分隔多段逐段探测；未设置时依次查找 `./modules`、可执行文件同前缀的 `share/mybot/modules`、`/usr/share/mybot/modules`）；矩阵每一行的 `name` 列成为一个硬件变量实例（如 `relay0`、`timer-0`），结构脚本里其他列的值按列名进入驱动的 data 表。
 
 硬件/总线驱动使用 `require_driver` 声明式框架：指定总线类型（`"i2c"` / `"spi"` / `"uart"`）和业务闭包（`build`/`call`/可选 `destroy`），框架自动生成全局 `build`/`call`/`destroy` 并处理入参校验与总线初始化。非驱动工具模块（`Relay`/`dummy`/`Kalman`/`Ema` 等）仍用传统的全局函数模式。
 

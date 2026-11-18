@@ -53,7 +53,17 @@ cmake --build build -j4
 cat scripts/relay-test.mt | ./build/mybot --robot=robots/relay-test.sql
 ```
 
-`--robot`/`--input` 是相对当前目录的路径；模块根优先 `./modules`（存在时），否则回退到可执行文件旁的 `../share/mybot/modules`（安装布局），也可用 `BOT4CJ_MODULE_PATH`（`:` 分隔）覆盖。
+`--robot`/`--input` 的相对路径基于当前工作目录。`BOT4CJ_MODULE_PATH`（`:` 分隔多路径）可显式覆盖驱动模块根；未设置时依次查找 `./modules`、可执行文件旁的 `../share/mybot/modules`、`/usr/share/mybot/modules`，因此真实 `/bin/mybot` 也能使用 `/usr/share/mybot/modules`。
+
+## 安装
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+cmake --build build -j4
+sudo cmake --install build
+```
+
+完整安装会生成 `/usr/bin/mybot` 和 `/usr/share/mybot/{modules,robots,scripts}`，不要只复制二进制。安装后可传入 `/usr/share/mybot/robots/`、`/usr/share/mybot/scripts/` 下的绝对路径，或使用自己项目中的 SQL/MT 文件。
 
 ## CLI
 

@@ -16,23 +16,36 @@
 
 namespace bot {
 
-/* 安装布局下的模块根：<prefix>/bin/mybot → <prefix>/share/mybot/modules。
- * 只读 /proc/self/exe，不依赖 CWD；找不到时返回空串。 */
-inline std::string installedModulePath() {
-	std::array<char, 4096> buffer{};
-	const ssize_t n = ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
-	if (n <= 0) { return std::string(); }
-	std::string exe(buffer.data(), static_cast<std::size_t>(n));
-	const std::size_t slash = exe.rfind('/');
-	if (slash == std::string::npos) { return std::string(); }
-	const std::string candidate = exe.substr(0, slash) + "/../share/mybot/modules";
-	if (::access(candidate.c_str(), F_OK) != 0) { return std::string(); }
+/* 安装布局下的模块根：优先 <prefix>/bin/mybot → <prefix>/share/mybot/modules，
+ * 再回退 /usr/share/mybot/modules；只读 /proc/self/exe，不依赖 CWD。 */
+inline std::string existingModulePath(const std::string& candidate) {
+	if (candidate.empty() || ::access(candidate.c_str(), F_OK) != 0) { return std::string(); }
 	/* 规范化掉 bin/../share 里的 '..'：Lua 沙箱路径校验明确拒绝该分量。 */
 	std::array<char, 4096> resolved{};
 	if (::realpath(candidate.c_str(), resolved.data()) != nullptr) {
 		return std::string(resolved.data());
 	}
 	return candidate;
+}
+
+inline std::string executableModulePath(const std::string& exe) {
+	const std::size_t slash = exe.rfind('/');
+	if (slash == std::string::npos) { return std::string(); }
+	return exe.substr(0, slash) + "/../share/mybot/modules";
+}
+
+inline std::string installedModulePathFromExecutable(const std::string& exe,
+		const std::string& systemModules) {
+	const std::string installed = existingModulePath(executableModulePath(exe));
+	return installed.empty() ? existingModulePath(systemModules) : installed;
+}
+
+inline std::string installedModulePath() {
+	std::array<char, 4096> buffer{};
+	const ssize_t n = ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+	if (n <= 0) { return std::string(); }
+	const std::string exe(buffer.data(), static_cast<std::size_t>(n));
+	return installedModulePathFromExecutable(exe, "/usr/share/mybot/modules");
 }
 
 /* 宿主状态根：BOT4CJ_STATE_DIR > $XDG_STATE_HOME/mybot >
@@ -57,8 +70,8 @@ inline std::string modelRoot() {
 }
 
 /* N-19：Lua 驱动模块根目录——BOT4CJ_MODULE_PATH（':' 分段）。
- * 未显式设置时优先当前目录的 ./modules（仓库/开发用法），不存在再回退安装布局
- * 的 share/mybot/modules；两者都没有则保留 ./modules 作为报错路径。 */
+ * 未显式设置时优先当前目录的 ./modules（仓库/开发用法），再依次回退可执行文件
+ * 同前缀和 /usr 的 share/mybot/modules；都没有则保留 ./modules 作为报错路径。 */
 inline std::string modulePaths() {
 	auto v = getEnvVar("BOT4CJ_MODULE_PATH");
 	if (v && !v->empty()) { return *v; }

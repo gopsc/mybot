@@ -858,6 +858,9 @@ if filter_matches "hardening" "$filter"; then
 		env BOT4CJ_MODULE_PATH=".tmp/no-such-module-root:./modules" \
 		timeout $HARDENING_TIMEOUT "$bin" --robot=robots/relay-test.sql --input scripts/relay-test.mt
 
+	run_one_hardening 'installed_module_path' 0 'Relay: test=200 note=hello-relay -> delay=200' \
+		run_installed_layout_smoke
+
 	setup_hardening_daemon_build_fixture
 	run_one_hardening 'daemon_build_raise' 0 'driver build() raised' \
 		env BOT4CJ_MODULE_PATH="./modules:.tmp/fixmod" timeout $HEAVY_TIMEOUT "$bin" \

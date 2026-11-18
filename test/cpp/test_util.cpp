@@ -21,6 +21,7 @@
 #include "util_except.hpp"
 #include "util_file.hpp"
 #include "util_num.hpp"
+#include "util_path.hpp"
 #include "util_str.hpp"
 #include "util_utf8.hpp"
 
@@ -32,6 +33,46 @@ void writeText(const std::filesystem::path& p, const std::string& text) {
 }
 
 } // namespace
+
+TH_TEST(executable_module_path_maps_root_bin_to_root_share) {
+	TH_CHECK(bot::executableModulePath("/bin/mybot") == "/bin/../share/mybot/modules");
+	TH_CHECK(bot::executableModulePath("mybot").empty());
+}
+
+TH_TEST(installed_module_path_prefers_executable_prefix) {
+	fx::TempDir dir("module_path_prefix");
+	const std::filesystem::path prefix = dir.path() / "prefix";
+	std::filesystem::create_directories(prefix / "bin");
+	const std::filesystem::path local = prefix / "share/mybot/modules";
+	const std::filesystem::path system = dir.path() / "system/share/mybot/modules";
+	std::filesystem::create_directories(local);
+	std::filesystem::create_directories(system);
+	TH_CHECK(bot::installedModulePathFromExecutable((prefix / "bin/mybot").string(), system.string())
+		== std::filesystem::canonical(local).string());
+}
+
+TH_TEST(installed_module_path_falls_back_to_system_root) {
+	fx::TempDir dir("module_path_system");
+	const std::filesystem::path prefix = dir.path() / "prefix";
+	std::filesystem::create_directories(prefix / "bin");
+	const std::filesystem::path system = dir.path() / "system/share/mybot/modules";
+	std::filesystem::create_directories(system);
+	TH_CHECK(bot::installedModulePathFromExecutable((prefix / "bin/mybot").string(), system.string())
+		== std::filesystem::canonical(system).string());
+}
+
+TH_TEST(installed_module_path_returns_empty_when_no_candidate_exists) {
+	fx::TempDir dir("module_path_missing");
+	const std::filesystem::path prefix = dir.path() / "prefix";
+	std::filesystem::create_directories(prefix / "bin");
+	const std::filesystem::path system = dir.path() / "missing/share/mybot/modules";
+	TH_CHECK(bot::installedModulePathFromExecutable((prefix / "bin/mybot").string(), system.string()).empty());
+}
+
+TH_TEST(module_paths_keeps_explicit_override) {
+	fx::EnvVar guard("BOT4CJ_MODULE_PATH", "/nonexistent/mybot-modules");
+	TH_CHECK(bot::modulePaths() == "/nonexistent/mybot-modules");
+}
 
 /* ---- isSafeIdent：agentmode 预检与 RobotStruct::injectLuaDriver 共用 ---- */
 
