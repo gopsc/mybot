@@ -252,6 +252,14 @@ typo_rc=0
 bash test/run_all.sh zzz_selftest_typo_probe >/dev/null 2>&1 || typo_rc=$?
 [ "$typo_rc" -ne 0 ] \
 	|| note "拼错过滤器仍以 0 退出：空匹配防线（C8）失效，有分段在无条件记通过"
+cpp_filter_rc=0
+cpp_filter_out="$(bash test/run_all.sh utils_is_safe_ident 2>&1)" || cpp_filter_rc=$?
+if [ "$cpp_filter_rc" -ne 0 ]; then
+	note "合法 C++ 过滤器 utils_is_safe_ident 以 $cpp_filter_rc 退出"
+elif ! printf '%s\n' "$cpp_filter_out" | grep -qF '[PASS] utils_is_safe_ident_accepts_plain_identifiers'; then
+	note "合法 C++ 过滤器未执行匹配的 utils_is_safe_ident 用例"
+fi
+unset cpp_filter_rc cpp_filter_out typo_rc
 #    第三类可信度：**坏形态 lint 的抽取判据对合成坏样本正向对照**（2026-10-08 审计
 #    P0 续）。run_one_inline_lint 搜的是「坏形态」，PASS 天然要求 0 命中——这意味着
 #    活树里的命中数永远不能当「判据还有效」的自证（0 命中既可能是「代码干净」也可能

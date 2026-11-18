@@ -52,6 +52,7 @@ filter="${1:-}"
 # ---- 分段过滤器 ----
 # Lua 段按文件名子串匹配；C++ 单测段在 tail_checks.sh 里把手势原样交给 harness。
 filter_lua="$filter"
+filter_cpp="$filter"
 
 # 某分段是否应在当前过滤器下执行（$1=分段名，$2=该分段使用的过滤器）
 filter_matches() {

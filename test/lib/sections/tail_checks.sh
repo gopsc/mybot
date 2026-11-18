@@ -77,15 +77,6 @@ run_cpp_unit() {
 		return 2
 	fi
 	local out rc pass_n
-	# AG-23：C++ 分段用自己的过滤器形态（作用域语法 `agent:` 与文件名子串
-	# `agent` 不是一回事）。未命中就在**本层**显式跳过，而不是把匹配不到的
-	# 过滤器透传给二进制、让「无匹配用例」在下一层才出现（那样汇总里看不出
-	# 是哪一层没匹配上）。
-	if [ -n "$filter" ] && ! filter_matches "agent:" "$filter_cpp"; then
-		echo "[SKIP] 过滤器 '${filter}' 未命中 cpp-unit 分段（该段用 '${filter_cpp}'）"
-		record_skip "cpp-unit(过滤器未命中)"
-		return 2
-	fi
 	if [ -n "$timeout_cmd" ]; then
 		out="$($timeout_cmd "$tests_bin" $filter_cpp 2>&1)"
 	else
