@@ -5,6 +5,8 @@ Source: 命令与开关的权威是 [controller CLI](cli.md)，测试见
 
 ## 1. 推荐路径：从虚拟到真机
 
+以下开发步骤都在技能目录之外的用户工作区进行。技能内置资产和测试仅供读取参考，不要原地修改。
+
 ```
 写驱动（内嵌 _VIRT 模型）
     │
@@ -14,24 +16,26 @@ Source: 命令与开关的权威是 [controller CLI](cli.md)，测试见
     │  pymybot run     （端到端：build/call/destroy 全链路）
     │  pymybot sample --name th0   （守护采样链路）
     ▼
-（可选）加 tests/fixtures/virt/ 夹具进 pytest
+（可选）在用户工作区添加虚拟夹具和 pytest 测试
     │  约定：<驱动小写>_virt.sql + <驱动小写>_virt.mt 成对；
-    │  机制见 tests/test_migrated_drivers.py（40 对既有夹具）
+    │  技能自带 tests/test_migrated_drivers.py 仅供参考
     ▼
 写真机结构（与虚拟 SQL 分别命名！）
     │  pymybot run --allow-hardware --robot robots/<任务>_real.sql ...
 ```
 
-## 2. 在项目外目录开发
+## 2. 创建并使用外部工作区
 
 ```sh
-pymybot check --robot robots/<任务>.sql --input scripts/<任务>.mt \
-  --module-path modules --module-path /path/to/pymybot/modules
+pymybot new mybot-arm --dir /path/to/project
+pymybot check --robot /path/to/project/robots/mybot-arm.sql \
+  --input /path/to/project/scripts/mybot-arm.mt --module-path /path/to/project/modules
 ```
 
-`--module-path` **替换**默认搜索路径——自定义目录与基础 `modules` 都要给出，等价环境变量
-`BOT4CJ_MODULE_PATH`（按系统路径分隔符连接），细节见 docs/cli.md。
-`@Include` 只能引用动作脚本所在目录内的文件。
+`--dir` 必填且必须在技能目录之外；所有生成目标都会预检，`--force` 不能绕过只读边界。
+`--module-path` **替换**默认搜索路径——还需内置驱动时，将 `assets list --kind modules` 返回的 `root`
+作为另一个 `--module-path`；等价环境变量是 `BOT4CJ_MODULE_PATH`（按系统路径分隔符连接），细节见 [CLI](cli.md)。
+`@Include` 只能引用动作脚本所在目录内的文件；被引用脚本也保存在外部工作区中。
 
 ## 3. 平台要点
 

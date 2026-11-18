@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from .errors import ScriptError
+from .paths import bundle_roots
 
 _NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
 
@@ -66,7 +67,9 @@ def create_robot(root, name, *, force=False):
     All target paths are checked before writing, so a refusal does not leave a
     half-created robot behind.
     """
-    root = Path(root).absolute()
+    if not str(root).strip():
+        raise ScriptError("Workspace directory must be explicitly specified")
+    root = Path(root).resolve()
     table = _class_name(name)
     slug = name.lower()
     variable = table[:1].lower() + table[1:] + "0"
@@ -75,6 +78,19 @@ def create_robot(root, name, *, force=False):
         root / "scripts" / f"{slug}.mt": _ACTION.format(title=table, variable=variable, slug=slug),
         root / "modules" / f"{table}.py": _DRIVER,
     }
+    protected = bundle_roots()
+    for path in (root, *targets):
+        resolved = path.resolve()
+        if any(resolved.is_relative_to(bundle) for bundle in protected):
+            raise ScriptError(f"Skill/package directories are read-only; choose an external workspace: {path}")
+        if not resolved.is_relative_to(root):
+            raise ScriptError(f"Generated path escapes the workspace: {path}")
+    for path in targets:
+        if path.exists():
+            if not path.is_file():
+                raise ScriptError(f"Generated target is not a regular file: {path}")
+            if path.stat().st_nlink > 1:
+                raise ScriptError(f"Refusing to overwrite a hard-linked file: {path}")
     existing = sorted(str(path) for path in targets if path.exists())
     if existing and not force:
         raise ScriptError("Refusing to overwrite existing files (use --force): " + ", ".join(existing))

@@ -152,6 +152,29 @@ def installed_smoke(manifest_path):
                            "--input", str(assets / "scripts" / "uart-loopback.mt"), "--timeout", "10"])
     require([item.get("rx") for item in native.get("outputs", [])] == [0, 127, 255],
             "Packaged Python drivers did not complete UART loopback")
+    workspace = Path.cwd() / "generated"
+    generated = command_json([*cli, "new", "probe", "--dir", str(workspace)])
+    require(Path(generated["root"]) == workspace, "Scaffold used a different workspace")
+    robot = str(workspace / generated["robot"])
+    action = str(workspace / generated["script"])
+    modules = str(workspace / "modules")
+    command_json([*cli, "check", "--robot", robot, "--input", action, "--module-path", modules])
+    executed = command_json([*cli, "run", "--robot", robot, "--input", action,
+                             "--module-path", modules, "--timeout", "10"])
+    require(executed.get("outputs") == [{"result": "OK", "ping": 1}], "External scaffold run failed")
+    for arguments, code in [
+        (["new", "probe"], 2),
+        (["new", "probe", "--dir", str(package), "--force"], 1),
+        (["assets", "write", "--kind", "scripts", "--path", "relay-test.mt",
+          "--content", "changed", "--force"], 2),
+        (["assets", "delete", "--kind", "scripts", "--path", "relay-test.mt", "--yes"], 2),
+    ]:
+        result = subprocess.run([*cli, *arguments], cwd=Path.cwd(), env=env,
+                                capture_output=True, text=True, encoding="utf-8", timeout=30)
+        require(result.returncode == code and json.loads(result.stdout).get("ok") is False,
+                f"Expected refusal for {arguments}: {result.stdout} {result.stderr}")
+    require(not (package / "robots").exists(), "Scaffold wrote into the installed package")
+    require(asset_manifest(assets) == expected, "CLI changed packaged assets")
     preflight()
     print(f"Verified {len(actual)} packaged assets and the CLI from {package}", flush=True)
 

@@ -121,15 +121,15 @@ def parser():
         "sample": "Activate and read a named variable; activation itself may write to devices",
         "apply-sql": "Apply SQL to a temporarily active robot; does not write the structure file",
         "doctor": "Check the interpreter, optional dependencies and bundled assets without touching hardware",
-        "new": "Create a runnable robot SQL/MT/driver skeleton in the current directory",
-        "assets": "List, read, write and delete bundled robots/modules/scripts asset files",
+        "new": "Create a runnable robot SQL/MT/driver skeleton in an external workspace",
+        "assets": "List and read bundled robots/modules/scripts asset files",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
         if name == "new":
             command.add_argument("name", help="robot name, for example mybot-arm")
-            command.add_argument("--dir", default=".", metavar="DIR",
-                                 help="workspace root (default: current directory)")
+            command.add_argument("--dir", required=True, metavar="DIR",
+                                 help="external workspace root (must be outside the skill/package directory)")
             command.add_argument("--force", action="store_true", help="overwrite existing generated files")
             continue
         if name == "assets":
@@ -142,19 +142,6 @@ def parser():
             reader.add_argument("--kind", choices=kinds, required=True)
             reader.add_argument("--path", required=True, metavar="REL",
                                 help="path relative to the kind's asset root")
-            writer = actions.add_parser("write", help="create or overwrite one asset file", allow_abbrev=False)
-            writer.add_argument("--kind", choices=kinds, required=True)
-            writer.add_argument("--path", required=True, metavar="REL",
-                                help="path relative to the kind's asset root")
-            source = writer.add_mutually_exclusive_group(required=True)
-            source.add_argument("--content", metavar="TEXT", help="UTF-8 text content")
-            source.add_argument("--content-file", metavar="FILE", help="read content from a regular file")
-            writer.add_argument("--force", action="store_true", help="overwrite an existing file")
-            deleter = actions.add_parser("delete", help="delete one asset file", allow_abbrev=False)
-            deleter.add_argument("--kind", choices=kinds, required=True)
-            deleter.add_argument("--path", required=True, metavar="REL",
-                                 help="path relative to the kind's asset root")
-            deleter.add_argument("--yes", action="store_true", help="confirm permanent deletion")
             continue
         if name == "discover":
             command.add_argument("--buses", default="all",
@@ -260,7 +247,7 @@ def _asset_target(kind, rel):
 
 
 def assets_command(args):
-    """List/read/write/delete files under the bundled robots/modules/scripts roots."""
+    """List or read bundled robots/modules/scripts files."""
     action = args.asset_action
     if action == "list":
         kinds = ("robots", "modules", "scripts") if args.kind == "all" else (args.kind,)
@@ -278,31 +265,11 @@ def assets_command(args):
         return {"kind": args.kind, **listed[args.kind], "activated": False}
     root, target = _asset_target(args.kind, args.path)
     relative = target.relative_to(root).as_posix()
-    if action == "read":
-        if not target.is_file() or target.is_symlink():
-            raise UsageError(f"Asset is not an existing regular file: {relative}")
-        content = read_file(target)
-        return {"kind": args.kind, "path": relative,
-                "bytes": len(content.encode("utf-8")), "content": content}
-    if action == "write":
-        content = args.content if args.content is not None else read_file(Path(args.content_file))
-        content = checked_text(content)
-        existed = target.exists()
-        if existed and not args.force:
-            raise UsageError(f"Asset already exists (use --force to overwrite): {relative}")
-        if target.is_symlink():
-            raise UsageError("Refusing to write through a symlink")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        verb = "overwritten" if existed else "created"
-        return {"kind": args.kind, "path": relative, verb: True,
-                "bytes": len(content.encode("utf-8"))}
-    if not args.yes:
-        raise UsageError("assets delete requires --yes")
     if not target.is_file() or target.is_symlink():
         raise UsageError(f"Asset is not an existing regular file: {relative}")
-    target.unlink()
-    return {"kind": args.kind, "path": relative, "deleted": True}
+    content = read_file(target)
+    return {"kind": args.kind, "path": relative,
+            "bytes": len(content.encode("utf-8")), "content": content}
 
 
 

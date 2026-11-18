@@ -76,8 +76,8 @@ python -m pymybot doctor
 | `run` | 激活、执行一个动作、清理 | 是 |
 | `sample` | 读取命名变量，可多次采样 | 是 |
 | `apply-sql` | 对临时激活的机器人执行受限 SQL，不写结构文件 | 是 |
-| `assets` | 列出/读取/新建/删除内置资产 | 否 |
-| `new` | 生成 `robots/`、`scripts/`、`modules/` 骨架 | 否 |
+| `assets` | 只读列出/读取内置资产 | 否 |
+| `new --dir DIR` | 在技能目录外生成 `robots/`、`scripts/`、`modules/` 骨架 | 否 |
 
 每个命令在 stdout 输出**恰好一行 JSON**，诊断写 stderr；退出码 `0` 成功、`1` 运行错误、
 `2` 用法错误、`130` 中断。
@@ -102,10 +102,11 @@ python -I tools/check_docs_skill_sync.py   # 引用登记、链接与 Source 行
 python -I tools/ci_smoke.py wheel          # sdist → wheel → 干净 venv
 ```
 
-新增驱动：在 `assets/modules/` 放 `Driver(context)` 实现或 `lib/` 下的 Lua 驱动，配套
-`tests/fixtures/virt/<名字>_virt.{sql,mt}` 夹具，先跑虚拟结构再加 `--allow-hardware`。
-细节见 [references/driver-lua.md](references/driver-lua.md) 与
-[references/testing.md](references/testing.md)。
+使用技能时，内置资产仅作只读参考；新 SQL、MT、驱动、测试和运行产物全部保存到技能目录外的用户项目。
+用 `pymybot new mybot-arm --dir /path/to/project` 初始化；`--dir` 必填，技能/安装包目录和符号链接回指均拒绝，`--force` 也不能绕过。
+在生成目录内执行返回的 `check`、`run` 命令；从其他目录调用时显式传入外部文件和 `--module-path` 的绝对路径。
+自定义驱动先配套虚拟结构和测试，再加 `--allow-hardware`；若还需内置驱动，追加其目录作为另一个 `--module-path`。
+细节见 [references/driver-lua.md](references/driver-lua.md) 与 [references/workflow-errors.md](references/workflow-errors.md)。
 
 ## 文档
 

@@ -29,8 +29,8 @@ JSON contract: `python scripts/hardware_controller.py <command> [options]`.
 | `pymybot sample --robot FILE --name NAME [--count N] [--interval-ms MS] [--timeout S] [--allow-hardware]` | Read a named variable | Yes |
 | `pymybot apply-sql --robot FILE --sql "..." [--allow-hardware]` | Apply restricted SQL to a temporarily active robot | Yes |
 | `pymybot doctor` | Environment/dependency/asset diagnostics | No |
-| `pymybot new --dir DIR NAME [--force]` | Generate a runnable `robots/`, `scripts/` and `modules/` skeleton | No |
-| `pymybot assets list/read/write/delete --kind robots\|modules\|scripts` | List, read, create, overwrite or delete bundled asset files | No |
+| `pymybot new --dir DIR NAME [--force]` | Generate a runnable skeleton in an explicit external workspace | No |
+| `pymybot assets list/read --kind robots\|modules\|scripts` | List or read bundled asset files without changing them | No |
 
 `check`, `discover`, `hardware`, `scripts`, `query`, `doctor`, `new` and `assets`
 never activate hardware; `run`, `sample` and `apply-sql` do, and activation
@@ -38,27 +38,37 @@ itself may write to devices. See [security.md](security.md) for the trust model.
 
 ## Asset files
 
-`pymybot assets` manages the bundled `robots` (`.sql`), `modules` (`.py`/`.lua`) and
-`scripts` (`.mt`) asset files in place, so the Skill can create, retrieve, overwrite and
-delete robot scripts without leaving the controller:
+`pymybot assets` only lists and reads bundled `robots` (`.sql`), `modules`
+(`.py`/`.lua`) and `scripts` (`.mt`). Treat these files as read-only examples;
+copy content to an external workspace before modifying it.
 
 ```sh
 pymybot assets list [--kind robots|modules|scripts|all]
-pymybot assets read   --kind robots  --path relay-test.sql
-pymybot assets write  --kind scripts --path mybot-arm.mt --content "@Action ..."   # create
-pymybot assets write  --kind scripts --path mybot-arm.mt --content-file arm.mt --force  # overwrite
-pymybot assets delete --kind scripts --path mybot-arm.mt --yes
+pymybot assets read --kind robots --path relay-test.sql
 ```
 
 `--path` is relative to the kind's asset root; traversal, absolute paths, symlink escape
-and wrong suffixes are refused. `write` creates and refuses an existing file unless
-`--force`; `delete` requires `--yes`. Content is bounded UTF-8 (`--content` inline or
-`--content-file` for larger bodies). The command never activates hardware.
+and wrong suffixes are refused. Read content is bounded UTF-8. The command never
+activates hardware or writes asset files.
 
 `--robot` and `--input` resolve against these roots: an absolute path or a path that
 already exists relative to CWD is used as-is, otherwise a bare or relative name falls
 back to `assets/robots` (`--robot`) or `assets/scripts` (`--input`). This keeps the
 Skill self-contained without breaking absolute or CWD-relative callers.
+
+## External workspaces
+
+`new NAME --dir DIR` requires an explicit workspace outside the skill/package.
+It checks the resolved workspace and every output path before creating files;
+symlinks into the bundle or outside the selected workspace are refused. Existing
+hard-linked files are also refused. `--force` only permits overwriting ordinary
+files in the external workspace; it never bypasses these checks.
+
+Store all generated SQL, MT, drivers, tests and run artifacts in that workspace.
+Run the returned `commands` from its `root`, or pass absolute paths for `--robot`,
+`--input` and `--module-path` from other directories. Custom module paths replace
+the defaults: if you also need bundled drivers, add the `root` reported by
+`assets list --kind modules` as another `--module-path`.
 
 ## Shared options
 
@@ -110,8 +120,8 @@ showing them rather than injected values.
 ## Examples
 
 ```sh
-# Create a runnable pure-software skeleton
-python -m pymybot new --dir . mybot-arm
+# Create a runnable pure-software skeleton outside the skill directory
+python -m pymybot new --dir /path/to/project mybot-arm
 
 # Static validation, no hardware
 python -m pymybot check \

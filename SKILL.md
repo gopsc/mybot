@@ -5,7 +5,9 @@ description: 通过自包含的 pymybot Runtime 控制与编程机器人：Struc
 
 # Hardware Controller
 
-使用 `scripts/pymybot/` 的 Python Runtime 控制机器人（`scripts/hardware_controller.py` 是自包含入口）。Structure SQL 声明硬件，Python/Lua driver 实现设备行为，MT action 描述时序动作。默认 robots、scripts 和 modules 位于 `assets/`。
+使用 `scripts/pymybot/` 的 Python Runtime 控制机器人（`scripts/hardware_controller.py` 是自包含入口）。Structure SQL 声明硬件，Python/Lua driver 实现设备行为，MT action 描述时序动作。内置只读示例位于 `assets/`。
+
+**使用技能时，将技能目录视为只读。** 不要通过 CLI、文件编辑工具、Shell 或驱动在技能目录内创建、覆盖或删除文件；需要改示例时先复制到技能目录之外的用户项目。所有新 SQL、MT、驱动、测试及运行产物都保存到该外部工作区，再用显式路径加载。不要把当前目录默认当作用户项目；若没有明确的外部目标，先询问用户。
 
 ## 1. 入口
 
@@ -43,8 +45,7 @@ python -m pymybot <command> [options]
 | `sample` | 读取某个命名变量的当前值或 Daemon 快照 | 是 |
 | `apply-sql` | 在临时会话中改变量、建表或删表做实验 | 是 |
 | `assets list/read` | 查看或读取内置 robots/modules/scripts 资产 | 否 |
-| `assets write/delete` | 新建、覆盖或删除内置资产脚本 | 否 |
-| `new` | 为用户自己的项目生成 `robots/`、`scripts/`、`modules/` 骨架 | 否 |
+| `new --dir DIR` | 在技能目录外的用户工作区生成 `robots/`、`scripts/`、`modules/` 骨架 | 否 |
 
 所有命令在 stdout 输出**恰好一行 JSON**；诊断写 stderr。退出码非零表示命令失败，但动作已派发后的异常代表“结果未知”，不要自动重试，也不要声称已回滚。
 
@@ -127,31 +128,27 @@ python scripts/hardware_controller.py doctor
 
 ### 3.7 `assets`
 
-管理内置资产文件，不激活硬件：
+只读浏览内置资产，不激活硬件：
 
 ```sh
 ... assets list --kind all
 ... assets read --kind robots --path relay-test.sql
-... assets write --kind scripts --path my-arm.mt --content "@Action ..."
-... assets write --kind scripts --path my-arm.mt --content-file arm.mt --force
-... assets delete --kind scripts --path my-arm.mt --yes
 ```
 
 - `kind` 为 `robots`（`.sql`）、`modules`（`.py`/`.lua`）或 `scripts`（`.mt`）；`list` 还可为 `all`。
-- `path` 相对该资产根；拒绝越界、绝对路径、符号链接和错误后缀。
-- `write` 新建，已存在则失败；`overwrite` 用 `--force`；`delete` 必须 `--yes`。
-- `--content` 经 argv 传递，Windows 命令行上限约 32 KiB；更大的文件用 `--content-file`。
+- `path` 相对该资产根；拒绝越界、绝对路径和错误后缀。
+- 需要修改示例时，将内容保存到外部工作区，不要改动内置资产。
 
 ### 3.8 `new`
 
-在用户工作区生成可运行的 SQL/MT/driver 骨架，不修改内置资产：
+显式指定技能目录之外的用户工作区，生成可运行的 SQL/MT/driver 骨架：
 
 ```sh
 ... new mybot-arm --dir /path/to/project
-... new demo --dir . --force
 ```
 
-生成后按骨架自带的命令先 `check`、再 `run`。
+`--dir` 必填；技能/安装包目录及子目录、通过符号链接回指这些目录的目标均拒绝，`--force` 不能绕过。`--force` 仅用于确认覆盖外部工作区的已有普通文件。
+生成后在返回的 `root` 工作区执行返回的命令，先 `check`、再 `run`；从其他目录调用时，为 `--robot`、`--input` 和 `--module-path` 提供外部工作区的绝对路径。
 
 ## 4. 路径与权限
 
@@ -167,11 +164,11 @@ python scripts/hardware_controller.py doctor
 
 推荐流程：
 
-1. 写 driver（内嵌 `*_VIRT` 模型）。
-2. 写 `proto='virt'` 结构 + 动作脚本，全程无硬件。
-3. `check` → `run`（虚拟）→ `sample`（需要采样时）。
-4. 加 `tests/fixtures/virt/<驱动小写>_virt.{sql,mt}` 夹具。
-5. 写真机结构（与虚拟 SQL 分别命名），再 `run --allow-hardware`。
+1. 确认技能目录之外的用户工作区，在其中的 `modules/` 写 driver（内嵌 `*_VIRT` 模型）。
+2. 在该工作区的 `robots/`、`scripts/` 写 `proto='virt'` 结构和动作脚本，全程无硬件。
+3. 使用外部文件路径执行 `check` → `run`（虚拟）→ `sample`（需要采样时）。`--module-path` 会替换默认搜索路径；需要内置驱动时，追加 `assets list --kind modules` 返回的 `root`。
+4. 在用户工作区添加虚拟夹具和测试，不要写入技能自带的测试目录。
+5. 在同一外部工作区写真机结构（与虚拟 SQL 分别命名），再 `run --allow-hardware`。
 
 文法细节、错误对照与硬纪律按任务先读对应 reference（每个 reference 开头 `Source:` 行标明权威位置）：
 

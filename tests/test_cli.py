@@ -403,36 +403,44 @@ def test_assets_list_reports_each_kind(asset_root, capsys):
     assert code == 0 and result["kind"] == "robots" and result["files"] == ["a.sql"]
 
 
-def test_assets_write_read_delete_roundtrip(asset_root, capsys):
-    sql = "CREATE TABLE Demo(name String);"
-    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
-                             "--path", "demo.sql", "--content", sql)
-    assert code == 0 and result["created"] is True and result["path"] == "demo.sql"
-    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
-                             "--path", "demo.sql", "--content", sql)
-    assert code == 2 and result["error"]["type"] == "UsageError"
-    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
-                             "--path", "demo.sql", "--content", "SELECT 1;", "--force")
-    assert code == 0 and result["overwritten"] is True
-    code, result, _ = invoke(capsys, "assets", "read", "--kind", "robots", "--path", "demo.sql")
-    assert code == 0 and result["content"] == "SELECT 1;"
-    code, result, _ = invoke(capsys, "assets", "delete", "--kind", "robots", "--path", "demo.sql")
-    assert code == 2 and result["error"]["type"] == "UsageError"
-    code, result, _ = invoke(capsys, "assets", "delete", "--kind", "robots",
-                             "--path", "demo.sql", "--yes")
-    assert code == 0 and result["deleted"] is True
-    assert not (asset_root / "robots" / "demo.sql").exists()
+@pytest.mark.parametrize("kind, filename", [("robots", "demo.sql"), ("scripts", "demo.mt"),
+                                           ("modules", "Demo.py"), ("modules", "Demo.lua")])
+def test_assets_read_preserves_content(asset_root, capsys, kind, filename):
+    content = "只读示例\n"
+    target = asset_root / kind / filename
+    target.write_text(content, encoding="utf-8")
+    code, result, _ = invoke(capsys, "assets", "read", "--kind", kind, "--path", filename)
+    assert code == 0 and result["content"] == content and result["path"] == filename
+    assert result["bytes"] == len(content.encode("utf-8"))
+    assert target.read_text(encoding="utf-8") == content
 
 
-def test_assets_reject_traversal_and_bad_suffix(asset_root, capsys):
-    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
-                             "--path", "../evil.sql", "--content", "x")
+@pytest.mark.parametrize("action, options", [("write", ["--content", "changed", "--force"]),
+                                            ("delete", ["--yes"])])
+@pytest.mark.parametrize("filename", ["demo.sql", "new.sql"])
+def test_assets_mutating_commands_are_rejected(asset_root, capsys, action, options, filename):
+    target = asset_root / "robots" / "demo.sql"
+    target.write_text("original", encoding="utf-8")
+    code, result, _ = invoke(capsys, "assets", action, "--kind", "robots", "--path", filename, *options)
     assert code == 2 and result["error"]["type"] == "UsageError"
-    code, result, _ = invoke(capsys, "assets", "write", "--kind", "robots",
-                             "--path", "demo.txt", "--content", "x")
+    assert "invalid choice" in result["error"]["message"]
+    assert target.read_text(encoding="utf-8") == "original"
+    assert sorted(path.name for path in (asset_root / "robots").iterdir()) == ["demo.sql"]
+
+
+@pytest.mark.parametrize("path", ["../evil.sql", "demo.txt", "missing.sql"])
+def test_assets_read_rejects_invalid_paths(asset_root, capsys, path):
+    code, result, _ = invoke(capsys, "assets", "read", "--kind", "robots", "--path", path)
     assert code == 2 and result["error"]["type"] == "UsageError"
-    code, result, _ = invoke(capsys, "assets", "read", "--kind", "robots", "--path", "missing.sql")
-    assert code == 2 and result["error"]["type"] == "UsageError"
+
+
+def test_assets_help_only_advertises_read_commands(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["assets", "--help"])
+    assert exc.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "{list,read}" in help_text
+    assert "write" not in help_text and "delete" not in help_text
 
 
 def test_robot_and_input_resolve_under_asset_root(asset_root):

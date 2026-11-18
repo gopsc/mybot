@@ -32,6 +32,21 @@ flowchart LR
 | Scripts → Python / Lua | Both are trusted in-process code. Python imports/direct native I/O are unrestricted; LuaJIT FFI is available when the `lupa` wheel includes LuaJIT (otherwise a standard-Lua fallback has no FFI). Neither is a security sandbox. |
 | Driver → device | `active`/`build`/`destroy`/`sample` may write hardware even when they appear read-only. |
 
+## Skill files and generated workspaces
+
+Treat the skill/package directory and bundled examples as read-only during use.
+`assets` only lists and reads. `new` requires an explicit external `--dir` and
+checks the workspace and every output's resolved path before writing anything.
+Skill/package paths, symlink escapes and existing hard-linked targets are refused,
+even with `--force`. Keep generated SQL, MT, drivers, tests and run artifacts in
+the external workspace; use explicit input and module paths to load them.
+
+These checks protect controller-managed generation, not arbitrary filesystem I/O.
+Trusted drivers, Python's import caches and an agent's file or shell tools retain
+the host account's privileges; path preflight is not protection against concurrent
+hostile filesystem changes. For strict write prevention, use OS-enforced read-only
+permissions or mounts and disable or relocate Python bytecode caches.
+
 ## Native driver trust
 
 An ordinary SQL table selects `<Table>.py` before `<Table>.lua` **within each

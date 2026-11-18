@@ -2,6 +2,10 @@
 
 Source: This is the authoritative controller testing document; fixtures and tests live in the repository `tests/`.
 
+These are controller-repository maintenance tests. When using the skill to develop
+a robot, keep custom fixtures and tests in the external user workspace; do not add
+them to the installed skill.
+
 ## Test layers
 
 | Layer | Location | What it proves |
@@ -11,8 +15,9 @@ Source: This is the authoritative controller testing document; fixtures and test
 | Virtual devices | `tests/fixtures/virt/*.sql` + `*.mt` | Real driver build/call/destroy paths without hardware |
 | Robot integration | `tests/test_robot.py`, `tests/test_daemon.py` | Activation, inheritance, controllers, sampling |
 | Native drivers | `tests/test_native.py` | Compile-only validation, per-row modules and the Driver context |
-| CLI | `tests/test_cli.py` | Command dispatch, JSON envelope and exit codes |
-| Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → assets/CLI |
+| CLI | `tests/test_cli.py` | Command dispatch, read-only assets, JSON envelope and exit codes |
+| Workspaces | `tests/test_scaffold.py`, `tests/test_paths.py` | External generation, protected bundle roots and link/overwrite refusal |
+| Packaging | `tools/ci_smoke.py` | sdist → wheel → isolated venv → read-only assets and external generation/execution |
 | Docs/skill sync | `tests/test_docs_skill_sync.py`, `tools/check_docs_skill_sync.py` | Skill links/paths resolve, references declare and register their authority |
 
 The suite must run without physical hardware: virtual fixtures, `proto='virt'`
