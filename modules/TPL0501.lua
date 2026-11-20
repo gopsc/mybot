@@ -67,8 +67,6 @@ require_driver("spi", {
 		local rt = tonumber(data.rtotal)
 		if rt ~= nil and rt > 0 then rtotal = rt else rtotal = DEF_RTOTAL end
 
-		print(string.format(
-			"TPL0501 init OK: rtotal=%d Ω（上电抽头为中点 127，非 0）", rtotal))
 		return {  result = "OK"  }
 	end,
 

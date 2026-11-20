@@ -22,7 +22,7 @@
 --   2) 虚拟原语契约：spi_xfer_full 注入身份/等长收发/参数族拒绝/未开 fd/
 --      delay 留痕与 __u16 钳制
 --   3) 真实 build：sopen+setup(mode3)、4 帧地址/命令/MOSI/MISO Hi-Z、
---      横幅 delay/zero/status/crc_ok、delay 透传与钳制、CRC 坏仍 build OK、
+--      build 静默、delay 透传与钳制、CRC 坏仍 build OK、
 --      传输失败/两类固定位违例/缺参负路径
 --   4) 真实 call：90°/0°/满码/告警位、每轮 4 帧、zero 三场景、virt_tick
 --      32 拍真实驱动闭环
@@ -92,7 +92,7 @@ local function section()
 	return #vbus.txlog
 end
 
--- 横幅捕获（驱动 build 仅一条 print）
+-- 输出捕获（缄默原则：build 成功不得打印）
 local cap_lines = {}
 local real_print = print
 local function cap_start()
@@ -100,12 +100,6 @@ local function cap_start()
 	print = function(s) cap_lines[#cap_lines + 1] = tostring(s) end
 end
 local function cap_stop() print = real_print end
-local function banner(pat)
-	for _, s in ipairs(cap_lines) do
-		if s:find(pat, 1, true) then return s end
-	end
-	return nil
-end
 
 -- 模型直调：发一帧读寄存器，返回末字节
 local function mread(reg)
@@ -352,11 +346,8 @@ do
 		if e.rx[1] ~= 0 or e.rx[2] ~= 0 then hiz = false end
 	end
 	check("MISO 命令+地址段 Hi-Z（前两字节 0）", hiz)
-	check("横幅含 init OK 与 fd/delay/zero/status/crc_ok",
-		banner("MT6826S init OK") ~= nil
-		and banner("fd=3") ~= nil and banner("delay=0us") ~= nil
-		and banner("zero=0.0deg") ~= nil and banner("status=0") ~= nil
-		and banner("crc_ok=true") ~= nil)
+	check("build 静默（无 init 横幅）", #cap_lines == 0,
+		table.concat(cap_lines, "|"))
 
 	-- delay 透传与钳制
 	local m2 = section()
@@ -369,26 +360,25 @@ do
 	dfr = xframes(m3)
 	check("delay=70000 钳 65535", dfr[1].delay == 65535)
 
-	-- zero 横幅
+	-- zero 配置：build 仍静默（行为由上方 call 角度断言覆盖）
 	section()
 	cap_start(); build({ fd = fd, delay = "0", zero = "90" }); cap_stop()
-	check("zero=90 横幅 zero=90.0deg", banner("zero=90.0deg") ~= nil)
+	check("zero=90 build 静默", #cap_lines == 0, table.concat(cap_lines, "|"))
 
-	-- status 透传到横幅
+	-- status 透传：build 静默
 	section()
 	dev:set_status(5)
 	cap_start(); build({ fd = fd, delay = "0" }); cap_stop()
-	check("status=5 时横幅 status=5 crc_ok=true",
-		banner("status=5") ~= nil and banner("crc_ok=true") ~= nil)
+	check("status=5 build 静默", #cap_lines == 0, table.concat(cap_lines, "|"))
 
-	-- CRC 坏：build 只做固定位自检，CRC 不符不致命（横幅 crc_ok=false）
+	-- CRC 坏：build 只做固定位自检，CRC 不符不致命
 	section()
 	dev:corrupt_crc(true)
 	cap_start()
 	local rb = build({ fd = fd, delay = "0" })
 	cap_stop()
 	check("CRC 坏 build 仍 OK（固定位未违例）", rb.result == "OK", rb.result)
-	check("横幅 crc_ok=false", banner("crc_ok=false") ~= nil)
+	check("CRC 坏 build 静默", #cap_lines == 0, table.concat(cap_lines, "|"))
 	dev:clear_faults()
 
 	-- 负路径：传输失败（每轮首帧即败，仅 1 帧）
@@ -484,8 +474,7 @@ do
 	-- 皆为真，`NaN % 360` 仍是 NaN，末尾 `NaN or 0` 又因 NaN 是 truthy 而取 NaN。
 	-- cfg_zero 是模块级状态，于是驱动里 `cfg_zero ~= 0` 恒真、**每一次 call 的
 	-- ANGLE 都变成 nan**：一次配置笔误把角度读数永久污染。delay 列的
-	-- `tonumber(x) or 0` 同病——NaN 会流进 read_reg 的延时参数，并被横幅的 %d
-	-- 打成 -9223372036854775808（string.format 对 NaN 不报错，只出垃圾）。
+	-- `tonumber(x) or 0` 同病——NaN 会流进 read_reg 的延时参数。
 	section()
 	build({ fd = fd, delay = "nan", zero = "nan" })
 	dev:set_angle_raw(8192)
@@ -493,9 +482,8 @@ do
 	check("zero='nan' 归缺省：ANGLE=90°（未被污染成 nan）",
 		near(r.ANGLE, 90.0) and r.RAW == 8192, tostring(r.ANGLE))
 	cap_start(); build({ fd = fd, delay = "nan", zero = "nan" }); cap_stop()
-	check("delay/zero='nan' 横幅回落缺省 delay=0us/zero=0.0deg",
-		banner("delay=0us") ~= nil and banner("zero=0.0deg") ~= nil,
-		tostring(banner("init OK")))
+	check("delay/zero='nan' build 静默", #cap_lines == 0,
+		table.concat(cap_lines, "|"))
 
 	-- virt_tick 32 拍经真实驱动闭环
 	section()

@@ -221,8 +221,6 @@ require_driver("i2c", {
 		c1 = prom[2]; c2 = prom[3]; c3 = prom[4]
 		c4 = prom[5]; c5 = prom[6]; c6 = prom[7]
 
-		print(string.format("MS5611 init OK: addr=0x%02X, osr=%d, wait=%dms, C1=%d C6=%d",
-			addr, OSR_TAB[oi], wait_ms, c1, c6))
 		return {  result = "OK"  }
 
 	end,

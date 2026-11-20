@@ -252,8 +252,6 @@ build = function(ctx, data)
 		return err("Failed to write BMM150 OP_MODE")
 	end
 
-	print(string.format("BMM150 init OK: addr=0x%02X, preset=%s (odr=%dHz)",
-		addr, pname, PRESET_ODR_HZ[p.odr] or 10))
 	return {  result = "OK"  }
 
 end,

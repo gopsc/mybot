@@ -208,7 +208,6 @@ build = function(ctx, data)
 		return err("SCSCL servo id=" .. tostring(id) .. " reports error status " .. tostring(rep.error))
 	end
 
-	print(string.format("SCSCL init OK: id=%d fd=%d", id, fd))
 	return {  result = "OK"  }
 
 end,

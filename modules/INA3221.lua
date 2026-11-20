@@ -166,8 +166,6 @@ build = function(ctx, data)
 	local loop_ms = math.ceil(3 * (1.1 + 1.1) * avg_n) + 2
 	milli_sleep(loop_ms)
 
-	print(string.format("INA3221 init OK: addr=0x%02X, avg=%d, rshunt=%.4f/%.4f/%.4f Ω",
-		addr, avg_n, rshunt1, rshunt2, rshunt3))
 	return {  result = "OK"  }
 
 end,

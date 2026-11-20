@@ -106,8 +106,6 @@ require_driver("i2c", {
 		end
 		local rb = decode_readback(r)
 
-		print(string.format("MCP4725 init OK: addr=0x%02X, vref=%.2fV, DAC=%d, EEPROM=%d",
-			addr, vref, rb.level, rb.eeprom))
 		return {  result = "OK"  }
 	end,
 

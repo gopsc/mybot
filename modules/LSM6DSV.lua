@@ -219,8 +219,6 @@ require_driver("i2c", {
 		-- 陀螺仪启动等待（ST 惯例 ~70-80ms，取 100ms 余量，首拍数据就绪）
 		milli_sleep(100)
 
-		print(string.format("LSM6DSV16X init OK: addr=0x%02X, ±%dg/±%ddps, odr=%gHz",
-			ctx.addr, acc_g, gyr_dps, odr_hz))
 		return {  result = "OK"  }
 	end,
 
@@ -639,7 +637,7 @@ end
 --    modules/LSM6DSV.lua 原写 REG_CTRL8 = 0x18——官方 lsm6dsv16x_reg.h
 --    实证 fs_xl 在 CTRL8(0x17)[1:0]，0x18 是 CTRL9（usr_off/lpf2 等
 --    使能位）。后果：驱动把加计 fs 码写进 CTRL9，真机加计永远 POR
---    ±2g（横幅却印配置值）。模型坚持 0x17/0x18 两址隔离：build 后
+--    ±2g。模型坚持 0x17/0x18 两址隔离：build 后
 --    0x17 低 2 位为 fs 码、0x18 保持 0，迁移测试据此钉死修复。
 -- 2) 旧桩 CTRL3 POR 播 0x04（IF_INC=1）且软复位后「首拍读 1、次拍
 --    自清」——官方 CTRL3 POR=0x00，sw_reset 写即自清，真实驱动首拍

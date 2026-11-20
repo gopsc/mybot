@@ -22,9 +22,9 @@
 --   CMD 0xFE 复位魔数 0x5400（17043 是 0x0054）；HIBRT 0x0A/VRESET
 --   0x18/TABLE 0x40~0x7F 驱动不碰，模型不建模（读/字写 NACK）。
 --
--- 真实 build：set + VERSION 指针读（3）+ 末尾 STATUS 横幅指针读（2）=
+-- 真实 build：set + VERSION 指针读（3）+ 末尾 STATUS 读取指针读（2）=
 -- 5 txlog 零写字零睡眠；quickstart=1 加 1 笔 0x4000 字写 + 实睡 5ms；
--- valrt/athd 各为读改写 3 笔；STATUS 横幅读失败不致命。真实 call：
+-- valrt/athd 各为读改写 3 笔；STATUS 读取失败不致命。真实 call：
 -- set + 四寄存器指针读 = 9 txlog 零睡眠，clear 且有标志加 1 笔字写。
 --
 -- 覆盖：模型侧 POR/偶地址不串读/坏帧 NACK/未建模地址边界/只读区写丢弃/
@@ -485,7 +485,7 @@ check("reset_logs 清空留痕（write_log 与 config_writes 均空）",
 
 -- =====================================================================
 -- 组 2：真实 build
--- 基础路径：set + VERSION 指针读（2）+ STATUS 横幅指针读（2）= 5 txlog，
+-- 基础路径：set + VERSION 指针读（2）+ STATUS 读取指针读（2）= 5 txlog，
 -- 零写字、零睡眠
 -- =====================================================================
 mark = section()
@@ -495,20 +495,20 @@ end)
 check("build 一次 set_addr", #set_addrs(mark) == 1 and set_addrs(mark)[1] == 0x36,
       tostring(#set_addrs(mark)))
 local pw = ptr_writes(mark)
-check("build 两笔纯指针写 0x08、0x1A（VERSION + STATUS 横幅）",
+check("build 两笔纯指针写 0x08、0x1A（VERSION + STATUS 读取）",
       #pw == 2 and pw[1] == 0x08 and pw[2] == 0x1A, table.concat(pw, ","))
 check("build 两次 2B 读", #reads(mark) == 2, tostring(#reads(mark)))
 check("build 共 5 txlog", #entries(mark) == 5, tostring(#entries(mark)))
 check("build 零写字", #write_words(mark) == 0, tostring(#write_words(mark)))
 check("build 零睡眠", sleep_total == 0, tostring(sleep_total))
 
--- STATUS 横幅读失败不致命：build 仍 OK
+-- STATUS 读取失败不致命：build 仍 OK
 mark = section()
 dev:fail_read(function(p) return p == 0x1A end)
-expect_ok("build STATUS 横幅读失败仍 OK（非致命）", function()
+expect_ok("build STATUS 读取失败仍 OK（非致命）", function()
 	return build({ fd = fd, address = "0x36" })
 end)
-check("横幅读失败仍 5 txlog", #entries(mark) == 5, tostring(#entries(mark)))
+check("STATUS 读失败仍 5 txlog", #entries(mark) == 5, tostring(#entries(mark)))
 dev:clear_faults()
 
 -- 字符串 fd
@@ -532,7 +532,7 @@ dev:who(0x001E)
 expect_err("build VERSION=0x001E（17043）拒收", function()
 	return build({ fd = fd, address = "0x36" })
 end, "MAX17043")
-check("17043 误拦在版本读之后：4 txlog（set+w08+r+w1A? 否——短路无横幅）",
+check("17043 误拦在版本读之后：4 txlog（set+w08+r；短路无 STATUS 读）",
       #entries(mark) == 3 and #reads(mark) == 1, tostring(#entries(mark)))
 mark = section()
 dev:who(0x00AA)

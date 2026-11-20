@@ -99,20 +99,17 @@ local function section()
 	return #vbus.txlog
 end
 
--- 横幅捕获（驱动 build 打印）
+-- 输出捕获（缄默原则：build 成功不得打印）
 local cap_lines = {}
 local real_print = print
 local function cap_start()
 	cap_lines = {}
-	print = function(s) cap_lines[#cap_lines + 1] = tostring(s) end
+	print = function(s)
+		s = tostring(s)
+		if not s:find("^%[") then cap_lines[#cap_lines + 1] = s end
+	end
 end
 local function cap_stop() print = real_print end
-local function cap_has(pat)
-	for _, s in ipairs(cap_lines) do
-		if s:find(pat, 1, true) then return true end
-	end
-	return false
-end
 
 -- ==================== 组 1：模型协议事实 ====================
 do
@@ -374,12 +371,13 @@ do
 		function() return build(meta({ id = 1 })) end, "error status 4")
 	dev:set_status(0)
 
-	-- 正常路径：帧逐字节 + 横幅 + 留痕
+	-- 正常路径：帧逐字节 + 静默 + 留痕
 	mark = section()
 	cap_start()
 	local ok_b = expect_ok("build OK", function() return build(meta({ id = 1 })) end)
 	cap_stop()
-	check("build 横幅含 id/fd", cap_has("SCSCL init OK: id=1 fd=3"))
+	check("build 静默（无 init 横幅）", #cap_lines == 0,
+		table.concat(cap_lines, "|"))
 	local es = entries(mark)
 	check("总线时序 uf→uw（flush 一次 + PING 一帧）",
 		dirs_of(es)[1] == "uf" and dirs_of(es)[2] == "uw" and dirs_of(es)[3] == "ur")

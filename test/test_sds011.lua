@@ -24,7 +24,7 @@
 --      virt_tick 钉值与小数不变量
 --   2) 虚拟原语契约：注入身份、open/write/read 校验与零留痕、环跨轮 drain、
 --      flush 清环、uart_fail_read、close 静默
---   3) 真实 build：两事务序列、横幅固件版本、被动回显、timeout 列透传、
+--   3) 真实 build：两事务序列、build 静默、被动回显、timeout 列透传、
 --      版本应答丢失仍降级 OK、fd 负路径
 --   4) 真实 call：查询帧/应答帧逐字节、PM 换算、power sleep/work 回显、
 --      小端字节拆分、残留主动流多轮扫描、tick 波形闭环与事务计数
@@ -127,7 +127,7 @@ local function section()
 	return #vbus.txlog
 end
 
--- 横幅捕获（驱动 build 仅一条 print）
+-- 输出捕获（缄默原则：build 成功不得打印）
 local cap_lines = {}
 local real_print = print
 local function cap_start()
@@ -135,12 +135,6 @@ local function cap_start()
 	print = function(s) cap_lines[#cap_lines + 1] = tostring(s) end
 end
 local function cap_stop() print = real_print end
-local function banner(pat)
-	for _, s in ipairs(cap_lines) do
-		if s:find(pat, 1, true) then return s end
-	end
-	return nil
-end
 
 -- ==================== 组 1：模型协议事实 ====================
 do
@@ -390,8 +384,8 @@ do
 	local res = build({ fd = fd })
 	cap_stop()
 	check("build OK", res.result == "OK", tostring(res.message))
-	check("横幅含 SDS011 init OK: fd=3 firmware=7.0 (passive mode)",
-		banner("SDS011 init OK: fd=" .. fd .. " firmware=7.0 (passive mode)") ~= nil)
+	check("build 静默（无 init 横幅）", #cap_lines == 0,
+		table.concat(cap_lines, "|"))
 	local es = entries(mark)
 	check("build 两命令事务序列",
 		table.concat(dirs_of(es), ",") == "uf,uw,ur,uf,uw,ur",
@@ -424,14 +418,14 @@ do
 	check("timeout 负值回落默认仍 OK", build({ fd = fd, timeout = "-1" }).result == "OK")
 	check("timeout 非数字回落默认仍 OK", build({ fd = fd, timeout = "-" }).result == "OK")
 
-	-- 版本应答丢失：驱动仅 dbg，横幅降级 firmware=? 且 build 仍 OK
+	-- 版本应答丢失：驱动仅 dbg，build 仍 OK 且静默
 	mark = section()
 	dev:swallow_next(0x07)
 	cap_start()
 	res = build({ fd = fd })
 	cap_stop()
 	check("版本丢失 build 仍 OK", res.result == "OK", tostring(res.message))
-	check("横幅降级 firmware=?", banner("firmware=?") ~= nil)
+	check("版本丢失 build 静默", #cap_lines == 0, table.concat(cap_lines, "|"))
 	es = entries(mark)
 	check("版本丢失：第二条命令 3 轮空读后继续",
 		count_dir(es, "uw") == 2 and count_dir(es, "ur") == 4,
@@ -525,7 +519,7 @@ do
 	check("第二轮扫描命中真 ACK = AA C5 02 01 ...",
 		same_bytes(es[4].bytes, ACK_PASSIVE), table.concat(es[4].bytes, ","))
 	check("版本应答同样前置残留帧", es[7].bytes[9] == 0 and #es[7].bytes == 10)
-	check("最终仍解出固件版本", es[8].bytes[3] == 0x07 and banner("firmware=7.0") ~= nil)
+	check("最终仍解出固件版本", es[8].bytes[3] == 0x07)
 
 	-- virt_tick 波形经真实驱动闭环（5 拍一周，含回卷共 6 次）
 	mark = section()

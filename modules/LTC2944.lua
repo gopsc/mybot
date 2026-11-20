@@ -138,8 +138,6 @@ build = function(ctx, data)
 		return err("Failed to write LTC2944 control")
 	end
 
-	print(string.format("LTC2944 init OK: addr=0x%02X, rsense=%.4f Ω, prescaler M=%d, status=0x%04X",
-		addr, rsense, presc_m, status))
 	return {  result = "OK"  }
 
 end,

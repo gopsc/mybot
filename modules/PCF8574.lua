@@ -83,10 +83,6 @@ require_driver("i2c", {
 		end
 		cfg_latch = out
 
-		if os.getenv("BOT4CJ_DEBUG") == "1" then
-			print(string.format("PCF8574 init OK: addr=0x%02X latch=0x%02X pins=0x%02X",
-				addr, out, pins))
-		end
 		return {  result = "OK"  }
 	end,
 

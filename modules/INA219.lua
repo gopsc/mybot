@@ -157,7 +157,6 @@ require_driver("i2c", {
 		local loop_ms = math.ceil(2 * IT_532US_US * avg_n / 1000) + 2
 		milli_sleep(loop_ms)
 
-		print(string.format("INA219 init OK: addr=0x%02X, avg=%d, rshunt=%.4f Ω", ctx.addr, avg_n, rshunt))
 		return {  result = "OK"  }
 	end,
 

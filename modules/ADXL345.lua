@@ -161,8 +161,6 @@ require_driver("i2c", {
 		local wait_ms = math.ceil(2 * 1000 / odr_hz) + 2
 		milli_sleep(wait_ms)
 
-		print(string.format("ADXL345 init OK: addr=0x%02X, ±%dg, odr=%gHz (FULL_RES 3.9mg/LSB)",
-			addr, range_g, odr_hz))
 		return {  result = "OK"  }
 
 	end,

@@ -170,8 +170,6 @@ build = function(ctx, data)
 	cfg_trigger = cfg				-- RDY=1 的配置字节，oneshot 每次 call 重写触发
 	cfg_wait = math.floor(wait)
 
-	print(string.format("MCP3421 init OK: addr=0x%02X res=%dbit pga=x%d mode=%s (%gSPS, LSB=%.4guV)",
-		addr, res, pga, opmode_s, RES_SPS[res], cfg_lsb_v * 1e6))
 	return {  result = "OK"  }
 
 	end,

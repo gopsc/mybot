@@ -118,11 +118,6 @@ local function build_impl(data)
 	end
 	is_output = (direction == "out")
 
-	-- C-L7：与其他驱动的 DEBUG 约定一致——GPIO 点动高频，成功打印须门控
-	if DEBUG then
-		print(string.format("GPIO init OK: %s line %d, %s%s",
-			chip, offset, direction, active_low and " (active low)" or ""))
-	end
 	return {  result = "OK"  }
 
 end

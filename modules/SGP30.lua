@@ -262,8 +262,6 @@ require_driver("i2c", {
 			base_state = baseline_restore(fd)
 		end
 
-		print(string.format("SGP30 init OK: addr=0x%02X, selftest=OK, baseline=%s",
-			addr, base_state))
 		return {  result = "OK"  }
 	end,
 

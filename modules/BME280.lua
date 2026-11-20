@@ -145,7 +145,6 @@ require_driver("i2c", {
 	    end
 
 	    cal_ok = true
-	    print(string.format("BME280 init OK: addr=0x%02X, oversampling=x1/x1/x1", ctx.addr))
 	    return { result = "OK" }
 	end,
 

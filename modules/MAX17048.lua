@@ -75,14 +75,12 @@ local s16 = function(v) return bitc.s16(v % 65536) end
 
 -- ==================== 模块级配置 ====================
 local cfg_lsb_v		-- VCELL 每 LSB 伏特（17048: 78.125uV / 17049: 156.25uV）
-local cfg_variant	-- 器件名（横幅/报错用）
 
 -- ==================== 配置脚本 ====================
 require_driver("i2c", {
 name = "MAX17048",
 build = function(ctx, data)
 	local fd = ctx.fd
-	local addr = ctx.addr
 
 	if DEBUG then
 		dbg_table("-------- MAX17048 builder func get a table --------", data)
@@ -100,7 +98,6 @@ build = function(ctx, data)
 	if ver ~= VER_17048 and ver ~= VER_17049 then
 		return err(string.format("MAX17048 unexpected version 0x%04X (expect 0x0012/0x0013)", ver))
 	end
-	cfg_variant = (ver == VER_17048) and "MAX17048" or "MAX17049"
 	cfg_lsb_v = (ver == VER_17048) and 78.125e-6 or 156.25e-6
 
 	-- QuickStart（可选）：换电池/上电后跳过慢收敛
@@ -160,12 +157,9 @@ build = function(ctx, data)
 		end
 	end
 
-	-- 读一次状态做横幅（复位指示 RI 常见于上电后首次读取）
-	local st = i2c_read_multi(fd, REG_STATUS, 2)
-	local flags = (st >= 0) and math.floor(st / 256) % 64 or 0
+	-- 读一次状态（复位指示 RI 常见于上电后首次读取）
+	i2c_read_multi(fd, REG_STATUS, 2)
 
-	print(string.format("%s init OK: addr=0x%02X ver=0x%04X status=0x%02X lsb=%.2fuV",
-		cfg_variant, addr, ver, flags, cfg_lsb_v * 1e6))
 	return {  result = "OK"  }
 
 end,
@@ -247,7 +241,7 @@ end,
 -- 与解锁口 0x3E/0x3F——读 NACK、字写 NACK。
 --
 -- 驱动 build/call 事务：build set + 指针读 VERSION 甄别 + 可选 QuickStart +
--- VALRT/CONFIG 读改写 + STATUS 横幅；call 依次指针读 VCELL/SOC/CRATE/STATUS
+-- VALRT/CONFIG 读改写 + STATUS 读取；call 依次指针读 VCELL/SOC/CRATE/STATUS
 -- （9 事务）零睡眠。芯片转换自由运行——无转换门/无 pending/不需要 advance，
 -- 测量值只由注入 API 改变，模型绝不自造电池数据。
 --

@@ -169,8 +169,6 @@ build = function(ctx, data)
 		return err("Failed to send AD9833 waveform word")
 	end
 
-	print(string.format("AD9833 init OK: freq=%.3fHz, wave=%s, phase=%g deg",
-		freq_hz, wave_str, phase_deg))
 	return {  result = "OK"  }
 
 end,

@@ -115,8 +115,6 @@ require_driver("i2c", {
             return err(string.format("ADS1015 config echo mismatch: got 0x%04X (expect 0x%04X)", rd, config))
         end
 
-        print(string.format("ADS1015 init OK: addr=0x%02X, channel=AIN%d, PGA=%s, DR=%s SPS",
-            addr, channel, pga_names[pga_idx + 1], dr_names[dr_idx + 1]))
         return { result = "OK" }
     end,
 

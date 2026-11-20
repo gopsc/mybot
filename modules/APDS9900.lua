@@ -212,9 +212,6 @@ require_driver("i2c", {
 		cfg_df = df
 		cfg_ga_scaled = ga_scaled
 
-		print(string.format(
-			"APDS9900 init OK: addr=0x%02X id=0x%02X atime=%.1fms again=x%d led=%.1fmA pgain=x%d ppulse=%d df=%g ga=%.2f",
-			addr, id, atime_actual, again, pdrive, pgain, ppcount, df, ga_scaled / SCALE))
 		return {  result = "OK"  }
 	end,
 

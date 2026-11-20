@@ -110,7 +110,6 @@ require_driver("i2c", {
 		end
 
 		cfg_addr = ctx.addr
-		print(string.format("CHT8305 init OK: addr=0x%02X mid=0x%04X did=0x%04X", ctx.addr, mid, did))
 		return {  result = "OK"  }
 	end,
 

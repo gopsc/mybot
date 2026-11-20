@@ -104,7 +104,6 @@ require_driver("i2c", {
 		if wait == nil or wait < 0 then wait = wait_default end
 		cfg_wait = math.floor(wait)
 
-		print(string.format("LPS22HB init OK: addr=0x%02X id=0xB1 mode=oneshot wait=%dms", addr, cfg_wait))
 		return {  result = "OK"  }
 	end,
 

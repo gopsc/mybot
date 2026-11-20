@@ -197,8 +197,6 @@ function build(data)
 	end
 
 	if sim then
-		print(string.format("Speaker init OK (simulate): %gHz, preset=%s, vol=%g",
-			rate, wname, vol))
 		return { result = "OK", device = dev, rate = rate,
 			preset = wname, volume = vol, max_ms = mx, simulated = true }
 	end
@@ -209,8 +207,6 @@ function build(data)
 	end
 	pcm = h
 
-	print(string.format("Speaker init OK: %s, %gHz, preset=%s, vol=%g",
-		dev, rate, wname, vol))
 	return { result = "OK", device = dev, rate = rate,
 		preset = wname, volume = vol, max_ms = mx }
 end

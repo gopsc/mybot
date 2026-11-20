@@ -455,9 +455,6 @@ require_driver("i2c", {
 			return err("Failed to start VL53L0X ranging")
 		end
 
-		print(string.format(
-			"VL53L0X init OK: addr=0x%02X, sig=%.2fMCPS, %s, timeout=%dms",
-			ctx.addr, sig, long_range and "long-range" or "standard", timeout))
 		return {  result = "OK"  }
 	end,
 

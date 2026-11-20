@@ -212,6 +212,13 @@ nn.input0 nn.input1 nn.target0;   # 有 target -> 训练；无 target -> 推理
 宿主侧由 `MatrixVars_Hardware::ensureOk` 统一检查：非表、空表、`result="ERR"`、
 `result` 非 `"OK"`/`"ERR"` 一律抛错。**漏写 `return` 会被判为失败**，不会静默当成功。
 
+### 输出与日志（缄默原则）
+
+成功路径默认不打印：`build`/`call`/`destroy` 正常返回时不得写启动横幅
+（如 `XXX init OK: ...`）或逐次成功日志。需要诊断时由操作者显式设置
+`BOT4CJ_DEBUG=1`（或驱动本地 `DEBUG`）输出；失败与告警仍应如实打印。
+`proto=virt` 的虚拟硬件安全横幅、框架的守护生命周期日志不属于驱动成功日志，保留。
+
 ### 参数校验顺序
 
 已迁移驱动使用 `require_driver` 框架，`arg_table` + 总线校验由框架包装层自动完成，

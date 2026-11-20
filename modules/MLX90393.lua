@@ -283,8 +283,6 @@ require_driver("i2c", {
 			return err(emsg)
 		end
 
-		print(string.format("MLX90393 init OK: addr=0x%02X, gain=%d, sens_xy=%.4f sens_z=%.4f µT/LSB, timeout=%dms",
-			ctx.addr, gain, sens_xy, sens_z, poll_timeout_ms))
 		return {  result = "OK"  }
 	end,
 

@@ -228,8 +228,6 @@ require_driver("i2c", {
 			return err("Failed to write AS7262 gain/mode")
 		end
 
-		print(string.format("AS7262 init OK: addr=0x%02X, gain=%dx, integ=%d (每轮约%.0fms), timeout=%dms",
-			ctx.addr, GAIN_TAB[gain + 1][1], integ, integ * 2.8 * 2, poll_timeout))
 		return {  result = "OK"  }
 	end,
 

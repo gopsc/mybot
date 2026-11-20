@@ -140,8 +140,6 @@ require_driver("spi", {
 	        return err("Failed to enter continuous read mode")
 	    end
 
-	    print(string.format("ADS1256 init OK: drate=%d SPS, PGA=×%d, channel=AIN%d",
-	        drate_tab[drate_idx + 1][2], pga_gain[pga_idx + 1], channel))
 	    return { result = "OK" }
 	end,
 

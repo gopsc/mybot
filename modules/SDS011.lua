@@ -137,16 +137,12 @@ build = function(ctx, data)
 		return err("SDS011 passive mode rejected")
 	end
 
-	-- 固件版本（横幅展示，同时确认查询链路）
+	-- 固件版本查询（确认查询链路；失败只记调试日志，不影响 build）
 	local v, verr = exec(fd, CMD_VERSION, 0x00, cfg_timeout)
-	local fw = "?"
-	if v ~= nil then
-		fw = string.format("%d.%d", v[3], v[4])
-	else
+	if v == nil then
 		dbg("SDS011 version read failed: " .. tostring(verr))
 	end
 
-	print(string.format("SDS011 init OK: fd=%d firmware=%s (passive mode)", fd, fw))
 	return {  result = "OK"  }
 
 end,
@@ -257,7 +253,7 @@ function SDS011_VIRT.new()
 	-- ---- 器件状态（协议事实层原始量：0.1 µg/m³ 计）----
 	local pm25_raw = 423		-- 42.3 µg/m³
 	local pm10_raw = 1000		-- 100.0 µg/m³
-	local fw_major, fw_minor = 7, 0	-- 驱动横幅 "%d.%d" 取应答 b3 b4
+	local fw_major, fw_minor = 7, 0	-- 应答 b3 b4（固件版本查询）
 	local passive = false		-- 0x02 D0=1 后置位（上电默认主动推送）
 	local sleeping = false		-- 0x06 D0=0 后置位（风扇停转）
 	local requests = {}		-- 请求帧留痕 { bytes=, cmd=, d0=, valid=bool }

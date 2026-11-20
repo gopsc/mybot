@@ -19,7 +19,7 @@
 --   2) 虚拟原语契约：注入身份、open baud/path 负路径、write 校验静默
 --      （非法入参零留痕）、byte_of floor 语义、read n 校验与 512 钳制、
 --      uart_fail_read、flush 清环、close 后读写全灭
---   3) 真实 build：uf 留痕恰一次、横幅、fd 非法/非表负路径且零事务
+--   3) 真实 build：uf 留痕恰一次、build 静默、fd 非法/非表负路径且零事务
 --   4) 真实 call：uw 请求帧逐字节、应答帧经典向量 500ppm/26°C、
 --      uf→uw→ur 时序、正常单轮读、噪声双轮聚合、32 拍 tick 驱动闭环
 --   5) call 负路径：no_reply→超时、坏校验和→无帧、fail_read→读错、
@@ -97,7 +97,7 @@ local function section()
 	return #vbus.txlog
 end
 
--- 横幅捕获（驱动 build 仅一条 print）
+-- 输出捕获（缄默原则：build 成功不得打印）
 local cap_lines = {}
 local real_print = print
 local function cap_start()
@@ -105,12 +105,6 @@ local function cap_start()
 	print = function(s) cap_lines[#cap_lines + 1] = tostring(s) end
 end
 local function cap_stop() print = real_print end
-local function banner(pat)
-	for _, s in ipairs(cap_lines) do
-		if s:find(pat, 1, true) then return s end
-	end
-	return nil
-end
 
 -- ==================== 组 1：模型协议事实 ====================
 do
@@ -306,8 +300,8 @@ do
 	local res = build({ fd = fd })
 	cap_stop()
 	check("build OK", res.result == "OK", tostring(res.message))
-	check("横幅含 MHZ19 init OK: fd=3（9600 8N1 预热提示）",
-		banner("MHZ19 init OK: fd=" .. fd .. " (9600 8N1") ~= nil)
+	check("build 静默（无 init 横幅）", #cap_lines == 0,
+		table.concat(cap_lines, "|"))
 	local es = entries(mark)
 	check("build 事务恰一条 uf", #es == 1 and es[1].dir == "uf" and es[1].path == PATH,
 		table.concat(dirs_of(es), ","))

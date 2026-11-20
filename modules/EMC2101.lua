@@ -216,8 +216,6 @@ build = function(ctx, data)
 		mode = string.format("手动 %g%% (lsb=%d/%d)", duty, lsb, full_lsb)
 	end
 
-	print(string.format("EMC2101 init OK: addr=0x%02X, part=%s, mode=%s",
-		addr, PART_IDS[part], mode))
 	return {  result = "OK"  }
 
 end,

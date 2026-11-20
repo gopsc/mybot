@@ -222,8 +222,6 @@ build = function(ctx, data)
 		return err(string.format("AS3935 RCO calibration failed (SRCO=0x%02X TRCO=0x%02X, NOK bit set)", srco, trco))
 	end
 
-	print(string.format("AS3935 init OK: addr=0x%02X, %s, nf=%d, wdth=%d, srej=%d, min_lig_c=%d, mask_dist=%s, tun_cap=%dpF",
-		addr, indoor and "indoor" or "outdoor", nf, wdth, srej, lig_c, tostring(mask), cap_pF))
 	return {  result = "OK"  }
 
 end,

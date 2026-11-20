@@ -174,7 +174,6 @@ require_driver("i2c", {
 			return err("LCD1206 not responding (entry mode)")
 		end
 
-		print(string.format("LCD1206 init OK: addr=0x%02X %dx%d", addr, cfg_cols, cfg_rows))
 		return {  result = "OK"  }
 	end,
 

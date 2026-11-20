@@ -104,8 +104,6 @@ build = function(ctx, data)
 	local wait_ms = (fps_1hz and 1000 or 100) + 20
 	milli_sleep(wait_ms)
 
-	print(string.format("AMG8833 init OK: addr=0x%02X, fps=%dHz, pixels=64 (0.25°C/LSB)",
-		addr, fps_1hz and 1 or 10))
 	return {  result = "OK"  }
 
 end,

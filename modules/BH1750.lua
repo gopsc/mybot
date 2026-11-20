@@ -137,8 +137,6 @@ require_driver("i2c", {
 		-- 等待一帧（连续模式让首发即时有效；单次模式该命令即本帧）
 		milli_sleep(mode_t.frame * mtreg / MTREG_DEFAULT)
 
-		print(string.format("BH1750 init OK: addr=0x%02X mode=%s once=%s mtreg=%d",
-			ctx.addr, m, tostring(once), mtreg))
 		return {  result = "OK"  }
 	end,
 

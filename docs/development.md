@@ -98,6 +98,7 @@ cd build && ctest --output-on-failure -R cpp_unit
 - 非驱动模块（`Relay`/`dummy` 等）入口第一行仍需 `local ok, ek = arg_table(data)` + `if not ok then return ek end`（`drv_common`）——它同时承担入参类型校验与 `proto=virt` 虚拟总线注入前置，手写 `type(data) ~= "table"` 内联检查会绕过注入钩子（`run_all.sh` 的 lint 段会拦）
 - **模块路径引导固定写法**（多路径加载的前提）：`local mpath = __mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua")`，后续 lib 一律 `dofile(mpath.resolve("lib/xxx.lua"))`。`__mpath` 由宿主建沙箱时注入（逐段探测），直接写 `(env):match("[^:]+")` 只取首段、多路径布局下会失败；`run_all.sh` 的 lint 段会拦
 - `result`/`message`/`mode` 三键由框架保留（见 [dsl.md](dsl.md)）
+- **缄默原则**：`build`/`call`/`destroy` 成功路径不打印启动横幅或逐次成功日志；诊断输出只在失败/告警或显式 `BOT4CJ_DEBUG=1` 时产生（详见 [drivers.md](drivers.md) 的「输出与日志」）
 - 建议随驱动在文件尾部内嵌 `<矩阵名>_VIRT` 仿真模型，接入 virtbus 回归（见 [virtbus.md](virtbus.md)）
 - 完成后跑一次 `luajit test/test_driver_contract.lua`（驱动入口契约 sweep：可加载 + 三入口齐全 + 非表入参 ERR 契约，同时覆盖上面两条 lint 的语义面）
 

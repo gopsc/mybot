@@ -332,8 +332,6 @@ require_driver("i2c", {
 			return err("Failed to clear VL53L4CD interrupt")
 		end
 
-		print(string.format("VL53L4CD init OK: addr=0x%02X, budget=%dms, %s",
-			ctx.addr, budget, inter == 0 and "continuous" or ("autonomous, inter=" .. inter .. "ms")))
 		return {  result = "OK"  }
 	end,
 

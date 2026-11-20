@@ -76,9 +76,6 @@ require_driver("i2c", {
 			return err("Failed to read MAX17043 version")
 		end
 
-		if os.getenv("BOT4CJ_DEBUG") == "1" then
-			print(string.format("MAX17043 init OK: addr=0x%02X, version=0x%04X", addr, ver))
-		end
 		return {  result = "OK"  }
 	end,
 

@@ -30,7 +30,7 @@
 -- 覆盖：模型 POR 全表/指针 burst 自增回绕/双路 interlock 撕裂防护/
 -- PROG 硬件门（FAN_SETTING+LUT 只读丢弃）/写掩码/测量区 ROM 只读/
 -- 外温 11 位补码编解码与开路短路特征码/TACH 小端编码/virt_tick/
--- who 覆写/钩子；真实 build 手动与 LUT 两路径逐 txlog/横幅/字符串地址/
+-- who 覆写/钩子；真实 build 手动与 LUT 两路径逐 txlog/build 静默/字符串地址/
 -- full_lsb=46 换算锚点/duty 钳位/lut 四类非法；build 负路径逐短路点；
 -- 真实 call 采样读序/故障码/负温/停转/duty 切换；call 六读失败点；
 -- destroy 安全。
@@ -431,7 +431,7 @@ check("reset 回 POR（4A=20/4D=17/LUT 兜底）",
 	and dev:reg(0x50) == 0x7F and dev:reg(0x5F) == 0x3F)
 
 -- =====================================================================
--- 组 2：真实 build（手动缺省，逐笔事务 + 横幅 + 字符串地址）
+-- 组 2：真实 build（手动缺省，逐笔事务 + build 静默 + 字符串地址）
 -- =====================================================================
 mark = section()
 local bframes, bbuild
@@ -464,11 +464,7 @@ check("读帧 3=PWM_F 17（full_lsb 现算 46）/ 4=FAN_CONFIG 20",
 	frame(bframes[3]) .. "|" .. frame(bframes[4]))
 check("build 后 4A=20（PROG 保持）/4C=00（停转）",
 	dev:reg(0x4A) == 0x20 and dev:reg(0x4C) == 0x00)
-check("横幅含 init OK/addr=0x4C/part=EMC2101/手动 0% lsb=0/46",
-	banner:find("EMC2101 init OK", 1, true)
-	and banner:find("addr=0x4C", 1, true)
-	and banner:find("part=EMC2101", 1, true)
-	and banner:find("lsb=0/46", 1, true), banner)
+check("build 静默（无 init 横幅）", banner == "", banner)
 check("build 全程无睡眠", sleep_total == 0, tostring(sleep_total))
 
 mark = section()
@@ -500,7 +496,7 @@ for _, spec in ipairs({
 		ok and res.result == "OK" and dev:reg(0x4C) == spec[2],
 		string.format("0x%02X", dev:reg(0x4C)))
 	if spec[1] == 75 then
-		check("75% 横幅 lsb=35/46", banner:find("lsb=35/46", 1, true) ~= nil, banner)
+		check("75% build 静默", banner == "", banner)
 	end
 end
 
@@ -542,8 +538,7 @@ do
 	local same = multi ~= nil and #multi == 17
 	if same then for i = 1, 17 do if multi[i] ~= want[i] then same = false end end end
 	check("LUT 写帧 {50+16B} 逐字节一致", same, frame(multi))
-	check("LUT 横幅 mode=LUT(4 项)",
-		lbanner:find("LUT(4 项)", 1, true) ~= nil, lbanner)
+	check("LUT build 静默", lbanner == "", lbanner)
 end
 
 -- 非法 lut（parse 在总线操作后、lut_disable 前，故 7 txlog 即止）

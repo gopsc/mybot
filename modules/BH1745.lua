@@ -144,7 +144,6 @@ require_driver("i2c", {
 		-- 等一个完整测量时间，首拍数据就绪
 		milli_sleep(mt_n + 2)
 
-		print(string.format("BH1745 init OK: addr=0x%02X, mt=%dms, gain=x%d", addr, mt_n, gain_n))
 		return {  result = "OK"  }
 	end,
 

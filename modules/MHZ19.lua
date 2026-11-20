@@ -97,7 +97,6 @@ require_driver("uart", {
 		-- 丢弃上电以来的陈旧字节
 		uart_flush(ctx.fd)
 
-		print(string.format("MHZ19 init OK: fd=%d (9600 8N1，预热约 3 分钟后读数稳定)", ctx.fd))
 		return {  result = "OK"  }
 	end,
 

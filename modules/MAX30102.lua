@@ -263,9 +263,6 @@ build = function(ctx, data)
 	cfg_n = n
 	cfg_wait = wait
 
-	print(string.format(
-		"MAX30102 init OK: addr=0x%02X mode=%s rate=%dsps pw=%dus adc=%dnA avg=%dx led1=%.1fmA led2=%.1fmA n=%d",
-		addr, opmode_s, rate, pw, adc, avg, led1 * 0.2, led2 * 0.2, n))
 	return {  result = "OK"  }
 
 	end,

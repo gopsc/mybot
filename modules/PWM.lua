@@ -156,10 +156,6 @@ function build(data)
 
 	-- %s 而非 %d：chip/channel 经 tonumber 后可能是浮点（如 '0.0'），
 	-- 直接给 %d 在 LuaJIT 下会抛 "no integer representation"
-	print(string.format("PWM init OK: pwmchip%s pwm%s, %gHz duty=%.1f%%%s%s",
-		tostring(c), tostring(h), freq, duty,
-		tostring(data.invert) == "1" and " (inversed)" or "",
-		enabled and "" or " (output idle until first call)"))
 
 	return {
 		result    = "OK",

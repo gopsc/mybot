@@ -25,7 +25,7 @@
 -- INT 读后清且 RMW 不丢事件/MASK_DIST 屏蔽干扰/PWD 检测停摆/
 -- 距离能量独立保留与 21 位编码/两条直接命令与错误数据忽略/
 -- DONE/NOK 与校准失败注入/who 身份覆写/virt_tick 8 拍事件脚本/
--- 故障钩子；真实 build 逐笔写序列/12 读全 1B/横幅/字符串地址/
+-- 故障钩子；真实 build 逐笔写序列/12 读全 1B/build 静默/字符串地址/
 -- 室内外增益/各字段档与钳位/取档/六类 NACK 短路点/无器件地址/参数错误；
 -- 真实 call 四事件优先级/读后清/距离三特殊值/能量边界/mask 下序列/
 -- tick 驱动；call 四类总线失败与参数错误；destroy 安全。
@@ -463,16 +463,7 @@ check("build 睡眠 4ms（复位 2 + 校准显示窗 2）",
 check("build 后 0x00=0x24/0x01=0x22/0x02=0x02/0x03=0x00/0x08=0x00",
 	dev:reg(0x00) == 0x24 and dev:reg(0x01) == 0x22 and dev:reg(0x02) == 0x02
 	and dev:reg(0x03) == 0x00 and dev:reg(0x08) == 0x00)
-check("横幅含 addr=0x03/indoor/各缺省值",
-	banner:find("AS3935 init OK", 1, true)
-	and banner:find("addr=0x03", 1, true)
-	and banner:find("indoor", 1, true)
-	and banner:find("nf=2", 1, true)
-	and banner:find("wdth=2", 1, true)
-	and banner:find("srej=2", 1, true)
-	and banner:find("min_lig_c=0", 1, true)
-	and banner:find("mask_dist=false", 1, true)
-	and banner:find("tun_cap=0pF", 1, true), banner)
+check("build 静默（无 init 横幅）", banner == "", banner)
 
 -- 字符串 fd/address
 mark = section()
@@ -492,7 +483,7 @@ end)
 check("build indoor=0 OK", ok and res.result == "OK", tostring(res and res.result))
 check("室外增益 0x00=0x1C（0x0E<<1）", dev:reg(0x00) == 0x1C,
 	string.format("0x%02X", dev:reg(0x00)))
-check("室外横幅 outdoor", banner:find("outdoor", 1, true) ~= nil, banner)
+check("室外 build 静默", banner == "", banner)
 
 mark = section()
 expect_ok("build 全字段拉满", function()
@@ -568,10 +559,7 @@ check("非有限列同归缺省 0x22/0x02/0x00/0x00",
 	and dev:reg(0x03) == 0x00 and dev:reg(0x08) == 0x00,
 	string.format("0x%02X/0x%02X/0x%02X/0x%02X", dev:reg(0x01),
 		dev:reg(0x02), dev:reg(0x03), dev:reg(0x08)))
-check("非有限列横幅仍是缺省 indoor/mask_dist=false",
-	banner:find("indoor", 1, true) ~= nil
-	and banner:find("mask_dist=false", 1, true) ~= nil
-	and banner:find("nf=2", 1, true) ~= nil, banner)
+check("非有限列 build 静默", banner == "", banner)
 
 -- =====================================================================
 -- 组 4：真实 build 错误路径

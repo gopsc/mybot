@@ -10,7 +10,7 @@
 --
 -- 迁移同时抓出真实驱动一处真机 bug：原 REG_CTRL8=0x18——官方 fs_xl 在
 -- CTRL8(0x17)[1:0]，0x18 是 CTRL9；真机加计量程码被写进 CTRL9，加计
--- 永远 POR ±2g（横幅照印配置值）。已修为 0x17，本测试组 2 以
+-- 永远 POR ±2g（旧日志照印配置值）。已修为 0x17，本测试组 2 以
 -- 「build 后 0x17=fs 码而 0x18 恒 0」钉死回归。
 --
 -- 旧桩互证假绿：
@@ -29,7 +29,7 @@
 --      物理量逆注入/virt_tick 码钉
 --   2) 真实 build：19 条 txlog（1 set+6 数据写+6 对指针读）、睡眠
 --      10+100=110ms、6 帧序列、CTRL3=0x44/CTRL1=CTRL2=6/CTRL6=2/
---      0x17=2/0x18=0、横幅、reset_count=1
+--      0x17=2/0x18=0、build 静默、reset_count=1
 --   3) 列取档枚举：acc snap_down/gyr snap_down（含 124dps 落缺省、
 --      4000→0xC）/odr 最近档平手取低（100→120、90→60）/'-'与非法值
 --   4) build 负路径：0x6C 家族 ID/ID 与 CTRL3/CTRL6/CTRL8 读失败/
@@ -353,7 +353,10 @@ check("reset 清注入码", (select(1, dev:accel_raw())) == 0)
 local mark = section()
 local cap
 local oldprint = print
-print = function(s) if type(s) == "string" and s:find("LSM6DSV16X init OK", 1, true) then cap = s end end
+print = function(s)
+		s = tostring(s)
+		if not s:find("^%[") then cap = s end
+	end
 local r = expect_ok("build 默认（缺省 ±8g/±500dps/120Hz）",
 	function() return build({ fd = fd, address = "0x6A" }) end)
 print = oldprint
@@ -404,9 +407,7 @@ if r then
 		byte(0x18) == 0x00, hx(byte(0x18)))
 	check("build 后 STATUS=0x03（XLDA|GDA）", byte(0x1E) == 0x03)
 	check("模型记录软复位 1 次", dev:reset_count() == 1)
-	check("横幅文案", cap ~= nil
-		and cap:find("LSM6DSV16X init OK: addr=0x6A, ±8g/±500dps, odr=120Hz", 1, true) ~= nil,
-		tostring(cap))
+	check("build 静默（无 init 横幅）", cap == nil, tostring(cap))
 end
 
 -- ======================================================================
@@ -510,16 +511,18 @@ for _, spec in ipairs({ { "7.5", 0x2 }, { "30", 0x4 }, { "960", 0x9 },
 		"want " .. spec[2] .. " got " .. tostring(r and r.result))
 end
 
--- 非缺省档横幅
+-- 非缺省档 build 静默
 section()
 cap = nil
 oldprint = print
-print = function(s) if type(s) == "string" and s:find("LSM6DSV16X init OK", 1, true) then cap = s end end
+print = function(s)
+		s = tostring(s)
+		if not s:find("^%[") then cap = s end
+	end
 r = build({ fd = fd, address = "0x6A", range = "16", gyro_range = "4000", odr = "7.5" })
 print = oldprint
-check("满档横幅 ±16g/±4000dps/odr=7.5Hz",
-	r.result == "OK" and cap ~= nil
-	and cap:find("±16g/±4000dps, odr=7.5Hz", 1, true) ~= nil, tostring(cap))
+check("满档 build 静默（无 init 横幅）",
+	r.result == "OK" and cap == nil, tostring(cap))
 
 -- ======================================================================
 -- 组 4：build 负路径

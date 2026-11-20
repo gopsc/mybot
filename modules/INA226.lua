@@ -196,7 +196,6 @@ build = function(ctx, data)
 	local loop_ms = math.ceil(2 * ct_us * avg_n / 1000) + 2
 	milli_sleep(loop_ms)
 
-	print(string.format("INA226 init OK: addr=0x%02X, avg=%d, ct=%dµs, rshunt=%.4f Ω", addr, avg_n, ct_us, rshunt))
 	return {  result = "OK"  }
 
 end,

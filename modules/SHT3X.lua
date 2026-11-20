@@ -114,7 +114,6 @@ require_driver("i2c", {
 			print("SHT3X: reset flag (bit4) not set in status, continuing")
 		end
 
-		print(string.format("SHT3X init OK: addr=0x%02X, status=0x%04X", ctx.addr, status))
 		return {  result = "OK"  }
 	end,
 

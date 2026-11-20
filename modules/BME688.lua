@@ -292,8 +292,6 @@ build = function(ctx, data)
 	cfg_variant = variant
 	cfg_wait = math.floor(wait)
 
-	print(string.format("BME688 init OK: addr=0x%02X variant=%s heatr=%dC/%dms t1=%d p1=%d h1=%d",
-		addr, variant == VARIANT_688 and "BME688" or "BME680", heatr_temp, heatr_dur, C.t1, C.p1, C.h1))
 	return {  result = "OK"  }
 
 	end,

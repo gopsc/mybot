@@ -25,7 +25,7 @@
 -- 帧长与 abc/Melexis 写保护/突发中 RRWR 拒/SM 转换门与轮询/RM status-first
 -- TXYZ 帧与零分量跳过/RM DRDY 低 ERROR/SB 突发与 SW 模式位/EX/HR/HS/RT/
 -- zyxt=0 取 BURST_SEL/set_raw 钳制/set_sample 反算/virt_tick 确定性+预武装/
--- 故障钩子；真实 build 序列逐笔编码/gain RMW 各档与钳位/横幅/参数错误/
+-- 故障钩子；真实 build 序列逐笔编码/gain RMW 各档与钳位/build 静默/参数错误/
 -- 五类 NACK 短路点/回读篡改；真实 call 四轴字节序与温度公式/增益档/超时/
 -- ERROR 状态/四类总线失败；destroy 安全。
 
@@ -480,11 +480,7 @@ check("build 睡眠 9ms（5 复位+2 召回+2 轮询）",
 	sleep_total == 9, tostring(sleep_total))
 check("build 后 reg0=0x000C", dev:reg(0x00) == 0x000C,
 	string.format("0x%04X", dev:reg(0x00)))
-check("横幅含 init OK/gain=0/sens_xy=0.7510/timeout=50ms",
-	banner:find("MLX90393 init OK", 1, true)
-	and banner:find("gain=0", 1, true)
-	and banner:find("sens_xy=0.7510", 1, true)
-	and banner:find("timeout=50ms", 1, true), banner)
+check("build 静默（无 init 横幅）", banner == "", banner)
 
 -- 字符串 fd/address
 mark = section()
@@ -495,7 +491,7 @@ check("set_addr 收到 0x0C=12", set_addrs(mark)[1] == 12,
 	tostring(set_addrs(mark)[1]))
 
 -- =====================================================================
--- 组 3：真实 build（gain 各档/钳位/timeout/横幅）
+-- 组 3：真实 build（gain 各档/钳位/timeout/静默）
 -- =====================================================================
 mark = section()
 ok, res, banner = capture(function()
@@ -511,9 +507,7 @@ check("gain=7 WR 帧 {60,00,7C,00}",
 		end
 		return false
 	end)())
-check("gain=7 横幅 sens_xy=0.1502/sens_z=0.2420",
-	banner:find("sens_xy=0.1502", 1, true)
-	and banner:find("sens_z=0.2420", 1, true), banner)
+check("gain=7 build 静默", banner == "", banner)
 
 mark = section()
 expect_ok("build gain=3（保留 HALLCONF=C）", function()
@@ -562,8 +556,7 @@ check("build gain=nan 不抛 Lua error（归缺省 0）",
 	oknan and tostring(resnan and resnan.result) or tostring(resnan))
 check("gain=nan 写 0x000C（与 'abc' 同结论）", dev:reg(0x00) == 0x000C,
 	string.format("0x%04X", dev:reg(0x00)))
-check("gain=nan 横幅 sens_xy=0.7510（未对 nil 做算术）",
-	bannernan:find("sens_xy=0.7510", 1, true) ~= nil, bannernan)
+check("gain=nan build 静默", bannernan == "", bannernan)
 
 mark = section()
 expect_ok("build timeout=100", function()
@@ -572,7 +565,7 @@ end)
 local _, _, banner100 = capture(function()
 	return build({ fd = fd, address = "0x0C", timeout = "100" })
 end)
-check("timeout=100 横幅", banner100:find("timeout=100ms", 1, true) ~= nil)
+check("timeout=100 build 静默", banner100 == "", banner100)
 
 mark = section()
 expect_ok("build timeout=0 归缺省 50", function()
@@ -590,10 +583,8 @@ mark = section()
 local oktn, _, bannertn = capture(function()
 	return build({ fd = fd, address = "0x0C", timeout = "nan" })
 end)
-check("build timeout=nan 归缺省 50ms",
-	oktn and bannertn:find("timeout=50ms", 1, true) ~= nil, bannertn)
-check("timeout=nan 横幅不含 %d 格式化 NaN 的哨兵值",
-	bannertn:find("9223372036854775808", 1, true) == nil, bannertn)
+check("build timeout=nan 归缺省 50ms 且 build 静默",
+	oktn and bannertn == "", bannertn)
 
 -- =====================================================================
 -- 组 4：真实 build 错误路径

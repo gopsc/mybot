@@ -23,7 +23,7 @@
 -- 覆盖：模型侧 POR/命令位与 TYPE 四态寻址/坏帧/未建模地址整笔 NACK/
 -- 保留位抹除/ROM 与测量区只读丢弃/突发写落址/计数注入钳制与小端摆放/
 -- virt_tick 确定性正弦/故障钩子；真实 build 寄存器序列逐笔编码/
--- 缺省与全自定义/atime 边界/三类增益与 LED 码/横幅/12 个参数错误分支/
+-- 缺省与全自定义/atime 边界/三类增益与 LED 码/build 静默/12 个参数错误分支/
 -- ID 三接受一拒收/四类 NACK 短路点 txlog；真实 call 三通道字节序/
 -- lux 内核两线算法多场景独立重算（增益/atime/df/ga/IR 钳零）/三路
 -- 读失败精确短路；destroy 断电与缺参安全。
@@ -124,7 +124,7 @@ local function lux_ref(ch0, ch1, again, cycles, df, ga)
 	local atime_ms = cycles * 87 / 32
 	return iac * df * math.floor(ga * 4096 + 0.5) / 4096 / (again * atime_ms)
 end
--- 捕获驱动 print 横幅（build 成功恰好打印一行）
+-- 捕获驱动输出（缄默原则：build 成功不得打印）
 local function capture(fn)
 	local cap, old = {}, print
 	print = function(...) cap[#cap + 1] = table.concat({ ... }, "\t") end
@@ -373,14 +373,10 @@ check("CONTROL=0x20（100mA|IR 管|×1|×1）",
 check("ENABLE=0x07（PON|AEN|PEN）",
 	dev:enable() == 0x07, string.format("0x%02X", dev:enable()))
 check("build 零睡眠", sleep_total == 0, tostring(sleep_total))
-check("横幅含 init OK/id=0x29/atime=48.9ms/again=x1",
-	banner:find("APDS9900 init OK", 1, true)
-	and banner:find("id=0x29", 1, true)
-	and banner:find("atime=48.9ms", 1, true)
-	and banner:find("again=x1", 1, true), banner)
+check("build 静默（无 init 横幅）", banner == "", banner)
 
 -- =====================================================================
--- 组 3：真实 build（自定义/边界/横幅）
+-- 组 3：真实 build（自定义/边界/静默）
 -- =====================================================================
 mark = section()
 ok, res, banner = capture(function()
@@ -392,10 +388,7 @@ check("atime 696ms → 256 周期（ATIME=0）", dev:atime() == 0, tostring(dev:
 check("CONTROL=0xEF（12.5mA|IR|×8|×120）",
 	dev:control() == 0xEF, string.format("0x%02X", dev:control()))
 check("PPCOUNT=64", dev:ppcount() == 64, tostring(dev:ppcount()))
-check("横幅全自定义字段",
-	banner:find("again=x120", 1, true) and banner:find("led=12.5mA", 1, true)
-	and banner:find("pgain=x8", 1, true) and banner:find("ppulse=64", 1, true)
-	and banner:find("ga=0.50", 1, true), banner)
+check("自定义 build 静默（无 init 横幅）", banner == "", banner)
 
 mark = section()
 expect_ok("build 最短积分 2.73ms（1 周期）", function()
@@ -463,9 +456,7 @@ ok, res, banner = capture(function()
 end)
 check("build df/ga='nan' OK（归缺省）", ok and res.result == "OK",
 	tostring(res and res.result))
-check("df/ga NaN 横幅回落缺省 df=52 ga=0.48",
-	banner:find("df=52", 1, true) ~= nil and banner:find("ga=0.48", 1, true) ~= nil,
-	banner)
+check("df/ga NaN build 静默", banner == "", banner)
 do
 	dev:set_counts(10000, 2500, 517)
 	local r = expect_ok("df/ga NaN 后 call 读数", function()
@@ -482,7 +473,7 @@ ok, res, banner = capture(function()
 end)
 check("build df='inf' OK（归缺省）", ok and res.result == "OK",
 	tostring(res and res.result))
-check("df inf 横幅回落缺省 df=52", banner:find("df=52", 1, true) ~= nil, banner)
+check("df inf build 静默", banner == "", banner)
 do
 	dev:set_counts(10000, 2500, 517)
 	local r = expect_ok("df=inf 后 call 读数", function()
@@ -555,7 +546,7 @@ local ok4, res4, banner4 = capture(function()
 	return build({ fd = fd, address = "0x39" })
 end)
 check("ID=0x04 接受", ok4 and res4.result == "OK", tostring(res4.result))
-check("ID=0x04 横幅 id=0x04", banner4:find("id=0x04", 1, true) ~= nil, banner4)
+check("ID=0x04 build 静默", banner4 == "", banner4)
 
 mark = section()
 dev.nack_write = true

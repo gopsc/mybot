@@ -24,7 +24,7 @@
 --      物理量反算、virt_tick 码钉
 --   2) 真实 build fifo：92 帧序列（复位+2 电源+INIT_CTRL+41 对块+
 --      启动+4 配置+上电）、19 指针读、睡眠 2+1+1+150+100=254ms、
---      落盘 0xA8/0xA8/02/02/06、横幅；预武装路径 114ms/1 轮询
+--      落盘 0xA8/0xA8/02/02/06、build 静默；预武装路径 114ms/1 轮询
 --   3) build full（2058 帧/8192B）与取档（range/gyro snap_down、
 --      odr snap_near、'-' 与非法值归缺省）
 --   4) build 负路径：0x26 变体/ID 读失败/stuck 0x02 与 never_ready
@@ -415,7 +415,10 @@ check("reset 清注入码与预武装",
 local mark = section()
 local cap
 local oldprint = print
-print = function(s) if type(s) == "string" and s:find("BMI270 init OK", 1, true) then cap = s end end
+print = function(s)
+		s = tostring(s)
+		if not s:find("^%[") then cap = s end
+	end
 local r = expect_ok("build 默认 fifo（±8g/±500dps/100Hz）",
 	function() return build({ fd = fd, address = "0x68" }) end)
 print = oldprint
@@ -470,9 +473,7 @@ if r then
 	check("build 总线事务总数 131（set+92 写+19 指针写+19 读）",
 		#entries(mark) == 131, tostring(#entries(mark)))
 	check("blob 已入模型缓冲 328 字节", blob_matches(FIFO_BIN))
-	check("横幅文案", cap ~= nil
-		and cap:find("BMI270 init OK: addr=0x68, blob=fifo(328B), ±8g/±500dps, odr=100Hz", 1, true) ~= nil,
-		tostring(cap))
+	check("build 静默（无 init 横幅）", cap == nil, tostring(cap))
 end
 
 -- 预武装路径（守护同款）：首拍轮询即 init_ok，睡眠 114ms
@@ -494,7 +495,10 @@ mark = section()
 dev:virt_tick(0)
 cap = nil
 oldprint = print
-print = function(s) if type(s) == "string" and s:find("BMI270 init OK", 1, true) then cap = s end end
+print = function(s)
+		s = tostring(s)
+		if not s:find("^%[") then cap = s end
+	end
 r = expect_ok("build cfg='full'（8192B context blob）",
 	function() return build({ fd = fd, address = "0x68", cfg = "full" }) end)
 print = oldprint
@@ -502,7 +506,7 @@ if r then
 	check("full build 恰好 2058 笔数据写（4+2048+1+4+1）",
 		#dev:frames() == 2058, tostring(#dev:frames()))
 	check("full blob 8192 字节逐字节入模", blob_matches(FULL_BIN))
-	check("full 横幅", cap ~= nil and cap:find("blob=full(8192B)", 1, true) ~= nil, tostring(cap))
+	check("full build 静默（无 init 横幅）", cap == nil, tostring(cap))
 end
 
 -- 取档：量程 snap_down、ODR snap_near

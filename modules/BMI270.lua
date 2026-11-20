@@ -277,8 +277,6 @@ require_driver("i2c", {
 		-- 陀螺仪启动等待（数据手册 ~40ms，取 100ms 余量，首拍数据就绪）
 		milli_sleep(100)
 
-		print(string.format("BMI270 init OK: addr=0x%02X, blob=%s(%dB), ±%dg/±%ddps, odr=%dHz",
-			ctx.addr, blob_name, #blob, acc_g, gyr_dps, odr_hz))
 		return {  result = "OK"  }
 	end,
 
