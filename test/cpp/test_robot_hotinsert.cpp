@@ -16,6 +16,7 @@
 #include "fixtures.hpp"
 #include "harness.hpp"
 #include "daemonvar.hpp"
+#include "exec_budget.hpp"
 #include "matrix.hpp"
 #include "robot.hpp"
 #include "util_env.hpp"
@@ -29,6 +30,23 @@ using fx::ModulePathGuard;
 using rfx::hotSqlError;
 using rfx::markerOf;
 using rfx::probeSql;
+
+namespace {
+
+/* 热 SQL 瞬态 Action 预算的可观测探针：play 时读取线程局部预算。 */
+class BudgetProbeHw : public bot::MatrixVars_Hardware {
+public:
+	bool sawBudget = false;
+	bot::Json play(const bot::Json&) override {
+		sawBudget = bot::luaExecBudget() != nullptr;
+		auto out = bot::JsonObject();
+		out.put("result", bot::JsonString("OK"));
+		return out;
+	}
+	const char* kindName() const override { return "budget-probe"; }
+};
+
+} // namespace
 /* ==================== 热插表：结构 SQL 带电生效（2026-09-23）====================
  * RobotStruct::applySql 的端到端守门（P3 事务门面）。三条判据贯穿全组：
  *   ① 生效 = 真的装配 + 真的上电；
@@ -293,6 +311,39 @@ TH_TEST(robot_hot_sql_rejects_unsafe_table_and_column_names) {
 	TH_CHECK(badCol.find("不是安全标识符") != std::string::npos);
 
 	TH_CHECK(robot.structures().empty());	/* 两次都在活体之外被拒 */
+	robot.deactivate();
+}
+
+TH_TEST(robot_hot_sql_arms_a_budget_around_transient_actions) {
+	ModulePathGuard guard("modules:test/cpp");
+	bot::MemoryReader sr("");
+	bot::RobotStruct robot(sr);
+	robot.active();
+
+	/* White-box 用例：注册表对生产调用方是只读视图，这里为探针临时突破
+	 * const；探针不进入结构脚本，也不改变任何已有变量的生命周期。 */
+	auto& registry = const_cast<bot::HwRegistry&>(robot.registry());
+	auto probe = std::make_unique<BudgetProbeHw>();
+	BudgetProbeHw* raw = probe.get();
+	registry.add("probe0", std::move(probe), " (test probe)");
+
+	robot.applySql(
+		"CREATE TABLE Action (probe0.p Number);\n"
+		"INSERT INTO Action (probe0.p) VALUES (1);\n");
+	TH_CHECK(raw->sawBudget);
+	robot.deactivate();
+}
+
+TH_TEST(robot_hot_sql_rejects_duplicate_columns) {
+	ModulePathGuard guard("modules:test/cpp");
+	bot::MemoryReader sr("");
+	bot::RobotStruct robot(sr);
+	robot.active();
+
+	const std::string msg = hotSqlError(robot,
+		"CREATE TABLE Vars (name String, value String, value String);\n");
+	TH_CHECK(msg.find("listed twice") != std::string::npos);
+	TH_CHECK(robot.structures().empty());
 	robot.deactivate();
 }
 

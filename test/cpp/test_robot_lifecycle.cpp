@@ -297,6 +297,22 @@ TH_TEST(single_consumer_accepts_the_five_real_hardware_fixtures) {
 	}
 }
 
+TH_TEST(shared_uart_rejection_does_not_capture_i2c_daemons) {
+	ModulePathGuard guard("modules:test/cpp");
+	/* 两个 proto=i2c 的守护共享 /dev/i2c-1 是正常拓扑；旧实现把所有非 virt
+	 * 的 Daemon path 都当成串口消费者，会误报 “UART path ... two consumers”。 */
+	const std::string err = assembleSql(
+		"CREATE TABLE Daemon (name String, chunk String, driver String, proto String,"
+		" path String, addr String, interval String, fields String, sign String);\n"
+		"INSERT INTO Daemon (name, chunk, driver, proto, path, addr, interval, fields, sign)"
+		" VALUES ('d1', 'lib/sensor_daemon.lua', 'MPU6050', 'i2c', '/dev/i2c-1',"
+		" '0x68', '10', 'ACCEL_X', '16');\n"
+		"INSERT INTO Daemon (name, chunk, driver, proto, path, addr, interval, fields, sign)"
+		" VALUES ('d2', 'lib/sensor_daemon.lua', 'BME280', 'i2c', '/dev/i2c-1',"
+		" '0x76', '10', 'TEMP:f', '16');\n");
+	TH_CHECK_MSG(err.empty(), "两个 I2C 守护共享总线被误拒: " + err);
+}
+
 TH_TEST(single_consumer_rejects_two_direct_vars_on_same_address) {
 	ModulePathGuard guard("modules:test/cpp");
 	/* 直连 vs 直连（不涉及守护）：同一声明者驱动、同总线同地址的两行 */

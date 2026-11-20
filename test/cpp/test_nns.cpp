@@ -15,6 +15,10 @@
 
 namespace {
 
+/* 本文件的 helper 只服务 MYBOT_HAVE_NN4CPP 段内的用例。若把定义留在
+ * #ifdef 外，独立 clone（无同级 nn4cpp）会以 -Werror=unused-function
+ * 打断 MYBOT_WERROR=ON 构建——CI 的 build:release 正是这个组合。 */
+#ifdef MYBOT_HAVE_NN4CPP
 bot::Json data(std::initializer_list<std::pair<const char*, bot::Json>> items) {
 	bot::Json out = bot::JsonObject();
 	for (const auto& item : items) { out.put(item.first, item.second); }
@@ -26,7 +30,6 @@ std::string resultOf(const bot::Json& value) {
 	return result != nullptr && result->isStr() ? result->getValue() : std::string();
 }
 
-#ifdef MYBOT_HAVE_NN4CPP
 bot::Json makeConfig(const std::string& layers, const std::string& path = "") {
 	return data({
 		{"layers", bot::JsonString(layers)},

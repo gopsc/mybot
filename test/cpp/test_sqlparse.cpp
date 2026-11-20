@@ -299,6 +299,13 @@ TH_TEST(parser_create_table_records_number_column_type) {
 	TH_CHECK(eves[0].create.tableColumns[2].type_ == VarType::Number);
 }
 
+TH_TEST(parser_create_table_rejects_duplicate_columns) {
+	/* 热 SQL 的 sql4cj 路径同样必须拒绝重复列名：否则 indexOfCol 只命中
+	 * 第一列，后续 INSERT 的“每列恰好一值”校验失真，留下不可用结构。 */
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "listed twice",
+		events("CREATE TABLE T ( a String, a Number );"));
+}
+
 TH_TEST(parser_number_column_accepts_numeric_values) {
 	/* Integer / 小数 / 带符号 / 引号包裹的数值字面量都算数值；
 	 * 值仍按文本驻留（本层不做类型转换）。`-` 是矩阵占位符而非字面量：

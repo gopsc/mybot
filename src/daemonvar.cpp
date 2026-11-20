@@ -427,8 +427,11 @@ bool DaemonRunner::finishTeardown(int64_t graceMs,
 
 void DaemonRunner::waitForExit() {
 	const auto waitStart = std::chrono::steady_clock::now();
-	/* 单守护路径：joinTimeout 等待，不给宽限（宽限是断电屏障的全局预算） */
-	requestStopAndWait(waitStart + std::chrono::milliseconds(joinTimeoutMs_));
+	/* 单守护路径：joinTimeout 等待，不给宽限（宽限是断电屏障的全局预算）。
+	 * 但 interval 上限 1h 让 joinTimeout 可达 5h——停机不能把执行器留在
+	 * 带电状态等 5 小时；超过 kMaxJoinWaitMs 即进入弃管/quiesce。 */
+	const int64_t waitMs = std::min<int64_t>(joinTimeoutMs_, kMaxJoinWaitMs);
+	requestStopAndWait(waitStart + std::chrono::milliseconds(waitMs));
 	finishTeardown(0, waitStart);
 }
 

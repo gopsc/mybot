@@ -122,6 +122,17 @@ local function fail(code, msg)
 end
 
 if not driver or driver == "" then fail(-9, "config missing 'driver'"); return end
+-- fields 是 publish 的唯一来源：缺失/空串时守护会成功启动但永远发布
+-- nvals=0，消费方只看到“字段缺失”这类间接症状。在 setup 期响亮失败。
+if #fields == 0 then
+	fail(-2, "config missing or empty 'fields' (no sample column to publish)")
+	return
+end
+-- uart 没有通用缺省串口：旧实现会落到 /dev/i2c-1，错误看起来像总线坏了。
+if proto == "uart" and (cfg.path == nil or cfg.path == "" or cfg.path == "-") then
+	fail(-2, "proto=uart requires an explicit 'path' (e.g. /dev/ttyS0 or /dev/serial0)")
+	return
+end
 
 local drvpath = mpath.resolve(driver .. ".lua")
 local ok_load, load_err = true, nil

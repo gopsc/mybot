@@ -381,6 +381,36 @@ TH_TEST(robot_reflex_unbound_temporary_reports) {
 	TH_CHECK(msg.find("bright") != std::string::npos);
 }
 
+TH_TEST(action_nested_trigger_is_rejected) {
+	/* runReflex 只合并顶层 @Trigger；嵌套块里静默跳过等于整段触发无声消失。
+	 * 条件块执行到该子块时必须响亮拒绝。 */
+	bot::HwRegistry reg;
+	reg.add("dev", std::make_unique<fx::LambdaHw>(
+		[](const bot::Json&) {
+			auto o = bot::JsonObject();
+			o.put("result", bot::JsonString("OK"));
+			return o;
+		}), "");
+	auto mats = fx::manyMatrices(
+		"@Action\ndev.p;\n 1;\n@\n"
+		"@if(1==1)\n@Trigger\ntrigger;\n doit;\n@\n@\n");
+	bot::ActionRunner runner(reg);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "只能出现在动作脚本顶层",
+		runner.runAction(mats));
+}
+
+TH_TEST(robot_reflex_self_recursion_is_rejected) {
+	/* capture-only 格使 callNamedReflex 以空参数再次进入同一个 @Reflex：
+	 * 旧实现会无限递归到栈溢出（ASan stack-overflow），必须在进入前抛可读错误。 */
+	bot::HwRegistry reg;
+	auto mats = fx::manyMatrices(
+		"@Reflex(loop)\nloop.x;\n$v=f;\n@\n"
+		"@Action\nloop.x;\n$v=f;\n@\n");
+	bot::ActionRunner runner(reg);
+	TH_CHECK_THROWS_MSG(bot::IllegalArgumentException, "递归",
+		runner.runAction(mats));
+}
+
 TH_TEST(robot_reflex_undefined_reflex_reports) {
 	const std::string msg = runTexts(kBasicSql,
 		"@Action\nrelay0.deg;\n@\n"

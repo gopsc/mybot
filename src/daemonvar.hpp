@@ -65,6 +65,13 @@ constexpr int32_t SLOT_SIZE = 96;         /* ABI v2: 600 → 96（采样数组�
 constexpr int32_t SLOT_MAXVALS = 64;      /* 缺省槽容量（@Daemon 未给 maxvals 列时） */
 constexpr int32_t SLOT_CAPACITY_LIMIT = 1024;	/* maxvals 列硬上限（8KiB 采样数组封顶） */
 
+/* 停机 join 等待的硬上限（2026-11 审计 M-2）：@Daemon interval 上限 1h，
+ * joinTimeout=interval*5 可达 5h；stopBarrier 若直接拿它做全体 deadline，
+ * 一个卡在不可中断 tick 里的守护会让 deactivate 先等 5h 才 quiesce。
+ * 单守护 waitForExit 与全体屏障共用这个上限；--daemon-grace-ms 仍是其后
+ * 的第二段宽限（不是本上限的替代）。 */
+constexpr int64_t kMaxJoinWaitMs = 30000;
+
 struct DaemonSlot {
 	char mutex[64];
 	std::int32_t count;

@@ -374,6 +374,25 @@ TH_TEST(mtinclude_nested_fragments_compose) {
 	TH_CHECK(fx::cell(act, 1, 1) == "100");
 }
 
+TH_TEST(mtinclude_include_preserves_merge_base_dir) {
+	/* @Include 把 sub/inc.mt 原样搬进来；inc 内的 @Merge 必须相对 sub/ 解析，
+	 * 而不是主脚本目录。旧实现留给外层 run()，会去找主目录 frag.mt。 */
+	fx::TempDir dir("inc_merge_inside");
+	writeFile(dir, "sub/inc.mt",
+		"@Merge\npath;\n  frag.mt;\n@\n"
+		"@Action\nb.x;\n 10;\n@\n");
+	writeFile(dir, "sub/frag.mt", "@Action\nc.x;\n 20;\n@\n");
+	auto mats = parseMain(
+		"@Include\npath;\n  sub/inc.mt;\n@\n"
+		"@Action\na.x;\n 1;\n@\n");
+	mtinclude::expandIncludes(mats, dir.path().string());
+	TH_CHECK(mats.size() == 2);
+	TH_CHECK(bot::trim(mats[0].getName()) == "Action");
+	TH_CHECK(mats[0].cols() == 2);
+	TH_CHECK(fx::cell(mats[0], 1, 0) == "10");
+	TH_CHECK(fx::cell(mats[0], 1, 1) == "20");
+}
+
 TH_TEST(mtinclude_once_suffix_skips_reinclusion) {
 	/* *.once.mt 被再次包含 → 跳过（stderr 注记），产物只含一份贡献 */
 	fx::TempDir dir("inc_once");

@@ -401,8 +401,11 @@ void HwFactory::rejectSharedUartPaths(const std::deque<mt::MatrixObject>& matric
 				if (path.empty() || path == "-") { continue; }
 				who = "UART bus variable '" + m.inherited(i, idxName) + "'";
 			} else if (t == "Daemon") {
+				/* 本判据只针对“各自 open 同一个物理串口”的 UART 消费者。
+				 * I2C/SPI 共享同一条总线路径是正常拓扑（多传感器挂同一总线），
+				 * 不能让它们落入 UART 的硬拒绝；缺 proto 缺省 i2c 同理跳过。 */
 				const std::string proto = optCol(m, i, "proto");
-				if (proto.empty() || proto == "virt") { continue; }
+				if (proto != "uart") { continue; }
 				path = optCol(m, i, "path");
 				if (path.empty()) { continue; }
 				who = "daemon '" + m.inherited(i, idxName) + "'";

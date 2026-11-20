@@ -100,7 +100,9 @@ static void rejectEmbeddedNul(const Json& val) {
 static void push_lua_value_impl(lua_State* L, const Json& val, int depth) {
 	if (depth > kMaxLuaNesting) { throw LuaNestingTooDeep(kMaxLuaNesting); }
 	if (val.isStr()) {
-		lua_pushstring(L, val.s.c_str());
+		/* 用带长度的 push：HAL 结果（HTTP body / shell out）允许含 NUL，
+		 * pushstring 会在首个 NUL 处静默截断。 */
+		lua_pushlstring(L, val.s.data(), val.s.size());
 	} else if (val.isInt()) {
 		lua_pushinteger(L, val.getInt());
 	} else if (val.isFloat()) {
@@ -118,8 +120,12 @@ static void push_lua_value_impl(lua_State* L, const Json& val, int depth) {
 	} else if (val.isObj()) {
 		lua_createtable(L, 0, 0);
 		for (const auto& kv : val.items()) {
+			/* 键也用 lua_pushlstring + rawset：C-string 语义的 setfield
+			 * 会在含 NUL 的键处截断并别名到另一字段。call_lua 的参数入口
+			 * 已显式拒绝 NUL 键；这里再保证 HAL 结果封装不引入同类截断。 */
+			lua_pushlstring(L, kv.first.data(), kv.first.size());
 			push_lua_value_impl(L, kv.second, depth + 1);
-			lua_setfield(L, -2, kv.first.c_str());
+			lua_rawset(L, -3);
 		}
 	} else {
 		logD([] { return "push_lua_value: unsupported JsonValue type, pushed nil"; });

@@ -23,6 +23,9 @@ INSERT INTO Daemon (name, chunk) VALUES ('imu0', 'lib/daemon_probe.lua');
   之后才逆序 `destroy()` 硬件。防的是「执行器已断电、某个在途 tick 又写它一次」——
   最后一次写随机胜出，进程退出时器件可能重新带电。
   `stop` 只在两拍之间被看见，所以屏障最坏要等一整拍。
+  join 等待另有 **30s 硬上限**（`kMaxJoinWaitMs`）：`interval` 上限 1h 会推出
+  `joinTimeout=5h`，不能因为一个卡在不可中断 tick 里的守护把停机拖成小时级；
+  超过上限即进入二段宽限/弃管。
   二段宽限也由全体 missed 守护**共享**一个截止点：从屏障 deadline 起算一次（封顶
   `graceCapMs`），不是每个守护各拿 `now+graceMs`——否则 N 个卡死守护会把最坏停机
   时间放大成 N×grace。

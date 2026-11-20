@@ -300,6 +300,13 @@ public:
 	explicit Expander(const std::string& mainBase) : mainBase_(mainBase) {}
 
 	void run(std::vector<mt::MatrixObject>& parsed) {
+		expandTopLevel(parsed, mainBase_);
+	}
+
+	/* 对一段顶层矩阵执行 @Merge 累加/重排。baseDir 是这组矩阵的来源目录：
+	 * 主脚本用自己的目录；被 @Include 拷贝进来的文件必须用自己的目录，
+	 * 否则文件内的 @Merge 会被错误地按主脚本目录解析。 */
+	void expandTopLevel(std::vector<mt::MatrixObject>& parsed, const std::string& baseDir) {
 		MergeAcc acc;
 		if (auto* act = mt::findByName(parsed, "Action")) { acc.action = *act; }
 		if (auto al = mtmerge::foldNamed(parsed, "Alias", acc.aliasPath)) {
@@ -309,7 +316,7 @@ public:
 			acc.vars = std::move(*va);
 		}
 		LevelOwned owned = ownedNamesOf(acc);	/* 快照：仅本层自有定义 */
-		runLevel(parsed, mainBase_, acc, owned);
+		runLevel(parsed, baseDir, acc, owned);
 
 		/* 产物：@Alias、@Vars、其余主脚本块按**原书写顺序**透传。
 		 * 2026-10-10 @if 特性起顺序不再是「无关」：runAction 按书写顺序
@@ -375,7 +382,21 @@ public:
 				bot::MemoryReader in(std::move(data));
 				std::vector<mt::MatrixObject> inc;
 				mt::readMatrix(in, inc);
-				spliceIncludes(inc, dirOf(resolved));	/* 被拷贝内容的 @Include 递归展开 */
+				const std::string incBase = dirOf(resolved);
+				spliceIncludes(inc, incBase);	/* 被拷贝内容的 @Include 递归展开 */
+				/* 被拷贝文件里的 @Merge 也必须以**该文件自身目录**为基准。
+				 * 若留给外层 run()，它只会看到 mainBase_，可复用片段整体
+				 * 搬移后就会去找主目录下的同名文件。 */
+				mergeNestedDirectives(inc, incBase);
+				rejectNestedDirectives(inc);
+				/* 只有确实存在顶层 @Merge 时才走累加/重排；纯 @Include
+				 * 拷贝（没有 Merge）必须逐字保留多张 Action 块，不能套用
+				 * @Merge 的“只保留首个 Action”聚合语义。 */
+				bool hasMerge = false;
+				for (const auto& x : inc) {
+					if (bot::trim(x.getName()) == "Merge") { hasMerge = true; break; }
+				}
+				if (hasMerge) { expandTopLevel(inc, incBase); }
 				for (auto& x : inc) { out.push_back(std::move(x)); }
 			}
 		}

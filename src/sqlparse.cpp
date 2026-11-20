@@ -1,5 +1,6 @@
 #include "sqlparse.hpp"
 
+#include <set>
 #include <stdexcept>
 
 #include "expr.hpp"
@@ -374,12 +375,21 @@ void Parser::nextCreateTable(CreateTableEvent& eve) {
 	if (t.type != TokenType::LEFT) {
 		throw bot::IllegalArgumentException(tokenMsg(t));
 	}
+	/* 热 SQL 是不可信输入：重复列名会让 indexOfCol 永远只命中第一列，
+	 * INSERT 的「每列恰好一值」校验随之失真，最终留下一张不可用的表。
+	 * 启动期 SqlEngine 的 processCreate 已拒绝重复列；热 SQL 走 sql4cj，
+	 * 必须在同一点补上同一判据。 */
+	std::set<std::string> seenColumns;
 	for (;;) {
 		t = expect();
 		if (t.type != TokenType::NAME) {
 			throw bot::IllegalArgumentException(tokenMsg(t));
 		}
 		std::string colName = t.name;
+		if (!seenColumns.insert(colName).second) {
+			throw bot::IllegalArgumentException("CREATE TABLE '" + eve.tableName
+				+ "': column '" + colName + "' listed twice");
+		}
 		t = expect();
 		if (t.type != TokenType::STRING && t.type != TokenType::NUMBER) {
 			throw bot::IllegalArgumentException(tokenMsg(t));

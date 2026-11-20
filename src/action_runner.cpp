@@ -203,6 +203,35 @@ void ActionRunner::collectNamedReflexes(const std::vector<mt::MatrixObject>& seq
 }
 
 Json ActionRunner::callNamedReflex(const mt::MatrixObject& reflex, const Json& params) {
+	/* 递归防线：反射体的设备列可再次命中反射名。先抓直接/间接环，再给一条
+	 * “很多不同名字”的长链设深度上限——两者都在栈溢出之前抛可读错误。 */
+	constexpr int kMaxReflexDepth = 64;
+	const std::string reflexName = bot::trim(reflex.getName());
+	if (activeReflexes_.count(&reflex) != 0) {
+		throw IllegalArgumentException(concatMsg("@Reflex '", reflexName,
+			"' 已在执行中：检测到自递归或互相递归。反射体不能再调用自身"
+			"（包括经设备列/别名间接调用）；请改为普通 @Action 或拆成不同反射。"));
+	}
+	if (reflexDepth_ >= kMaxReflexDepth) {
+		throw IllegalArgumentException(concatMsg("@Reflex '", reflexName,
+			"' 调用嵌套超过 ", std::to_string(kMaxReflexDepth),
+			" 层：怀疑反射链失控；请检查是否存在自递归/互相递归。"));
+	}
+	if (!activeReflexes_.insert(&reflex).second) {
+		throw IllegalArgumentException(concatMsg("@Reflex '", reflexName,
+			"' 递归状态登记失败（内部不一致）"));
+	}
+	++reflexDepth_;
+	struct ReflexGuard {
+		int& depth;
+		std::set<const mt::MatrixObject*>& active;
+		const mt::MatrixObject* key;
+		~ReflexGuard() {
+			--depth;
+			active.erase(key);
+		}
+	} reflexGuard{reflexDepth_, activeReflexes_, &reflex};
+
 	/* 与外层会话隔离：反射体看不到调用方的临时别名，体内的参数/捕获在返回时
 	 * 整体回滚（对齐当前 Python 的 Registry.session()）。 */
 	HwRegistry::SessionSnapshot snapshot(registry_);
@@ -568,8 +597,18 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
 			}
 			continue;
 		}
-		/* 普通 @Reflex / @Trigger 由 runReflex 统一执行，不是可执行块。 */
-		if (name == "Reflex" || name == "Trigger") { continue; }
+		/* 普通 @Reflex / @Trigger 由 runReflex 统一执行，不是可执行块。
+		 * 二者只在顶层有意义：runReflex 的 mergeDirectiveRows 只扫顶层序列。
+		 * 嵌在 @if/@while/@Action compound 里若静默跳过，整段触发/定义会
+		 * 无声消失；这里按项目既有 halt-on-error 取向明确拒绝。 */
+		if (name == "Reflex" || name == "Trigger") {
+			if (scoped) {
+				throw IllegalArgumentException("@Block nesting: @" + name
+					+ " 只能出现在动作脚本顶层；嵌套在 @if/@while/@Action 子块内"
+					"不会被执行，请把该块移到顶层。");
+			}
+			continue;
+		}
 		/* 这两个指令块应在 mtinclude 展开阶段被消费；留到这里说明输入
 		 * 结构异常，不能静默跳过（否则整段动作可能无声丢失）。 */
 		if (name == "Merge" || name == "Include") {
@@ -592,6 +631,10 @@ bool ActionRunner::execSequence(const std::vector<mt::MatrixObject>& seq, bool s
  * 独立成立（直接返回，runReflex 接手），否则响亮报错。 */
 void ActionRunner::runAction(std::vector<mt::MatrixObject>& actionMatrices) {
 	namedReflexes_.clear();
+	/* 防御性复位：正常路径的 ReflexGuard 已在异常/返回时清空；这里兜住
+	 * 外部直接调用 callNamedReflex 后失败留下的状态。 */
+	activeReflexes_.clear();
+	reflexDepth_ = 0;
 	collectNamedReflexes(actionMatrices);
 	bool sawActionable = execSequence(actionMatrices, false);
 	if (!sawActionable) {

@@ -69,6 +69,13 @@ class ActionRunner {
 	std::map<std::string, const mt::MatrixObject*> namedReflexes_;
 	/* 命名反射调用期间，dispatchMatrix 把最后一次 play 结果写到这里。 */
 	Json* resultSink_ = nullptr;
+	/* @Reflex 递归防线（2026-11 审计）：反射体里的设备列可以再次命中同一个
+	 * （或互相引用的）反射名。旧实现无任何深度限制，capture-only 格即可构造
+	 * 空参数自递归，栈溢出发生在 deactivate 之前。activeReflexes_ 抓直接/间接
+	 * 环，reflexDepth_ 给“很多不同名字的链”兜底；两者都在 callNamedReflex
+	 * 的 RAII 内维护，异常路径同样回退。 */
+	std::set<const mt::MatrixObject*> activeReflexes_;
+	int reflexDepth_ = 0;
 
 	/* C-M3：$(...) 表达式 AST 按列缓存——"-" 继承链上同一表达式文本
 	 * 原实现每行每格重解析一次（O(行数²) 字符扫描）。body 为上次解析的

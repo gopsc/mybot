@@ -53,6 +53,20 @@ bool allDigits(const std::string& text) {
 		[](unsigned char c) { return std::isdigit(c) != 0; });
 }
 
+/* /dev 名称是内核/udev 给的字符串；超长数字会让 std::stoi 抛 out_of_range，
+ * 一路穿到 main 变成整机 abort。枚举工具对畸形条目应跳过，而不是把一次
+ * 查询变成机器人停机。 */
+std::optional<int> parseSmallInt(const std::string& text, int base = 10) {
+	try {
+		std::size_t used = 0;
+		const int value = std::stoi(text, &used, base);
+		if (used != text.size()) { return std::nullopt; }
+		return value;
+	} catch (const std::exception&) {
+		return std::nullopt;
+	}
+}
+
 std::string driverLink(const std::string& path) {
 	std::error_code code;
 	if (!fs::is_symlink(path, code)) { return std::string(); }
@@ -71,16 +85,17 @@ Json i2cReport() {
 
 	for (const std::string& name : listDir("/dev")) {
 		if (!startsWith(name, "i2c-") || !allDigits(name.substr(4))) { continue; }
-		const int bus = std::stoi(name.substr(4));
-		seen.push_back(bus);
+		const auto bus = parseSmallInt(name.substr(4));
+		if (!bus) { continue; }
+		seen.push_back(*bus);
 		const std::string device = "/dev/" + name;
 		Json record = JsonObject();
 		record.put("device", JsonString(device));
 		record.put("node_present", JsonBool(true));
 		record.put("readable", JsonBool(::access(device.c_str(), R_OK) == 0));
 		record.put("writable", JsonBool(::access(device.c_str(), W_OK) == 0));
-		record.put("bus", JsonInt(bus));
-		if (auto adapter = readText("/sys/class/i2c-dev/i2c-" + std::to_string(bus) + "/name")) {
+		record.put("bus", JsonInt(*bus));
+		if (auto adapter = readText("/sys/class/i2c-dev/i2c-" + std::to_string(*bus) + "/name")) {
 			record.put("adapter_name", JsonString(*adapter));
 		}
 		adapters.add(record);
@@ -89,11 +104,12 @@ Json i2cReport() {
 	int hidden = 0;
 	for (const std::string& name : listDir("/sys/class/i2c-dev")) {
 		if (!startsWith(name, "i2c-") || !allDigits(name.substr(4))) { continue; }
-		const int bus = std::stoi(name.substr(4));
-		if (std::find(seen.begin(), seen.end(), bus) != seen.end()) { continue; }
+		const auto bus = parseSmallInt(name.substr(4));
+		if (!bus) { continue; }
+		if (std::find(seen.begin(), seen.end(), *bus) != seen.end()) { continue; }
 		Json record = JsonObject();
-		record.put("device", JsonString("/dev/i2c-" + std::to_string(bus)));
-		record.put("bus", JsonInt(bus));
+		record.put("device", JsonString("/dev/i2c-" + std::to_string(*bus)));
+		record.put("bus", JsonInt(*bus));
 		record.put("node_present", JsonBool(false));
 		record.put("source", JsonString("sysfs"));
 		record.put("readable", JsonNull());
@@ -124,10 +140,13 @@ Json i2cReport() {
 			if (std::isxdigit(static_cast<unsigned char>(c)) == 0) { hex = false; }
 		}
 		if (!hex) { continue; }
+		const auto bus = parseSmallInt(busText);
+		const auto addressValue = parseSmallInt(addressText, 16);
+		if (!bus || !addressValue) { continue; }
 		Json record = JsonObject();
-		record.put("bus", JsonInt(std::stoi(busText)));
+		record.put("bus", JsonInt(*bus));
 		char address[8];
-		std::snprintf(address, sizeof(address), "0x%02X", std::stoi(addressText, nullptr, 16));
+		std::snprintf(address, sizeof(address), "0x%02X", *addressValue);
 		record.put("address", JsonString(address));
 		if (auto nameText = readText("/sys/bus/i2c/devices/" + name + "/name")) {
 			record.put("name", JsonString(*nameText));
@@ -169,13 +188,16 @@ Json spiReport() {
 				|| !allDigits(suffix.substr(dot + 1))) {
 			continue;
 		}
+		const auto bus = parseSmallInt(suffix.substr(0, dot));
+		const auto chipSelect = parseSmallInt(suffix.substr(dot + 1));
+		if (!bus || !chipSelect) { continue; }
 		const std::string device = "/dev/" + name;
 		Json record = JsonObject();
 		record.put("device", JsonString(device));
 		record.put("readable", JsonBool(::access(device.c_str(), R_OK) == 0));
 		record.put("writable", JsonBool(::access(device.c_str(), W_OK) == 0));
-		record.put("bus", JsonInt(std::stoi(suffix.substr(0, dot))));
-		record.put("chip_select", JsonInt(std::stoi(suffix.substr(dot + 1))));
+		record.put("bus", JsonInt(*bus));
+		record.put("chip_select", JsonInt(*chipSelect));
 		if (auto modalias = readText("/sys/class/spidev/" + name + "/device/modalias")) {
 			record.put("modalias", JsonString(*modalias));
 		}

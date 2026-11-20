@@ -255,9 +255,11 @@ struct FtdiBus::Impl {
 		return static_cast<std::uint8_t>((getPins() & kMiso) != 0 ? 1 : 0);
 	}
 
+	/* 锁由本函数统一持有。外部调用方（FtdiBus::spiTransfer）不得再持同一把
+	 * 非递归 mutex 进入——旧实现在两层各锁一次，SPI 传输确定性自锁。 */
 	void spiTransfer(const std::vector<std::uint8_t>& data,
-			std::vector<std::uint8_t>& out, int delayUs, std::mutex& guard) {
-		std::lock_guard<std::mutex> held(guard);
+			std::vector<std::uint8_t>& out, int delayUs) {
+		std::lock_guard<std::mutex> held(lock);
 		const bool idle = (mode & 2) != 0;	/* CPOL */
 		const bool phase = (mode & 1) != 0;	/* CPHA */
 		spiDrive(idle, false, false);
@@ -387,7 +389,8 @@ void FtdiBus::spiSetup(int mode, int bits, int speed) {
 void FtdiBus::spiTransfer(const std::vector<std::uint8_t>& data,
 		std::vector<std::uint8_t>& out, int delayUs) {
 	if (!impl_->spi) { throw std::runtime_error("FTDI bus is not SPI"); }
-	impl_->spiTransfer(data, out, delayUs, impl_->lock);
+	/* 锁在 Impl::spiTransfer 内统一持有（Impl::lock 非递归）。 */
+	impl_->spiTransfer(data, out, delayUs);
 }
 
 } // namespace bot

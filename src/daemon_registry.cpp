@@ -40,6 +40,9 @@ void DaemonRegistry::stopBarrier(const std::vector<std::shared_ptr<DaemonRunner>
 	for (const auto& h : holders) {
 		budgetMs = std::max(budgetMs, h->joinTimeoutMs());
 	}
+	/* 硬上限：interval 上限 1h → joinTimeout 5h。停机屏障必须先于硬件
+	 * 销毁返回；一个卡死的守护不能把 deactivate 拖成小时级等待。 */
+	budgetMs = std::min<int64_t>(budgetMs, kMaxJoinWaitMs);
 	const auto waitStart = std::chrono::steady_clock::now();
 	const auto deadline = waitStart + std::chrono::milliseconds(budgetMs);
 	std::vector<DaemonRunner*> missed;

@@ -92,6 +92,11 @@ inline CapReadStatus readFileCapped(const std::string& path, std::size_t cap, Ca
 				::close(fd);
 				return CapReadStatus::TOO_LARGE;
 			}
+			if (n < 0) {
+				if (errno == EINTR) { continue; }
+				::close(fd);
+				return CapReadStatus::READ_FAILED;
+			}
 			break;
 		}
 		std::size_t want = buf.size();

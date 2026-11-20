@@ -366,7 +366,7 @@ applySql(sql)
   → 返回人读摘要
 ```
 
-热 SQL 的入口按**不可信输入**处理：`Daemon.chunk` 只接受模块根下已存在的相对路径；`Nns.path` 只接受模型根下相对路径；`layers` 有层数/单层/总参数上限。启动期结构脚本仍按可信本地文件处理（见 [reference.md](reference.md) 的信任模型）。
+热 SQL 的入口按**不可信输入**处理：`Daemon.chunk` 只接受模块根下已存在的相对路径；`Nns.path` 只接受模型根下相对路径；`layers` 有层数/单层/总参数上限。启动期结构脚本仍按可信本地文件处理（见 [reference.md](reference.md) 的信任模型）。热 SQL 内的瞬态 `Action` 在 30s 墙钟预算下执行（`kHotSqlActionBudgetMs`）：超时按 `ExecBudgetExceeded` 中止并回滚本批次硬件，不能借 `Timer` 等路径把 `applySql` 拖成长时间阻塞。
 
 ## 7. 仿真：无硬件时到底仿真了什么
 

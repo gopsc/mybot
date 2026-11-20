@@ -23,10 +23,12 @@
 #include "daemonvar.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <set>
 
+#include "exec_budget.hpp"	/* 瞬态 Action 的有界预算（2026-11 审计 M-5） */
 #include "util_env.hpp"		/* stopRequested（热插/热删除的中断响应点） */
 #include "util_except.hpp"	/* kNonStdExceptionNote（非 std 异常兜底拼接） */
 #include "util_str.hpp"		/* joinNames（点名/成因列表拼接单点）、trim */
@@ -51,6 +53,43 @@ public:
 private:
 	HwFactory& factory_;
 	bool previous_;
+};
+
+/* 热 SQL 瞬态 Action 的墙钟预算（2026-11 审计 M-5）。applySql 本身没有
+ * --timeout 参数，而瞬态 Action 可以调用 Timer/Nns 等长时间阻塞的路径；
+ * 不设上限时，8 MiB 热 SQL 足以让控制器停在一次 applySql 里数十分钟。
+ * 30s 覆盖正常热插动作；超时按 ExecBudgetExceeded 走既有 halt-on-error/回滚。 */
+constexpr int64_t kHotSqlActionBudgetMs = 30000;
+
+/* 在 commitHotBatch 的瞬态 Action 窗口内挂预算：C++ 动作行循环看
+ * setLuaExecBudget，Lua 驱动状态看各变量的 armExecBudget（指令钩子 +
+ * HAL 阻塞调用）。析构恢复进入前的预算，不能无脑置 nullptr——未来若
+ * applySql 从一次带预算的 run 内被调用，外层预算必须保持。 */
+class HotSqlActionBudgetGuard {
+public:
+	explicit HotSqlActionBudgetGuard(HwRegistry& registry)
+		: registry_(registry), previous_(luaExecBudget()) {
+		budget_.deadline = std::chrono::steady_clock::now()
+			+ std::chrono::milliseconds(kHotSqlActionBudgetMs);
+		budget_.watchStop = true;
+		setLuaExecBudget(&budget_);
+		for (MatrixVars_Hardware* hv : registry_.sequence()) {
+			hv->armExecBudget(&budget_);
+		}
+	}
+	~HotSqlActionBudgetGuard() {
+		for (MatrixVars_Hardware* hv : registry_.sequence()) {
+			hv->armExecBudget(previous_);
+		}
+		setLuaExecBudget(previous_);
+	}
+	HotSqlActionBudgetGuard(const HotSqlActionBudgetGuard&) = delete;
+	HotSqlActionBudgetGuard& operator=(const HotSqlActionBudgetGuard&) = delete;
+
+private:
+	HwRegistry& registry_;
+	const LuaExecBudget* previous_;
+	LuaExecBudget budget_;
 };
 
 /* 热删除中途失败的报错文本拼装（拆自 executeHotDeletes，2026-09-26 批次 5）。
@@ -237,8 +276,13 @@ HotSqlService::CommitOutcome HotSqlService::commitHotBatch(
 		}
 		/* 4.5 瞬态 Action：排在硬件之后执行（动作可引用本批次新建变量），
 		 *     执行完即丢弃——不入结构矩阵、不注册。执行失败同样回滚本批次硬件
-		 *     （结构回到批次前状态），但动作已下发的物理副作用不回退。 */
-		if (!insPlan.actionMats.empty()) { runner_.runAction(insPlan.actionMats); }
+		 *     （结构回到批次前状态），但动作已下发的物理副作用不回退。
+		 *     预算只包 Action 段：build 可能涉及器件自检/模型加载，不应被
+		 *     一个为“防动作失控”设置的短预算误杀。 */
+		if (!insPlan.actionMats.empty()) {
+			HotSqlActionBudgetGuard actionBudget(registry_);
+			runner_.runAction(insPlan.actionMats);
+		}
 	} catch (...) {
 		try {
 			rollbackHotBatch(mark, metaMark, daemonMark, appended, addedTables);
