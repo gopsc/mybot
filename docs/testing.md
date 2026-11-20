@@ -150,6 +150,7 @@ cd build && ctest -R 'lua_|cpp_unit'         # 只跑 Lua 段 + C++ 单测
 13. **C++ 层单测**（`test/cpp/`，`mybot_tests` 目标，零第三方框架），覆盖：
     - 基础设施：JSON 值语义、JSON 文本解析、Lua↔Json 边界与转换深度上限、util 全局助手（安全标识符判据 `isSafeIdent`、深度护栏 `DepthLimitGuard`、CLI 切分 `cli::parseKeyValue`、越界文案模板 `rangeErrorText`）
     - 解析管线：`.mt` 矩阵状态机（含块嵌套 children 树、叶子不可嵌套、深度上限、EOF 未闭合响亮报错）、SQL 词法/语法、元数据收集与 `$` 引用环检测、@Merge 归并核心白盒、@Include 内容拷贝与子块内位置局部归并白盒
+    - 动作打印格（2026-11）：`?` 的设备返回表输出、按设备去重、与普通参数共存、`-` 继承
     - 守护：never-spawn/abandon 分支
     - 会话变量作用域（2026-09-20 阶段 1）：动作脚本内联 `@Alias` 不跨 `run()` 残留、不遮蔽结构变量、报错脚本不改写注册表、200 轮重复执行后结构名字索引不增长
     - I/O 与错误语义（2026-09-20 阶段 4）：`retryEintr` 只在 EINTR 重试、整文件读取超限报「字节上限」而非「不是合法 JSON」、TCP 口令三态（空闲超时/对端关闭不算鉴权失败，只有凭据错才计数）、表达式语法错误截断回显

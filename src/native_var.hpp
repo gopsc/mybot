@@ -25,6 +25,9 @@ public:
 		std::vector<std::string> trigNames, HwLookup* registry);
 
 	Json play(const Json& input) override;
+	/* 与 play 同语义（含 ensureOk/controller 转发），但不回显结果表。
+	 * `?` 打印格与 agent 的 playQuiet 入口都走这里，避免重复输出。 */
+	Json playQuiet(const Json& input) override;
 	Json read() override;
 	void build() override;
 	void destroy() override;
@@ -35,6 +38,7 @@ private:
 		MetadataFn getMetadata, std::vector<std::string> ctrlNames,
 		std::vector<std::string> trigNames, HwLookup* registry);
 
+	Json playImpl(const Json& input, bool echo);
 	void rejectReservedKeys(const Json& metadata, const Json& params) const;
 	void mergeTriggerResults(Json& obj);
 	Json forwardToControllers(const Json& metadata, const Json& res);

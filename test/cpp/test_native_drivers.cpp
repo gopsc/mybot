@@ -3,7 +3,9 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -17,9 +19,21 @@
 #include "hal.hpp"
 #include "harness.hpp"
 #include "native_driver.hpp"
+#include "native_var.hpp"
 #include "util_except.hpp"
 
 namespace {
+
+/* stderr 捕获：playQuiet 的契约是「结果不回显」 */
+struct CerrCapture {
+	std::ostringstream buf;
+	std::streambuf* old;
+	CerrCapture() : old(std::cerr.rdbuf(buf.rdbuf())) {}
+	~CerrCapture() { std::cerr.rdbuf(old); }
+	CerrCapture(const CerrCapture&) = delete;
+	CerrCapture& operator=(const CerrCapture&) = delete;
+	std::string str() const { return buf.str(); }
+};
 
 bot::Json callData(std::initializer_list<std::pair<const char*, bot::Json>> items) {
 	bot::Json data = bot::JsonObject();
@@ -74,6 +88,28 @@ TH_TEST(native_time_driver_reports_clock_fields) {
 	TH_CHECK(result.find("local") != nullptr && result.find("local")->isStr());
 	TH_CHECK(result.find("weekday") != nullptr);
 	TH_CHECK(result.find("weekday")->getInt() >= 1 && result.find("weekday")->getInt() <= 7);
+}
+
+TH_TEST(native_variable_play_quiet_suppresses_result_echo) {
+	bot::HALManager hal;
+	auto var = bot::MtVars_Native::Factory(
+		bot::makeTimeDriver(hal), "t0",
+		[](bool) {
+			bot::Json m = bot::JsonObject();
+			m.put("name", bot::JsonString("t0"));
+			return m;
+		},
+		{}, {}, nullptr);
+	var->build();
+	bot::Json result;
+	{
+		CerrCapture cap;
+		result = var->playQuiet(bot::JsonObject());
+		TH_CHECK(cap.str().empty());
+	}
+	TH_CHECK(result.find("result") != nullptr
+		&& result.find("result")->getValue() == "OK");
+	var->destroy();
 }
 
 TH_TEST(native_time_driver_formats_with_the_documented_subset) {

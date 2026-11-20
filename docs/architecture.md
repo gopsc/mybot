@@ -149,11 +149,11 @@ stateDiagram-v2
 一帧的派发核心在 `ActionRunner::dispatchMatrix()`：
 
 1. **检查预算与停止标志**：`requireExecBudget()` / `stopRequested()`，每个动作行都过。
-2. **解析本行单元格**：`-` 继承上一行；`$(...)` 求值；`$var=field` 识别为捕获格；普通数值/文本放进 `set`。
+2. **解析本行单元格**：`-` 继承上一行；`$(...)` 求值；`$var=field` 识别为捕获格；单独 `?` 识别为打印格（不传参，标记本列设备本行打印返回表）；普通数值/文本放进 `set`。
 3. **按设备首次出现顺序派发**：`plan.order` 是列头中设备首次出现的顺序；同一设备的多个参数列合并成**一次** `play()`。
-4. **调用 `hv->play(params)`**：Lua 驱动走 `MtVars_Lua::callImpl`，原生驱动走 `MtVars_Native`，守护变量走 `MtVars_Daemon::play`。
+4. **调用 `hv->play(params)`**：Lua 驱动走 `MtVars_Lua::callImpl`，原生驱动走 `MtVars_Native`，守护变量走 `MtVars_Daemon::play`；带 `?` 标记的普通设备变量走 `playQuiet`，结果由派发层统一打印。
 5. **契约检查**：`MatrixVars_Hardware::ensureOk(res)`——`result == "ERR"` 或返回值不是表，立即抛异常，停止本帧/本轮。
-6. **捕获赋值**：本帧设备返回后，`$var=field` 从返回表按点号路径取值，写进 `@Vars`/`@Alias` 的会话覆盖层。
+6. **捕获赋值**：本帧设备返回后，`$var=field` 从返回表按点号路径取值，写进 `@Vars`/`@Alias` 的会话覆盖层；`?` 标记则在同一位置把完整返回表打印到 stderr。
 
 ### 4.2 Lua 驱动的调用顺序
 

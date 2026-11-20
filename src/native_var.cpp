@@ -95,6 +95,14 @@ Json MtVars_Native::forwardToControllers(const Json& metadata, const Json& res) 
 }
 
 Json MtVars_Native::play(const Json& input) {
+	return playImpl(input, true);
+}
+
+Json MtVars_Native::playQuiet(const Json& input) {
+	return playImpl(input, false);
+}
+
+Json MtVars_Native::playImpl(const Json& input, bool echo) {
 	if (driver_ == nullptr) {
 		throw std::runtime_error("'" + name_ + "' is not built or already destroyed");
 	}
@@ -117,7 +125,7 @@ Json MtVars_Native::play(const Json& input) {
 		throw;
 	}
 	--g_nativeDepth;
-	if (top) { std::cerr << result.toString() << std::endl; }
+	if (top && echo) { std::cerr << result.toString() << std::endl; }
 	return result;
 }
 

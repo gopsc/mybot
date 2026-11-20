@@ -16,6 +16,7 @@
 #include "hw_factory.hpp"
 #include "util_env.hpp"
 #include "util_num.hpp"
+#include "util_str.hpp"
 
 namespace bot {
 
@@ -147,12 +148,15 @@ void ActionRunner::dispatchMatrix(const mt::MatrixObject& actionDefs) {
 		}
 		Json set = JsonObject();
 		std::map<std::string, std::vector<Capture>> captures;
+		/* `?` 打印格：设备名 → 首个携带标记的列头。按设备去重，一行一设备
+		 * 只打印一次完整返回表（同设备多列 `?` 不重复刷屏）。 */
+		std::map<std::string, std::string> printMarks;
 		for (std::int64_t j = 0; j < static_cast<std::int64_t>(actionDefs.cols()); ++j) {
 			parseActionCell(set, actionDefs, i, j, plan.phaseDevices,
 				plan.params[static_cast<std::size_t>(j)],
 				plan.devs[static_cast<std::size_t>(j)],
 				exprCache[static_cast<std::size_t>(j)],
-				captures);
+				captures, printMarks);
 		}
 		for (const std::string& name_dev : plan.order) {
 			MatrixVars_Hardware* hv = registry_.find(name_dev);
@@ -168,20 +172,29 @@ void ActionRunner::dispatchMatrix(const mt::MatrixObject& actionDefs) {
 			}
 			const auto capIt = captures.find(name_dev);
 			const bool hasCaps = capIt != captures.end() && !capIt->second.empty();
+			const auto printIt = printMarks.find(name_dev);
+			const bool printResult = printIt != printMarks.end();
 			auto paramsOpt = set.get(name_dev);
-			if (!paramsOpt && !hasCaps) {
+			if (!paramsOpt && !hasCaps && !printResult) {
 				/* 该设备本行所有参数列都未起拍（无可继承的 "-"，典型来自 mtmerge
-				 * 相位前导）且无捕获 → 不派发。旧行为会以 0.0 误发一次指令，把「还没
-				 * 轮到」伪装成「指令为 0」；耗尽侧的行尾 "-" 会继承前值，不会走到这里。 */
+				 * 相位前导）且无捕获/打印标记 → 不派发。旧行为会以 0.0 误发一次指令，
+				 * 把「还没轮到」伪装成「指令为 0」；耗尽侧的行尾 "-" 会继承前值，
+				 * 不会走到这里。 */
 				continue;
 			}
-			/* 捕获格不传参：只有捕获而无普通参数的设备仍需 play（以空参数触发一次
-			 * 读取/调用），否则无从拿到返回值来提取字段。 */
+			/* 捕获格/打印格不传参：只有捕获或 `?` 而无普通参数的设备仍需 play
+			 * （以空参数触发一次读取/调用），否则无从拿到返回值。 */
 			if (!paramsOpt) { paramsOpt = JsonObject(); }
+			/* `?` 是显式索要结果：走 quiet 路径，由下方统一打印一次，避免与
+			 * Lua/原生驱动的常规回显重复。 */
 			Json res = reflex != nullptr ? callNamedReflex(*reflex, *paramsOpt)
-				: hv->play(*paramsOpt);
+				: (printResult ? hv->playQuiet(*paramsOpt) : hv->play(*paramsOpt));
 			MatrixVars_Hardware::ensureOk(res, "play " + name_dev + " (row " + std::to_string(i) + ")");
 			if (resultSink_ != nullptr) { *resultSink_ = res; }
+			if (printResult) {
+				std::cerr << "[?] " << echoSource(printIt->second)
+					<< " (row " << i << "): " << res.toString() << std::endl;
+			}
 			if (hasCaps) {
 				for (const Capture& cap : capIt->second) {
 					applyCapture(res, cap, i);
@@ -652,7 +665,8 @@ void ActionRunner::parseActionCell(Json& set, const mt::MatrixObject& actionDefs
 		std::int64_t i, std::int64_t j, const std::set<std::string>& phaseDevices,
 		const std::string& resolvedParam,
 		const std::string& resolvedDev, ColExprCache& exprCache,
-		std::map<std::string, std::vector<Capture>>& captures) {
+		std::map<std::string, std::vector<Capture>>& captures,
+		std::map<std::string, std::string>& printMarks) {
 	const std::string& name_param = resolvedParam;
 
 	/* 未起拍：本格 "-" 且无前值可继承（首数据行），且该设备属于相位设备
@@ -662,11 +676,18 @@ void ActionRunner::parseActionCell(Json& set, const mt::MatrixObject& actionDefs
 	if (phaseDevices.count(resolvedDev) > 0 && actionDefs.inherited(i, j) == "-") { return; }
 
 	/* 单元格：$(...) 表达式按求值结果（数值→JsonFloat、文本→JsonString，
-	 * 拼接由 '+' 的类型分派产生）；`$var=field` 是捕获指令（不传参，记入
-	 * captures，待该设备 play 后落地）；否则走既有数值/继承解析。
-	 * inherited 已解析 "-" 继承（上一行是表达式/捕获时按上一行文本再处理一次）。 */
+	 * 拼接由 '+' 的类型分派产生）；`?` 是打印指令（不传参，记入 printMarks，
+	 * 待该设备 play 后打印完整返回表）；`$var=field` 是捕获指令（不传参，
+	 * 记入 captures，待该设备 play 后落地）；否则走既有数值/继承解析。
+	 * inherited 已解析 "-" 继承（上一行是表达式/捕获/打印格时按上一行文本
+	 * 再处理一次，故 `-` 会继续打印）。 */
 	Json paramVal;
 	const std::string& raw = actionDefs.inherited(i, j);
+	if (raw == "?") {
+		/* 同设备多列都写 `?` 时只记首个列头；dispatchMatrix 按设备去重打印。 */
+		printMarks.emplace(resolvedDev, actionDefs(0, j));
+		return;
+	}
 	if (auto body = exprBody(raw)) {
 		/* C-M3：AST 按列缓存——"-" 继承链上同一表达式文本原每行重解析 */
 		if (exprCache.body != *body) {

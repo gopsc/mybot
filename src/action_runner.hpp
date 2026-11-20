@@ -85,12 +85,16 @@ class ActionRunner {
 		Expression ast;
 	};
 
-	/* N-10：按名查矩阵与列头切分下沉 mt 层（findByName / splitActionColumn） */
+	/* N-10：按名查矩阵与列头切分下沉 mt 层（findByName / splitActionColumn）
+	 * 2026-11 `?` 打印格：单元格原文恰为 `?` 时不传参，把 resolvedDev 记进
+	 * printMarks（值 = 首个列头，供输出归因）；dispatchMatrix 在该设备 play
+	 * 成功后打印完整返回表。与 captures 一样，纯 `?` 列也会触发一次 play。 */
 	void parseActionCell(Json& set, const mt::MatrixObject& actionDefs,
 			std::int64_t i, std::int64_t j, const std::set<std::string>& phaseDevices,
 			const std::string& resolvedParam,
 			const std::string& resolvedDev, ColExprCache& exprCache,
-			std::map<std::string, std::vector<Capture>>& captures);
+			std::map<std::string, std::vector<Capture>>& captures,
+			std::map<std::string, std::string>& printMarks);
 
 	/* ---- 捕获赋值（play 之后落地）----
 	 * applyCapture：从返回值 res 按 cap.path（点号路径）取字段，赋给 cap.var。
