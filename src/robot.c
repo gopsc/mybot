@@ -36,6 +36,7 @@ typedef enum {
     ROBOT_CMD_STOP,
     ROBOT_CMD_STATUS,
     ROBOT_CMD_PROFILE,
+    ROBOT_CMD_MEM,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -47,6 +48,7 @@ static queue_t robot_log_queue;
 static queue_t robot_cmd_queue;
 static volatile bool robot_stop;
 static volatile bool robot_busy;
+static int last_lua_heap_kb;
 static char p2_profile_override[ROBOT_CMD_ARG];
 static char lua_file_buf[32 * 1024];
 
@@ -2993,7 +2995,8 @@ static void robot_lua_smoke(void) {
         }
     }
 
-    robot_log("Lua smoke %s, heap=%dKB", ok ? "OK" : "FAILED", lua_heap_kb(L));
+    last_lua_heap_kb = lua_heap_kb(L);
+    robot_log("Lua smoke %s, heap=%dKB", ok ? "OK" : "FAILED", last_lua_heap_kb);
 
     if (!p2_ran) {
         if (robot_env != LUA_NOREF) {
@@ -3092,6 +3095,10 @@ void robot_send_profile(void) {
     robot_send_cmd(ROBOT_CMD_PROFILE, NULL);
 }
 
+void robot_send_mem(void) {
+    robot_send_cmd(ROBOT_CMD_MEM, NULL);
+}
+
 void robot_core1(void) {
     robot_log("core1: robot runtime started");
     robot_busy = true;
@@ -3143,6 +3150,11 @@ void robot_core1(void) {
             }
             break;
         }
+        case ROBOT_CMD_MEM:
+            robot_log("core1: mem stack=%u/16384 heap_last=%dKB busy=%d stop=%d",
+                (unsigned)robot_stack_used(), last_lua_heap_kb,
+                robot_busy ? 1 : 0, robot_stop ? 1 : 0);
+            break;
         default:
             break;
         }

@@ -38,6 +38,7 @@ void robot_send_run(const char *profile);
 void robot_send_stop(void);
 void robot_send_status(void);
 void robot_send_profile(void);
+void robot_send_mem(void);
 
 /* 供 core1 内部/后续驱动使用：非阻塞写入日志队列。 */
 void robot_log(const char *fmt, ...);

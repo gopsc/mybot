@@ -377,6 +377,9 @@ static void cmd_dispatch(void) {
     } else if (strcmp(cmd, "profile") == 0) {
         robot_send_profile();
         printtovga(L"[profile]\n");
+    } else if (strcmp(cmd, "mem") == 0) {
+        robot_send_mem();
+        printtovga(L"[mem]\n");
     } else if (cmd[0] != '\0') {
         printtovga(L"unknown command\n");
     }

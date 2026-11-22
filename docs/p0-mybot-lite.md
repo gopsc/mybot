@@ -70,7 +70,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-879684    0 166092
+879956    0 166096
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -94,7 +94,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-256388     0 115680
+256556     0 115684
 ```
 
 此时：
@@ -719,6 +719,7 @@ core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
 /stop         停止当前运行
 /status       查看 core1 状态
 /profile      显示 /profile.txt
+/mem          core1 栈高水位和上次 Lua 堆
 ```
 
 `/run` 的完整流程：
@@ -753,6 +754,7 @@ core1: run profile p4
 core1: run finished, idle
 core1: status idle
 core1: /profile.txt = p4
+core1: mem stack=.../16384 heap_last=...KB busy=0 stop=0
 ```
 
 `/stop` 立即置 stop 标志；`@while`、`milli_sleep` 和动作派发行会在各自的检查点看到它。长时间阻塞在器件驱动内部的 I2C/SPI/UART 调用只能等超时。
