@@ -7,11 +7,11 @@
 @
 
 @Action
-p5.value  p5.name  p5.item;
+p5b.value  p5b.name  p5b.item;
  $(cfg.value) $(cfg.inner.name) $(cfg.items[1]);
 @
 
 @if(cfg.items[1]>10)
-p5.ok;
+p5b.ok;
    1;
 @

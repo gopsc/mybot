@@ -139,7 +139,7 @@ RX GP1
 
 ```text
 /run p4       运行 /robots/p4.sql + /scripts/p4.mt
-/run p5 p8    用 /robots/p5.sql + /scripts/p8.mt
+/run p5c p5   用 /robots/p5c.sql + /scripts/p5.mt
 /run          重新读 /profile.txt 并运行
 /stop         停止当前运行
 /status       查看 core1 状态
@@ -271,7 +271,7 @@ sdcard/
     p22.mt
     p23.mt
     p25.mt
-    parts/inc_p5.mt
+    parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
     parts/merge_alias.mt
@@ -793,7 +793,7 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 
 ```text
 /run p4       运行 /robots/p4.sql + /scripts/p4.mt
-/run p5 p8    用 /robots/p5.sql + /scripts/p8.mt
+/run p5c p5   用 /robots/p5c.sql + /scripts/p5.mt
 /run          重新读 /profile.txt 并运行
 /stop         停止当前运行
 /status       查看 core1 状态
@@ -877,7 +877,7 @@ p5.ok;
 @
 
 @Action
-p5.value  p5.name  p5.item;
+p5b.value  p5b.name  p5b.item;
  $(cfg.value) $(cfg.inner.name) $(cfg.items[1]);
 @
 ```
@@ -915,7 +915,7 @@ P2: @Action columns=2
 P5Check: call value=7 name=pico
 P2: p5.call result=OK
 P2: p5 call ok
-P5Check: call value=nil name=nil
+P5Check: call value=nil name=p5
 P2: p5.call result=OK
 P2: p5 call ok
 ...
@@ -957,7 +957,7 @@ p5.value;
 
 ```text
 P2: capture cfg.value=1
-P5Check: call value=1 name=nil item=nil
+P5Check: call value=1 name=p5 item=nil
 ```
 
 ## P6：@Include 脚本片段
@@ -971,15 +971,15 @@ P6-A 支持顶层 `@Include`：
 
 @Include
 path;
-  parts/inc_p5.mt;
+  parts/inc_p6.mt;
 @
 ```
 
-`/scripts/parts/inc_p5.mt`：
+`/scripts/parts/inc_p6.mt`：
 
 ```mt
 @Action
-p5.value;
+p6.value;
  $(cfg.value);
 @
 ```
@@ -1011,7 +1011,7 @@ P2: profile=p6
 P2: @Include merged 1 file(s)
 P2: @Struct cfg.value = 9
 P2: device p6 driver=P5Check controller=-
-P5Check: call value=9 name=nil item=nil
+P5Check: call value=9 name=p6 item=nil
 ```
 
 ## P7：算术表达式
@@ -1029,12 +1029,12 @@ name  value;
 @
 
 @Action
-p5.value  p5.item;
+p7.value  p7.item;
  $(cfg.value*count+1) $(cfg.value+1);
 @
 
 @if((count+2)*2==8)
-p5.ok;
+p7.ok;
    1;
 @
 ```
@@ -1068,9 +1068,9 @@ p7
 P2: profile=p7
 P2: @Struct cfg.value = 7
 P2: @Vars count = 2
-P5Check: call value=15 name=nil item=8
+P5Check: call value=15 name=p7 item=8
 P2: p7.call result=OK
-P5Check: call value=nil name=nil item=nil
+P5Check: call value=nil name=p7 item=nil
 P2: p7 call ok
 ...
 ```
@@ -1096,12 +1096,12 @@ name  value;
 @
 
 @Action
-p5.name  p5.value;
+p8.name  p8.value;
  $(cfg.name + "-" + count) $(count + 1);
 @
 
 @if((cfg.name + "-x") == "pico-x")
-p5.ok;
+p8.ok;
    1;
 @
 ```
@@ -1128,7 +1128,7 @@ P2: @Struct cfg.name = pico
 P2: @Vars count = 2
 P5Check: call value=3 name=pico-2 item=nil
 ...
-P5Check: call value=nil name=nil item=nil
+P5Check: call value=nil name=p8 item=nil
 ```
 
 当前限制：
@@ -1279,7 +1279,7 @@ name  value;
 @
 
 @Action
-p5.A;
+p13.A;
  $(n);
 @
 ```
@@ -1296,7 +1296,7 @@ path phase;
 行为：
 
 - 片段里的 `@Alias` / `@Vars` 会加入当前运行会话
-- 片段动作头 `p5.A` 解析为 `p5.angle`
+- 片段动作头 `p13.A` 解析为 `p13.angle`
 - `$(n)` 解析为 `200`
 - `@Merge` 前会检查设备集是否相交；相交直接拒绝整次归并
 
@@ -1310,7 +1310,7 @@ p13
 
 ```text
 P2: @Merge /scripts/parts/merge_alias.mt phase=0 rows=1
-P5Check: call value=nil name=nil item=nil angle=200
+P5Check: call value=nil name=p13 item=nil angle=200
 P2: p13.call result=OK
 P2: @Merge timeline 1 beat(s)
 ```
@@ -1418,7 +1418,7 @@ P14-A 支持普通 `@Reflex` 和 `@Trigger`：
 
 ```mt
 @Reflex
-name  p5.value;
+name  p14.value;
 blink $(v);
 @
 
@@ -1448,7 +1448,7 @@ p14
 ```text
 P2: @Reflex parsed
 P2: @Trigger blink
-P5Check: call value=42 name=nil item=nil angle=nil
+P5Check: call value=42 name=p14 item=nil angle=nil
 P2: p14.call result=OK
 P2: p14 call ok
 ```
@@ -1467,7 +1467,7 @@ P15-A 支持命名反射：
 
 ```mt
 @Reflex(echo)
-p5.value;
+p15.value;
 $(v);
 @
 
@@ -1498,7 +1498,7 @@ p15
 ```text
 P2: named @Reflex echo parsed
 P2: named reflex echo
-P5Check: call value=5 name=nil item=nil angle=nil
+P5Check: call value=5 name=p15 item=nil angle=nil
 P2: p15.call result=OK
 ```
 
@@ -1520,7 +1520,7 @@ P16-A 给 named `@Reflex` 和 `@Trigger` 加上递归/深度防线：
 
 ```mt
 @Reflex(loop)
-p5.value;
+p16.value;
 $(v);
 loop.v;
 @
@@ -1531,7 +1531,7 @@ loop.v;
 @
 ```
 
-`loop` 反射执行一次 `p5.value`，然后尝试递归调用 `loop`；第二次进入被拦截。
+`loop` 反射执行一次 `p16.value`，然后尝试递归调用 `loop`；第二次进入被拦截。
 
 测试 profile：
 
@@ -1544,7 +1544,7 @@ p16
 ```text
 P2: named @Reflex loop parsed
 P2: named reflex loop
-P5Check: call value=1 name=nil item=nil angle=nil
+P5Check: call value=1 name=p16 item=nil angle=nil
 P2: reflex recursion blocked: loop
 ```
 
@@ -1569,12 +1569,12 @@ name  value;
 @
 
 @Action
-p5.value  p5.item;
+p17.value  p17.item;
  $(cfg.items[idx]) $(cfg.items[idx+1]);
 @
 
 @if(cfg.items[idx] > 10)
-p5.ok;
+p17.ok;
    1;
 @
 ```
@@ -1602,7 +1602,7 @@ p17
 预期关键输出：
 
 ```text
-P5Check: call value=20 name=nil item=30 angle=nil
+P5Check: call value=20 name=p17 item=30 angle=nil
 P2: p17.call result=OK
 P2: p17 call ok
 ```
@@ -1679,7 +1679,7 @@ path;
 ```mt
 # parts/level2.mt
 @Action
-p5.value;
+p19.value;
  $(cfg.value);
 @
 ```
@@ -1701,7 +1701,7 @@ p19
 
 ```text
 P2: @Include merged 2 file(s)
-P5Check: call value=7 name=nil item=nil angle=nil
+P5Check: call value=7 name=p19 item=nil angle=nil
 P2: p19.call result=OK
 ```
 
@@ -1710,14 +1710,14 @@ P2: p19.call result=OK
 P20-A 允许 `/run` 同时指定结构 SQL 和动作脚本：
 
 ```text
-/run p5 p8
+/run p5c p5
 ```
 
 表示：
 
 ```text
-结构: /robots/p5.sql
-动作: /scripts/p8.mt
+结构: /robots/p5c.sql
+动作: /scripts/p5.mt
 ```
 
 用途：
@@ -1726,10 +1726,11 @@ P20-A 允许 `/run` 同时指定结构 SQL 和动作脚本：
 - 同一个结构可以跑不同动作脚本
 - 不需要复制 profile 文件
 
-示例 `p5.sql + p8.mt`：
+示例 `p5c.sql + p5.mt`：
 
 ```text
-P5Check: call value=3 name=pico-2 item=nil angle=nil
+P5Check: call value=7 name=pico item=nil angle=nil
+P5Check: call value=nil name=p5 item=nil angle=nil
 ```
 
 `/run p5` 仍然表示 SQL 和动作都用 `p5`。

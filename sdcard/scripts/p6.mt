@@ -4,5 +4,5 @@
 
 @Include
 path;
-  parts/inc_p5.mt;
+  parts/inc_p6.mt;
 @

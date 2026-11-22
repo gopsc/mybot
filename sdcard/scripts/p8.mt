@@ -8,11 +8,11 @@ name  value;
 @
 
 @Action
-p5.name  p5.value;
+p8.name  p8.value;
  $(cfg.name + "-" + count) $(count + 1);
 @
 
 @if((cfg.name + "-x") == "pico-x")
-p5.ok;
+p8.ok;
    1;
 @

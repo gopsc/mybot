@@ -8,11 +8,11 @@ name  value;
 @
 
 @Action
-p5.value  p5.item;
+p17.value  p17.item;
  $(cfg.items[idx]) $(cfg.items[idx+1]);
 @
 
 @if(cfg.items[idx] > 10)
-p5.ok;
+p17.ok;
    1;
 @

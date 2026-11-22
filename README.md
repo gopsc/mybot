@@ -84,7 +84,7 @@ p23
 
 ```text
 /run p23     运行 /robots/p23.sql + /scripts/p23.mt
-/run p5 p8   用 /robots/p5.sql + /scripts/p8.mt
+/run p5c p5   用 /robots/p5c.sql + /scripts/p5.mt
 /run         重新读 /profile.txt
 /stop        停止当前运行
 /status      查看 core1 状态
