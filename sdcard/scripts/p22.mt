@@ -19,7 +19,7 @@ p5.item;
 @
 
 @if((1 == 2 && missing > 0) || cfg.name == "pico-x")
-p5.ok;
+p5.name;
   7;
 @
 

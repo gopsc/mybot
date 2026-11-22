@@ -1775,7 +1775,7 @@ p5.value;
 @
 
 @if((1 == 2 && missing > 0) || cfg.name == "pico-x")
-p5.ok;
+p5.name;
   7;
 @
 
@@ -1796,7 +1796,7 @@ p22
 ```text
 P5Check: call value=30 name=nil item=nil angle=nil
 P5Check: call value=nil name=nil item=11 angle=nil
-P5Check: call value=nil name=nil item=nil angle=7
+P5Check: call value=nil name=7 item=nil angle=nil
 Counter: reading=1
 Counter: reading=2
 P2: [while] (count < 3) && !(count == 2) -> 2 iteration(s)
@@ -1838,7 +1838,7 @@ p5.value              p5.item               p5.name          p5.angle;
 @
 
 @if(cfg.items[idx+1] > 25 && (cfg.items[idx]*2 == 40) && !(1==2))
-p5.ok;
+p5.value;
   99;
 @
 ```

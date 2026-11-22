@@ -13,6 +13,6 @@ p5.value             p5.item             p5.name          p5.angle;
 @
 
 @if(cfg.items[idx+1] > 25 && (cfg.items[idx]*2 == 40) && !(1==2))
-p5.ok;
+p5.value;
   99;
 @
