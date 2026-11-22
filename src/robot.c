@@ -52,6 +52,8 @@ typedef enum {
     ROBOT_CMD_SPITEST,
     ROBOT_CMD_SET,
     ROBOT_CMD_GET,
+    ROBOT_CMD_SAVEVARS,
+    ROBOT_CMD_LOADVARS,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -4915,6 +4917,47 @@ static bool robot_p2_run(lua_State *L) {
     return true;
 }
 
+static int p2_load_vars_file(void) {
+    FILINFO fno;
+    if (f_stat("/vars.txt", &fno) != FR_OK) {
+        return 0;
+    }
+    char buf[512];
+    size_t n = p2_read_file("/vars.txt", buf, sizeof(buf));
+    if (n == 0) {
+        return 0;
+    }
+    int loaded = 0;
+    char *save = NULL;
+    char *line = strtok_r(buf, "\n", &save);
+    while (line != NULL) {
+        char *t = p2_trim(line);
+        if (*t != '\0' && *t != '#') {
+            char *sp = t;
+            while (*sp != '\0' && !isspace((unsigned char)*sp)) {
+                ++sp;
+            }
+            if (*sp != '\0') {
+                *sp++ = '\0';
+                while (*sp != '\0' && isspace((unsigned char)*sp)) {
+                    ++sp;
+                }
+                char *end = sp + strlen(sp);
+                while (end > sp && isspace((unsigned char)end[-1])) {
+                    --end;
+                }
+                *end = '\0';
+                if (*sp != '\0') {
+                    p2_set_var(t, sp);
+                    ++loaded;
+                }
+            }
+        }
+        line = strtok_r(NULL, "\n", &save);
+    }
+    return loaded;
+}
+
 static void robot_lua_smoke(void) {
     robot_runtime_close();
     sd_card_t *pSD = sd_get_by_num(0);
@@ -4967,6 +5010,10 @@ static void robot_lua_smoke(void) {
     } else {
         p2_active_L = L;
         p2_active = true;
+        int loaded = p2_load_vars_file();
+        if (loaded > 0) {
+            robot_log("core1: loaded %d var(s) from /vars.txt", loaded);
+        }
         last_lua_heap_kb = lua_heap_kb(L);
         robot_log("P2: profile active, devices=%d heap=%dKB", p2_ndevices,
             last_lua_heap_kb);
@@ -5178,6 +5225,14 @@ void robot_send_set(const char *arg) {
 
 void robot_send_get(const char *arg) {
     robot_send_cmd(ROBOT_CMD_GET, arg);
+}
+
+void robot_send_savevars(void) {
+    robot_send_cmd(ROBOT_CMD_SAVEVARS, NULL);
+}
+
+void robot_send_loadvars(void) {
+    robot_send_cmd(ROBOT_CMD_LOADVARS, NULL);
 }
 
 static bool p2_path_stem(const char *path, char *out, size_t cap) {
@@ -6013,6 +6068,42 @@ void robot_core1(void) {
             }
             break;
         }
+        case ROBOT_CMD_SAVEVARS: {
+            if (!p2_active) {
+                robot_log("core1: /savevars needs an active profile");
+                break;
+            }
+            char buf[512];
+            size_t off = 0;
+            buf[0] = '\0';
+            for (int i = 0; i < p2_nvars; ++i) {
+                int wrote = snprintf(buf + off, sizeof(buf) - off, "%s %s\n",
+                    p2_vars[i].name, p2_vars[i].value);
+                if (wrote < 0 || (size_t)wrote >= sizeof(buf) - off) {
+                    robot_log("core1: /savevars buffer full");
+                    break;
+                }
+                off += (size_t)wrote;
+            }
+            if (off == 0) {
+                robot_log("core1: /savevars no active vars");
+                break;
+            }
+            if (p2_write_file("/vars.txt", buf)) {
+                robot_log("core1: saved %d var(s) to /vars.txt", p2_nvars);
+            }
+            break;
+        }
+        case ROBOT_CMD_LOADVARS:
+            if (!p2_active) {
+                robot_log("core1: /loadvars needs an active profile");
+                break;
+            }
+            {
+                int loaded = p2_load_vars_file();
+                robot_log("core1: loaded %d var(s) from /vars.txt", loaded);
+            }
+            break;
         case ROBOT_CMD_UNLOAD:
             p2_stop_loop("unload");
             robot_runtime_close();

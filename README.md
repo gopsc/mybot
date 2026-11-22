@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-281232    0  140404
+286728    0  140408
 ```
 
 ## SD 卡（必需）
@@ -111,6 +111,8 @@ p23
 /spitest [speed]  SPI1 回环测试
 /set name value  设置 active 变量
 /get name    读取 active 变量/别名
+/savevars    保存 active 变量到 /vars.txt
+/loadvars    从 /vars.txt 恢复变量
 /version     显示固件 git/build 信息
 /uptime      显示运行时长
 /vars        列出 active 变量/别名

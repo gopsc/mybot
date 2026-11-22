@@ -68,6 +68,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 60. **P60：`?` 嵌套表 JSON 展开**
 61. **P61：`/version` 与 `/uptime` 诊断**
 62. **P62：`@Merge` 32 行预算**
+63. **P63：`/savevars` / `/loadvars` 变量持久化**
 60. **P59：`/set` / `/get` 运行时变量**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
@@ -145,7 +146,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-285496    0 140408
+286728    0 140408
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -203,6 +204,8 @@ RX GP1
 /spitest [speed]  SPI1 回环测试
 /set name value  设置 active 变量
 /get name     读取 active 变量/别名
+/savevars     保存 active 变量到 /vars.txt
+/loadvars     从 /vars.txt 恢复变量
 /version      显示固件 git/build 信息
 /uptime       显示运行时长
 /vars         列出 active 变量/别名
@@ -981,6 +984,8 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /spitest [speed]  SPI1 回环测试
 /set name value  设置 active 变量
 /get name     读取 active 变量/别名
+/savevars     保存 active 变量到 /vars.txt
+/loadvars     从 /vars.txt 恢复变量
 /version      显示固件 git/build 信息
 /uptime       显示运行时长
 /vars         列出 active 变量/别名
@@ -1824,7 +1829,7 @@ run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_m
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 use <profile> | autostart <action> <period_ms> | autostart off | autostart
 devices | device <name> | i2cscan [0|1] | uarttest [baud] | spitest [speed]
-set <name> <value> | get <name> | version | uptime
+set <name> <value> | get <name> | savevars | loadvars | version | uptime
 vars | structs | unload | reboot | help
 history: terminal up/down (ANSI)
 ```
@@ -1856,6 +1861,8 @@ history: terminal up/down (ANSI)
 /spitest [speed]
 /set <name> <value>
 /get <name>
+/savevars
+/loadvars
 /version
 /uptime
 /vars
@@ -2290,7 +2297,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-285496     0  140408
+286728     0  140408
 ```
 
 构建：
@@ -3376,7 +3383,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-285496     0  140408
+286728     0  140408
 ```
 
 限制：
@@ -4337,6 +4344,64 @@ P2: @Merge aborted
 - 达到上限即整次归并中止
 - 预算只在单次 `@Merge` 内有效
 - 片段文件字节数仍受现有读缓冲限制
+- 尚未上板实测
+
+## P63：/savevars / /loadvars 变量持久化
+
+P63-A 增加运行期变量持久化：
+
+```text
+/savevars
+/loadvars
+```
+
+`/savevars`：
+
+- 需要 active profile
+- 把当前 `@Vars` 写到 `/vars.txt`
+- 格式为每行 `name value`
+- 不保存 `@Alias`
+- 使用 FatFS 直接覆盖写
+
+`/loadvars`：
+
+- 需要 active profile
+- 从 `/vars.txt` 读取 `name value`
+- 使用 `p2_set_var` 覆盖同名变量或新建变量
+- 文件不存在时返回 loaded=0
+
+自动加载：
+
+- profile 成功 active 后会尝试读取 `/vars.txt`
+- 加载发生在 profile 动作脚本执行之后
+- 初始脚本动作仍使用文件内默认值，后续 `/action` / `/loop` 使用持久化值
+- 日志示例：
+
+```text
+core1: loaded 2 var(s) from /vars.txt
+```
+
+测试：
+
+```text
+/run p59
+/set gain 42
+/savevars
+/set gain 1
+/loadvars
+/action
+```
+
+预期 `/action` 使用 `gain=42`。
+
+限制：
+
+- 不保存别名
+- 不自动保存，只有 `/savevars`
+- 直接覆盖写，没有临时文件/原子 rename
+- 变量值里的换行会破坏文件格式
+- 自动加载发生在 profile 初始动作之后
+- 同名变量查找仍是首个定义优先
 - 尚未上板实测
 
 ## 运行现象

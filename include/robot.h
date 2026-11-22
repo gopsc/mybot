@@ -57,6 +57,8 @@ void robot_send_uarttest(const char *arg);
 void robot_send_spitest(const char *arg);
 void robot_send_set(const char *arg);
 void robot_send_get(const char *arg);
+void robot_send_savevars(void);
+void robot_send_loadvars(void);
 
 /* 供 core1 内部/后续驱动使用：非阻塞写入日志队列。 */
 void robot_log(const char *fmt, ...);
