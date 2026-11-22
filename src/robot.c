@@ -3211,6 +3211,8 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
     p2_merge_failed = false;
     bool header = false;
     int last_phase = 0;
+    char loaded[P2_MERGE_FILES][128];
+    int nloaded = 0;
     for (int i = start + 1; i < end; ++i) {
         char *t = p2_trim(p2_lines[i]);
         if (*t == '\0') {
@@ -3244,11 +3246,32 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
         }
         char path[128];
         p2_include_path(cells[0], path, sizeof(path));
+        bool duplicate = false;
+        for (int l = 0; l < nloaded; ++l) {
+            if (strcmp(loaded[l], path) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            size_t plen = strlen(path);
+            if (plen > 8 && strcmp(path + plen - 8, ".once.mt") == 0) {
+                robot_log("P2: @Merge once fragment skipped: %s", path);
+                continue;
+            }
+            robot_log("P2: @Merge duplicate fragment: %s", path);
+            p2_merge_failed = true;
+            break;
+        }
         if (p2_load_merge_file(path, phase,
                 &p2_merge_srcs[p2_merge_nsrc])) {
             robot_log("P2: @Merge %s phase=%d rows=%d", path, phase,
                 p2_merge_srcs[p2_merge_nsrc].nrows);
             ++p2_merge_nsrc;
+            if (nloaded < P2_MERGE_FILES) {
+                snprintf(loaded[nloaded], sizeof(loaded[0]), "%s", path);
+                ++nloaded;
+            }
         } else {
             robot_log("P2: @Merge cannot load %s", path);
         }

@@ -56,6 +56,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 48. **P47：递归 `@Include` 与循环检测**
 49. **P48：顶层 MT 纳入 include 循环检测**
 50. **P49：`@Merge` 主从别名/变量覆盖**
+51. **P50：`@Merge` include-once 片段**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -132,7 +133,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-276504    0 134940
+276768    0 134940
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -297,6 +298,7 @@ sdcard/
     p46.sql
     p47.sql
     p49.sql
+    p50.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -343,6 +345,7 @@ sdcard/
     p47.mt
     p48_self.mt
     p49.mt
+    p50.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -672,6 +675,7 @@ p46             -> /robots/p46.sql + /scripts/p46.mt（列头按行重算）
 p47             -> /robots/p47.sql + /scripts/p47.mt（递归 @Include）
 p48_self        -> /scripts/p48_self.mt（顶层自包含负例）
 p49             -> /robots/p49.sql + /scripts/p49.mt（@Merge 主从覆盖）
+p50             -> /robots/p50.sql + /scripts/p50.mt（@Merge include-once）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2214,7 +2218,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-276504     0  134940
+276768     0  134940
 ```
 
 构建：
@@ -3300,7 +3304,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-276504     0  134940
+276768     0  134940
 ```
 
 限制：
@@ -3581,6 +3585,71 @@ P2: a.call result=OK
 - 片段之间重复的新别名/变量会整次中止
 - 结构层已有同名定义也按主绑定处理
 - 变量查找仍是首个定义优先，主脚本后置 `@Vars` 的行为不在本阶段保证
+- 尚未上板实测
+
+## P50：@Merge include-once 片段
+
+P50-A 给 `@Merge` 加 include-once：
+
+- 同一路径第二次出现时，如果文件后缀是 `.once.mt`，跳过并记录
+- 同一路径第二次出现且不是 `.once.mt`，拒绝并中止整次 `@Merge`
+- 检查按路径字符串精确比较，不做 canonicalize
+- 仍然没有片段递归 `@Merge`
+
+测试 profile：
+
+```text
+p50
+```
+
+片段文件：
+
+```text
+/scripts/parts/merge_50_once.once.mt
+```
+
+内容：
+
+```mt
+@Action
+a.value;
+  50;
+@
+```
+
+主脚本：
+
+```mt
+@Merge
+path phase;
+  parts/merge_50_once.once.mt 0;
+  parts/merge_50_once.once.mt 0;
+@
+```
+
+预期只加载一次：
+
+```text
+P2: @Merge /scripts/parts/merge_50_once.once.mt phase=0 rows=1
+P2: @Merge once fragment skipped: /scripts/parts/merge_50_once.once.mt
+P2: @Merge timeline 1 beat(s)
+P5Check: call value=50 name=a item=nil angle=nil
+P2: a.call result=OK
+```
+
+非 `.once.mt` 重复会输出：
+
+```text
+P2: @Merge duplicate fragment: ...
+P2: @Merge aborted by fragment duplicate
+```
+
+限制：
+
+- 按路径文本精确匹配，`./x.mt` 与 `x.mt` 不视为同一文件
+- include-once 只跳过重复，不做菱形依赖递归
+- 片段递归 `@Merge` 仍未实现
+- 主脚本动作表不算片段路径
 - 尚未上板实测
 
 ## 运行现象
