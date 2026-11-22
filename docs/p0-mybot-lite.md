@@ -40,6 +40,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 32. **P31：active 状态诊断 `/devices` / `/vars` / `/structs`**
 33. **P32：`/sql` 事务回滚**
 34. **P33：`@SQL` 块事务回滚**
+35. **P34：设备列 `@Alias` 解析**
 
 还没有实现：完整 `@Merge` 语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -116,7 +117,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-268648    0 106404
+269056    0 106404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -261,6 +262,7 @@ sdcard/
     p27.sql
     p28.sql
     p33.sql
+    p34.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -295,6 +297,7 @@ sdcard/
     p28.mt
     p29.mt
     p33.mt
+    p34.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -600,6 +603,7 @@ p27             -> /robots/p27.sql + /scripts/p27.mt（@SQL UPDATE/DROP）
 p28             -> /robots/p28.sql + /scripts/p28.mt（常驻状态 + /sql）
 p29             -> /scripts/p29.mt（/action 重播测试，无独立 SQL）
 p33             -> /robots/p33.sql + /scripts/p33.mt（@SQL 事务回滚）
+p34             -> /robots/p34.sql + /scripts/p34.mt（设备列 @Alias）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2124,7 +2128,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-268648     0  106404
+269056     0  106404
 ```
 
 构建：
@@ -2600,6 +2604,52 @@ P2: profile active, devices=1 heap=...KB
 - 回滚重建失败时状态可能不完整
 - `@SQL` 仍只支持当前子集（INSERT/DELETE/UPDATE/DROP）
 - 事务快照不包含驱动内部状态
+
+## P34：设备列 @Alias 解析
+
+P34-A 支持在动作脚本列头的设备位使用 `@Alias`：
+
+```mt
+@Alias
+name alias;
+  leg base;
+  A   angle;
+@
+
+@Action
+leg.value  base.A;
+   7         45;
+@
+```
+
+行为：
+
+- `leg` 是设备别名，解析为 active 设备 `base`
+- `A` 是参数别名，解析为 `angle`
+- 设备别名只在目标确实是当前 active 设备时生效，避免把普通参数别名误当设备
+- `@Action`、`@Merge` 合并源、`@Reflex` 反射体共用同一套解析
+- 同一设备解析后会在动作行内合并参数，不会重复调用
+
+测试 profile：
+
+```text
+p34
+```
+
+预期关键日志：
+
+```text
+P5Check: call value=7 name=base item=nil angle=45
+P2: base.call result=OK
+```
+
+限制：
+
+- 设备别名只解析一层，不追链
+- 目标设备必须在执行时已 build
+- `@Alias` 必须在动作块之前定义
+- 设备别名和参数别名共用同一张名字表；同名时优先按 active 设备判断
+- 还没有 `include-once` / 子块内 `@Merge` 的完整语义
 
 ## 运行现象
 

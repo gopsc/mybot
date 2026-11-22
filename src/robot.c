@@ -1358,6 +1358,14 @@ static const char *p2_find_alias(const char *name) {
     return NULL;
 }
 
+static const char *p2_resolve_device_alias(const char *name) {
+    const char *alias = p2_find_alias(name);
+    if (alias != NULL && p2_find_device(alias) != NULL) {
+        return alias;
+    }
+    return name;
+}
+
 static void p2_add_alias(const char *name, const char *target) {
     if (p2_naliases >= P2_MAX_ALIASES) {
         return;
@@ -2546,8 +2554,9 @@ static void p2_exec_action(lua_State *L, int start, int end) {
             continue;
         }
         *dot = '\0';
+        const char *device_name = p2_resolve_device_alias(cells[i]);
         p2_copy_trim(p2_action_cols[ncols].device,
-            sizeof(p2_action_cols[ncols].device), cells[i], NULL);
+            sizeof(p2_action_cols[ncols].device), device_name, NULL);
         const char *param = dot + 1;
         const char *alias = p2_find_alias(param);
         if (alias != NULL) {
@@ -3010,8 +3019,9 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
                     continue;
                 }
                 *dot = '\0';
+                const char *device_name = p2_resolve_device_alias(header);
                 p2_copy_trim(p2_action_cols[total].device,
-                    sizeof(p2_action_cols[total].device), header, NULL);
+                    sizeof(p2_action_cols[total].device), device_name, NULL);
                 const char *param = dot + 1;
                 const char *alias = p2_find_alias(param);
                 if (alias != NULL) {
@@ -3193,8 +3203,9 @@ static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row) {
             continue;
         }
         *dot = '\0';
+        const char *device_name = p2_resolve_device_alias(header);
         p2_copy_trim(p2_action_cols[total].device,
-            sizeof(p2_action_cols[total].device), header, NULL);
+            sizeof(p2_action_cols[total].device), device_name, NULL);
         const char *param = dot + 1;
         const char *alias = p2_find_alias(param);
         if (alias != NULL) {
