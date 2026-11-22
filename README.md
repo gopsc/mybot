@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-273776     0  106548
+274520     0  110544
 ```
 
 ## SD 卡（必需）

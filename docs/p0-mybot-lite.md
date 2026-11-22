@@ -45,8 +45,9 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 37. **P36：`/reload` 重载 active profile**
 38. **P37：`/boot.txt` 开机自动周期动作**
 39. **P38：`/use` 与 `/autostart` 持久化开机配置**
+40. **P39：`@Merge` 容量扩展、负相位与前导 `-` 跳过**
 
-还没有实现：完整 `@Merge` 语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
+还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
 ## 当前硬件形态
 
@@ -121,7 +122,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-273776    0 106548
+274520    0 110544
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -274,6 +275,7 @@ sdcard/
     p28.sql
     p33.sql
     p34.sql
+    p39.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -309,10 +311,15 @@ sdcard/
     p29.mt
     p33.mt
     p34.mt
+    p39.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
     parts/merge_alias.mt
+    parts/merge_39_a.mt
+    parts/merge_39_b.mt
+    parts/merge_39_c.mt
+    parts/merge_39_d.mt
     parts/level1.mt
     parts/level2.mt
     pca9685.mt
@@ -616,6 +623,7 @@ p28             -> /robots/p28.sql + /scripts/p28.mt（常驻状态 + /sql）
 p29             -> /scripts/p29.mt（/action 重播测试，无独立 SQL）
 p33             -> /robots/p33.sql + /scripts/p33.mt（@SQL 事务回滚）
 p34             -> /robots/p34.sql + /scripts/p34.mt（设备列 @Alias）
+p39             -> /robots/p39.sql + /scripts/p39.mt（@Merge 容量/相位）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2156,7 +2164,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-273776     0  106548
+274520     0  110544
 ```
 
 构建：
@@ -2898,6 +2906,72 @@ core1: boot autostart /scripts/p29.mt period=200ms
 - 需要 SD 可写
 - 写入失败只报日志，不自动回滚
 - 文件内容很小：profile 一行，boot 一行
+
+## P39：@Merge 容量扩展、负相位与前导 `-` 跳过
+
+P39-A 在简化 `@Merge` 上补三件事：
+
+- 源文件上限 3 → 4
+- 单源数据行上限 4 → 8
+- 支持负 `phase`：丢弃开头 `abs(phase)` 行；整源丢弃会告警
+- 支持 `phase` 列写 `-`：继承上一行相位
+- 支持前导 `-` 行：源在第一条有数据的行之前不参与派发
+
+测试 profile：
+
+```text
+p39
+```
+
+源布局：
+
+```mt
+@Merge
+path phase;
+  parts/merge_39_a.mt  0;
+  parts/merge_39_b.mt  0;
+  parts/merge_39_c.mt -1;
+  parts/merge_39_d.mt  1;
+@
+```
+
+- `a`：1..5，共 5 行
+- `b`：前导 `-`，随后 `10`
+- `c`：`30, 40`，phase=-1，`30` 被丢弃
+- `d`：`50, 60`，phase=1
+
+预期 5 拍：
+
+```text
+beat0: a=1 c=40
+beat1: a=2 b=10 c=40 d=50
+beat2: a=3 b=10 c=40 d=60
+beat3: a=4 b=10 c=40 d=60
+beat4: a=5 b=10 c=40 d=60
+```
+
+关键日志：
+
+```text
+P2: @Merge ... phase=-1 rows=2
+P2: @Merge source 2 starts at beat 0 (phase=-1)
+P2: @Merge timeline 5 beat(s)
+P5Check: call value=1 name=a item=nil angle=nil
+P5Check: call value=40 name=c item=nil angle=nil
+P5Check: call value=2 name=a item=nil angle=nil
+P5Check: call value=10 name=b item=nil angle=nil
+P5Check: call value=40 name=c item=nil angle=nil
+P5Check: call value=50 name=d item=nil angle=nil
+...
+```
+
+限制：
+
+- 仍不是完整 mybot `@Merge`
+- 没有片段递归 `@Merge`、include-once、8MiB 预算、嵌套控制块归并
+- 数据格 `-` 只在“前导未起拍”时跳过；行内继承仍依赖驱动处理
+- 负相位整源丢弃只告警，不中止脚本
+- 列数上限仍为 6
 
 ## 运行现象
 

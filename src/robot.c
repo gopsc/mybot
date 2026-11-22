@@ -137,8 +137,8 @@ typedef struct {
 } p2_struct_t;
 static p2_struct_t p2_structs[P2_MAX_STRUCTS];
 static int p2_nstructs;
-#define P2_MERGE_FILES 3
-#define P2_MERGE_ROWS 4
+#define P2_MERGE_FILES 4
+#define P2_MERGE_ROWS 8
 #define P2_MERGE_COLS 6
 typedef struct {
     int phase;
@@ -2923,9 +2923,107 @@ static bool p2_parse_action_src(int header, int end, p2_merge_src_t *src) {
     return src->ncols > 0 && src->nrows > 0;
 }
 
+static bool p2_merge_src_has_data(const p2_merge_src_t *src) {
+    for (int r = 0; r < src->nrows; ++r) {
+        for (int c = 0; c < src->ncols; ++c) {
+            if (strcmp(src->rows[r][c], "-") != 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static void p2_merge_emit(lua_State *L) {
+    int beats = 0;
+    bool playable = false;
+    for (int s = 0; s < p2_merge_nsrc; ++s) {
+        p2_merge_src_t *src = &p2_merge_srcs[s];
+        int end_beat = src->phase + src->nrows;
+        if (src->nrows > 0 && !p2_merge_src_has_data(src)) {
+            robot_log("P2: @Merge source %d has no data rows", s);
+        } else if (src->nrows > 0 && end_beat > 0) {
+            playable = true;
+            if (end_beat > beats) {
+                beats = end_beat;
+            }
+        } else if (src->nrows > 0) {
+            robot_log("P2: @Merge source %d all rows discarded (phase=%d rows=%d)",
+                s, src->phase, src->nrows);
+        }
+    }
+    if (!playable) {
+        robot_log("P2: @Merge no playable rows");
+        return;
+    }
+
+    bool started[P2_MERGE_FILES] = {false};
+    for (int beat = 0; beat < beats && !robot_stop; ++beat) {
+        int total = 0;
+        char *vals[P2_MAX_COLS];
+        memset(p2_action_cols, 0, sizeof(p2_action_cols));
+        for (int s = 0; s < p2_merge_nsrc; ++s) {
+            p2_merge_src_t *src = &p2_merge_srcs[s];
+            if (src->nrows == 0 || src->phase + src->nrows <= 0) {
+                continue;
+            }
+            int row = beat - src->phase;
+            if (row < 0) {
+                continue;
+            }
+            if (row >= src->nrows) {
+                row = src->nrows - 1;   /* 耗尽保持最后姿势 */
+            }
+            if (!started[s]) {
+                bool any_data = false;
+                for (int c = 0; c < src->ncols; ++c) {
+                    if (strcmp(src->rows[row][c], "-") != 0) {
+                        any_data = true;
+                        break;
+                    }
+                }
+                if (!any_data) {
+                    continue;   /* 前导 - 未起拍 */
+                }
+                started[s] = true;
+                if (src->phase < 0) {
+                    robot_log("P2: @Merge source %d starts at beat %d (phase=%d)",
+                        s, beat, src->phase);
+                }
+            }
+            for (int c = 0; c < src->ncols && total < P2_MAX_COLS; ++c) {
+                char header[P2_MAX_NAME];
+                p2_copy_trim(header, sizeof(header), src->headers[c], NULL);
+                char *dot = strchr(header, '.');
+                if (dot == NULL) {
+                    continue;
+                }
+                *dot = '\0';
+                const char *device_name = p2_resolve_device_alias(header);
+                p2_copy_trim(p2_action_cols[total].device,
+                    sizeof(p2_action_cols[total].device), device_name, NULL);
+                const char *param = dot + 1;
+                const char *alias = p2_find_alias(param);
+                if (alias != NULL) {
+                    param = alias;
+                }
+                p2_copy_trim(p2_action_cols[total].param,
+                    sizeof(p2_action_cols[total].param), param, NULL);
+                vals[total] = src->rows[row][c];
+                ++total;
+            }
+        }
+        if (total > 0) {
+            p2_execute_row(L, vals, total);
+        }
+    }
+    robot_log("P2: @Merge timeline %d beat(s)", beats);
+}
+
 static void p2_merge_exec(lua_State *L, int start, int end) {
     p2_merge_nsrc = 0;
     bool header = false;
+    int last_phase = 0;
     for (int i = start + 1; i < end; ++i) {
         char *t = p2_trim(p2_lines[i]);
         if (*t == '\0') {
@@ -2943,9 +3041,19 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
         if (n < 1 || p2_merge_nsrc >= P2_MERGE_FILES) {
             continue;
         }
-        int phase = n >= 2 ? atoi(cells[1]) : 0;
-        if (phase < 0) {
-            phase = 0;
+        int phase = 0;
+        if (n >= 2) {
+            if (strcmp(cells[1], "-") == 0) {
+                phase = last_phase;
+            } else {
+                phase = atoi(cells[1]);
+            }
+        }
+        last_phase = phase;
+        if (phase < -100000) {
+            phase = -100000;
+        } else if (phase > 100000) {
+            phase = 100000;
         }
         char path[128];
         p2_include_path(cells[0], path, sizeof(path));
@@ -3001,53 +3109,7 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
         }
     }
 
-    int beats = 0;
-    for (int s = 0; s < p2_merge_nsrc; ++s) {
-        int end_beat = p2_merge_srcs[s].phase + p2_merge_srcs[s].nrows;
-        if (end_beat > beats) {
-            beats = end_beat;
-        }
-    }
-    for (int beat = 0; beat < beats && !robot_stop; ++beat) {
-        int total = 0;
-        char *vals[P2_MAX_COLS];
-        memset(p2_action_cols, 0, sizeof(p2_action_cols));
-        for (int s = 0; s < p2_merge_nsrc; ++s) {
-            p2_merge_src_t *src = &p2_merge_srcs[s];
-            int row = beat - src->phase;
-            if (row < 0 || src->nrows == 0) {
-                continue;
-            }
-            if (row >= src->nrows) {
-                row = src->nrows - 1;   /* 耗尽保持最后姿势 */
-            }
-            for (int c = 0; c < src->ncols && total < P2_MAX_COLS; ++c) {
-                char header[P2_MAX_NAME];
-                p2_copy_trim(header, sizeof(header), src->headers[c], NULL);
-                char *dot = strchr(header, '.');
-                if (dot == NULL) {
-                    continue;
-                }
-                *dot = '\0';
-                const char *device_name = p2_resolve_device_alias(header);
-                p2_copy_trim(p2_action_cols[total].device,
-                    sizeof(p2_action_cols[total].device), device_name, NULL);
-                const char *param = dot + 1;
-                const char *alias = p2_find_alias(param);
-                if (alias != NULL) {
-                    param = alias;
-                }
-                p2_copy_trim(p2_action_cols[total].param,
-                    sizeof(p2_action_cols[total].param), param, NULL);
-                vals[total] = src->rows[row][c];
-                ++total;
-            }
-        }
-        if (total > 0) {
-            p2_execute_row(L, vals, total);
-        }
-    }
-    robot_log("P2: @Merge timeline %d beat(s)", beats);
+    p2_merge_emit(L);
 }
 
 static p2_reflex_t *p2_find_reflex(const char *name) {
