@@ -139,7 +139,7 @@ typedef struct {
 } p2_struct_t;
 static p2_struct_t p2_structs[P2_MAX_STRUCTS];
 static int p2_nstructs;
-#define P2_MERGE_FILES 4
+#define P2_MERGE_FILES 6
 #define P2_MERGE_ROWS 8
 #define P2_MERGE_COLS 6
 typedef struct {
@@ -3216,6 +3216,84 @@ static void p2_merge_emit(lua_State *L) {
     robot_log("P2: @Merge timeline %d beat(s)", beats);
 }
 
+static void p2_merge_load_nested(const char *path, int base_phase, int depth) {
+    if (p2_merge_failed) {
+        return;
+    }
+    if (depth >= P2_INCLUDE_MAX_DEPTH - 1) {
+        robot_log("P2: @Merge nested depth limit at %s", path);
+        p2_merge_failed = true;
+        return;
+    }
+    char *buf = p2_inc_bufs[depth];
+    if (p2_read_file(path, buf, sizeof(p2_inc_bufs[0])) == 0) {
+        p2_merge_failed = true;
+        return;
+    }
+    p2_strip_comments(buf);
+    bool in_merge = false;
+    bool header = false;
+    int last_phase = 0;
+    char *save = NULL;
+    char *line = strtok_r(buf, "\n", &save);
+    while (line != NULL) {
+        char *t = p2_trim(line);
+        if (!in_merge) {
+            if (strncmp(t, "@Merge", 6) == 0) {
+                in_merge = true;
+                header = false;
+                last_phase = 0;
+            }
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        if (*t == '@') {
+            in_merge = false;
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        if (!header) {
+            header = true;   /* path phase; */
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        char *cells[4];
+        int n = p2_split_ws(t, cells, 4);
+        if (n < 1) {
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        int phase = 0;
+        if (n >= 2) {
+            if (strcmp(cells[1], "-") == 0) {
+                phase = last_phase;
+            } else {
+                phase = atoi(cells[1]);
+            }
+        }
+        last_phase = phase;
+        if (p2_merge_nsrc >= P2_MERGE_FILES) {
+            robot_log("P2: @Merge nested too many sources");
+            p2_merge_failed = true;
+            return;
+        }
+        char nested[128];
+        p2_include_path(cells[0], nested, sizeof(nested));
+        int slot = p2_merge_nsrc;
+        if (!p2_load_merge_file(nested, base_phase + phase,
+                &p2_merge_srcs[slot])) {
+            robot_log("P2: @Merge nested cannot load %s", nested);
+            p2_merge_failed = true;
+            return;
+        }
+        ++p2_merge_nsrc;
+        robot_log("P2: @Merge nested %s phase=%d rows=%d", nested,
+            base_phase + phase, p2_merge_srcs[slot].nrows);
+        p2_merge_load_nested(nested, base_phase + phase, depth + 1);
+        line = strtok_r(NULL, "\n", &save);
+    }
+}
+
 static void p2_merge_exec(lua_State *L, int start, int end) {
     p2_merge_nsrc = 0;
     p2_merge_alias_base = p2_naliases;
@@ -3223,8 +3301,9 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
     p2_merge_failed = false;
     bool header = false;
     int last_phase = 0;
-    char loaded[P2_MERGE_FILES][128];
-    int nloaded = 0;
+    char top_paths[P2_MERGE_FILES][128];
+    int top_phases[P2_MERGE_FILES];
+    int ntop = 0;
     for (int i = start + 1; i < end; ++i) {
         char *t = p2_trim(p2_lines[i]);
         if (*t == '\0') {
@@ -3259,8 +3338,8 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
         char path[128];
         p2_include_path(cells[0], path, sizeof(path));
         bool duplicate = false;
-        for (int l = 0; l < nloaded; ++l) {
-            if (strcmp(loaded[l], path) == 0) {
+        for (int l = 0; l < ntop; ++l) {
+            if (strcmp(top_paths[l], path) == 0) {
                 duplicate = true;
                 break;
             }
@@ -3280,13 +3359,17 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
             robot_log("P2: @Merge %s phase=%d rows=%d", path, phase,
                 p2_merge_srcs[p2_merge_nsrc].nrows);
             ++p2_merge_nsrc;
-            if (nloaded < P2_MERGE_FILES) {
-                snprintf(loaded[nloaded], sizeof(loaded[0]), "%s", path);
-                ++nloaded;
+            if (ntop < P2_MERGE_FILES) {
+                snprintf(top_paths[ntop], sizeof(top_paths[0]), "%s", path);
+                top_phases[ntop] = phase;
+                ++ntop;
             }
         } else {
             robot_log("P2: @Merge cannot load %s", path);
         }
+    }
+    for (int n = 0; n < ntop && !p2_merge_failed; ++n) {
+        p2_merge_load_nested(top_paths[n], top_phases[n], 0);
     }
     if (p2_merge_failed) {
         robot_log("P2: @Merge aborted by fragment duplicate");

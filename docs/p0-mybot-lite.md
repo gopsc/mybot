@@ -58,8 +58,9 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 50. **P49：`@Merge` 主从别名/变量覆盖**
 51. **P50：`@Merge` include-once 片段**
 52. **P51：`/i2cscan` 硬件总线扫描**
+53. **P52：`@Merge` 片段递归**
 
-还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
+还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
 ## 当前硬件形态
 
@@ -134,7 +135,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-276768    0 134940
+279032    0 138324
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -301,6 +302,7 @@ sdcard/
     p47.sql
     p49.sql
     p50.sql
+    p52.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -348,6 +350,7 @@ sdcard/
     p48_self.mt
     p49.mt
     p50.mt
+    p52.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -678,6 +681,7 @@ p47             -> /robots/p47.sql + /scripts/p47.mt（递归 @Include）
 p48_self        -> /scripts/p48_self.mt（顶层自包含负例）
 p49             -> /robots/p49.sql + /scripts/p49.mt（@Merge 主从覆盖）
 p50             -> /robots/p50.sql + /scripts/p50.mt（@Merge include-once）
+p52             -> /robots/p52.sql + /scripts/p52.mt（@Merge 片段递归）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2222,7 +2226,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-276768     0  134940
+279032     0  138324
 ```
 
 构建：
@@ -3026,7 +3030,7 @@ P5Check: call value=50 name=d item=nil angle=nil
 限制：
 
 - 仍不是完整 mybot `@Merge`
-- 没有片段递归 `@Merge`、include-once、8MiB 预算、嵌套控制块归并
+- P50/P52 起支持 include-once 与片段递归；仍没有 8MiB 预算和嵌套控制块归并
 - 数据格 `-` 只在“前导未起拍”时跳过；P41 起 `@Merge` 行内 `-` 也做框架级继承
 - 负相位整源丢弃只告警，不中止脚本
 - 列数上限仍为 6
@@ -3308,7 +3312,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-276768     0  134940
+279032     0  138324
 ```
 
 限制：
@@ -3598,7 +3602,7 @@ P50-A 给 `@Merge` 加 include-once：
 - 同一路径第二次出现时，如果文件后缀是 `.once.mt`，跳过并记录
 - 同一路径第二次出现且不是 `.once.mt`，拒绝并中止整次 `@Merge`
 - 检查按路径字符串精确比较，不做 canonicalize
-- 仍然没有片段递归 `@Merge`
+- P52 起支持片段递归；嵌套源暂不参与顶层 include-once 去重
 
 测试 profile：
 
@@ -3652,7 +3656,7 @@ P2: @Merge aborted by fragment duplicate
 
 - 按路径文本精确匹配，`./x.mt` 与 `x.mt` 不视为同一文件
 - include-once 只跳过重复，不做菱形依赖递归
-- 片段递归 `@Merge` 仍未实现
+- P52 起支持片段递归；嵌套源 include-once 尚未完整覆盖
 - 主脚本动作表不算片段路径
 - 尚未上板实测
 
@@ -3698,6 +3702,81 @@ core1: i2cscan bus 0 -> 2 device(s)
 - 只报告 ACK 地址，不识别器件型号
 - 地址范围固定 0x08..0x77
 - 没有上拉/电气诊断
+- 尚未上板实测
+
+## P52：@Merge 片段递归
+
+P52-A 支持片段里的 `@Merge`：
+
+- 顶层片段和嵌套片段都被展开为独立 source
+- 嵌套 phase 与父 phase 相加
+- 递归深度最多 3 层（顶层扫描 depth=0）
+- 总 source 上限从 4 提到 6
+- 设备集不相交、主从别名/变量覆盖仍覆盖全部展开结果
+- 嵌套扫描使用独立缓冲区，不覆盖父片段文本
+
+测试 profile：
+
+```text
+p52
+```
+
+顶层：
+
+```mt
+@Merge
+path phase;
+  parts/merge_52_parent.mt 0;
+@
+```
+
+父片段：
+
+```mt
+@Merge
+path phase;
+  parts/merge_52_child.mt 1;
+@
+
+@Action
+m1.value;
+  10;
+@
+```
+
+子片段：
+
+```mt
+@Action
+m2.value;
+  20;
+@
+```
+
+预期两拍：
+
+```text
+beat0: m1=10
+beat1: m1=10, m2=20
+```
+
+关键日志：
+
+```text
+P2: @Merge nested /scripts/parts/merge_52_child.mt phase=1 rows=1
+P2: @Merge timeline 2 beat(s)
+P5Check: call value=10 name=m1 item=nil angle=nil
+P5Check: call value=10 name=m1 item=nil angle=nil
+P5Check: call value=20 name=m2 item=nil angle=nil
+```
+
+限制：
+
+- 片段递归是“扁平化为多个 source”，不是 mybot 的完整递归合并树
+- 嵌套深度上限 3，超过会中止
+- 嵌套源暂不参与 include-once 路径去重
+- 嵌套扫描缓冲 6KB；单文件过大时读取失败
+- source 上限 6，超限中止
 - 尚未上板实测
 
 ## 运行现象
