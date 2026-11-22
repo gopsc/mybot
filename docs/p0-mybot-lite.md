@@ -59,6 +59,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 51. **P50：`@Merge` include-once 片段**
 52. **P51：`/i2cscan` 硬件总线扫描**
 53. **P52：`@Merge` 片段递归**
+54. **P53：跨顶层/嵌套的 include-once**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -135,7 +136,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-279032    0 138324
+279312    0 140376
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -303,6 +304,7 @@ sdcard/
     p49.sql
     p50.sql
     p52.sql
+    p53.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -351,6 +353,7 @@ sdcard/
     p49.mt
     p50.mt
     p52.mt
+    p53.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -682,6 +685,7 @@ p48_self        -> /scripts/p48_self.mt（顶层自包含负例）
 p49             -> /robots/p49.sql + /scripts/p49.mt（@Merge 主从覆盖）
 p50             -> /robots/p50.sql + /scripts/p50.mt（@Merge include-once）
 p52             -> /robots/p52.sql + /scripts/p52.mt（@Merge 片段递归）
+p53             -> /robots/p53.sql + /scripts/p53.mt（跨层 include-once）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2226,7 +2230,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-279032     0  138324
+279312     0  140376
 ```
 
 构建：
@@ -3312,7 +3316,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-279032     0  138324
+279312     0  140376
 ```
 
 限制：
@@ -3656,7 +3660,7 @@ P2: @Merge aborted by fragment duplicate
 
 - 按路径文本精确匹配，`./x.mt` 与 `x.mt` 不视为同一文件
 - include-once 只跳过重复，不做菱形依赖递归
-- P52 起支持片段递归；嵌套源 include-once 尚未完整覆盖
+- P52 起支持片段递归；P53 起嵌套源也参与 include-once
 - 主脚本动作表不算片段路径
 - 尚未上板实测
 
@@ -3774,9 +3778,81 @@ P5Check: call value=20 name=m2 item=nil angle=nil
 
 - 片段递归是“扁平化为多个 source”，不是 mybot 的完整递归合并树
 - 嵌套深度上限 3，超过会中止
-- 嵌套源暂不参与 include-once 路径去重
+- P53 起顶层/嵌套源共享 include-once 路径表
 - 嵌套扫描缓冲 6KB；单文件过大时读取失败
 - source 上限 6，超限中止
+- 尚未上板实测
+
+## P53：跨顶层/嵌套的 include-once
+
+P53-A 把 include-once 路径表扩展到整次 `@Merge`：
+
+- 顶层片段和嵌套片段共享同一张路径表
+- 路径表容量 16
+- `.once.mt` 第二次出现时跳过
+- 非 `.once.mt` 第二次出现时中止整次归并
+- 嵌套扫描和顶层加载使用同一套注册逻辑
+
+测试 profile：
+
+```text
+p53
+```
+
+顶层：
+
+```mt
+@Merge
+path phase;
+  parts/merge_53_parent.mt 0;
+  parts/merge_53_child.once.mt 0;
+@
+```
+
+父片段：
+
+```mt
+@Merge
+path phase;
+  parts/merge_53_child.once.mt 1;
+@
+
+@Action
+m1.value;
+  10;
+@
+```
+
+子片段：
+
+```mt
+@Action
+m2.value;
+  20;
+@
+```
+
+加载顺序：
+
+1. 顶层加载 parent
+2. 顶层加载 child.once（phase=0）
+3. 扫描 parent 时再次遇到 child.once，跳过
+
+预期：
+
+```text
+P2: @Merge nested once skipped: /scripts/parts/merge_53_child.once.mt
+P2: @Merge timeline 1 beat(s)
+P5Check: call value=10 name=m1 item=nil angle=nil
+P5Check: call value=20 name=m2 item=nil angle=nil
+```
+
+限制：
+
+- 路径按文本精确匹配，不做 canonicalize
+- 路径表 16 项，超出会中止
+- `.once.mt` 后缀必须完全匹配
+- 只对 `@Merge` 片段生效，不影响 `@Include`
 - 尚未上板实测
 
 ## 运行现象

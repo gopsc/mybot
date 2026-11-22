@@ -156,6 +156,8 @@ static int p2_merge_skip_end = -1;
 static int p2_merge_alias_base;
 static int p2_merge_var_base;
 static bool p2_merge_failed;
+static char p2_merge_paths[16][128];
+static int p2_merge_npaths;
 #define P2_MAX_REFLEXES 4
 #define P2_REFLEX_ROWS 8
 #define P2_REFLEX_COLS 6
@@ -3216,6 +3218,25 @@ static void p2_merge_emit(lua_State *L) {
     robot_log("P2: @Merge timeline %d beat(s)", beats);
 }
 
+static int p2_merge_register_path(const char *path) {
+    for (int i = 0; i < p2_merge_npaths; ++i) {
+        if (strcmp(p2_merge_paths[i], path) == 0) {
+            size_t n = strlen(path);
+            if (n > 8 && strcmp(path + n - 8, ".once.mt") == 0) {
+                return 1;
+            }
+            return -1;
+        }
+    }
+    if (p2_merge_npaths >= 16) {
+        return -1;
+    }
+    snprintf(p2_merge_paths[p2_merge_npaths], sizeof(p2_merge_paths[0]), "%s",
+        path);
+    ++p2_merge_npaths;
+    return 0;
+}
+
 static void p2_merge_load_nested(const char *path, int base_phase, int depth) {
     if (p2_merge_failed) {
         return;
@@ -3279,6 +3300,17 @@ static void p2_merge_load_nested(const char *path, int base_phase, int depth) {
         }
         char nested[128];
         p2_include_path(cells[0], nested, sizeof(nested));
+        int reg = p2_merge_register_path(nested);
+        if (reg == 1) {
+            robot_log("P2: @Merge nested once skipped: %s", nested);
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        if (reg < 0) {
+            robot_log("P2: @Merge nested duplicate fragment: %s", nested);
+            p2_merge_failed = true;
+            return;
+        }
         int slot = p2_merge_nsrc;
         if (!p2_load_merge_file(nested, base_phase + phase,
                 &p2_merge_srcs[slot])) {
@@ -3299,6 +3331,7 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
     p2_merge_alias_base = p2_naliases;
     p2_merge_var_base = p2_nvars;
     p2_merge_failed = false;
+    p2_merge_npaths = 0;
     bool header = false;
     int last_phase = 0;
     char top_paths[P2_MERGE_FILES][128];
@@ -3337,19 +3370,12 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
         }
         char path[128];
         p2_include_path(cells[0], path, sizeof(path));
-        bool duplicate = false;
-        for (int l = 0; l < ntop; ++l) {
-            if (strcmp(top_paths[l], path) == 0) {
-                duplicate = true;
-                break;
-            }
+        int reg = p2_merge_register_path(path);
+        if (reg == 1) {
+            robot_log("P2: @Merge once fragment skipped: %s", path);
+            continue;
         }
-        if (duplicate) {
-            size_t plen = strlen(path);
-            if (plen > 8 && strcmp(path + plen - 8, ".once.mt") == 0) {
-                robot_log("P2: @Merge once fragment skipped: %s", path);
-                continue;
-            }
+        if (reg < 0) {
             robot_log("P2: @Merge duplicate fragment: %s", path);
             p2_merge_failed = true;
             break;
