@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <wchar.h>
+#include <ctype.h>
 
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
@@ -29,6 +30,54 @@ typedef struct {
 static queue_t robot_log_queue;
 static volatile bool robot_stop;
 static char lua_file_buf[32 * 1024];
+
+/* ---- P2：结构 SQL / MT 的最小运行期解析 --------------------------------
+ * 这一阶段只覆盖 mybot 的启动期结构脚本和 @Action 叶子块：
+ *   CREATE TABLE ...;               （忽略，列信息由 INSERT 的列清单给出）
+ *   INSERT INTO t (cols) VALUES (...);
+ *   @Action / 列头 / 数据行 / @
+ * 支持多 INSERT、多数据行、同设备多参数；不支持 @if/@while/@Alias/$ref。
+ */
+#define P2_MAX_TABLES 6
+#define P2_MAX_COLS 10
+#define P2_MAX_DEVICES 8
+#define P2_MAX_FIELDS 10
+#define P2_MAX_NAME 24
+#define P2_MAX_VALUE 32
+#define P2_SQL_MAX (12 * 1024)
+#define P2_MT_MAX (6 * 1024)
+
+typedef struct {
+    char key[P2_MAX_NAME];
+    char value[P2_MAX_VALUE];
+} p2_field_t;
+
+typedef struct {
+    char name[P2_MAX_NAME];
+    char driver[P2_MAX_NAME];
+    char controller[P2_MAX_NAME];
+    p2_field_t meta[P2_MAX_FIELDS];
+    int nmeta;
+    int env_ref;
+} p2_device_t;
+
+typedef struct {
+    char device[P2_MAX_NAME];
+    char param[P2_MAX_NAME];
+} p2_action_col_t;
+
+typedef struct {
+    bool ok;
+    char result[16];
+    int delay;
+    int slept;
+} p2_call_result_t;
+
+static p2_device_t p2_devices[P2_MAX_DEVICES];
+static int p2_ndevices;
+static p2_action_col_t p2_action_cols[P2_MAX_COLS];
+static char p2_sql_buf[P2_SQL_MAX];
+static char p2_mt_buf[P2_MT_MAX];
 
 /* core1 栈放在普通 BSS，而不是 SDK 默认的 SCRATCH_X（只有 4KB）。
  * multicore_launch_core1_with_stack 会把 SP 设到数组末尾。 */
@@ -428,6 +477,558 @@ static bool lua_env_call_entry(lua_State *L, int env_ref, const char *label,
     return ok;
 }
 
+/* ---- P2 运行期脚本解析：结构 SQL / @Action MT ------------------------- */
+
+static char *p2_trim(char *s) {
+    while (*s != '\0' && isspace((unsigned char)*s)) {
+        ++s;
+    }
+    char *end = s + strlen(s);
+    while (end > s && isspace((unsigned char)end[-1])) {
+        --end;
+    }
+    *end = '\0';
+    return s;
+}
+
+static void p2_copy_trim(char *dst, size_t cap, const char *begin, const char *end) {
+    if (end == NULL) {
+        end = begin + strlen(begin);
+    }
+    while (begin < end && isspace((unsigned char)*begin)) {
+        ++begin;
+    }
+    while (end > begin && isspace((unsigned char)end[-1])) {
+        --end;
+    }
+    size_t n = (size_t)(end - begin);
+    if (n >= cap) {
+        n = cap - 1;
+    }
+    memcpy(dst, begin, n);
+    dst[n] = '\0';
+}
+
+static const char *p2_strcasestr(const char *haystack, const char *needle) {
+    if (*needle == '\0') {
+        return haystack;
+    }
+    for (; *haystack != '\0'; ++haystack) {
+        const char *h = haystack;
+        const char *n = needle;
+        while (*h != '\0' && *n != '\0' &&
+               tolower((unsigned char)*h) == tolower((unsigned char)*n)) {
+            ++h;
+            ++n;
+        }
+        if (*n == '\0') {
+            return haystack;
+        }
+    }
+    return NULL;
+}
+
+/* 去掉块注释、-- 行注释、# 行注释；引号内的内容原样保留。 */
+static void p2_strip_comments(char *s) {
+    char *r = s;
+    char *w = s;
+    bool block = false;
+    bool line = false;
+    char quote = '\0';
+    while (*r != '\0') {
+        if (block) {
+            if (r[0] == '*' && r[1] == '/') {
+                r += 2;
+                block = false;
+            } else {
+                ++r;
+            }
+            continue;
+        }
+        if (line) {
+            if (*r == '\n') {
+                line = false;
+                *w++ = *r++;
+            } else {
+                ++r;
+            }
+            continue;
+        }
+        if (quote != '\0') {
+            *w++ = *r;
+            if (*r == '\\' && r[1] != '\0') {
+                *w++ = r[1];
+                r += 2;
+                continue;
+            }
+            if (*r == quote) {
+                quote = '\0';
+            }
+            ++r;
+            continue;
+        }
+        if (r[0] == '/' && r[1] == '*') {
+            block = true;
+            r += 2;
+            continue;
+        }
+        if ((r[0] == '-' && r[1] == '-') || r[0] == '#') {
+            line = true;
+            r += (r[0] == '#') ? 1 : 2;
+            continue;
+        }
+        if (*r == '\'' || *r == '"') {
+            quote = *r;
+        }
+        *w++ = *r++;
+    }
+    *w = '\0';
+}
+
+static int p2_split_commas(char *s, char **out, int max) {
+    int n = 0;
+    char quote = '\0';
+    char *start = s;
+    for (char *p = s;; ++p) {
+        bool at_end = (*p == '\0');
+        if (!at_end && quote != '\0') {
+            if (*p == quote) {
+                quote = '\0';
+            }
+            continue;
+        }
+        if (!at_end && (*p == '\'' || *p == '"')) {
+            quote = *p;
+            continue;
+        }
+        if (at_end || *p == ',') {
+            *p = '\0';
+            if (n < max) {
+                out[n++] = p2_trim(start);
+            }
+            if (at_end) {
+                break;
+            }
+            start = p + 1;
+        }
+    }
+    return n;
+}
+
+static int p2_split_ws(char *s, char **out, int max) {
+    int n = 0;
+    char *p = s;
+    while (*p != '\0') {
+        while (*p != '\0' && (isspace((unsigned char)*p) || *p == ';')) {
+            ++p;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        if (n < max) {
+            out[n++] = p;
+        }
+        while (*p != '\0' && !isspace((unsigned char)*p) && *p != ';') {
+            ++p;
+        }
+        if (*p != '\0') {
+            *p++ = '\0';
+        }
+    }
+    return n;
+}
+
+static void p2_unquote(char *s) {
+    size_t n = strlen(s);
+    if (n >= 2 && (s[0] == '\'' || s[0] == '"') && s[n - 1] == s[0]) {
+        memmove(s, s + 1, n - 2);
+        s[n - 2] = '\0';
+    }
+}
+
+static p2_device_t *p2_find_device(const char *name) {
+    for (int i = 0; i < p2_ndevices; ++i) {
+        if (strcmp(p2_devices[i].name, name) == 0) {
+            return &p2_devices[i];
+        }
+    }
+    return NULL;
+}
+
+static bool p2_add_field(p2_field_t *fields, int *count, const char *key,
+        const char *value) {
+    if (*count >= P2_MAX_FIELDS) {
+        return false;
+    }
+    p2_copy_trim(fields[*count].key, sizeof(fields[*count].key), key, NULL);
+    p2_copy_trim(fields[*count].value, sizeof(fields[*count].value), value, NULL);
+    ++*count;
+    return true;
+}
+
+static void p2_add_device(const char *driver, char **cols, char **vals, int n) {
+    if (p2_ndevices >= P2_MAX_DEVICES) {
+        robot_log("P2: too many devices (max %d)", P2_MAX_DEVICES);
+        return;
+    }
+    p2_device_t *d = &p2_devices[p2_ndevices];
+    memset(d, 0, sizeof(*d));
+    p2_copy_trim(d->driver, sizeof(d->driver), driver, NULL);
+    d->env_ref = LUA_NOREF;
+    for (int i = 0; i < n; ++i) {
+        char key[P2_MAX_NAME];
+        char value[P2_MAX_VALUE];
+        p2_copy_trim(key, sizeof(key), cols[i], NULL);
+        p2_copy_trim(value, sizeof(value), vals[i], NULL);
+        p2_unquote(value);
+        p2_add_field(d->meta, &d->nmeta, key, value);
+        if (strcmp(key, "name") == 0) {
+            p2_copy_trim(d->name, sizeof(d->name), value, NULL);
+        } else if (strcmp(key, "controller") == 0) {
+            p2_copy_trim(d->controller, sizeof(d->controller), value, NULL);
+        }
+    }
+    if (d->name[0] == '\0') {
+        snprintf(d->name, sizeof(d->name), "%s-%d", d->driver, p2_ndevices);
+        p2_add_field(d->meta, &d->nmeta, "name", d->name);
+    }
+    robot_log("P2: device %s driver=%s controller=%s", d->name,
+        d->driver, d->controller[0] != '\0' ? d->controller : "-");
+    ++p2_ndevices;
+}
+
+static void p2_parse_sql(void) {
+    p2_ndevices = 0;
+    p2_strip_comments(p2_sql_buf);
+    char *cur = p2_sql_buf;
+    while ((cur = (char *)p2_strcasestr(cur, "INSERT INTO")) != NULL) {
+        char *p = cur + strlen("INSERT INTO");
+        while (*p != '\0' && isspace((unsigned char)*p)) {
+            ++p;
+        }
+        char *lp = strchr(p, '(');
+        if (lp == NULL) {
+            break;
+        }
+        char table[P2_MAX_NAME];
+        p2_copy_trim(table, sizeof(table), p, lp);
+        char *rp = strchr(lp + 1, ')');
+        if (rp == NULL) {
+            break;
+        }
+        char colbuf[256];
+        p2_copy_trim(colbuf, sizeof(colbuf), lp + 1, rp);
+
+        char *vp = (char *)p2_strcasestr(rp, "VALUES");
+        if (vp == NULL) {
+            break;
+        }
+        char *vlp = strchr(vp, '(');
+        if (vlp == NULL) {
+            break;
+        }
+        char *vrp = strchr(vlp + 1, ')');
+        if (vrp == NULL) {
+            break;
+        }
+        char valbuf[512];
+        p2_copy_trim(valbuf, sizeof(valbuf), vlp + 1, vrp);
+
+        char *cols[P2_MAX_FIELDS];
+        char *vals[P2_MAX_FIELDS];
+        int nc = p2_split_commas(colbuf, cols, P2_MAX_FIELDS);
+        int nv = p2_split_commas(valbuf, vals, P2_MAX_FIELDS);
+        if (nc > 0 && nc == nv) {
+            p2_add_device(table, cols, vals, nc);
+        } else {
+            robot_log("P2: INSERT %s column/value count mismatch (%d/%d)",
+                table, nc, nv);
+        }
+        cur = vrp + 1;
+    }
+}
+
+static size_t p2_read_file(const char *path, char *buf, size_t cap) {
+#if USE_SD
+    FIL fp;
+    FRESULT fr = f_open(&fp, path, FA_READ);
+    if (fr != FR_OK) {
+        robot_log("P2: cannot open %s (%s)", path, FRESULT_str(fr));
+        return 0;
+    }
+    FSIZE_t size = f_size(&fp);
+    if (size == 0 || size >= cap) {
+        robot_log("P2: %s size %lu unsupported", path, (unsigned long)size);
+        f_close(&fp);
+        return 0;
+    }
+    UINT read = 0;
+    fr = f_read(&fp, buf, (UINT)size, &read);
+    f_close(&fp);
+    if (fr != FR_OK || read != (UINT)size) {
+        robot_log("P2: read %s failed", path);
+        return 0;
+    }
+    buf[read] = '\0';
+    return read;
+#else
+    (void)path;
+    (void)buf;
+    (void)cap;
+    robot_log("P2: SD support disabled");
+    return 0;
+#endif
+}
+
+static bool p2_lua_call(lua_State *L, int env_ref, const char *label,
+        const char *func, const p2_field_t *fields, int nfields,
+        p2_call_result_t *out) {
+    memset(out, 0, sizeof(*out));
+    lua_rawgeti(L, LUA_REGISTRYINDEX, env_ref);
+    int env = lua_gettop(L);
+    lua_getfield(L, env, func);
+    if (!lua_isfunction(L, -1)) {
+        robot_log("P2: %s.%s missing", label, func);
+        lua_pop(L, 2);
+        return false;
+    }
+
+    lua_newtable(L);
+    for (int i = 0; i < nfields; ++i) {
+        lua_pushstring(L, fields[i].key);
+        lua_pushstring(L, fields[i].value);
+        lua_rawset(L, -3);
+    }
+    if (lua_pcall(L, 1, 1, 0) != 0) {
+        const char *err = lua_tostring(L, -1);
+        robot_log("P2: %s.%s error: %s", label, func, err != NULL ? err : "?");
+        lua_pop(L, 2);
+        return false;
+    }
+
+    out->ok = true;
+    if (lua_istable(L, -1)) {
+        lua_getfield(L, -1, "result");
+        const char *result = lua_tostring(L, -1);
+        if (result != NULL) {
+            snprintf(out->result, sizeof(out->result), "%s", result);
+            if (strcmp(result, "OK") != 0) {
+                out->ok = false;
+            }
+        } else if (strcmp(func, "call") != 0) {
+            out->ok = false;
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, -1, "delay");
+        if (lua_isnumber(L, -1)) {
+            out->delay = (int)lua_tointeger(L, -1);
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, -1, "slept");
+        if (lua_isnumber(L, -1)) {
+            out->slept = (int)lua_tointeger(L, -1);
+        }
+        lua_pop(L, 1);
+    } else {
+        out->ok = false;
+    }
+    lua_pop(L, 2);   /* result, env */
+
+    if (out->delay != 0) {
+        robot_log("P2: %s.%s result=%s delay=%d", label, func,
+            out->result[0] != '\0' ? out->result : "-", out->delay);
+    } else if (out->slept != 0) {
+        robot_log("P2: %s.%s result=%s slept=%d", label, func,
+            out->result[0] != '\0' ? out->result : "-", out->slept);
+    } else {
+        robot_log("P2: %s.%s result=%s", label, func,
+            out->result[0] != '\0' ? out->result : "-");
+    }
+    return out->ok;
+}
+
+static void p2_add_meta_fields(const p2_device_t *d, p2_field_t *fields, int *n) {
+    for (int i = 0; i < d->nmeta; ++i) {
+        if (*n < P2_MAX_FIELDS) {
+            fields[(*n)++] = d->meta[i];
+        }
+    }
+}
+
+static void p2_execute_row(lua_State *L, char **vals, int nvals) {
+    for (int i = 0; i < P2_MAX_COLS; ++i) {
+        if (p2_action_cols[i].device[0] == '\0') {
+            break;
+        }
+        bool done = false;
+        for (int j = 0; j < i; ++j) {
+            if (strcmp(p2_action_cols[j].device, p2_action_cols[i].device) == 0) {
+                done = true;
+                break;
+            }
+        }
+        if (done || i >= nvals) {
+            continue;
+        }
+        p2_device_t *d = p2_find_device(p2_action_cols[i].device);
+        if (d == NULL || d->env_ref == LUA_NOREF) {
+            robot_log("P2: unknown device %s", p2_action_cols[i].device);
+            continue;
+        }
+
+        p2_field_t fields[P2_MAX_FIELDS];
+        int nf = 0;
+        p2_add_meta_fields(d, fields, &nf);
+        for (int j = i; j < P2_MAX_COLS; ++j) {
+            if (p2_action_cols[j].device[0] == '\0') {
+                break;
+            }
+            if (strcmp(p2_action_cols[j].device, d->name) == 0 && j < nvals) {
+                p2_add_field(fields, &nf, p2_action_cols[j].param, vals[j]);
+            }
+        }
+
+        p2_call_result_t res;
+        if (!p2_lua_call(L, d->env_ref, d->name, "call", fields, nf, &res)) {
+            robot_log("P2: %s call failed", d->name);
+            continue;
+        }
+        robot_log("P2: %s delay=%d", d->name, res.delay);
+
+        if (d->controller[0] != '\0') {
+            p2_device_t *ctl = p2_find_device(d->controller);
+            if (ctl == NULL || ctl->env_ref == LUA_NOREF) {
+                robot_log("P2: controller %s not found", d->controller);
+                continue;
+            }
+            p2_field_t cf[P2_MAX_FIELDS];
+            int cn = 0;
+            p2_add_meta_fields(ctl, cf, &cn);
+            p2_add_meta_fields(d, cf, &cn);
+            char delay_text[16];
+            snprintf(delay_text, sizeof(delay_text), "%d", res.delay);
+            p2_add_field(cf, &cn, "delay", delay_text);
+            p2_call_result_t cres;
+            if (!p2_lua_call(L, ctl->env_ref, ctl->name, "call", cf, cn, &cres)) {
+                robot_log("P2: controller %s call failed", ctl->name);
+            } else {
+                robot_log("P2: controller %s result=%s slept=%d", ctl->name,
+                    cres.result[0] != '\0' ? cres.result : "-", cres.slept);
+            }
+        }
+    }
+}
+
+static bool p2_run_mt(lua_State *L) {
+    p2_strip_comments(p2_mt_buf);
+    char *save = NULL;
+    char *line = strtok_r(p2_mt_buf, "\n", &save);
+    bool in_action = false;
+    int ncols = 0;
+    memset(p2_action_cols, 0, sizeof(p2_action_cols));
+
+    while (line != NULL) {
+        line = p2_trim(line);
+        if (*line == '\0') {
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        if (!in_action) {
+            if (strncmp(line, "@Action", 7) == 0) {
+                in_action = true;
+            }
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        if (line[0] == '@') {
+            break;
+        }
+
+        if (ncols == 0) {
+            char *cells[P2_MAX_COLS];
+            int n = p2_split_ws(line, cells, P2_MAX_COLS);
+            for (int i = 0; i < n; ++i) {
+                char *dot = strchr(cells[i], '.');
+                if (dot == NULL) {
+                    continue;
+                }
+                *dot = '\0';
+                p2_copy_trim(p2_action_cols[ncols].device,
+                    sizeof(p2_action_cols[ncols].device), cells[i], NULL);
+                p2_copy_trim(p2_action_cols[ncols].param,
+                    sizeof(p2_action_cols[ncols].param), dot + 1, NULL);
+                ++ncols;
+            }
+            robot_log("P2: @Action columns=%d", ncols);
+        } else {
+            char *vals[P2_MAX_COLS];
+            int n = p2_split_ws(line, vals, P2_MAX_COLS);
+            if (n > 0) {
+                p2_execute_row(L, vals, n);
+            }
+        }
+        line = strtok_r(NULL, "\n", &save);
+    }
+    return ncols > 0;
+}
+
+static bool p2_build_devices(lua_State *L) {
+    for (int i = 0; i < p2_ndevices; ++i) {
+        p2_device_t *d = &p2_devices[i];
+        char path[64];
+        snprintf(path, sizeof(path), "/modules/%s.lua", d->driver);
+        int env = robot_create_env_from_path(L, path, d->driver);
+        if (env == LUA_NOREF) {
+            robot_log("P2: cannot load driver %s", path);
+            continue;
+        }
+        d->env_ref = env;
+        p2_call_result_t res;
+        if (!p2_lua_call(L, env, d->name, "build", d->meta, d->nmeta, &res)) {
+            robot_log("P2: build %s failed", d->name);
+        }
+    }
+    return true;
+}
+
+static void p2_destroy_devices(lua_State *L) {
+    for (int i = 0; i < p2_ndevices; ++i) {
+        p2_device_t *d = &p2_devices[i];
+        if (d->env_ref != LUA_NOREF) {
+            p2_call_result_t res;
+            (void)p2_lua_call(L, d->env_ref, d->name, "destroy", d->meta,
+                d->nmeta, &res);
+            luaL_unref(L, LUA_REGISTRYINDEX, d->env_ref);
+            d->env_ref = LUA_NOREF;
+        }
+    }
+}
+
+static bool robot_p2_run(lua_State *L) {
+    size_t n = p2_read_file("/robots/relay-test.sql", p2_sql_buf,
+        sizeof(p2_sql_buf));
+    if (n == 0) {
+        robot_log("P2: /robots/relay-test.sql unavailable; skip script run");
+        return false;
+    }
+    p2_parse_sql();
+    robot_log("P2: parsed %d device(s)", p2_ndevices);
+    if (p2_ndevices == 0) {
+        return false;
+    }
+    p2_build_devices(L);
+
+    n = p2_read_file("/scripts/relay-test.mt", p2_mt_buf, sizeof(p2_mt_buf));
+    if (n == 0) {
+        robot_log("P2: /scripts/relay-test.mt unavailable");
+    } else if (!p2_run_mt(L)) {
+        robot_log("P2: no @Action block found");
+    }
+
+    p2_destroy_devices(L);
+    return true;
+}
+
 static void robot_lua_smoke(void) {
 #if USE_SD
     sd_card_t *pSD = sd_get_by_num(0);
@@ -453,62 +1054,75 @@ static void robot_lua_smoke(void) {
     robot_set_lua_paths(L);
     robot_log("%s state ready, heap=%dKB", LUA_VERSION, lua_heap_kb(L));
 
-    int robot_env = robot_create_env_from_path(L, "/robot.lua", "robot.lua");
-    if (robot_env == LUA_NOREF) {
-        robot_log("Lua: using embedded smoke script");
-        robot_env = robot_create_env_from_source(L, kSmokeScript,
-            sizeof(kSmokeScript) - 1, "embedded-smoke");
-    }
-
-    /* P1-B 的第二个实例：证明两个驱动可以各自持有 build/call/destroy。 */
-    int echo_env = robot_create_env_from_path(L, "/modules/Echo.lua", "Echo.lua");
-    if (echo_env == LUA_NOREF) {
-        robot_log("P1-B: /modules/Echo.lua unavailable; single-env check only");
-    }
-
-    /* P1-C：真实 Timer.lua + 最小 HAL.lua，验证 milli_sleep 与 VGA 实时性。 */
-    int timer_env = robot_create_env_from_path(L, "/modules/Timer.lua", "Timer.lua");
-    if (timer_env == LUA_NOREF) {
-        robot_log("P1-C: /modules/Timer.lua unavailable; sleep check skipped");
-    }
-
     bool ok = true;
-    if (robot_env != LUA_NOREF) {
-        bool env_ok = lua_env_call_entry(L, robot_env, "robot", "build", false) &&
-                      lua_env_call_entry(L, robot_env, "robot", "call", true) &&
-                      lua_env_call_entry(L, robot_env, "robot", "destroy", false);
-        robot_log("Lua robot env: %s", env_ok ? "OK" : "FAILED");
-        ok = ok && env_ok;
+    bool p2_ran = robot_p2_run(L);
+    int robot_env = LUA_NOREF;
+    int echo_env = LUA_NOREF;
+    int timer_env = LUA_NOREF;
+
+    if (!p2_ran) {
+        robot_env = robot_create_env_from_path(L, "/robot.lua", "robot.lua");
+        if (robot_env == LUA_NOREF) {
+            robot_log("Lua: using embedded smoke script");
+            robot_env = robot_create_env_from_source(L, kSmokeScript,
+                sizeof(kSmokeScript) - 1, "embedded-smoke");
+        }
+
+        /* P1-B 的第二个实例：证明两个驱动可以各自持有 build/call/destroy。 */
+        echo_env = robot_create_env_from_path(L, "/modules/Echo.lua", "Echo.lua");
+        if (echo_env == LUA_NOREF) {
+            robot_log("P1-B: /modules/Echo.lua unavailable; single-env check only");
+        }
+
+        /* P1-C：真实 Timer.lua + 最小 HAL.lua，验证 milli_sleep 与 VGA 实时性。 */
+        timer_env = robot_create_env_from_path(L, "/modules/Timer.lua", "Timer.lua");
+        if (timer_env == LUA_NOREF) {
+            robot_log("P1-C: /modules/Timer.lua unavailable; sleep check skipped");
+        }
     } else {
-        ok = false;
+        robot_log("P2: relay-test script run completed");
     }
 
-    if (echo_env != LUA_NOREF) {
-        bool env_ok = lua_env_call_entry(L, echo_env, "echo", "build", false) &&
-                      lua_env_call_entry(L, echo_env, "echo", "call", true) &&
-                      lua_env_call_entry(L, echo_env, "echo", "destroy", false);
-        robot_log("Lua echo env: %s", env_ok ? "OK" : "FAILED");
-        ok = ok && env_ok;
-    }
+    if (!p2_ran) {
+        if (robot_env != LUA_NOREF) {
+            bool env_ok = lua_env_call_entry(L, robot_env, "robot", "build", false) &&
+                          lua_env_call_entry(L, robot_env, "robot", "call", true) &&
+                          lua_env_call_entry(L, robot_env, "robot", "destroy", false);
+            robot_log("Lua robot env: %s", env_ok ? "OK" : "FAILED");
+            ok = ok && env_ok;
+        } else {
+            ok = false;
+        }
 
-    if (timer_env != LUA_NOREF) {
-        bool env_ok = lua_env_call_entry(L, timer_env, "timer", "build", false) &&
-                      lua_env_call_entry(L, timer_env, "timer", "call", true) &&
-                      lua_env_call_entry(L, timer_env, "timer", "destroy", false);
-        robot_log("Lua timer env: %s", env_ok ? "OK" : "FAILED");
-        ok = ok && env_ok;
+        if (echo_env != LUA_NOREF) {
+            bool env_ok = lua_env_call_entry(L, echo_env, "echo", "build", false) &&
+                          lua_env_call_entry(L, echo_env, "echo", "call", true) &&
+                          lua_env_call_entry(L, echo_env, "echo", "destroy", false);
+            robot_log("Lua echo env: %s", env_ok ? "OK" : "FAILED");
+            ok = ok && env_ok;
+        }
+
+        if (timer_env != LUA_NOREF) {
+            bool env_ok = lua_env_call_entry(L, timer_env, "timer", "build", false) &&
+                          lua_env_call_entry(L, timer_env, "timer", "call", true) &&
+                          lua_env_call_entry(L, timer_env, "timer", "destroy", false);
+            robot_log("Lua timer env: %s", env_ok ? "OK" : "FAILED");
+            ok = ok && env_ok;
+        }
     }
 
     robot_log("Lua smoke %s, heap=%dKB", ok ? "OK" : "FAILED", lua_heap_kb(L));
 
-    if (robot_env != LUA_NOREF) {
-        luaL_unref(L, LUA_REGISTRYINDEX, robot_env);
-    }
-    if (echo_env != LUA_NOREF) {
-        luaL_unref(L, LUA_REGISTRYINDEX, echo_env);
-    }
-    if (timer_env != LUA_NOREF) {
-        luaL_unref(L, LUA_REGISTRYINDEX, timer_env);
+    if (!p2_ran) {
+        if (robot_env != LUA_NOREF) {
+            luaL_unref(L, LUA_REGISTRYINDEX, robot_env);
+        }
+        if (echo_env != LUA_NOREF) {
+            luaL_unref(L, LUA_REGISTRYINDEX, echo_env);
+        }
+        if (timer_env != LUA_NOREF) {
+            luaL_unref(L, LUA_REGISTRYINDEX, timer_env);
+        }
     }
     lua_close(L);
 }

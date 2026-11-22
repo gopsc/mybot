@@ -1,11 +1,13 @@
 # P0：mybot-lite 双核与 Lua 冒烟
 
-本分支（`mybot-lite-p0`）是 mybot 迁移到 pico-vga 的第一阶段，只验证两件事：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2-A 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
+3. **Lua 驱动从 SD 加载，每个驱动有独立 env**
+4. **运行期解析 `relay-test.sql` / `relay-test.mt`，跑通 Relay → Timer 的 controller 转发**
 
-还没有实现：SQL/MT 解析、I2C/SPI/UART HAL、Lua 驱动环境、命令系统。那些属于 P1/P2。
+还没有实现：I2C/SPI/UART HAL、`@if/@while`、`@Alias/@Vars/@Struct`、`$ref`、动态 SQL、命令系统。那些属于 P3/P4。
 
 ## 改动
 
@@ -61,7 +63,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-844700    0 103776
+851972    0 127812
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -85,7 +87,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-222828     0  53508
+230108     0  77544
 ```
 
 此时：
@@ -152,6 +154,10 @@ sdcard/
       HAL.lua
       drv_common.lua
       print_table.lua
+  robots/
+    relay-test.sql
+  scripts/
+    relay-test.mt
 ```
 
 `robot.lua` 只做一件事：
@@ -208,7 +214,65 @@ P1-C 增加了最小 `HAL.lua` + 真实 `Timer.lua`：
 - 每设备 env 隔离生效，两个驱动可以同时存在；
 - Lua 的 `print()` 能回到 core0 显示到 VGA。
 
-下一步 P2 会把 mybot 的 `sqlparse` + `matrix` 接进来，执行真实 `.sql` / `.mt`。
+P2-A 已把运行期 SQL/MT 解析接进来，执行真实 `.sql` / `.mt`。
+
+## P2-A：运行期解析 relay-test.sql / relay-test.mt
+
+P2 不再依赖 P1 的硬编码三个 env。只要 SD 上存在：
+
+```text
+/robots/relay-test.sql
+/scripts/relay-test.mt
+```
+
+启动时会自动走 P2，并跳过 P1 的 demo env，避免同一份 `drv_common.lua` 被加载多次。
+
+P2-A 当前使用一个嵌入式精简解析器（不是把 mybot 的 SQLite / C++ 解析器整体搬过来），
+只覆盖下面的子集；后续 P2-B 再决定是否移植完整的 `sqlparse` / `matrix`。
+
+- `INSERT INTO table (col, ...) VALUES (...);`
+- `/* ... */`、`--`、`#` 注释
+- `@Action` 叶子块、列头 `device.param`、数据行
+- 同设备多参数合并成一次 `call`
+- 结构行的 `controller` 列转发
+- `name` / `note` 等字符串元数据
+
+暂不支持：
+
+- `@if` / `@while`
+- `@Alias` / `@Vars` / `@Struct`
+- `$ref` 引用列
+- 动态 SQL（DELETE/DROP/UPDATE）
+- `@Include` / `@Merge`
+
+预期 VGA 输出：
+
+```text
+P2: device timer-0 driver=Timer controller=-
+P2: device relay0 driver=Relay controller=timer-0
+P2: parsed 2 device(s)
+P2: timer-0.build result=OK
+P2: relay0.build result=OK
+P2: @Action columns=1
+Lua: Relay: test=200 note=hello-relay -> delay=200
+P2: relay0.call result=- delay=200
+P2: relay0 delay=200
+P2: timer-0.call result=OK slept=200
+P2: controller timer-0 result=OK slept=200
+P2: timer-0.destroy result=OK
+P2: relay0.destroy result=OK
+P2: relay-test script run completed
+Lua smoke OK, heap=...KB
+```
+
+这已经跑通 mybot 的真实链路：
+
+```text
+Relay.call({test=200}) -> {delay=200}
+    -> controller Timer.call({delay=200})
+    -> milli_sleep(200)
+    -> {result=OK, slept=200}
+```
 
 ## 运行现象
 
