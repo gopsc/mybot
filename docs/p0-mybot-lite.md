@@ -43,6 +43,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 35. **P34：设备列 `@Alias` 解析**
 36. **P35：`/loop` 周期动作循环**
 37. **P36：`/reload` 重载 active profile**
+38. **P37：`/boot.txt` 开机自动周期动作**
 
 还没有实现：完整 `@Merge` 语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -119,7 +120,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-270064    0 106548
+270544    0 106548
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -317,6 +318,7 @@ sdcard/
     p28_add.sql
     p28_del.sql
     p32_bad.sql
+  boot.txt
   profile.txt
 ```
 
@@ -2140,7 +2142,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-270064     0  106548
+270544     0  106548
 ```
 
 构建：
@@ -2777,6 +2779,53 @@ core1: reload finished, profile active
 - 会重新执行 profile 动作脚本一次
 - 加载失败时可能回退到内置 smoke，active 状态丢失
 - `/reload` 使用 profile 原始动作脚本，不一定是最近 `/action` 的脚本
+
+## P37：/boot.txt 开机自动周期动作
+
+P37-A 支持 SD 根目录的 `/boot.txt`：
+
+```text
+# mybot-lite boot autostart
+# format: <action-script> <period_ms>
+p29 200
+```
+
+行为：
+
+- 上电加载 profile 后读取 `/boot.txt`
+- 第一个非空、非 `#` 行按 `<action> <period_ms>` 解析
+- 自动启动与 `/loop` 相同的周期调度
+- `period_ms` 范围 50 ~ 60000
+- 动作脚本来自 `/scripts/<name>.mt`
+- `off` / `none` 明确禁用自动启动
+- 没有 `/boot.txt`、只有注释或首行无效时不启动，只记录诊断
+- `/reload` 不会重新读取 `/boot.txt`，只有重新上电才生效
+- 启动后仍可用 `/loop` 替换周期、`/loop stop`、`/stop` 或 `Ctrl-C` 停止
+
+测试：
+
+1. `/profile.txt` 写 `p28`
+2. `/boot.txt` 写 `p29 200`
+3. 重新上电
+
+预期关键日志：
+
+```text
+core1: boot autostart /scripts/p29.mt period=200ms
+P5Check: call value=5 name=base item=nil angle=nil
+P2: base.call result=OK
+...
+```
+
+默认 SD 布局里的 `/boot.txt` 只有注释，因此默认不会自动循环。
+
+限制：
+
+- 只读取第一条有效配置行
+- `/boot.txt` 最大 128 字节
+- 开机自动启动依赖 profile 已经成功 active
+- 动作脚本缺失时只报错并保持 idle
+- 没有看门狗/失效重启机制
 
 ## 运行现象
 

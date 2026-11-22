@@ -1,0 +1,3 @@
+# mybot-lite boot autostart
+# format: <action-script> <period_ms>
+# p29 200

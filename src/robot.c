@@ -4474,11 +4474,91 @@ static bool p2_parse_uint_arg(const char **pp, int *out) {
     return true;
 }
 
+static void p2_boot_autostart(void) {
+    if (!p2_active || p2_active_L == NULL) {
+        return;
+    }
+    FILINFO fno;
+    if (f_stat("/boot.txt", &fno) != FR_OK) {
+        return;
+    }
+    char buf[128];
+    size_t n = p2_read_file("/boot.txt", buf, sizeof(buf));
+    if (n == 0) {
+        return;
+    }
+    char *save = NULL;
+    char *line = strtok_r(buf, "\n", &save);
+    char *t = NULL;
+    while (line != NULL) {
+        t = p2_trim(line);
+        if (*t != '\0' && *t != '#') {
+            break;
+        }
+        line = strtok_r(NULL, "\n", &save);
+        t = NULL;
+    }
+    if (t == NULL || *t == '\0') {
+        return;
+    }
+    if (strcmp(t, "off") == 0 || strcmp(t, "none") == 0) {
+        robot_log("core1: boot autostart disabled");
+        return;
+    }
+    char name[P2_MAX_NAME];
+    int ni = 0;
+    bool name_ok = true;
+    char *ap = t;
+    while (*ap != '\0' && !isspace((unsigned char)*ap)) {
+        if (ni >= (int)sizeof(name) - 1) {
+            name_ok = false;
+            break;
+        }
+        name[ni++] = *ap++;
+    }
+    name[ni] = '\0';
+    int period_ms = 0;
+    const char *cp = ap;
+    if (*cp == '\0' || !p2_parse_uint_arg(&cp, &period_ms)) {
+        period_ms = -1;
+    }
+    while (*cp != '\0' && isspace((unsigned char)*cp)) {
+        ++cp;
+    }
+    bool valid = name_ok && name[0] != '\0';
+    for (int q = 0; name[q] != '\0'; ++q) {
+        if (!isalnum((unsigned char)name[q]) && name[q] != '_' &&
+            name[q] != '-') {
+            valid = false;
+            break;
+        }
+    }
+    if (!valid || period_ms < 50 || period_ms > 60000 || *cp != '\0') {
+        robot_log("core1: /boot.txt invalid; expected '<action> <period_ms>'");
+        return;
+    }
+    char path[64];
+    snprintf(path, sizeof(path), "/scripts/%s.mt", name);
+    if (p2_read_file(path, p2_mt_buf, sizeof(p2_mt_buf)) == 0) {
+        robot_log("core1: boot autostart action %s unavailable", path);
+        return;
+    }
+    snprintf(p2_active_mt, sizeof(p2_active_mt), "%s", path);
+    snprintf(p2_loop_path, sizeof(p2_loop_path), "%s", path);
+    p2_loop_period_ms = period_ms;
+    p2_loop_iterations = 0;
+    p2_loop_active = true;
+    p2_loop_next = get_absolute_time();
+    robot_stop = false;
+    robot_log("core1: boot autostart %s period=%dms", path, period_ms);
+}
+
 void robot_core1(void) {
     robot_log("core1: robot runtime started");
     robot_busy = true;
     robot_lua_smoke();
     robot_busy = false;
+    p2_boot_autostart();
     robot_log("core1: stack high-water %u / %u bytes",
         (unsigned)robot_stack_used(), (unsigned)sizeof(robot_core1_stack));
     robot_log("core1: ready for commands");

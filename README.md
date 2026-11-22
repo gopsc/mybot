@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-270064     0  106548
+270544     0  106548
 ```
 
 ## SD 卡（必需）
@@ -54,6 +54,7 @@ SD 支持是固定功能，没有无 SD 构建。把 `sdcard/` 下的内容拷�
 
 ```text
 /profile.txt
+/boot.txt
 /robot.lua
 /modules/
 /robots/
