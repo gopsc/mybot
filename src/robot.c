@@ -172,7 +172,7 @@ static char p2_mt_buf[P2_MT_MAX];
 static char p2_expanded_buf[P2_MT_MAX * 2];
 #define P2_INCLUDE_MAX_DEPTH 4
 static char p2_inc_bufs[P2_INCLUDE_MAX_DEPTH - 1][P2_MT_MAX];
-static char p2_include_stack[P2_INCLUDE_MAX_DEPTH][128];
+static char p2_include_stack[8][128];
 static int p2_include_depth;
 static char *p2_lines[P2_MAX_LINES];
 static int p2_nlines;
@@ -4211,7 +4211,14 @@ static bool p2_expand_includes(const char *src) {
     p2_include_files = 0;
     p2_include_depth = 0;
     p2_expanded_buf[0] = '\0';
-    if (!p2_expand_level(p2_mt_buf, 0)) {
+    if (p2_active_mt[0] != '\0') {
+        snprintf(p2_include_stack[0], sizeof(p2_include_stack[0]), "%s",
+            p2_active_mt);
+        p2_include_depth = 1;
+    }
+    bool ok = p2_expand_level(p2_mt_buf, 0);
+    p2_include_depth = 0;
+    if (!ok) {
         return false;
     }
     if (p2_include_files > 0) {

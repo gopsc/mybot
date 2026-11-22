@@ -54,6 +54,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 46. **P45：列头设备位/参数位表达式**
 47. **P46：`@Action` 列头表达式按行重算**
 48. **P47：递归 `@Include` 与循环检测**
+49. **P48：顶层 MT 纳入 include 循环检测**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -130,7 +131,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-275760    0 134420
+275800    0 134932
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -338,6 +339,7 @@ sdcard/
     p45.mt
     p46.mt
     p47.mt
+    p48_self.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -664,6 +666,7 @@ p44             -> /robots/p44.sql + /scripts/p44.mt（12 设备容量）
 p45             -> /robots/p45.sql + /scripts/p45.mt（列头表达式）
 p46             -> /robots/p46.sql + /scripts/p46.mt（列头按行重算）
 p47             -> /robots/p47.sql + /scripts/p47.mt（递归 @Include）
+p48_self        -> /scripts/p48_self.mt（顶层自包含负例）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2206,7 +2209,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-275760     0  134420
+275800     0  134932
 ```
 
 构建：
@@ -3292,7 +3295,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-275760     0  134420
+275800     0  134932
 ```
 
 限制：
@@ -3463,6 +3466,54 @@ P2: p47.call result=OK
 - 超过 4 层被包含文件会拒绝
 - `@Include` 仍只做文本拷贝，不做相位归并
 - 被包含文件里的路径仍按 `/scripts/` 解析
+- 尚未上板实测
+
+## P48：顶层 MT 纳入 include 循环检测
+
+P48-A 把当前 MT 文件路径压入 include 路径栈：
+
+- `p2_active_mt` 作为栈底路径
+- 顶层文件再次 include 自己会在第一次展开时被拒绝
+- include 栈容量增到 8 个路径，递归深度仍是 4 层
+- `/action` / `/repeat` / `/loop` / boot autostart 都会使用当前动作脚本路径
+
+负例脚本：
+
+```text
+/scripts/p48_self.mt
+```
+
+内容：
+
+```mt
+@Include
+path;
+  p48_self.mt;
+@
+```
+
+测试：
+
+```text
+/run p28
+/action p48_self
+```
+
+预期：
+
+```text
+P2: @Include cycle: /scripts/p48_self.mt
+core1: action finished, devices=1 heap=...KB
+```
+
+不会执行任何动作，也不会无限递归。
+
+限制：
+
+- 只把当前 MT 路径纳入栈，不追踪历史上运行过的其它脚本
+- include 栈容量 8、递归深度 4；超限拒绝
+- `/action` 失败后 active 结构保持不变
+- `@Include` 仍是文本拷贝
 - 尚未上板实测
 
 ## 运行现象
