@@ -1770,18 +1770,28 @@ P22-A 把 `@if` / `@while` 的条件求值换成递归下降解析器，优先�
 
 ```mt
 @if((cfg.items[idx] == 20 && !(cfg.items[idx] > 25)) || cfg.name == "a && b")
-p5.value;
+p22.value;
   $(cfg.items[idx+1]);
 @
 
+@if(-3 + 5 == 2 && cfg.name == "pico-x")
+p22.item;
+  11;
+@
+
 @if((1 == 2 && missing > 0) || cfg.name == "pico-x")
-p5.name;
+p22.name;
   7;
 @
 
 @while((count < 3) && !(count == 2))
 cnt.reading;
  $count=reading;
+@
+
+@if((count == 2) || (count > 5))
+p22.angle;
+  45;
 @
 ```
 
@@ -1833,12 +1843,12 @@ P23-A 把 `$(...)` 的数值/文本求值也切到 P22 的值解析器，删除�
 
 ```mt
 @Action
-p5.value              p5.item               p5.name          p5.angle;
+p23.value              p23.item               p23.name          p23.angle;
  $(cfg.items[idx+1]+1) $((cfg.items[idx]+5)*2) $(cfg.name+"-x") $(-3+5);
 @
 
 @if(cfg.items[idx+1] > 25 && (cfg.items[idx]*2 == 40) && !(1==2))
-p5.value;
+p23.value;
   99;
 @
 ```

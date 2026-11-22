@@ -9,17 +9,17 @@ name   value;
 @
 
 @if((cfg.items[idx] == 20 && !(cfg.items[idx] > 25)) || cfg.name == "a && b")
-p5.value;
+p22.value;
   $(cfg.items[idx+1]);
 @
 
 @if(-3 + 5 == 2 && cfg.name == "pico-x")
-p5.item;
+p22.item;
   11;
 @
 
 @if((1 == 2 && missing > 0) || cfg.name == "pico-x")
-p5.name;
+p22.name;
   7;
 @
 
@@ -29,6 +29,6 @@ cnt.reading;
 @
 
 @if((count == 2) || (count > 5))
-p5.angle;
+p22.angle;
   45;
 @
