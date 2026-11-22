@@ -31,8 +31,9 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 23. **条件解析 v2（分组/一元 !/短路）**
 24. **统一表达式引擎（条件与 `$(...)` 共用）**
 25. **P24：移除 VGA / PIO 视频 / USB HID 键鼠，改为 headless 串口控制台**
+26. **P25：`@SQL` 运行期热插拔（INSERT / DELETE）**
 
-还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
+还没有实现：完整 `@Merge` 语义、完整动态 SQL（UPDATE/DROP/事务回滚）、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
 ## 当前硬件形态
 
@@ -106,7 +107,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-254944    0  99888
+257624    0  99888
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -239,6 +240,7 @@ sdcard/
     p19.sql
     p22.sql
     p23.sql
+    p25.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -268,6 +270,7 @@ sdcard/
     p19.mt
     p22.mt
     p23.mt
+    p25.mt
     parts/inc_p5.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -564,6 +567,7 @@ p17             -> /robots/p17.sql + /scripts/p17.mt（动态数组下标）
 p19             -> /robots/p19.sql + /scripts/p19.mt（嵌套 @Include）
 p22             -> /robots/p22.sql + /scripts/p22.mt（条件解析 v2）
 p23             -> /robots/p23.sql + /scripts/p23.mt（统一表达式引擎）
+p25             -> /robots/p25.sql + /scripts/p25.mt（@SQL 热插拔）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -1840,13 +1844,13 @@ p22
 预期关键输出：
 
 ```text
-P5Check: call value=30 name=nil item=nil angle=nil
-P5Check: call value=nil name=nil item=11 angle=nil
+P5Check: call value=30 name=p22 item=nil angle=nil
+P5Check: call value=nil name=p22 item=11 angle=nil
 P5Check: call value=nil name=7 item=nil angle=nil
 Counter: reading=1
 Counter: reading=2
 P2: [while] (count < 3) && !(count == 2) -> 2 iteration(s)
-P5Check: call value=nil name=nil item=nil angle=45
+P5Check: call value=nil name=p22 item=nil angle=45
 P2: p22.call result=OK
 ```
 
@@ -1908,7 +1912,7 @@ p23
 
 ```text
 P5Check: call value=31 name=pico-x item=50 angle=2
-P5Check: call value=99 name=nil item=nil angle=nil
+P5Check: call value=99 name=p23 item=nil angle=nil
 P2: p23.call result=OK
 ```
 
@@ -1976,6 +1980,86 @@ headless 版本   254944        0    99888
 - 串口输入是行式编辑，不支持左右移动光标或行内编辑
 - 命令历史依赖终端发送 ANSI 方向键；纯文本终端只能重输命令
 - 控制台与机器人日志共用 UART，运行期日志较多时输入可能被重画打断
+
+## P25：@SQL 运行期热插拔
+
+P25-A 增加 `@SQL` 块。动作脚本执行到该位置时，直接对当前设备表做增量变更：
+
+```mt
+@Action
+cold.value;
+   1;
+@
+
+@SQL
+INSERT INTO P5Check (name, value) VALUES ('hot', '99');
+@
+
+@Action
+hot.value;
+   2;
+@
+
+@SQL
+DELETE FROM P5Check WHERE name='hot';
+@
+
+@Action
+cold.value;
+   3;
+@
+```
+
+行为：
+
+- `INSERT INTO ...`：解析后追加设备，立即 `build`
+- `build` 失败会回滚刚插入的设备，不影响已有设备
+- `DELETE FROM 表 [WHERE name='x']`：逆序 `destroy` 并摘除匹配行
+- 不带 `WHERE` 表示删除该表全部行
+- 删除前检查 `controller` / `trigger` / 未解析 `$ref`，仍被引用的设备拒绝删除
+- SQL 文本复用 `p2_sql_buf`（12KB），不新增 BSS
+- `@SQL` 可以出现在顶层，也可以在 `@if` / `@while` 体内
+
+测试 profile：
+
+```text
+p25
+```
+
+预期关键日志：
+
+```text
+P2: device cold driver=P5Check controller=- triggers=0
+P5Check: build value=1 name=cold item=nil angle=nil
+P2: cold.build result=OK
+P5Check: call value=1 name=cold item=nil angle=nil
+P2: cold.call result=OK
+P25: @SQL block ... bytes
+P2: device hot driver=P5Check controller=- triggers=0
+P25: hot insert hot driver=P5Check
+P5Check: build value=99 name=hot item=nil angle=nil
+P2: hot.build result=OK
+P5Check: call value=2 name=hot item=nil angle=nil
+P2: hot.call result=OK
+P25: @SQL block ... bytes
+P25: hot delete hot driver=P5Check
+Lua: P5Check: destroy
+P2: hot.destroy result=OK
+P25: DELETE P5Check name=hot -> 1 removed, 0 blocked
+P5Check: call value=3 name=cold item=nil angle=nil
+P2: cold.call result=OK
+Lua: P5Check: destroy
+P2: cold.destroy result=OK
+```
+
+限制：
+
+- 只支持 `INSERT INTO` / `DELETE FROM`；没有 `UPDATE` / `DROP` / 事务
+- `DELETE ... WHERE` 只支持 `name = '...'`，不支持 `AND` / `OR`
+- 已解析的总线 `$ref` 会变成 fd/path 文本，删除总线时无法自动识别所有依赖；不要热删仍被使用的 I2C/SPI/UART 总线
+- SQL 值里的 `)` 仍会截断 `VALUES (...)`，这是现有最简解析器的限制
+- `@SQL` 是 Pico 侧扩展；mybot 原版热 SQL 由宿主 `apply_sql` 调用
+- 不是常驻热 SQL：只在动作脚本执行期间生效，脚本结束后设备仍统一销毁
 
 ## 运行现象
 

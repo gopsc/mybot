@@ -1474,6 +1474,53 @@ static void p2_add_device(const char *driver, char **cols, char **vals, int n) {
     ++p2_ndevices;
 }
 
+static bool p2_parse_insert_stmt(char *cur, char **next) {
+    char *p = cur + strlen("INSERT INTO");
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    char *lp = strchr(p, '(');
+    if (lp == NULL) {
+        return false;
+    }
+    char table[P2_MAX_NAME];
+    p2_copy_trim(table, sizeof(table), p, lp);
+    char *rp = strchr(lp + 1, ')');
+    if (rp == NULL) {
+        return false;
+    }
+    char colbuf[256];
+    p2_copy_trim(colbuf, sizeof(colbuf), lp + 1, rp);
+
+    char *vp = (char *)p2_strcasestr(rp, "VALUES");
+    if (vp == NULL) {
+        return false;
+    }
+    char *vlp = strchr(vp, '(');
+    if (vlp == NULL) {
+        return false;
+    }
+    char *vrp = strchr(vlp + 1, ')');
+    if (vrp == NULL) {
+        return false;
+    }
+    char valbuf[512];
+    p2_copy_trim(valbuf, sizeof(valbuf), vlp + 1, vrp);
+
+    char *cols[P2_MAX_FIELDS];
+    char *vals[P2_MAX_FIELDS];
+    int nc = p2_split_commas(colbuf, cols, P2_MAX_FIELDS);
+    int nv = p2_split_commas(valbuf, vals, P2_MAX_FIELDS);
+    if (nc > 0 && nc == nv) {
+        p2_add_device(table, cols, vals, nc);
+    } else {
+        robot_log("P2: INSERT %s column/value count mismatch (%d/%d)",
+            table, nc, nv);
+    }
+    *next = vrp + 1;
+    return true;
+}
+
 static void p2_parse_sql(void) {
     p2_ndevices = 0;
     p2_nvars = 0;
@@ -1481,49 +1528,11 @@ static void p2_parse_sql(void) {
     p2_strip_comments(p2_sql_buf);
     char *cur = p2_sql_buf;
     while ((cur = (char *)p2_strcasestr(cur, "INSERT INTO")) != NULL) {
-        char *p = cur + strlen("INSERT INTO");
-        while (*p != '\0' && isspace((unsigned char)*p)) {
-            ++p;
-        }
-        char *lp = strchr(p, '(');
-        if (lp == NULL) {
+        char *next = NULL;
+        if (!p2_parse_insert_stmt(cur, &next)) {
             break;
         }
-        char table[P2_MAX_NAME];
-        p2_copy_trim(table, sizeof(table), p, lp);
-        char *rp = strchr(lp + 1, ')');
-        if (rp == NULL) {
-            break;
-        }
-        char colbuf[256];
-        p2_copy_trim(colbuf, sizeof(colbuf), lp + 1, rp);
-
-        char *vp = (char *)p2_strcasestr(rp, "VALUES");
-        if (vp == NULL) {
-            break;
-        }
-        char *vlp = strchr(vp, '(');
-        if (vlp == NULL) {
-            break;
-        }
-        char *vrp = strchr(vlp + 1, ')');
-        if (vrp == NULL) {
-            break;
-        }
-        char valbuf[512];
-        p2_copy_trim(valbuf, sizeof(valbuf), vlp + 1, vrp);
-
-        char *cols[P2_MAX_FIELDS];
-        char *vals[P2_MAX_FIELDS];
-        int nc = p2_split_commas(colbuf, cols, P2_MAX_FIELDS);
-        int nv = p2_split_commas(valbuf, vals, P2_MAX_FIELDS);
-        if (nc > 0 && nc == nv) {
-            p2_add_device(table, cols, vals, nc);
-        } else {
-            robot_log("P2: INSERT %s column/value count mismatch (%d/%d)",
-                table, nc, nv);
-        }
-        cur = vrp + 1;
+        cur = next;
     }
 }
 
@@ -3294,6 +3303,203 @@ static void p2_parse_trigger_block(lua_State *L, int start, int end) {
     }
 }
 
+/* ---- P25：@SQL 运行期热插拔 --------------------------------------------
+ * @SQL 块在动作脚本执行到该位置时生效：
+ *   INSERT INTO 表 (...) VALUES (...);   追加设备并立即 build
+ *   DELETE FROM 表 [WHERE name='x'];     逆序 destroy 并摘除设备
+ * 复用 p2_sql_buf 作为临时 SQL 文本缓冲；初始结构 SQL 已解析完，不再需要。
+ */
+static void p2_hot_remove_device(lua_State *L, int index) {
+    if (index < 0 || index >= p2_ndevices) {
+        return;
+    }
+    p2_device_t *d = &p2_devices[index];
+    robot_log("P25: hot delete %s driver=%s", d->name, d->driver);
+    if (d->env_ref != LUA_NOREF) {
+        p2_call_result_t res;
+        (void)p2_lua_call(L, d->env_ref, d->name, "destroy", d->meta,
+            d->nmeta, &res);
+        luaL_unref(L, LUA_REGISTRYINDEX, d->env_ref);
+        d->env_ref = LUA_NOREF;
+    }
+    for (int i = index; i < p2_ndevices - 1; ++i) {
+        p2_devices[i] = p2_devices[i + 1];
+    }
+    --p2_ndevices;
+    memset(&p2_devices[p2_ndevices], 0, sizeof(p2_devices[0]));
+    p2_devices[p2_ndevices].env_ref = LUA_NOREF;
+}
+
+static bool p2_hot_referenced(const char *name) {
+    for (int i = 0; i < p2_ndevices; ++i) {
+        const p2_device_t *d = &p2_devices[i];
+        if (strcmp(d->name, name) == 0) {
+            continue;
+        }
+        if (strcmp(d->controller, name) == 0) {
+            return true;
+        }
+        for (int t = 0; t < d->ntriggers; ++t) {
+            if (strcmp(d->triggers[t], name) == 0) {
+                return true;
+            }
+        }
+        for (int m = 0; m < d->nmeta; ++m) {
+            const char *v = d->meta[m].value;
+            if (v[0] == '$' && strcmp(v + 1, name) == 0) {
+                return true;
+            }
+            if (v[0] == '$' && v[1] == '(') {
+                const char *close = strchr(v + 2, ')');
+                if (close != NULL &&
+                    strlen(name) == (size_t)(close - (v + 2)) &&
+                    strncmp(v + 2, name, strlen(name)) == 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+static void p2_hot_apply_delete(lua_State *L, char *stmt) {
+    char *p = stmt + strlen("DELETE FROM");
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    char *where = (char *)p2_strcasestr(p, "WHERE");
+    char *table_end = where != NULL ? where : p + strlen(p);
+    char table[P2_MAX_NAME];
+    p2_copy_trim(table, sizeof(table), p, table_end);
+    if (table[0] == '\0') {
+        robot_log("P25: DELETE missing table");
+        return;
+    }
+
+    bool has_name = false;
+    char want_name[P2_MAX_NAME];
+    if (where != NULL) {
+        char *q = where + strlen("WHERE");
+        while (*q != '\0' && isspace((unsigned char)*q)) {
+            ++q;
+        }
+        char *eq = strchr(q, '=');
+        if (eq == NULL) {
+            robot_log("P25: DELETE WHERE unsupported (missing =)");
+            return;
+        }
+        char col[P2_MAX_NAME];
+        p2_copy_trim(col, sizeof(col), q, eq);
+        if (strcmp(col, "name") != 0) {
+            robot_log("P25: DELETE WHERE only supports name, got %s", col);
+            return;
+        }
+        char val[P2_MAX_VALUE];
+        p2_copy_trim(val, sizeof(val), eq + 1, NULL);
+        p2_unquote(val);
+        p2_trim(val);
+        p2_copy_trim(want_name, sizeof(want_name), val, NULL);
+        has_name = true;
+    }
+
+    int removed = 0;
+    int blocked = 0;
+    for (int i = p2_ndevices - 1; i >= 0; --i) {
+        p2_device_t *d = &p2_devices[i];
+        if (strcmp(d->driver, table) != 0) {
+            continue;
+        }
+        if (has_name && strcmp(d->name, want_name) != 0) {
+            continue;
+        }
+        if (p2_hot_referenced(d->name)) {
+            robot_log("P25: DELETE %s refused: still referenced", d->name);
+            ++blocked;
+            continue;
+        }
+        p2_hot_remove_device(L, i);
+        ++removed;
+    }
+    robot_log("P25: DELETE %s%s%s -> %d removed, %d blocked", table,
+        has_name ? " name=" : "", has_name ? want_name : "", removed, blocked);
+    if (removed == 0 && blocked == 0) {
+        robot_log("P25: DELETE %s matched no row", table);
+    }
+}
+
+static void p2_hot_apply_sql(lua_State *L, char *sql) {
+    p2_strip_comments(sql);
+    char *cur = sql;
+    while (*cur != '\0') {
+        char *ins = (char *)p2_strcasestr(cur, "INSERT INTO");
+        char *del = (char *)p2_strcasestr(cur, "DELETE FROM");
+        if (ins == NULL && del == NULL) {
+            break;
+        }
+        if (ins != NULL && (del == NULL || ins < del)) {
+            int before = p2_ndevices;
+            char *next = NULL;
+            if (!p2_parse_insert_stmt(ins, &next)) {
+                robot_log("P25: malformed INSERT in @SQL");
+                break;
+            }
+            cur = next;
+            if (p2_ndevices == before) {
+                robot_log("P25: INSERT applied without new device");
+                continue;
+            }
+            for (int i = before; i < p2_ndevices; ) {
+                p2_device_t *d = &p2_devices[i];
+                robot_log("P25: hot insert %s driver=%s", d->name, d->driver);
+                if (p2_build_one(L, d)) {
+                    ++i;
+                } else {
+                    robot_log("P25: hot insert %s build failed; rollback",
+                        d->name);
+                    p2_hot_remove_device(L, i);
+                }
+            }
+        } else {
+            char *end = strchr(del, ';');
+            char saved = 0;
+            if (end != NULL) {
+                saved = *end;
+                *end = '\0';
+            }
+            p2_hot_apply_delete(L, del);
+            if (end != NULL) {
+                *end = saved;
+                cur = end + 1;
+            } else {
+                cur = del + strlen(del);
+            }
+        }
+    }
+}
+
+static void p2_exec_sql_block(lua_State *L, int start, int end) {
+    size_t off = 0;
+    p2_sql_buf[0] = '\0';
+    for (int i = start; i < end; ++i) {
+        const char *line = p2_lines[i];
+        size_t n = strlen(line);
+        if (off + n + 2 >= sizeof(p2_sql_buf)) {
+            robot_log("P25: @SQL block too large");
+            return;
+        }
+        memcpy(p2_sql_buf + off, line, n);
+        off += n;
+        p2_sql_buf[off++] = '\n';
+        p2_sql_buf[off] = '\0';
+    }
+    if (off == 0) {
+        robot_log("P25: @SQL block is empty");
+        return;
+    }
+    robot_log("P25: @SQL block %u bytes", (unsigned)off);
+    p2_hot_apply_sql(L, p2_sql_buf);
+}
+
 static void p2_exec_lines(lua_State *L, int start, int end) {
     int i = start;
     while (i < end) {
@@ -3345,6 +3551,12 @@ static void p2_exec_lines(lua_State *L, int start, int end) {
         if (strncmp(line, "@Vars", 5) == 0) {
             int close = p2_find_matching(i, end);
             p2_parse_directive(i, close, true);
+            i = close + 1;
+            continue;
+        }
+        if (strncmp(line, "@SQL", 4) == 0) {
+            int close = p2_find_matching(i, end);
+            p2_exec_sql_block(L, i + 1, close);
             i = close + 1;
             continue;
         }
