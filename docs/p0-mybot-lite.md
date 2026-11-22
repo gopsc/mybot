@@ -46,6 +46,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 38. **P37：`/boot.txt` 开机自动周期动作**
 39. **P38：`/use` 与 `/autostart` 持久化开机配置**
 40. **P39：`@Merge` 容量扩展、负相位与前导 `-` 跳过**
+41. **P40：`@Action` 行内 `-` 继承**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -122,7 +123,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-274520    0 110544
+274648    0 110544
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -276,6 +277,7 @@ sdcard/
     p33.sql
     p34.sql
     p39.sql
+    p40.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -312,6 +314,7 @@ sdcard/
     p33.mt
     p34.mt
     p39.mt
+    p40.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -624,6 +627,7 @@ p29             -> /scripts/p29.mt（/action 重播测试，无独立 SQL）
 p33             -> /robots/p33.sql + /scripts/p33.mt（@SQL 事务回滚）
 p34             -> /robots/p34.sql + /scripts/p34.mt（设备列 @Alias）
 p39             -> /robots/p39.sql + /scripts/p39.mt（@Merge 容量/相位）
+p40             -> /robots/p40.sql + /scripts/p40.mt（行内 - 继承）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2164,7 +2168,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-274520     0  110544
+274648     0  110544
 ```
 
 构建：
@@ -2972,6 +2976,57 @@ P5Check: call value=50 name=d item=nil angle=nil
 - 数据格 `-` 只在“前导未起拍”时跳过；行内继承仍依赖驱动处理
 - 负相位整源丢弃只告警，不中止脚本
 - 列数上限仍为 6
+
+## P40：@Action 行内 `-` 继承
+
+P40-A 给 `@Action` 数据行加上框架级 `-` 继承：
+
+- 某一列写 `-` 时，沿用上一行同一列的原始值
+- 第一行就写 `-` 时没有可继承值，保留字面 `-`
+- 捕获格 `$var=field` 不参与继承，也不会写上一行缓存
+- `@if` / `@while` 里由 `p2_exec_action` 执行的隐式动作块在每次块执行内部同样生效；`@while` 每轮重新开始继承缓存
+- `@Reflex` / `@Merge` 的逐行派发暂未接入同一继承逻辑，仍按各自路径处理
+
+测试 profile：
+
+```text
+p40
+```
+
+脚本：
+
+```mt
+@Action
+p40.value  p40.item;
+   7         10;
+   -         20;
+   8         -;
+@
+```
+
+预期三次调用：
+
+```text
+P5Check: call value=7 name=p40 item=10 angle=nil
+P5Check: call value=7 name=p40 item=20 angle=nil
+P5Check: call value=8 name=p40 item=20 angle=nil
+```
+
+关键日志：
+
+```text
+P2: @Action columns=2
+P2: p40.call result=OK
+P2: p40.call result=OK
+P2: p40.call result=OK
+```
+
+限制：
+
+- `-` 继承只在单个 `@Action` / 控制块动作序列内，不跨块
+- `@Reflex`、`@Merge` 暂无框架级继承
+- `-` 缓存是原始文本，不保存 `$(...)` 求值后的结果
+- 行内缺列仍按当前解析器行为处理
 
 ## 运行现象
 

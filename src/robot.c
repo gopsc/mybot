@@ -1811,6 +1811,26 @@ static bool p2_capture_cell(const char *cell, char *var, size_t vcap,
     return var[0] != '\0' && field[0] != '\0';
 }
 
+static void p2_apply_inheritance(char **vals, int nvals,
+        char prev[][P2_MAX_VALUE], bool *has_prev) {
+    for (int c = 0; c < nvals; ++c) {
+        char cap_var[P2_MAX_NAME];
+        char cap_field[P2_MAX_NAME];
+        if (p2_capture_cell(vals[c], cap_var, sizeof(cap_var), cap_field,
+                sizeof(cap_field))) {
+            continue;
+        }
+        if (strcmp(vals[c], "-") == 0) {
+            if (has_prev[c]) {
+                vals[c] = prev[c];
+            }
+        } else {
+            p2_copy_trim(prev[c], P2_MAX_VALUE, vals[c], NULL);
+            has_prev[c] = true;
+        }
+    }
+}
+
 static void p2_apply_captures(const p2_device_t *d, char **vals, int nvals,
         const p2_call_result_t *res) {
     for (int j = 0; j < P2_MAX_COLS; ++j) {
@@ -2580,6 +2600,8 @@ static void p2_exec_action(lua_State *L, int start, int end) {
         return;
     }
     robot_log("P2: @Action columns=%d", ncols);
+    char prev[P2_MAX_COLS][P2_MAX_VALUE];
+    bool has_prev[P2_MAX_COLS] = {false};
     for (int i = start + 1; i < end; ++i) {
         char row_buf[256];
         p2_copy_trim(row_buf, sizeof(row_buf), p2_lines[i], NULL);
@@ -2588,6 +2610,7 @@ static void p2_exec_action(lua_State *L, int start, int end) {
         }
         char *vals[P2_MAX_COLS];
         int nv = p2_split_ws(row_buf, vals, P2_MAX_COLS);
+        p2_apply_inheritance(vals, nv, prev, has_prev);
         if (nv > 0) {
             p2_execute_row(L, vals, nv);
         }
