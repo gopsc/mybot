@@ -64,6 +64,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 56. **P55：`/uarttest` 串口自检**
 57. **P56：`/spitest` SPI 回环自检**
 58. **P57：include/merge 路径规范化与安全校验**
+59. **P58：`?` 返回表打印格**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -140,7 +141,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-281816    0 140404
+282056    0 140404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -313,6 +314,7 @@ sdcard/
     p52.sql
     p53.sql
     p57.sql
+    p58.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -364,6 +366,7 @@ sdcard/
     p53.mt
     p57.mt
     p57_bad.mt
+    p58.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -697,6 +700,7 @@ p50             -> /robots/p50.sql + /scripts/p50.mt（@Merge include-once）
 p52             -> /robots/p52.sql + /scripts/p52.mt（@Merge 片段递归）
 p53             -> /robots/p53.sql + /scripts/p53.mt（跨层 include-once）
 p57             -> /robots/p57.sql + /scripts/p57.mt（路径规范化）
+p58             -> /robots/p58.sql + /scripts/p58.mt（? 打印格）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2248,7 +2252,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-281816     0  140404
+282056     0  140404
 ```
 
 构建：
@@ -3334,7 +3338,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-281816     0  140404
+282056     0  140404
 ```
 
 限制：
@@ -4051,6 +4055,59 @@ P2: unsafe include path: /scripts/../merge_57_once.once.mt
 - 不做符号链接检查
 - 路径长度上限 127/159 字节
 - 绝对路径仍允许，但同样禁止 `..` 和强制 `.mt`
+- 尚未上板实测
+
+## P58：`?` 返回表打印格
+
+P58-A 支持动作数据格的 `?` 标记：
+
+- `?` 不作为参数传给驱动
+- 该设备仍会正常 call 一次
+- call 成功后打印一行结果摘要：
+
+```text
+P2: [?] cnt.reading result=OK reading=1
+```
+
+- `-` 会继承上一行的 `?`，继续打印
+- 同一设备一行多个 `?` 只打印一次
+- 打印内容包含 `result` 和返回表里的标量字段
+- `@Action`、`@Reflex`、`@Merge` 共用同一派发路径
+
+测试 profile：
+
+```text
+p58
+```
+
+脚本：
+
+```mt
+@Action
+cnt.reading;
+  ?;
+  -;
+@
+```
+
+预期：
+
+```text
+Counter: reading=1
+P2: cnt call ok
+P2: [?] cnt.reading result=OK reading=1
+Counter: reading=2
+P2: cnt call ok
+P2: [?] cnt.reading result=OK reading=2
+```
+
+限制：
+
+- 只打印标量返回字段，不展开嵌套表/数组
+- 每设备每行最多一行摘要
+- 输出走机器人日志队列和 UART
+- 单行缓冲 128 字节，字段过多会截断
+- `?` 是保留标记，要传字面文本需用 `$("?")`
 - 尚未上板实测
 
 ## 运行现象

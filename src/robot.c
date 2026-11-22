@@ -2007,6 +2007,26 @@ static void p2_exec_named_reflex(lua_State *L, p2_reflex_t *rf,
     }
 }
 
+static void p2_log_print_result(const p2_device_t *d, const char *param,
+        const p2_call_result_t *res) {
+    char extra[ROBOT_LOG_LINE];
+    size_t off = 0;
+    extra[0] = '\0';
+    for (int i = 0; i < res->nfields && off + 1 < sizeof(extra); ++i) {
+        int wrote = snprintf(extra + off, sizeof(extra) - off, " %s=%s",
+            res->fields[i].key, res->fields[i].value);
+        if (wrote < 0) {
+            break;
+        }
+        off += (size_t)wrote;
+        if (off >= sizeof(extra)) {
+            off = sizeof(extra) - 1;
+        }
+    }
+    robot_log("P2: [?] %s.%s result=%s%s", d->name, param,
+        res->result[0] != '\0' ? res->result : "-", extra);
+}
+
 static void p2_execute_row(lua_State *L, char **vals, int nvals) {
     for (int i = 0; i < P2_MAX_COLS; ++i) {
         if (p2_action_cols[i].device[0] == '\0') {
@@ -2051,6 +2071,9 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
 
         p2_field_t fields[P2_MAX_FIELDS];
         int nf = 0;
+        bool print_result = false;
+        char print_param[P2_MAX_NAME];
+        print_param[0] = '\0';
         p2_add_meta_fields(d, fields, &nf);
         for (int j = i; j < P2_MAX_COLS; ++j) {
             if (p2_action_cols[j].device[0] == '\0') {
@@ -2061,6 +2084,14 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
                 char cap_field[P2_MAX_NAME];
                 if (p2_capture_cell(vals[j], cap_var, sizeof(cap_var),
                         cap_field, sizeof(cap_field))) {
+                    continue;
+                }
+                if (strcmp(vals[j], "?") == 0) {
+                    if (!print_result) {
+                        print_result = true;
+                        p2_copy_trim(print_param, sizeof(print_param),
+                            p2_action_cols[j].param, NULL);
+                    }
                     continue;
                 }
                 char value_buf[P2_MAX_VALUE];
@@ -2083,6 +2114,9 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
             robot_log("P2: %s call ok", d->name);
         }
         p2_apply_captures(d, vals, nvals, &res);
+        if (print_result) {
+            p2_log_print_result(d, print_param, &res);
+        }
 
         if (d->controller[0] != '\0') {
             p2_device_t *ctl = p2_find_device(d->controller);
