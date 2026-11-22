@@ -10,7 +10,7 @@
 6. **`@if` / `@while` 控制流、动作捕获、命令系统与热重载**
 7. **`@Struct` JSON 对象/数组与字段选择**
 
-还没有实现：`@Struct` 字段捕获、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
+还没有实现：动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
 
 ## 改动
 
@@ -66,7 +66,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-873084    0 131800
+873924    0 131800
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -90,7 +90,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-249796     0  81388
+250628     0  81388
 ```
 
 此时：
@@ -176,6 +176,7 @@ sdcard/
     p4.sql
     p5.sql
     p5b.sql
+    p5c.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -190,6 +191,7 @@ sdcard/
     p4.mt
     p5.mt
     p5b.mt
+    p5c.mt
     pca9685.mt
     ads1015.mt
     spi.mt
@@ -465,6 +467,7 @@ uart            -> /robots/uart.sql + /scripts/uart.mt（真实 UART1）
 p4              -> /robots/p4.sql + /scripts/p4.mt（@if/@while 控制流）
 p5              -> /robots/p5.sql + /scripts/p5.mt（平坦 @Struct）
 p5b             -> /robots/p5b.sql + /scripts/p5b.mt（嵌套对象/数组）
+p5c             -> /robots/p5c.sql + /scripts/p5c.mt（@Struct 字段捕获）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -782,7 +785,6 @@ p5.value  p5.name  p5.item;
 限制：
 
 - JSON 解析器是精简实现，不支持非常复杂的转义/深度
-- `@Struct` 字段捕获尚未实现
 - 数组只支持固定下标，不支持表达式下标
 
 测试 profile：
@@ -817,6 +819,35 @@ P2: @Struct cfg.inner.name = pico
 P2: @Struct cfg.items[0] = 10
 P2: @Struct cfg.items[1] = 20
 P5Check: call value=7 name=pico item=20
+```
+
+### @Struct 字段捕获
+
+profile `p5c`：
+
+```mt
+@Struct(cfg)
+{ "value": 0 }
+@
+
+@Action
+cnt.reading;
+ $cfg.value=reading;
+@
+
+@Action
+p5.value;
+ $(cfg.value);
+@
+```
+
+`Counter` 返回 `reading=1`，捕获写回 `cfg.value`，后续动作读到 `$(cfg.value)=1`。
+
+预期关键输出：
+
+```text
+P2: capture cfg.value=1
+P5Check: call value=1 name=nil item=nil
 ```
 
 ## 运行现象

@@ -1260,6 +1260,37 @@ static void p2_set_var(const char *name, const char *value) {
     p2_add_var(name, value);
 }
 
+static bool p2_set_struct_field(const char *path, const char *value) {
+    const char *dot = strchr(path, '.');
+    if (dot == NULL || dot == path || dot[1] == '\0') {
+        return false;
+    }
+    char base[P2_MAX_NAME];
+    char field[P2_MAX_NAME];
+    p2_copy_trim(base, sizeof(base), path, dot);
+    p2_copy_trim(field, sizeof(field), dot + 1, NULL);
+    p2_struct_t *st = p2_find_struct(base);
+    if (st == NULL) {
+        return false;
+    }
+    for (int i = 0; i < st->nfields; ++i) {
+        if (strcmp(st->fields[i].key, field) == 0) {
+            p2_copy_trim(st->fields[i].value, sizeof(st->fields[i].value),
+                value, NULL);
+            return true;
+        }
+    }
+    if (st->nfields < P2_MAX_FIELDS) {
+        p2_copy_trim(st->fields[st->nfields].key,
+            sizeof(st->fields[st->nfields].key), field, NULL);
+        p2_copy_trim(st->fields[st->nfields].value,
+            sizeof(st->fields[st->nfields].value), value, NULL);
+        ++st->nfields;
+        return true;
+    }
+    return false;
+}
+
 static const char *p2_find_alias(const char *name) {
     for (int i = p2_naliases - 1; i >= 0; --i) {
         if (strcmp(p2_aliases[i].name, name) == 0) {
@@ -1695,6 +1726,10 @@ static void p2_apply_captures(const p2_device_t *d, char **vals, int nvals,
         if (value == NULL) {
             robot_log("P2: capture %s=%s missing from %s result", var, field,
                 d->name);
+            continue;
+        }
+        if (strchr(var, '.') != NULL && p2_set_struct_field(var, value)) {
+            robot_log("P2: capture %s=%s", var, value);
             continue;
         }
         p2_set_var(var, value);
