@@ -48,6 +48,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 40. **P39：`@Merge` 容量扩展、负相位与前导 `-` 跳过**
 41. **P40：`@Action` 行内 `-` 继承**
 42. **P41：`@Reflex` / `@Merge` 的 `-` 继承**
+43. **P42：动作行缺列按 `-` 补齐**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -124,7 +125,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-274984    0 110544
+275200    0 110544
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -280,6 +281,7 @@ sdcard/
     p39.sql
     p40.sql
     p41.sql
+    p42.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -318,6 +320,7 @@ sdcard/
     p39.mt
     p40.mt
     p41.mt
+    p42.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -634,6 +637,7 @@ p34             -> /robots/p34.sql + /scripts/p34.mt（设备列 @Alias）
 p39             -> /robots/p39.sql + /scripts/p39.mt（@Merge 容量/相位）
 p40             -> /robots/p40.sql + /scripts/p40.mt（@Action 行内 - 继承）
 p41             -> /robots/p41.sql + /scripts/p41.mt（Reflex/Merge - 继承）
+p42             -> /robots/p42.sql + /scripts/p42.mt（缺列按 - 补齐）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2174,7 +2178,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-274984     0  110544
+275200     0  110544
 ```
 
 构建：
@@ -3032,7 +3036,7 @@ P2: p40.call result=OK
 - `-` 继承只在单个 `@Action` / 控制块动作序列内，不跨块
 - P41 起 `@Reflex`、`@Merge` 也接入框架级继承
 - `-` 缓存是原始文本，不保存 `$(...)` 求值后的结果
-- 行内缺列仍按当前解析器行为处理
+- P42 起动作行缺列会补 `-` 并参与继承
 
 ## P41：@Reflex / @Merge 的 `-` 继承
 
@@ -3105,7 +3109,54 @@ P2: @Merge timeline 2 beat(s)
 - 不跨 `@Action` 块、`@Reflex` 调用或 `/action` 执行
 - 缓存的是原始文本，不是 `$(...)` 求值后的结果
 - `@Merge` 前导 `-` 跳过逻辑与继承缓存相互独立
-- 行内缺列仍按当前解析器行为处理
+
+## P42：动作行缺列按 `-` 补齐
+
+P42-A 让 `@Action` 数据行少于表头时，缺失列按 `-` 处理：
+
+- 缺列先补 `-`
+- 补出的 `-` 再走 P40 的继承逻辑
+- 第一行缺列且没有上一行时保留字面 `-`
+- 多出的数据格仍被忽略
+- `@Reflex` / `@Merge` 在解析阶段本来就按 `-` 补齐，行为保持一致
+
+测试 profile：
+
+```text
+p42
+```
+
+脚本：
+
+```mt
+@Action
+p42.value  p42.item  p42.angle;
+   7         10        20;
+   -         30;
+   8;
+@
+```
+
+预期：
+
+```text
+P5Check: call value=7 name=p42 item=10 angle=20
+P5Check: call value=7 name=p42 item=30 angle=20
+P5Check: call value=8 name=p42 item=30 angle=20
+```
+
+关键行为：
+
+- 第二行只写两格：angle 缺列 → 继承上一行 20
+- 第三行只写一格：item/angle 缺列 → 继承 30/20
+
+限制：
+
+- 只对 `p2_exec_action` 的 `@Action` / 控制块动作序列生效
+- 多余数据格仍忽略，不报错
+- 缺列补 `-` 后仍遵循首行无继承的规则
+- 缓存仍是原始文本，不是求值结果
+- 没有根据表头类型做缺列校验
 
 ## 运行现象
 

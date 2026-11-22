@@ -1811,6 +1811,13 @@ static bool p2_capture_cell(const char *cell, char *var, size_t vcap,
     return var[0] != '\0' && field[0] != '\0';
 }
 
+static int p2_pad_missing_cells(char **vals, int nvals, int ncols) {
+    for (int c = nvals; c < ncols; ++c) {
+        vals[c] = (char *)"-";
+    }
+    return nvals < ncols ? ncols : nvals;
+}
+
 static void p2_apply_inheritance(char **vals, int nvals,
         char prev[][P2_MAX_VALUE], bool *has_prev) {
     for (int c = 0; c < nvals; ++c) {
@@ -2613,9 +2620,10 @@ static void p2_exec_action(lua_State *L, int start, int end) {
         }
         char *vals[P2_MAX_COLS];
         int nv = p2_split_ws(row_buf, vals, P2_MAX_COLS);
-        p2_apply_inheritance(vals, nv, prev, has_prev);
-        if (nv > 0) {
-            p2_execute_row(L, vals, nv);
+        int row_n = p2_pad_missing_cells(vals, nv, ncols);
+        p2_apply_inheritance(vals, row_n, prev, has_prev);
+        if (row_n > 0) {
+            p2_execute_row(L, vals, row_n);
         }
     }
 }
