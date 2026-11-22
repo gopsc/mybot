@@ -127,7 +127,7 @@ typedef struct {
 } p2_struct_t;
 static p2_struct_t p2_structs[P2_MAX_STRUCTS];
 static int p2_nstructs;
-#define P2_MERGE_FILES 2
+#define P2_MERGE_FILES 3
 #define P2_MERGE_ROWS 4
 #define P2_MERGE_COLS 6
 typedef struct {
@@ -139,6 +139,8 @@ typedef struct {
 } p2_merge_src_t;
 static p2_merge_src_t p2_merge_srcs[P2_MERGE_FILES];
 static int p2_merge_nsrc;
+static int p2_merge_skip_start = -1;
+static int p2_merge_skip_end = -1;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
 static char p2_expanded_buf[P2_MT_MAX * 2];
@@ -2538,6 +2540,37 @@ static bool p2_load_merge_file(const char *path, int phase, p2_merge_src_t *src)
     return src->ncols > 0 && src->nrows > 0;
 }
 
+static bool p2_parse_action_src(int header, int end, p2_merge_src_t *src) {
+    memset(src, 0, sizeof(*src));
+    src->phase = 0;
+    if (header + 1 >= end) {
+        return false;
+    }
+    char hb[256];
+    p2_copy_trim(hb, sizeof(hb), p2_lines[header], NULL);
+    char *cells[P2_MERGE_COLS];
+    int n = p2_split_ws(hb, cells, P2_MERGE_COLS);
+    src->ncols = n;
+    for (int i = 0; i < n; ++i) {
+        p2_copy_trim(src->headers[i], sizeof(src->headers[i]), cells[i], NULL);
+    }
+    for (int i = header + 1; i < end && src->nrows < P2_MERGE_ROWS; ++i) {
+        char rb[256];
+        p2_copy_trim(rb, sizeof(rb), p2_lines[i], NULL);
+        if (rb[0] == '\0') {
+            continue;
+        }
+        char *vals[P2_MERGE_COLS];
+        int nv = p2_split_ws(rb, vals, P2_MERGE_COLS);
+        for (int c = 0; c < src->ncols; ++c) {
+            p2_copy_trim(src->rows[src->nrows][c],
+                sizeof(src->rows[src->nrows][c]), c < nv ? vals[c] : "-", NULL);
+        }
+        ++src->nrows;
+    }
+    return src->ncols > 0 && src->nrows > 0;
+}
+
 static void p2_merge_exec(lua_State *L, int start, int end) {
     p2_merge_nsrc = 0;
     bool header = false;
@@ -2571,6 +2604,25 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
             ++p2_merge_nsrc;
         } else {
             robot_log("P2: @Merge cannot load %s", path);
+        }
+    }
+    /* 主脚本 @Merge 后面的第一张 @Action 与片段对齐。 */
+    p2_merge_skip_start = -1;
+    p2_merge_skip_end = -1;
+    for (int i = end + 1; i < p2_nlines; ++i) {
+        char *t = p2_trim(p2_lines[i]);
+        if (strncmp(t, "@Action", 7) == 0) {
+            int close = p2_find_matching(i, p2_nlines);
+            if (p2_merge_nsrc < P2_MERGE_FILES &&
+                p2_parse_action_src(i + 1, close,
+                    &p2_merge_srcs[p2_merge_nsrc])) {
+                robot_log("P2: @Merge main action rows=%d",
+                    p2_merge_srcs[p2_merge_nsrc].nrows);
+                ++p2_merge_nsrc;
+                p2_merge_skip_start = i;
+                p2_merge_skip_end = close;
+            }
+            break;
         }
     }
     if (p2_merge_nsrc == 0) {
@@ -2627,6 +2679,11 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
 static void p2_exec_lines(lua_State *L, int start, int end) {
     int i = start;
     while (i < end) {
+        if (p2_merge_skip_start >= 0 && i >= p2_merge_skip_start &&
+            i <= p2_merge_skip_end) {
+            i = p2_merge_skip_end + 1;
+            continue;
+        }
         char *line = p2_trim(p2_lines[i]);
         if (*line == '\0') {
             ++i;
@@ -2800,6 +2857,8 @@ static bool p2_run_mt(lua_State *L) {
     }
     p2_strip_comments(p2_expanded_buf);
     p2_nstructs = 0;
+    p2_merge_skip_start = -1;
+    p2_merge_skip_end = -1;
     p2_nlines = 0;
     char *save = NULL;
     char *line = strtok_r(p2_expanded_buf, "\n", &save);
