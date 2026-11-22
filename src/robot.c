@@ -1484,9 +1484,43 @@ static void p2_destroy_devices(lua_State *L) {
 }
 
 static bool robot_p2_run(lua_State *L) {
-    const char *sql_path = "/robots/p3.sql";
-    const char *mt_path = "/scripts/p3.mt";
-    size_t n = p2_read_file(sql_path, p2_sql_buf, sizeof(p2_sql_buf));
+    static char profile_sql[64];
+    static char profile_mt[64];
+    char profile[32];
+    const char *sql_path = NULL;
+    const char *mt_path = NULL;
+    size_t n = 0;
+
+    size_t profile_len = p2_read_file("/profile.txt", profile, sizeof(profile));
+    if (profile_len > 0) {
+        char *name = p2_trim(profile);
+        bool valid = *name != '\0';
+        for (const char *p = name; *p != '\0'; ++p) {
+            if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
+                valid = false;
+                break;
+            }
+        }
+        if (valid) {
+            snprintf(profile_sql, sizeof(profile_sql), "/robots/%s.sql", name);
+            snprintf(profile_mt, sizeof(profile_mt), "/scripts/%s.mt", name);
+            n = p2_read_file(profile_sql, p2_sql_buf, sizeof(p2_sql_buf));
+            if (n > 0) {
+                sql_path = profile_sql;
+                mt_path = profile_mt;
+                robot_log("P2: profile=%s", name);
+            } else {
+                robot_log("P2: profile %s has no %s; falling back", name,
+                    profile_sql);
+            }
+        }
+    }
+
+    if (n == 0) {
+        sql_path = "/robots/p3.sql";
+        mt_path = "/scripts/p3.mt";
+        n = p2_read_file(sql_path, p2_sql_buf, sizeof(p2_sql_buf));
+    }
     if (n == 0) {
         sql_path = "/robots/p2b.sql";
         mt_path = "/scripts/p2b.mt";

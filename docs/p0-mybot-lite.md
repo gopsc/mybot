@@ -1,12 +1,12 @@
 # P0：mybot-lite 双核、Lua、脚本解析与 I2C HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3-B 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
 3. **Lua 驱动从 SD 加载，每个驱动有独立 env**
 4. **运行期解析 `.sql` / `.mt`，支持 `$ref` / `@Alias` / `@Vars`**
-5. **真实 I2C HAL（Pico hardware_i2c）与总线扫描**
+5. **真实 I2C HAL（Pico hardware_i2c）与 PCA9685/ADS1015 驱动接入**
 
 还没有实现：SPI/UART HAL、`@if/@while`、`@Struct`、动态 SQL、命令系统。那些属于 P3 后续/P4。
 
@@ -64,7 +64,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-860988    0 128676
+860684    0 128804
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -88,7 +88,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-239124     0  78408
+238820     0  78536
 ```
 
 此时：
@@ -154,6 +154,9 @@ sdcard/
     I2C.lua
     RefCheck.lua
     P3Check.lua
+    PCA9685.lua
+    ADS1015.lua
+    bitcompat.lua
     lib/
       HAL.lua
       drv_common.lua
@@ -162,10 +165,16 @@ sdcard/
     relay-test.sql
     p2b.sql
     p3.sql
+    pca9685.sql
+    pca9685_fake.sql
+    ads1015.sql
   scripts/
     relay-test.mt
     p2b.mt
     p3.mt
+    pca9685.mt
+    ads1015.mt
+  profile.txt
 ```
 
 `robot.lua` 只做一件事：
@@ -419,6 +428,80 @@ P3Check: scan fd=0 found=1 [0x40]
 没有外设时 `found=0` 是正常结果，说明总线打开和 probe 都完成了。
 
 > P3 目前只实现 I2C；SPI/UART 仍是 P3 后续步骤。真实 I2C 事务失败会返回 `-1`/`nil`，不会伪装成成功。
+
+## P3-B：PCA9685 / ADS1015 与 profile 选择
+
+SD 根目录的 `/profile.txt` 决定运行哪组脚本：
+
+```text
+p3              -> /robots/p3.sql + /scripts/p3.mt
+pca9685_fake    -> /robots/pca9685_fake.sql + /scripts/pca9685.mt
+pca9685         -> /robots/pca9685.sql + /scripts/pca9685.mt（真实 PCA9685，0x40）
+ads1015         -> /robots/ads1015.sql + /scripts/ads1015.mt（真实 ADS1015，0x48）
+p2b             -> /robots/p2b.sql + /scripts/p2b.mt
+```
+
+没有 `/profile.txt` 时按 `p3 -> p2b -> relay-test` 回退。
+
+### PCA9685 无硬件冒烟
+
+`/profile.txt` 写成：
+
+```text
+pca9685_fake
+```
+
+会走 `/dev/i2c-fake`，真实 `PCA9685.lua` 仍会执行寄存器写序列，但由假总线返回成功。VGA 应出现：
+
+```text
+P2: profile=pca9685_fake
+P2: device i2c-f driver=I2C controller=-
+P2: device pca-0 driver=PCA9685 controller=-
+P2: device t0 driver=Timer controller=-
+P2: i2c-f.build result=OK
+P2: t0.build result=OK
+P2: i2c-f.call result=OK
+P2: $i2c-f -> 1 field(s)
+P2: pca-0.build result=OK
+P2: @Action columns=2
+P2: pca-0 call ok
+P2: t0.call result=OK slept=50
+P2: t0 slept=50
+...
+```
+
+### PCA9685 真实硬件
+
+`/profile.txt` 写成：
+
+```text
+pca9685
+```
+
+接线：
+
+```text
+Pico GP6 -> PCA9685 SDA
+Pico GP7 -> PCA9685 SCL
+SDA/SCL 4.7k 上拉到 3.3V
+GND 共地
+PCA9685 VCC 按模块要求供电
+地址默认 0x40
+```
+
+`/scripts/pca9685.mt` 会依次写 90/45/135/90 度，每步 Timer 50ms。
+
+### ADS1015 真实硬件
+
+`/profile.txt` 写成：
+
+```text
+ads1015
+```
+
+ADS1015 地址默认 `0x48`。`build` 会写配置并读回比对，因此**必须接真实器件**；没有器件时会在 build 阶段报 `ERR`，不会伪装成功。
+
+> SPI/UART HAL 仍未实现；P3-B 目前只覆盖 I2C 器件。
 
 ## 运行现象
 
