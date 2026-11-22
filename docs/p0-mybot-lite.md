@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4-B 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -8,8 +8,9 @@
 4. **运行期解析 `.sql` / `.mt`，支持 `$ref` / `@Alias` / `@Vars`**
 5. **真实 I2C/SPI/UART HAL，以及 PCA9685/ADS1015/AD9833 驱动接入**
 6. **`@if` / `@while` 控制流、动作捕获、命令系统与热重载**
+7. **`@Struct` 平坦 JSON 对象与字段选择**
 
-还没有实现：`@Struct`、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
+还没有实现：嵌套 `@Struct`、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
 
 ## 改动
 
@@ -65,7 +66,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-870564    0 129444
+872156    0 131800
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -89,7 +90,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-247268     0  79032
+248860     0  81388
 ```
 
 此时：
@@ -162,6 +163,7 @@ sdcard/
     AD9833.lua
     UartCheck.lua
     Counter.lua
+    P5Check.lua
     bitcompat.lua
     lib/
       HAL.lua
@@ -172,6 +174,7 @@ sdcard/
     p2b.sql
     p3.sql
     p4.sql
+    p5.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -184,6 +187,7 @@ sdcard/
     p2b.mt
     p3.mt
     p4.mt
+    p5.mt
     pca9685.mt
     ads1015.mt
     spi.mt
@@ -457,6 +461,7 @@ spi             -> /robots/spi.sql + /scripts/spi.mt（真实 AD9833）
 uart_fake       -> /robots/uart_fake.sql + /scripts/uart.mt
 uart            -> /robots/uart.sql + /scripts/uart.mt（真实 UART1）
 p4              -> /robots/p4.sql + /scripts/p4.mt（@if/@while 控制流）
+p5              -> /robots/p5.sql + /scripts/p5.mt（@Struct）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -723,6 +728,64 @@ core1: /profile.txt = p4
 ```
 
 `/stop` 立即置 stop 标志；`@while`、`milli_sleep` 和动作派发行会在各自的检查点看到它。长时间阻塞在器件驱动内部的 I2C/SPI/UART 调用只能等超时。
+
+## P5：@Struct
+
+新增 `@Struct(name)` 平坦 JSON 对象支持：
+
+```mt
+@Struct(cfg)
+{ "value": 7, "name": "pico" }
+@
+
+@Action
+p5.value  p5.name;
+ $(cfg.value) $(cfg.name);
+@
+
+@if(cfg.value>0)
+p5.ok;
+   1;
+@
+```
+
+已实现：
+
+- `@Struct(name)` 块
+- 平坦 JSON 对象：字符串、数字、布尔/null 文本
+- `$(cfg.field)` 动作值替换
+- `cfg.field` 条件表达式
+- struct 只在当前 MT 运行内有效
+
+限制：
+
+- 只支持平坦对象，不支持嵌套对象/数组
+- 不支持 `@Struct` 字段捕获
+- 不支持数组下标 `items[0]`
+
+测试 profile：
+
+```text
+p5
+```
+
+预期 VGA：
+
+```text
+P2: profile=p5
+P2: @Struct cfg.value = 7
+P2: @Struct cfg.name = pico
+P2: device p5 driver=P5Check controller=-
+P2: p5.build result=OK
+P2: @Action columns=2
+P5Check: call value=7 name=pico
+P2: p5.call result=OK
+P2: p5 call ok
+P5Check: call value=nil name=nil
+P2: p5.call result=OK
+P2: p5 call ok
+...
+```
 
 ## 运行现象
 

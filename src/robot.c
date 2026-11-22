@@ -114,6 +114,14 @@ static p2_var_t p2_vars[P2_MAX_VARS];
 static int p2_nvars;
 static p2_alias_t p2_aliases[P2_MAX_ALIASES];
 static int p2_naliases;
+#define P2_MAX_STRUCTS 4
+typedef struct {
+    char name[P2_MAX_NAME];
+    p2_field_t fields[P2_MAX_FIELDS];
+    int nfields;
+} p2_struct_t;
+static p2_struct_t p2_structs[P2_MAX_STRUCTS];
+static int p2_nstructs;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
 static char *p2_lines[P2_MAX_LINES];
@@ -1206,6 +1214,42 @@ static void p2_add_var(const char *name, const char *value) {
     ++p2_nvars;
 }
 
+static p2_struct_t *p2_find_struct(const char *name) {
+    for (int i = 0; i < p2_nstructs; ++i) {
+        if (strcmp(p2_structs[i].name, name) == 0) {
+            return &p2_structs[i];
+        }
+    }
+    return NULL;
+}
+
+static bool p2_lookup_value(const char *name, char *out, size_t cap) {
+    const char *var = p2_find_var(name);
+    if (var != NULL) {
+        p2_copy_trim(out, cap, var, NULL);
+        return true;
+    }
+    const char *dot = strchr(name, '.');
+    if (dot == NULL || dot == name || dot[1] == '\0') {
+        return false;
+    }
+    char base[P2_MAX_NAME];
+    char field[P2_MAX_NAME];
+    p2_copy_trim(base, sizeof(base), name, dot);
+    p2_copy_trim(field, sizeof(field), dot + 1, NULL);
+    p2_struct_t *st = p2_find_struct(base);
+    if (st == NULL) {
+        return false;
+    }
+    for (int i = 0; i < st->nfields; ++i) {
+        if (strcmp(st->fields[i].key, field) == 0) {
+            p2_copy_trim(out, cap, st->fields[i].value, NULL);
+            return true;
+        }
+    }
+    return false;
+}
+
 static void p2_set_var(const char *name, const char *value) {
     for (int i = 0; i < p2_nvars; ++i) {
         if (strcmp(p2_vars[i].name, name) == 0) {
@@ -1513,11 +1557,9 @@ static const char *p2_expand_value(const char *value, char *buf, size_t cap) {
     char key[P2_MAX_NAME];
     memcpy(key, name, len);
     key[len] = '\0';
-    const char *var = p2_find_var(key);
-    if (var == NULL) {
+    if (!p2_lookup_value(key, buf, cap)) {
         return value;
     }
-    p2_copy_trim(buf, cap, var, NULL);
     return buf;
 }
 
@@ -1748,9 +1790,9 @@ static bool p2_operand_value(const char *s, double *num, char *text,
         *isnum = false;
         return true;
     }
-    const char *var = p2_find_var(text);
-    if (var != NULL) {
-        p2_copy_trim(text, cap, var, NULL);
+    char lookup[P2_MAX_VALUE];
+    if (p2_lookup_value(text, lookup, sizeof(lookup))) {
+        p2_copy_trim(text, cap, lookup, NULL);
     }
     char *end = NULL;
     double d = strtod(text, &end);
@@ -1939,6 +1981,131 @@ static void p2_exec_action(lua_State *L, int start, int end) {
     }
 }
 
+static void p2_json_skip_ws(const char **pp) {
+    while (isspace((unsigned char)**pp)) {
+        ++*pp;
+    }
+}
+
+static bool p2_parse_json_object(const char *json, p2_struct_t *st) {
+    const char *p = json;
+    p2_json_skip_ws(&p);
+    if (*p != '{') {
+        return false;
+    }
+    ++p;
+    st->nfields = 0;
+    for (;;) {
+        p2_json_skip_ws(&p);
+        if (*p == '}') {
+            return true;
+        }
+        if (*p != '"') {
+            return false;
+        }
+        ++p;
+        char key[P2_MAX_NAME];
+        size_t k = 0;
+        while (*p != '\0' && *p != '"' && k + 1 < sizeof(key)) {
+            if (*p == '\\' && p[1] != '\0') {
+                ++p;
+            }
+            key[k++] = *p++;
+        }
+        key[k] = '\0';
+        if (*p != '"') {
+            return false;
+        }
+        ++p;
+        p2_json_skip_ws(&p);
+        if (*p != ':') {
+            return false;
+        }
+        ++p;
+        p2_json_skip_ws(&p);
+
+        char value[P2_MAX_VALUE];
+        size_t v = 0;
+        if (*p == '"') {
+            ++p;
+            while (*p != '\0' && *p != '"' && v + 1 < sizeof(value)) {
+                if (*p == '\\' && p[1] != '\0') {
+                    ++p;
+                }
+                value[v++] = *p++;
+            }
+            if (*p != '"') {
+                return false;
+            }
+            ++p;
+        } else {
+            while (*p != '\0' && *p != ',' && *p != '}' &&
+                   !isspace((unsigned char)*p) && v + 1 < sizeof(value)) {
+                value[v++] = *p++;
+            }
+        }
+        value[v] = '\0';
+        if (st->nfields < P2_MAX_FIELDS) {
+            p2_copy_trim(st->fields[st->nfields].key,
+                sizeof(st->fields[st->nfields].key), key, NULL);
+            p2_copy_trim(st->fields[st->nfields].value,
+                sizeof(st->fields[st->nfields].value), value, NULL);
+            ++st->nfields;
+        }
+        p2_json_skip_ws(&p);
+        if (*p == ',') {
+            ++p;
+            continue;
+        }
+        if (*p == '}') {
+            return true;
+        }
+        return false;
+    }
+}
+
+static void p2_exec_struct(int header, int close) {
+    char *line = p2_trim(p2_lines[header]);
+    const char *lp = strchr(line, '(');
+    const char *rp = strrchr(line, ')');
+    if (lp == NULL || rp == NULL || rp <= lp || close <= header + 1) {
+        robot_log("P2: @Struct block malformed");
+        return;
+    }
+    if (p2_nstructs >= P2_MAX_STRUCTS) {
+        robot_log("P2: too many @Struct blocks");
+        return;
+    }
+    p2_struct_t *st = &p2_structs[p2_nstructs];
+    memset(st, 0, sizeof(*st));
+    p2_copy_trim(st->name, sizeof(st->name), lp + 1, rp);
+
+    char json[512];
+    size_t off = 0;
+    for (int i = header + 1; i < close; ++i) {
+        char *part = p2_trim(p2_lines[i]);
+        size_t n = strlen(part);
+        if (off + n + 2 >= sizeof(json)) {
+            break;
+        }
+        if (off > 0) {
+            json[off++] = ' ';
+        }
+        memcpy(json + off, part, n);
+        off += n;
+    }
+    json[off] = '\0';
+    if (!p2_parse_json_object(json, st)) {
+        robot_log("P2: @Struct %s JSON parse error", st->name);
+        return;
+    }
+    ++p2_nstructs;
+    for (int i = 0; i < st->nfields; ++i) {
+        robot_log("P2: @Struct %s.%s = %s", st->name, st->fields[i].key,
+            st->fields[i].value);
+    }
+}
+
 static void p2_exec_lines(lua_State *L, int start, int end) {
     int i = start;
     while (i < end) {
@@ -1948,6 +2115,12 @@ static void p2_exec_lines(lua_State *L, int start, int end) {
             continue;
         }
 
+        if (strncmp(line, "@Struct(", 8) == 0) {
+            int close = p2_find_matching(i, end);
+            p2_exec_struct(i, close);
+            i = close + 1;
+            continue;
+        }
         if (strncmp(line, "@Alias", 6) == 0) {
             int close = p2_find_matching(i, end);
             p2_parse_directive(i, close, false);
@@ -2014,6 +2187,7 @@ static void p2_exec_lines(lua_State *L, int start, int end) {
 
 static bool p2_run_mt(lua_State *L) {
     p2_strip_comments(p2_mt_buf);
+    p2_nstructs = 0;
     p2_nlines = 0;
     char *save = NULL;
     char *line = strtok_r(p2_mt_buf, "\n", &save);
