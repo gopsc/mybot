@@ -43,6 +43,7 @@ typedef enum {
     ROBOT_CMD_VARS,
     ROBOT_CMD_STRUCTS,
     ROBOT_CMD_LOOP,
+    ROBOT_CMD_RELOAD,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -173,6 +174,7 @@ static lua_State *p2_active_L;
 static bool p2_active;
 static char p2_active_sql[64];
 static char p2_active_mt[64];
+static char p2_default_mt[64];
 static bool p2_hot_error;
 static bool p2_loop_active;
 static char p2_loop_path[64];
@@ -4103,6 +4105,7 @@ static void robot_runtime_close(void) {
     p2_active = false;
     p2_active_sql[0] = '\0';
     p2_active_mt[0] = '\0';
+    p2_default_mt[0] = '\0';
     p2_ndevices = 0;
     p2_nvars = 0;
     p2_naliases = 0;
@@ -4183,6 +4186,7 @@ static bool robot_p2_run(lua_State *L) {
     robot_log("P2: using %s", sql_path);
     snprintf(p2_active_sql, sizeof(p2_active_sql), "%s", sql_path);
     snprintf(p2_active_mt, sizeof(p2_active_mt), "%s", mt_path);
+    snprintf(p2_default_mt, sizeof(p2_default_mt), "%s", mt_path);
     p2_parse_sql();
     robot_log("P2: parsed %d device(s)", p2_ndevices);
     if (p2_ndevices == 0) {
@@ -4304,6 +4308,7 @@ static void robot_lua_smoke(void) {
     p2_active = false;
     p2_active_sql[0] = '\0';
     p2_active_mt[0] = '\0';
+    p2_default_mt[0] = '\0';
     p2_ndevices = 0;
     p2_nvars = 0;
     p2_naliases = 0;
@@ -4426,6 +4431,26 @@ void robot_send_structs(void) {
 
 void robot_send_loop(const char *arg) {
     robot_send_cmd(ROBOT_CMD_LOOP, arg);
+}
+
+void robot_send_reload(void) {
+    robot_send_cmd(ROBOT_CMD_RELOAD, NULL);
+}
+
+static bool p2_path_stem(const char *path, char *out, size_t cap) {
+    const char *base = strrchr(path, '/');
+    base = base != NULL ? base + 1 : path;
+    size_t n = strlen(base);
+    if (n > 4 && (strcmp(base + n - 4, ".sql") == 0 ||
+                  strcmp(base + n - 4, ".mt") == 0)) {
+        n -= 4;
+    }
+    if (n == 0 || n >= cap) {
+        return false;
+    }
+    memcpy(out, base, n);
+    out[n] = '\0';
+    return true;
 }
 
 static bool p2_parse_uint_arg(const char **pp, int *out) {
@@ -4809,6 +4834,35 @@ void robot_core1(void) {
             p2_loop_next = get_absolute_time();
             robot_stop = false;
             robot_log("core1: loop start %s period=%dms", path, period_ms);
+            break;
+        }
+        case ROBOT_CMD_RELOAD: {
+            if (!p2_active || p2_active_sql[0] == '\0' ||
+                p2_default_mt[0] == '\0') {
+                robot_log("core1: /reload needs an active profile");
+                break;
+            }
+            char sql_name[32];
+            char mt_name[32];
+            if (!p2_path_stem(p2_active_sql, sql_name, sizeof(sql_name)) ||
+                !p2_path_stem(p2_default_mt, mt_name, sizeof(mt_name))) {
+                robot_log("core1: /reload cannot derive active paths");
+                break;
+            }
+            p2_stop_loop("reload");
+            snprintf(p2_profile_override, sizeof(p2_profile_override), "%s",
+                sql_name);
+            snprintf(p2_script_override, sizeof(p2_script_override), "%s",
+                mt_name);
+            robot_stop = false;
+            robot_busy = true;
+            robot_log("core1: reload sql=%s script=%s", sql_name, mt_name);
+            robot_lua_smoke();
+            robot_busy = false;
+            p2_profile_override[0] = '\0';
+            p2_script_override[0] = '\0';
+            robot_log("core1: reload finished, %s", p2_active
+                ? "profile active" : "idle");
             break;
         }
         case ROBOT_CMD_UNLOAD:

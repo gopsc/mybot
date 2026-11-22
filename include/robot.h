@@ -48,6 +48,7 @@ void robot_send_devices(void);
 void robot_send_vars(void);
 void robot_send_structs(void);
 void robot_send_loop(const char *arg);
+void robot_send_reload(void);
 
 /* 供 core1 内部/后续驱动使用：非阻塞写入日志队列。 */
 void robot_log(const char *fmt, ...);

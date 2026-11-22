@@ -42,6 +42,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 34. **P33：`@SQL` 块事务回滚**
 35. **P34：设备列 `@Alias` 解析**
 36. **P35：`/loop` 周期动作循环**
+37. **P36：`/reload` 重载 active profile**
 
 还没有实现：完整 `@Merge` 语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -118,7 +119,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-269880    0 106484
+270064    0 106548
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -163,6 +164,7 @@ RX GP1
 /repeat name [count] [delay_ms]  批量重播
 /loop name period_ms             周期执行动作脚本
 /loop stop                       停止周期循环
+/reload       重读当前 SQL + 原始动作脚本
 /devices      列出 active 设备
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
@@ -845,6 +847,7 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /repeat name [count] [delay_ms]  批量重播
 /loop name period_ms             周期执行动作脚本
 /loop stop                       停止周期循环
+/reload       重读当前 SQL + 原始动作脚本
 /devices      列出 active 设备
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
@@ -1684,7 +1687,7 @@ P18-A 增加两个控制台命令：
 
 ```text
 run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
-loop <name> <period_ms> | loop stop | stop | status | profile | mem | list
+loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 devices | vars | structs | unload | help
 history: terminal up/down (ANSI)
 ```
@@ -1703,6 +1706,7 @@ history: terminal up/down (ANSI)
 /repeat <name> [count] [delay_ms]
 /loop <name> <period_ms>
 /loop stop
+/reload
 /devices
 /vars
 /structs
@@ -2136,7 +2140,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-269880     0  106484
+270064     0  106548
 ```
 
 构建：
@@ -2713,6 +2717,66 @@ core1: loop stopped after 2 iteration(s): command
 - 只维护一个周期循环
 - `/loop` 需要 active profile
 - 回滚/事务只作用于 `/sql`，周期动作本身没有事务
+
+## P36：/reload 重载 active profile
+
+P36-A 增加：
+
+```text
+/reload
+```
+
+行为：
+
+- 从当前 active 的 `/robots/*.sql` 和原始 `/scripts/*.mt` 重新加载
+- 先停止 `/loop`
+- 销毁当前 active 设备并关闭旧 Lua state
+- 重新读 SD 上的 SQL/MT 文件，重新 build、重新执行一次动作脚本
+- 热 SQL 补丁不重放；只重读 SD 文件本身
+- 如果 `/action` 换过动作脚本，`/reload` 仍使用 profile 原始动作脚本
+- 需要 active profile
+
+测试：
+
+```text
+/run p28
+/sql p28_add
+/devices
+/reload
+/devices
+```
+
+预期：
+
+- 第一次 `/devices` 看到 `base` + `hot`
+- `/reload` 后只剩 `base`
+- 修改 SD 上的 `p28.sql` / `p28.mt` 后，`/reload` 会读到新内容
+
+关键日志：
+
+```text
+core1: reload sql=p28 script=p28
+Lua: P5Check: destroy
+P2: hot.destroy result=OK
+Lua: P5Check: destroy
+P2: base.destroy result=OK
+P2: using /robots/p28.sql
+P2: device base driver=P5Check controller=- triggers=0
+P5Check: build value=1 name=base item=nil angle=nil
+P2: base.build result=OK
+P5Check: call value=1 name=base item=nil angle=nil
+P2: base.call result=OK
+P2: profile active, devices=1 heap=...KB
+core1: reload finished, profile active
+```
+
+限制：
+
+- 热 SQL 变更不会保留
+- 会重新初始化所有物理设备
+- 会重新执行 profile 动作脚本一次
+- 加载失败时可能回退到内置 smoke，active 状态丢失
+- `/reload` 使用 profile 原始动作脚本，不一定是最近 `/action` 的脚本
 
 ## 运行现象
 
