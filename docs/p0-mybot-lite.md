@@ -57,6 +57,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 49. **P48：顶层 MT 纳入 include 循环检测**
 50. **P49：`@Merge` 主从别名/变量覆盖**
 51. **P50：`@Merge` include-once 片段**
+52. **P51：`/i2cscan` 硬件总线扫描**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -185,6 +186,7 @@ RX GP1
 /autostart                  查看当前开机配置
 /devices      列出 active 设备
 /device name  显示单个设备 meta/拓扑
+/i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -921,6 +923,7 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /autostart                  查看当前开机配置
 /devices      列出 active 设备
 /device name  显示单个设备 meta/拓扑
+/i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -1761,7 +1764,7 @@ P18-A 增加两个控制台命令：
 run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 use <profile> | autostart <action> <period_ms> | autostart off | autostart
-devices | device <name> | vars | structs | unload | help
+devices | device <name> | i2cscan [0|1] | vars | structs | unload | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1786,6 +1789,7 @@ history: terminal up/down (ANSI)
 /autostart
 /devices
 /device <name>
+/i2cscan [0|1]
 /vars
 /structs
 /unload
@@ -3650,6 +3654,50 @@ P2: @Merge aborted by fragment duplicate
 - include-once 只跳过重复，不做菱形依赖递归
 - 片段递归 `@Merge` 仍未实现
 - 主脚本动作表不算片段路径
+- 尚未上板实测
+
+## P51：/i2cscan 硬件总线扫描
+
+P51-A 增加 I2C 总线扫描：
+
+```text
+/i2cscan 0
+/i2cscan 1
+```
+
+行为：
+
+- 不带参数默认扫描 bus 0
+- bus 0 使用 GP6/GP7，bus 1 使用 GP14/GP15
+- 以 100kHz 初始化（如果总线尚未打开）
+- 扫描地址 `0x08..0x77`
+- 每发现一个 ACK 地址输出一行：
+
+```text
+core1: i2cscan bus 0 addr=0x40
+core1: i2cscan bus 0 addr=0x48
+core1: i2cscan bus 0 -> 2 device(s)
+```
+
+- 不需要 active profile
+- 如果总线已被 Lua 驱动打开，会复用现有实例
+- 不扫描 fake 总线；fake 路径仍由 Lua 驱动内部处理
+
+测试（真实硬件）：
+
+```text
+/i2cscan 0
+```
+
+如果 PCA9685 / ADS1015 已接好且地址分别是 0x40 / 0x48，应看到这两个地址。
+
+限制：
+
+- 扫描会向总线发读探测；运行中扫描可能干扰正在工作的器件，建议 idle 时使用
+- 只支持 bus 0/1
+- 只报告 ACK 地址，不识别器件型号
+- 地址范围固定 0x08..0x77
+- 没有上拉/电气诊断
 - 尚未上板实测
 
 ## 运行现象

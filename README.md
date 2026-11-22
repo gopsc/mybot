@@ -105,6 +105,7 @@ p23
 /autostart                  查看开机配置
 /devices     列出 active 设备
 /device name 显示单个设备 meta/拓扑
+/i2cscan [0|1] 扫描 I2C 总线
 /vars        列出 active 变量/别名
 /structs     列出 active @Struct 字段
 /unload      销毁 active 设备并关闭 Lua

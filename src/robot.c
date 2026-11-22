@@ -47,6 +47,7 @@ typedef enum {
     ROBOT_CMD_USE,
     ROBOT_CMD_AUTOSTART,
     ROBOT_CMD_DEVICE,
+    ROBOT_CMD_I2CSCAN,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -332,6 +333,29 @@ static int p3_i2c_bus_from_path(const char *path) {
     return -1;
 }
 
+static int p3_i2c_open_bus(int bus) {
+    if (bus < 0 || bus > 1) {
+        return -1;
+    }
+    p3_i2c_t *slot = &p3_i2c[bus];
+    if (slot->open) {
+        return bus;
+    }
+    static const uint8_t sda_pin[2] = {6, 14};
+    static const uint8_t scl_pin[2] = {7, 15};
+    slot->inst = bus == 0 ? i2c0 : i2c1;
+    i2c_init(slot->inst, 100 * 1000);
+    gpio_set_function(sda_pin[bus], GPIO_FUNC_I2C);
+    gpio_set_function(scl_pin[bus], GPIO_FUNC_I2C);
+    gpio_pull_up(sda_pin[bus]);
+    gpio_pull_up(scl_pin[bus]);
+    slot->open = true;
+    slot->fake = false;
+    robot_log("I2C: opened bus %d (SDA GP%d, SCL GP%d)", bus,
+        sda_pin[bus], scl_pin[bus]);
+    return bus;
+}
+
 static int robot_lua_i2c_open(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     if (p3_i2c_fake_path(path)) {
@@ -347,25 +371,13 @@ static int robot_lua_i2c_open(lua_State *L) {
         lua_pushinteger(L, -1);
         return 1;
     }
-    p3_i2c_t *slot = &p3_i2c[bus];
-    if (slot->open) {
-        lua_pushinteger(L, bus);
+    int fd = p3_i2c_open_bus(bus);
+    if (fd < 0) {
+        lua_pushinteger(L, -1);
         return 1;
     }
-
-    static const uint8_t sda_pin[2] = {6, 14};
-    static const uint8_t scl_pin[2] = {7, 15};
-    slot->inst = bus == 0 ? i2c0 : i2c1;
-    i2c_init(slot->inst, 100 * 1000);
-    gpio_set_function(sda_pin[bus], GPIO_FUNC_I2C);
-    gpio_set_function(scl_pin[bus], GPIO_FUNC_I2C);
-    gpio_pull_up(sda_pin[bus]);
-    gpio_pull_up(scl_pin[bus]);
-    slot->open = true;
-    slot->fake = false;
-    robot_log("I2C: opened %s (SDA GP%d, SCL GP%d)", path,
-        sda_pin[bus], scl_pin[bus]);
-    lua_pushinteger(L, bus);
+    robot_log("I2C: path %s -> bus %d", path, fd);
+    lua_pushinteger(L, fd);
     return 1;
 }
 
@@ -4749,6 +4761,10 @@ void robot_send_device(const char *name) {
     robot_send_cmd(ROBOT_CMD_DEVICE, name);
 }
 
+void robot_send_i2cscan(const char *arg) {
+    robot_send_cmd(ROBOT_CMD_I2CSCAN, arg);
+}
+
 static bool p2_path_stem(const char *path, char *out, size_t cap) {
     const char *base = strrchr(path, '/');
     base = base != NULL ? base + 1 : path;
@@ -5153,6 +5169,39 @@ void robot_core1(void) {
                     d->env_ref != LUA_NOREF ? "yes" : "no");
             }
             break;
+        case ROBOT_CMD_I2CSCAN: {
+            int bus = 0;
+            if (cmd.arg[0] != '\0') {
+                const char *cp = cmd.arg;
+                if (!p2_parse_uint_arg(&cp, &bus)) {
+                    bus = -1;
+                }
+                while (*cp != '\0' && isspace((unsigned char)*cp)) {
+                    ++cp;
+                }
+                if (*cp != '\0') {
+                    bus = -1;
+                }
+            }
+            if (bus < 0 || bus > 1) {
+                robot_log("core1: /i2cscan usage: /i2cscan [0|1]");
+                break;
+            }
+            int fd = p3_i2c_open_bus(bus);
+            if (fd < 0) {
+                robot_log("core1: i2cscan cannot open bus %d", bus);
+                break;
+            }
+            int found = 0;
+            for (int addr = 0x08; addr <= 0x77; ++addr) {
+                if (p3_i2c_probe_addr(fd, addr)) {
+                    robot_log("core1: i2cscan bus %d addr=0x%02X", bus, addr);
+                    ++found;
+                }
+            }
+            robot_log("core1: i2cscan bus %d -> %d device(s)", bus, found);
+            break;
+        }
         case ROBOT_CMD_DEVICE: {
             if (cmd.arg[0] == '\0') {
                 robot_log("core1: /device usage: /device <name>");
