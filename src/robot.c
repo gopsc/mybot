@@ -5273,18 +5273,35 @@ static bool p2_parse_uint_arg(const char **pp, int *out) {
 }
 
 static bool p2_write_file(const char *path, const char *text) {
+    char tmp[64];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     FIL fp;
-    FRESULT fr = f_open(&fp, path, FA_WRITE | FA_CREATE_ALWAYS);
+    FRESULT fr = f_open(&fp, tmp, FA_WRITE | FA_CREATE_ALWAYS);
     if (fr != FR_OK) {
-        robot_log("core1: cannot write %s (%s)", path, FRESULT_str(fr));
+        robot_log("core1: cannot write %s (%s)", tmp, FRESULT_str(fr));
         return false;
     }
     UINT wrote = 0;
     size_t len = strlen(text);
     fr = f_write(&fp, text, (UINT)len, &wrote);
+    FRESULT sf = f_sync(&fp);
     FRESULT cf = f_close(&fp);
-    if (fr != FR_OK || cf != FR_OK || wrote != len) {
-        robot_log("core1: write %s failed", path);
+    if (fr != FR_OK || sf != FR_OK || cf != FR_OK || wrote != len) {
+        robot_log("core1: write %s failed", tmp);
+        f_unlink(tmp);
+        return false;
+    }
+    FRESULT ur = f_unlink(path);
+    if (ur != FR_OK && ur != FR_NO_FILE) {
+        robot_log("core1: unlink %s failed (%s)", path, FRESULT_str(ur));
+        f_unlink(tmp);
+        return false;
+    }
+    FRESULT rr = f_rename(tmp, path);
+    if (rr != FR_OK) {
+        robot_log("core1: rename %s -> %s failed (%s)", tmp, path,
+            FRESULT_str(rr));
+        f_unlink(tmp);
         return false;
     }
     return true;

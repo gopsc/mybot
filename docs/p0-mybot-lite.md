@@ -69,6 +69,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 61. **P61：`/version` 与 `/uptime` 诊断**
 62. **P62：`@Merge` 32 行预算**
 63. **P63：`/savevars` / `/loadvars` 变量持久化**
+64. **P64：配置文件临时文件替换写入**
 60. **P59：`/set` / `/get` 运行时变量**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
@@ -146,7 +147,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-286728    0 140408
+289256    0 140408
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -2297,7 +2298,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-286728     0  140408
+289256     0  140408
 ```
 
 构建：
@@ -3033,7 +3034,7 @@ core1: boot autostart /scripts/p29.mt period=200ms
 
 限制：
 
-- 直接覆盖写，没有临时文件/原子 rename；掉电可能截断
+- P64 起先写 `.tmp` 再 unlink+rename；掉电窗口内可能短暂无文件
 - `/use` 只改 `/profile.txt`，不会立即切 profile
 - `/autostart` 只改 `/boot.txt`，不会立即启动循环
 - 需要 SD 可写
@@ -3383,7 +3384,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-286728     0  140408
+289256     0  140408
 ```
 
 限制：
@@ -4398,10 +4399,40 @@ core1: loaded 2 var(s) from /vars.txt
 
 - 不保存别名
 - 不自动保存，只有 `/savevars`
-- 直接覆盖写，没有临时文件/原子 rename
+- P64 起先写 `.tmp` 再 unlink+rename；不是完全原子
 - 变量值里的换行会破坏文件格式
 - 自动加载发生在 profile 初始动作之后
 - 同名变量查找仍是首个定义优先
+- 尚未上板实测
+
+## P64：配置文件临时文件替换写入
+
+P64-A 改进 `/profile.txt`、`/boot.txt`、`/vars.txt` 的写入流程：
+
+1. 写入 `<path>.tmp`
+2. `f_sync` 刷盘
+3. `f_close`
+4. `f_unlink` 旧文件
+5. `f_rename` 临时文件为目标名
+
+覆盖：
+
+- `/profile.txt`（`/use`）
+- `/boot.txt`（`/autostart`）
+- `/vars.txt`（`/savevars`）
+
+优点：
+
+- 临时文件写入期间旧配置保持完整
+- 写入失败会清理 `.tmp`
+- 不再直接 truncate 目标文件
+
+限制：
+
+- FatFs `f_rename` 不能覆盖已存在目标，因此必须先 unlink
+- unlink 与 rename 之间存在短暂“无配置文件”窗口
+- 掉电发生在该窗口时，配置会丢失
+- `.tmp` 仍是普通 FAT 文件，没有日志/校验和
 - 尚未上板实测
 
 ## 运行现象
