@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -12,8 +12,9 @@
 8. **顶层 `@Include` 脚本片段**
 9. **算术表达式、括号条件和字符串拼接**
 10. **简化版 `@Merge` 相位时间线**
+11. **trigger 前置调用**
 
-还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
+还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
 ## 改动
 
@@ -69,7 +70,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-878644    0 165676
+879684    0 166092
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -93,7 +94,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-255348     0 115264
+256388     0 115680
 ```
 
 此时：
@@ -184,6 +185,7 @@ sdcard/
     p7.sql
     p8.sql
     p9.sql
+    p10.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -203,6 +205,7 @@ sdcard/
     p7.mt
     p8.mt
     p9.mt
+    p10.mt
     parts/inc_p5.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -486,6 +489,7 @@ p6              -> /robots/p6.sql + /scripts/p6.mt（@Include）
 p7              -> /robots/p7.sql + /scripts/p7.mt（算术表达式）
 p8              -> /robots/p8.sql + /scripts/p8.mt（字符串拼接）
 p9              -> /robots/p9.sql + /scripts/p9.mt（@Merge 相位时间线）
+p10             -> /robots/p10.sql + /scripts/p10.mt（trigger 前置调用）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -1121,6 +1125,67 @@ P2: @Merge timeline 5 beat(s)
 - 片段里不支持 `@Alias`/`@Vars`/`@if`/`@while`
 - 不校验设备集是否相交
 - 不是完整 mybot `mtmerge` 语义
+
+## P10：trigger 前置调用
+
+P10-A 支持结构表里的 `trigger` / `triggerN` 列：
+
+```sql
+CREATE TABLE Relay (
+    name       String,
+    controller String,
+    trigger    String,
+    note       String,
+    test       String
+);
+INSERT INTO Relay (name, controller, trigger, note, test)
+  VALUES ('relay-src', '-', '-', 'src', '300');
+INSERT INTO Relay (name, controller, trigger, note, test)
+  VALUES ('relay-sink', 'timer-0', 'relay-src', 'sink', '-');
+```
+
+动作：
+
+```mt
+@Action
+relay-sink.junk;
+      1;
+@
+```
+
+执行顺序：
+
+```text
+relay-sink build
+  → trigger relay-src.call()
+  → relay-sink.call()
+  → controller timer-0.call()
+```
+
+测试 profile：
+
+```text
+p10
+```
+
+预期关键输出：
+
+```text
+P2: device relay-sink driver=Relay controller=timer-0 triggers=1
+P2: trigger relay-src before relay-sink
+Relay: test=300 note=src -> delay=300
+P2: relay-src.call result=- delay=300
+Relay: test=- note=sink -> delay=0
+...
+P2: controller timer-0 result=OK slept=0
+```
+
+限制：
+
+- trigger 只执行前置调用，返回字段目前不合并成嵌套表
+- 最多 2 个 trigger 列
+- trigger 目标必须先声明
+- 还没有 trigger 递归深度防线
 
 ## 运行现象
 

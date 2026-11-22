@@ -61,6 +61,7 @@ static char lua_file_buf[32 * 1024];
 #define P2_MAX_COLS 16
 #define P2_MAX_DEVICES 8
 #define P2_MAX_FIELDS 10
+#define P2_MAX_TRIGGERS 2
 #define P2_MAX_ALIASES 8
 #define P2_MAX_VARS 8
 #define P2_MAX_LINES 96
@@ -88,6 +89,8 @@ typedef struct {
     char name[P2_MAX_NAME];
     char driver[P2_MAX_NAME];
     char controller[P2_MAX_NAME];
+    char triggers[P2_MAX_TRIGGERS][P2_MAX_NAME];
+    int ntriggers;
     p2_field_t meta[P2_MAX_FIELDS];
     int nmeta;
     int env_ref;
@@ -1347,6 +1350,19 @@ static bool p2_add_field(p2_field_t *fields, int *count, const char *key,
     return true;
 }
 
+static bool p2_flow_column(const char *col, const char *base) {
+    size_t n = strlen(base);
+    if (strncmp(col, base, n) != 0) {
+        return false;
+    }
+    for (size_t i = n; col[i] != '\0'; ++i) {
+        if (!isdigit((unsigned char)col[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static void p2_add_device(const char *driver, char **cols, char **vals, int n) {
     if (strcmp(driver, "Vars") == 0) {
         const char *name = NULL;
@@ -1398,16 +1414,26 @@ static void p2_add_device(const char *driver, char **cols, char **vals, int n) {
         p2_add_field(d->meta, &d->nmeta, key, value);
         if (strcmp(key, "name") == 0) {
             p2_copy_trim(d->name, sizeof(d->name), value, NULL);
-        } else if (strcmp(key, "controller") == 0) {
-            p2_copy_trim(d->controller, sizeof(d->controller), value, NULL);
+        } else if (p2_flow_column(key, "controller")) {
+            if (d->controller[0] == '\0') {
+                p2_copy_trim(d->controller, sizeof(d->controller), value, NULL);
+            }
+        } else if (p2_flow_column(key, "trigger")) {
+            if (d->ntriggers < P2_MAX_TRIGGERS && value[0] != '-' &&
+                value[0] != '$') {
+                p2_copy_trim(d->triggers[d->ntriggers],
+                    sizeof(d->triggers[d->ntriggers]), value, NULL);
+                ++d->ntriggers;
+            }
         }
     }
     if (d->name[0] == '\0') {
         snprintf(d->name, sizeof(d->name), "%s-%d", d->driver, p2_ndevices);
         p2_add_field(d->meta, &d->nmeta, "name", d->name);
     }
-    robot_log("P2: device %s driver=%s controller=%s", d->name,
-        d->driver, d->controller[0] != '\0' ? d->controller : "-");
+    robot_log("P2: device %s driver=%s controller=%s triggers=%d", d->name,
+        d->driver, d->controller[0] != '\0' ? d->controller : "-",
+        d->ntriggers);
     ++p2_ndevices;
 }
 
@@ -1779,6 +1805,20 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
         if (d == NULL || d->env_ref == LUA_NOREF) {
             robot_log("P2: unknown device %s", p2_action_cols[i].device);
             continue;
+        }
+
+        for (int t = 0; t < d->ntriggers; ++t) {
+            p2_device_t *tr = p2_find_device(d->triggers[t]);
+            if (tr == NULL || tr->env_ref == LUA_NOREF) {
+                robot_log("P2: trigger %s not found", d->triggers[t]);
+                continue;
+            }
+            p2_call_result_t tres;
+            robot_log("P2: trigger %s before %s", tr->name, d->name);
+            if (!p2_lua_call(L, tr->env_ref, tr->name, "call", tr->meta,
+                    tr->nmeta, &tres)) {
+                robot_log("P2: trigger %s call failed", tr->name);
+            }
         }
 
         p2_field_t fields[P2_MAX_FIELDS];
