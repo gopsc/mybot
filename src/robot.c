@@ -132,6 +132,22 @@ static int robot_os_noop(lua_State *L) {
     return 2;
 }
 
+/* P1-C：Timer.lua 只需要阻塞毫秒。分片睡眠让 stop 请求在 50ms 内可见，
+ * 同时因为 core1 独占机器人运行时，core0 的 VGA/USB 不受影响。 */
+static int robot_lua_milli_sleep(lua_State *L) {
+    lua_Number n = luaL_checknumber(L, 1);
+    if (n < 0) {
+        n = 0;
+    }
+    int ms = (int)n;
+    while (ms > 0 && !robot_stop) {
+        int chunk = ms > 50 ? 50 : ms;
+        sleep_ms((uint32_t)chunk);
+        ms -= chunk;
+    }
+    return 0;
+}
+
 static void robot_openlibs(lua_State *L) {
     static const lua_CFunction libs[] = {
         luaopen_base, luaopen_package, luaopen_table,
@@ -143,6 +159,7 @@ static void robot_openlibs(lua_State *L) {
     }
 
     lua_register(L, "print", robot_lua_print);
+    lua_register(L, "milli_sleep", robot_lua_milli_sleep);
 
     lua_newtable(L);
     lua_pushcfunction(L, robot_os_getenv); lua_setfield(L, -2, "getenv");
@@ -347,7 +364,7 @@ static int robot_create_env_from_source(lua_State *L, const char *source,
 }
 
 static bool lua_env_call_entry(lua_State *L, int env_ref, const char *label,
-        const char *name, bool with_test) {
+        const char *name, bool with_args) {
     lua_rawgeti(L, LUA_REGISTRYINDEX, env_ref);   /* env */
     int env = lua_gettop(L);
     lua_getfield(L, env, name);
@@ -358,11 +375,14 @@ static bool lua_env_call_entry(lua_State *L, int env_ref, const char *label,
     }
 
     lua_newtable(L);
-    if (with_test) {
+    if (with_args) {
+        /* Relay/Echo 用 test/note，Timer 用 delay；三类参数同表传入，驱动各取所需。 */
         lua_pushinteger(L, 200);
         lua_setfield(L, -2, "test");
         lua_pushliteral(L, "hello");
         lua_setfield(L, -2, "note");
+        lua_pushinteger(L, 200);
+        lua_setfield(L, -2, "delay");
     }
     if (lua_pcall(L, 1, 1, 0) != 0) {
         const char *err = lua_tostring(L, -1);
@@ -389,6 +409,12 @@ static bool lua_env_call_entry(lua_State *L, int env_ref, const char *label,
             lua_getfield(L, -1, "delay");
             if (lua_isnumber(L, -1)) {
                 robot_log("Lua %s.%s delay=%d", label, name,
+                    (int)lua_tointeger(L, -1));
+            }
+            lua_pop(L, 1);
+            lua_getfield(L, -1, "slept");
+            if (lua_isnumber(L, -1)) {
+                robot_log("Lua %s.%s slept=%d", label, name,
                     (int)lua_tointeger(L, -1));
             }
             lua_pop(L, 1);
@@ -440,6 +466,12 @@ static void robot_lua_smoke(void) {
         robot_log("P1-B: /modules/Echo.lua unavailable; single-env check only");
     }
 
+    /* P1-C：真实 Timer.lua + 最小 HAL.lua，验证 milli_sleep 与 VGA 实时性。 */
+    int timer_env = robot_create_env_from_path(L, "/modules/Timer.lua", "Timer.lua");
+    if (timer_env == LUA_NOREF) {
+        robot_log("P1-C: /modules/Timer.lua unavailable; sleep check skipped");
+    }
+
     bool ok = true;
     if (robot_env != LUA_NOREF) {
         bool env_ok = lua_env_call_entry(L, robot_env, "robot", "build", false) &&
@@ -459,6 +491,14 @@ static void robot_lua_smoke(void) {
         ok = ok && env_ok;
     }
 
+    if (timer_env != LUA_NOREF) {
+        bool env_ok = lua_env_call_entry(L, timer_env, "timer", "build", false) &&
+                      lua_env_call_entry(L, timer_env, "timer", "call", true) &&
+                      lua_env_call_entry(L, timer_env, "timer", "destroy", false);
+        robot_log("Lua timer env: %s", env_ok ? "OK" : "FAILED");
+        ok = ok && env_ok;
+    }
+
     robot_log("Lua smoke %s, heap=%dKB", ok ? "OK" : "FAILED", lua_heap_kb(L));
 
     if (robot_env != LUA_NOREF) {
@@ -466,6 +506,9 @@ static void robot_lua_smoke(void) {
     }
     if (echo_env != LUA_NOREF) {
         luaL_unref(L, LUA_REGISTRYINDEX, echo_env);
+    }
+    if (timer_env != LUA_NOREF) {
+        luaL_unref(L, LUA_REGISTRYINDEX, timer_env);
     }
     lua_close(L);
 }

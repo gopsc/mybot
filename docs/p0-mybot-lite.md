@@ -61,7 +61,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-844172    0 103776
+844700    0 103776
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -85,7 +85,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-222300     0  53508
+222828     0  53508
 ```
 
 此时：
@@ -147,7 +147,9 @@ sdcard/
   modules/
     Relay.lua
     Echo.lua
+    Timer.lua
     lib/
+      HAL.lua
       drv_common.lua
       print_table.lua
 ```
@@ -183,19 +185,30 @@ C 侧随后调用 `build` / `call` / `destroy`，其中 `call` 会传入
 [robot] Lua robot env: OK
 [robot] Lua: Echo: build
 [robot] Lua: Echo: call test=200
+[robot] Lua: Echo: destroy
 [robot] Lua echo env: OK
+[robot] Lua timer.call slept=200
+[robot] Lua timer env: OK
 [robot] Lua smoke OK, heap=...KB
 ```
 
+P1-C 增加了最小 `HAL.lua` + 真实 `Timer.lua`：
+
+- `Timer.lua` 从 SD 加载；
+- `HAL.lua` 提供最小 Pico 后端；
+- `milli_sleep(200)` 在 core1 分片睡眠；
+- VGA/USB 在 core0 继续响应；
+- Timer 返回 `slept=200`。
+
 这证明：
 
-- Lua 5.1 能加载 mybot 的真实 `Relay.lua`；
+- Lua 5.1 能加载 mybot 的真实 `Relay.lua` / `Timer.lua`；
 - `drv_common.lua` / `print_table.lua` 的 LuaJIT 5.1 语法兼容；
 - `dofile` 已改走 FatFS，而不是 newlib `fopen`；
 - 每设备 env 隔离生效，两个驱动可以同时存在；
 - Lua 的 `print()` 能回到 core0 显示到 VGA。
 
-下一步 P1-C 会加最小 `HAL.lua` + `Timer.lua`，让 Lua 能调用 `milli_sleep`。
+下一步 P2 会把 mybot 的 `sqlparse` + `matrix` 接进来，执行真实 `.sql` / `.mt`。
 
 ## 运行现象
 
