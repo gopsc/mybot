@@ -53,6 +53,7 @@ void robot_send_use(const char *name);
 void robot_send_autostart(const char *arg);
 void robot_send_device(const char *name);
 void robot_send_i2cscan(const char *arg);
+void robot_send_uarttest(const char *arg);
 
 /* 供 core1 内部/后续驱动使用：非阻塞写入日志队列。 */
 void robot_log(const char *fmt, ...);

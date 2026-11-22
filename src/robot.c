@@ -48,6 +48,7 @@ typedef enum {
     ROBOT_CMD_AUTOSTART,
     ROBOT_CMD_DEVICE,
     ROBOT_CMD_I2CSCAN,
+    ROBOT_CMD_UARTTEST,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -652,9 +653,34 @@ typedef struct {
     bool open;
     bool fake;
     uart_inst_t *inst;
+    int baud;
 } p3_uart_t;
 
 static p3_uart_t p3_uart[3];
+
+static int p3_uart_open_baud(int baud) {
+    if (baud <= 0) {
+        return -1;
+    }
+    p3_uart_t *slot = &p3_uart[1];
+    if (slot->open && slot->baud == baud) {
+        return 1;
+    }
+    if (slot->open && slot->inst != NULL) {
+        uart_deinit(slot->inst);
+    }
+    slot->inst = uart1;
+    uart_init(slot->inst, (uint)baud);
+    gpio_set_function(8, GPIO_FUNC_UART);
+    gpio_set_function(9, GPIO_FUNC_UART);
+    uart_set_format(slot->inst, 8, 1, UART_PARITY_NONE);
+    uart_set_fifo_enabled(slot->inst, true);
+    slot->open = true;
+    slot->fake = false;
+    slot->baud = baud;
+    robot_log("UART: opened UART1 (TX GP8, RX GP9) @ %d", baud);
+    return 1;
+}
 
 static int robot_lua_uart_open(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
@@ -671,17 +697,9 @@ static int robot_lua_uart_open(lua_State *L) {
         lua_pushinteger(L, -1);
         return 1;
     }
-    p3_uart_t *slot = &p3_uart[1];
-    if (!slot->open) {
-        slot->inst = uart1;
-        uart_init(slot->inst, (uint)baud);
-        gpio_set_function(8, GPIO_FUNC_UART);
-        gpio_set_function(9, GPIO_FUNC_UART);
-        uart_set_format(slot->inst, 8, 1, UART_PARITY_NONE);
-        uart_set_fifo_enabled(slot->inst, true);
-        slot->open = true;
-        slot->fake = false;
-        robot_log("UART: opened UART1 (TX GP8, RX GP9) @ %d", baud);
+    if (p3_uart_open_baud(baud) < 0) {
+        lua_pushinteger(L, -1);
+        return 1;
     }
     lua_pushinteger(L, 1);
     return 1;
@@ -4874,6 +4892,10 @@ void robot_send_i2cscan(const char *arg) {
     robot_send_cmd(ROBOT_CMD_I2CSCAN, arg);
 }
 
+void robot_send_uarttest(const char *arg) {
+    robot_send_cmd(ROBOT_CMD_UARTTEST, arg);
+}
+
 static bool p2_path_stem(const char *path, char *out, size_t cap) {
     const char *base = strrchr(path, '/');
     base = base != NULL ? base + 1 : path;
@@ -5278,6 +5300,55 @@ void robot_core1(void) {
                     d->env_ref != LUA_NOREF ? "yes" : "no");
             }
             break;
+        case ROBOT_CMD_UARTTEST: {
+            int baud = 115200;
+            if (cmd.arg[0] != '\0') {
+                const char *cp = cmd.arg;
+                if (!p2_parse_uint_arg(&cp, &baud)) {
+                    baud = -1;
+                }
+                while (*cp != '\0' && isspace((unsigned char)*cp)) {
+                    ++cp;
+                }
+                if (*cp != '\0') {
+                    baud = -1;
+                }
+            }
+            if (baud < 1200 || baud > 2000000) {
+                robot_log("core1: /uarttest usage: /uarttest [baud]");
+                break;
+            }
+            if (p3_uart_open_baud(baud) < 0) {
+                robot_log("core1: uarttest cannot open UART1");
+                break;
+            }
+            const uint8_t ping[] = {'P', 'I', 'N', 'G', '\r', '\n'};
+            uart_write_blocking(p3_uart[1].inst, ping, sizeof(ping));
+            uint8_t buf[32];
+            int got = 0;
+            absolute_time_t deadline = make_timeout_time_ms(50);
+            while (!time_reached(deadline) && got < (int)sizeof(buf)) {
+                while (uart_is_readable(p3_uart[1].inst) && got < (int)sizeof(buf)) {
+                    buf[got++] = (uint8_t)uart_getc(p3_uart[1].inst);
+                }
+            }
+            char hex[3 * 16 + 1];
+            int hn = 0;
+            int shown = got < 16 ? got : 16;
+            for (int i = 0; i < shown; ++i) {
+                hn += snprintf(hex + hn, sizeof(hex) - hn, "%02X", buf[i]);
+                if (i + 1 < shown) {
+                    hex[hn++] = ' ';
+                    hex[hn] = '\0';
+                }
+            }
+            if (hn == 0) {
+                snprintf(hex, sizeof(hex), "-");
+            }
+            robot_log("core1: uarttest baud=%d wrote=%d read=%d [%s]",
+                baud, (int)sizeof(ping), got, hex);
+            break;
+        }
         case ROBOT_CMD_I2CSCAN: {
             int bus = 0;
             if (cmd.arg[0] != '\0') {

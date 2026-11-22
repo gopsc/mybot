@@ -61,6 +61,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 53. **P52：`@Merge` 片段递归**
 54. **P53：跨顶层/嵌套的 include-once**
 55. **P54：`/reboot` 软重启**
+56. **P55：`/uarttest` 串口自检**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -137,7 +138,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-279568    0 140380
+280544    0 140392
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -191,6 +192,7 @@ RX GP1
 /devices      列出 active 设备
 /device name  显示单个设备 meta/拓扑
 /i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
+/uarttest [baud]  UART1 发 PING 并读回
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -935,6 +937,7 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /devices      列出 active 设备
 /device name  显示单个设备 meta/拓扑
 /i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
+/uarttest [baud]  UART1 发 PING 并读回
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -1775,7 +1778,8 @@ P18-A 增加两个控制台命令：
 run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 use <profile> | autostart <action> <period_ms> | autostart off | autostart
-devices | device <name> | i2cscan [0|1] | vars | structs | unload | reboot | help
+devices | device <name> | i2cscan [0|1] | uarttest [baud] | vars | structs
+unload | reboot | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1802,6 +1806,7 @@ history: terminal up/down (ANSI)
 /devices
 /device <name>
 /i2cscan [0|1]
+/uarttest [baud]
 /vars
 /structs
 /unload
@@ -2234,7 +2239,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-279568     0  140380
+280544     0  140392
 ```
 
 构建：
@@ -3320,7 +3325,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-279568     0  140380
+280544     0  140392
 ```
 
 限制：
@@ -3893,6 +3898,45 @@ P54-A 增加：
 - 依赖 `/profile.txt` / `/boot.txt` 持久化配置
 - 如果 `/boot.txt` 无效，重启后保持 idle
 - 没有重启原因/日志持久化
+- 尚未上板实测
+
+## P55：/uarttest 串口自检
+
+P55-A 增加 UART1 自检：
+
+```text
+/uarttest
+/uarttest 9600
+```
+
+行为：
+
+- 默认 baud 115200
+- 范围 1200 ~ 2000000
+- 使用 UART1，TX GP8 / RX GP9，8N1
+- 如果 UART1 已打开且 baud 相同，直接复用
+- baud 不同则 deinit/reinit
+- 发送 `PING\r\n`
+- 随后 50ms 内读取最多 32 字节
+- 日志输出写入长度、读取长度和十六进制内容：
+
+```text
+core1: uarttest baud=115200 wrote=6 read=0 [-]
+```
+
+做 TX/RX 回环（GP8 接 GP9）时预期：
+
+```text
+core1: uarttest baud=115200 wrote=6 read=6 [50 49 4E 47 0D 0A]
+```
+
+限制：
+
+- 如果 UART1 正被 active 设备使用，测试会注入 PING 并可能消费 RX 数据，建议 idle 时运行
+- 只支持 UART1 GP8/9
+- 没有自动流控/校验
+- 回环需要手动短接 TX/RX
+- 只读取 50ms，较慢设备可能无响应
 - 尚未上板实测
 
 ## 运行现象

@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-279568     0  140380
+280544     0  140392
 ```
 
 ## SD 卡（必需）
@@ -107,6 +107,7 @@ p23
 /devices     列出 active 设备
 /device name 显示单个设备 meta/拓扑
 /i2cscan [0|1] 扫描 I2C 总线
+/uarttest [baud]  UART1 发 PING 并读回
 /vars        列出 active 变量/别名
 /structs     列出 active @Struct 字段
 /unload      销毁 active 设备并关闭 Lua
