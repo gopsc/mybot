@@ -58,7 +58,7 @@ static char lua_file_buf[32 * 1024];
  * 支持多 INSERT、多数据行、同设备多参数；不支持 @if/@while/@Alias/$ref。
  */
 #define P2_MAX_TABLES 6
-#define P2_MAX_COLS 10
+#define P2_MAX_COLS 16
 #define P2_MAX_DEVICES 8
 #define P2_MAX_FIELDS 10
 #define P2_MAX_ALIASES 8
@@ -122,6 +122,18 @@ typedef struct {
 } p2_struct_t;
 static p2_struct_t p2_structs[P2_MAX_STRUCTS];
 static int p2_nstructs;
+#define P2_MERGE_FILES 4
+#define P2_MERGE_ROWS 8
+#define P2_MERGE_COLS 8
+typedef struct {
+    int phase;
+    int ncols;
+    char headers[P2_MERGE_COLS][P2_MAX_NAME];
+    int nrows;
+    char rows[P2_MERGE_ROWS][P2_MERGE_COLS][P2_MAX_VALUE];
+} p2_merge_src_t;
+static p2_merge_src_t p2_merge_srcs[P2_MERGE_FILES];
+static int p2_merge_nsrc;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
 static char p2_expanded_buf[P2_MT_MAX * 2];
@@ -2432,6 +2444,145 @@ static void p2_exec_struct(int header, int close) {
     }
 }
 
+static void p2_include_path(const char *row, char *out, size_t cap);
+
+static bool p2_load_merge_file(const char *path, int phase, p2_merge_src_t *src) {
+    if (p2_read_file(path, p2_include_file, sizeof(p2_include_file)) == 0) {
+        return false;
+    }
+    p2_strip_comments(p2_include_file);
+    memset(src, 0, sizeof(*src));
+    src->phase = phase;
+    bool found = false;
+    bool header = false;
+    char *save = NULL;
+    char *line = strtok_r(p2_include_file, "\n", &save);
+    while (line != NULL) {
+        char *t = p2_trim(line);
+        if (*t == '\0') {
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        if (!found) {
+            if (strncmp(t, "@Action", 7) == 0) {
+                found = true;
+            }
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        if (*t == '@') {
+            break;
+        }
+        if (!header) {
+            char *cells[P2_MERGE_COLS];
+            int n = p2_split_ws(t, cells, P2_MERGE_COLS);
+            src->ncols = n;
+            for (int i = 0; i < n; ++i) {
+                p2_copy_trim(src->headers[i], sizeof(src->headers[i]),
+                    cells[i], NULL);
+            }
+            header = true;
+        } else if (src->nrows < P2_MERGE_ROWS) {
+            char *vals[P2_MERGE_COLS];
+            int n = p2_split_ws(t, vals, P2_MERGE_COLS);
+            for (int i = 0; i < src->ncols; ++i) {
+                p2_copy_trim(src->rows[src->nrows][i],
+                    sizeof(src->rows[src->nrows][i]),
+                    i < n ? vals[i] : "-", NULL);
+            }
+            ++src->nrows;
+        }
+        line = strtok_r(NULL, "\n", &save);
+    }
+    return src->ncols > 0 && src->nrows > 0;
+}
+
+static void p2_merge_exec(lua_State *L, int start, int end) {
+    p2_merge_nsrc = 0;
+    bool header = false;
+    for (int i = start + 1; i < end; ++i) {
+        char *t = p2_trim(p2_lines[i]);
+        if (*t == '\0') {
+            continue;
+        }
+        if (*t == '@') {
+            break;
+        }
+        if (!header) {
+            header = true;   /* path phase; */
+            continue;
+        }
+        char *cells[4];
+        int n = p2_split_ws(t, cells, 4);
+        if (n < 1 || p2_merge_nsrc >= P2_MERGE_FILES) {
+            continue;
+        }
+        int phase = n >= 2 ? atoi(cells[1]) : 0;
+        if (phase < 0) {
+            phase = 0;
+        }
+        char path[128];
+        p2_include_path(cells[0], path, sizeof(path));
+        if (p2_load_merge_file(path, phase,
+                &p2_merge_srcs[p2_merge_nsrc])) {
+            robot_log("P2: @Merge %s phase=%d rows=%d", path, phase,
+                p2_merge_srcs[p2_merge_nsrc].nrows);
+            ++p2_merge_nsrc;
+        } else {
+            robot_log("P2: @Merge cannot load %s", path);
+        }
+    }
+    if (p2_merge_nsrc == 0) {
+        return;
+    }
+    int beats = 0;
+    for (int s = 0; s < p2_merge_nsrc; ++s) {
+        int end_beat = p2_merge_srcs[s].phase + p2_merge_srcs[s].nrows;
+        if (end_beat > beats) {
+            beats = end_beat;
+        }
+    }
+    for (int beat = 0; beat < beats && !robot_stop; ++beat) {
+        int total = 0;
+        char *vals[P2_MAX_COLS];
+        memset(p2_action_cols, 0, sizeof(p2_action_cols));
+        for (int s = 0; s < p2_merge_nsrc; ++s) {
+            p2_merge_src_t *src = &p2_merge_srcs[s];
+            int row = beat - src->phase;
+            if (row < 0 || src->nrows == 0) {
+                continue;
+            }
+            if (row >= src->nrows) {
+                row = src->nrows - 1;   /* 耗尽保持最后姿势 */
+            }
+            for (int c = 0; c < src->ncols && total < P2_MAX_COLS; ++c) {
+                char header[P2_MAX_NAME];
+                p2_copy_trim(header, sizeof(header), src->headers[c], NULL);
+                char *dot = strchr(header, '.');
+                if (dot == NULL) {
+                    continue;
+                }
+                *dot = '\0';
+                p2_copy_trim(p2_action_cols[total].device,
+                    sizeof(p2_action_cols[total].device), header, NULL);
+                const char *param = dot + 1;
+                const char *alias = p2_find_alias(param);
+                if (alias != NULL) {
+                    param = alias;
+                }
+                p2_copy_trim(p2_action_cols[total].param,
+                    sizeof(p2_action_cols[total].param), param, NULL);
+                vals[total] = src->rows[row][c];
+                ++total;
+            }
+        }
+        if (total > 0) {
+            p2_execute_row(L, vals, total);
+        }
+    }
+    robot_log("P2: @Merge timeline %d beat(s)", beats);
+}
+
 static void p2_exec_lines(lua_State *L, int start, int end) {
     int i = start;
     while (i < end) {
@@ -2443,7 +2594,7 @@ static void p2_exec_lines(lua_State *L, int start, int end) {
 
         if (strncmp(line, "@Merge", 6) == 0) {
             int close = p2_find_matching(i, end);
-            robot_log("P2: @Merge unsupported; use @Include");
+            p2_merge_exec(L, i, close);
             i = close + 1;
             continue;
         }

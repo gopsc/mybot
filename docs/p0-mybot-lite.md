@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -11,8 +11,9 @@
 7. **`@Struct` JSON 对象/数组与字段选择**
 8. **顶层 `@Include` 脚本片段**
 9. **算术表达式、括号条件和字符串拼接**
+10. **简化版 `@Merge` 相位时间线**
 
-还没有实现：@Merge、动态 SQL、完整 mybot 表达式 AST（字符串拼接等）。那些属于后续阶段。
+还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
 
 ## 改动
 
@@ -68,7 +69,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-876780    0 156376
+878644    0 165676
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -92,7 +93,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-253492     0 105964
+255348     0 115264
 ```
 
 此时：
@@ -182,6 +183,7 @@ sdcard/
     p6.sql
     p7.sql
     p8.sql
+    p9.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -200,7 +202,10 @@ sdcard/
     p6.mt
     p7.mt
     p8.mt
+    p9.mt
     parts/inc_p5.mt
+    parts/merge_ca.mt
+    parts/merge_cb.mt
     pca9685.mt
     ads1015.mt
     spi.mt
@@ -480,6 +485,7 @@ p5c             -> /robots/p5c.sql + /scripts/p5c.mt（@Struct 字段捕获）
 p6              -> /robots/p6.sql + /scripts/p6.mt（@Include）
 p7              -> /robots/p7.sql + /scripts/p7.mt（算术表达式）
 p8              -> /robots/p8.sql + /scripts/p8.mt（字符串拼接）
+p9              -> /robots/p9.sql + /scripts/p9.mt（@Merge 相位时间线）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -1038,6 +1044,83 @@ P5Check: call value=nil name=nil item=nil
 - 字符串拼接只支持 `+`
 - 字符串比较仍是精确文本比较
 - 完整 mybot 表达式 AST 仍未实现
+
+## P9：@Merge 相位时间线
+
+P9-A 支持一个简化版 `@Merge`：
+
+```mt
+@Merge
+path phase;
+  parts/merge_ca.mt 1;
+  parts/merge_cb.mt 2;
+@
+```
+
+`parts/merge_ca.mt`：
+
+```mt
+@Action
+ca.reading;
+  1;
+  2;
+@
+```
+
+`parts/merge_cb.mt`：
+
+```mt
+@Action
+cb.reading;
+  1;
+  2;
+  3;
+@
+```
+
+行为：
+
+- 每个片段必须是单个 `@Action`
+- `phase` 表示该片段从第几拍开始
+- 多个片段按拍合成一次 `call`
+- 片段耗尽后保持最后一行（类似姿势保持）
+- 设备集最好不相交；重复设备会按现有 `p2_execute_row` 规则合并
+- 最多 4 个片段、每片段 8 行
+
+预期时间线：
+
+```text
+beat 0: 无
+beat 1: ca=1
+beat 2: ca=2, cb=1
+beat 3: ca=2(保持), cb=2
+beat 4: ca=2(保持), cb=3
+```
+
+测试 profile：
+
+```text
+p9
+```
+
+预期关键输出：
+
+```text
+P2: @Merge /scripts/parts/merge_ca.mt phase=1 rows=2
+P2: @Merge /scripts/parts/merge_cb.mt phase=2 rows=3
+Counter: reading=1
+Counter: reading=2
+Counter: reading=1
+...
+P2: @Merge timeline 5 beat(s)
+```
+
+限制：
+
+- 主脚本自己的 `@Action` 不与片段做相位合并
+- 片段里不支持 `@Alias`/`@Vars`/`@if`/`@while`
+- 不校验设备集是否相交
+- 不是完整 mybot `mtmerge` 语义
 
 ## 运行现象
 
