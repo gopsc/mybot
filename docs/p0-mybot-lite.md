@@ -70,6 +70,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 62. **P62：`@Merge` 32 行预算**
 63. **P63：`/savevars` / `/loadvars` 变量持久化**
 64. **P64：配置文件临时文件替换写入**
+65. **P65：配置文件 .bak 备份与恢复**
 60. **P59：`/set` / `/get` 运行时变量**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
@@ -147,7 +148,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-289256    0 140408
+289768    0 140408
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -2298,7 +2299,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-289256     0  140408
+289768     0  140408
 ```
 
 构建：
@@ -3384,7 +3385,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-289256     0  140408
+289768     0  140408
 ```
 
 限制：
@@ -4430,9 +4431,50 @@ P64-A 改进 `/profile.txt`、`/boot.txt`、`/vars.txt` 的写入流程：
 限制：
 
 - FatFs `f_rename` 不能覆盖已存在目标，因此必须先 unlink
-- unlink 与 rename 之间存在短暂“无配置文件”窗口
+- P65 起旧文件先改名为 `.bak`，启动时可恢复
 - 掉电发生在该窗口时，配置会丢失
 - `.tmp` 仍是普通 FAT 文件，没有日志/校验和
+- 尚未上板实测
+
+## P65：配置文件 .bak 备份与恢复
+
+P65-A 在 P64 临时文件替换上增加备份与启动恢复：
+
+写入流程：
+
+1. 写 `<path>.tmp`
+2. `f_sync` + `f_close`
+3. 删除旧 `<path>.bak`
+4. 把旧 `<path>` 改名为 `<path>.bak`
+5. 把 `<path>.tmp` 改名为 `<path>`
+6. 失败时尝试把 `.bak` 恢复回目标名
+
+恢复流程（读取 profile/boot/vars 前）：
+
+- 目标文件不存在时：
+  - 优先把 `<path>.tmp` 恢复为目标
+  - 否则把 `<path>.bak` 恢复为目标
+- 目标存在时不处理残留 `.tmp`/`.bak`
+
+覆盖：
+
+- `/profile.txt`
+- `/boot.txt`
+- `/vars.txt`
+
+掉电窗口：
+
+- 写 tmp 时：旧目标完整
+- 目标已改名为 `.bak`、tmp 尚未改名时：目标缺失，但 tmp 完整，启动可恢复
+- 新目标已就位、`.bak` 仍存在：正常使用新目标
+
+限制：
+
+- 不是文件系统级原子操作
+- 没有目录 fsync/校验和
+- 恢复时优先 `.tmp`，如果 `.tmp` 是陈旧但完整的旧写入，可能覆盖 `.bak`
+- 成功后不会删除 `.bak`
+- 掉电发生在 tmp 写入中途时，`.tmp` 不完整；但目标仍存在，不会触发恢复
 - 尚未上板实测
 
 ## 运行现象

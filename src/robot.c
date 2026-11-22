@@ -1623,6 +1623,8 @@ static void p2_parse_sql(void) {
     }
 }
 
+static void p2_recover_config(const char *path);
+
 static size_t p2_read_file(const char *path, char *buf, size_t cap) {
     FIL fp;
     FRESULT fr = f_open(&fp, path, FA_READ);
@@ -4851,6 +4853,7 @@ static bool robot_p2_run(lua_State *L) {
     }
 
     if (n == 0) {
+        p2_recover_config("/profile.txt");
         size_t profile_len = p2_read_file("/profile.txt", profile, sizeof(profile));
         if (profile_len > 0) {
             char *name = p2_trim(profile);
@@ -4919,6 +4922,7 @@ static bool robot_p2_run(lua_State *L) {
 
 static int p2_load_vars_file(void) {
     FILINFO fno;
+    p2_recover_config("/vars.txt");
     if (f_stat("/vars.txt", &fno) != FR_OK) {
         return 0;
     }
@@ -5272,6 +5276,27 @@ static bool p2_parse_uint_arg(const char **pp, int *out) {
     return true;
 }
 
+static void p2_recover_config(const char *path) {
+    FILINFO fno;
+    if (f_stat(path, &fno) == FR_OK) {
+        return;
+    }
+    char aux[64];
+    snprintf(aux, sizeof(aux), "%s.tmp", path);
+    if (f_stat(aux, &fno) == FR_OK) {
+        if (f_rename(aux, path) == FR_OK) {
+            robot_log("core1: recovered %s from tmp", path);
+            return;
+        }
+    }
+    snprintf(aux, sizeof(aux), "%s.bak", path);
+    if (f_stat(aux, &fno) == FR_OK) {
+        if (f_rename(aux, path) == FR_OK) {
+            robot_log("core1: recovered %s from bak", path);
+        }
+    }
+}
+
 static bool p2_write_file(const char *path, const char *text) {
     char tmp[64];
     snprintf(tmp, sizeof(tmp), "%s.tmp", path);
@@ -5291,9 +5316,19 @@ static bool p2_write_file(const char *path, const char *text) {
         f_unlink(tmp);
         return false;
     }
-    FRESULT ur = f_unlink(path);
-    if (ur != FR_OK && ur != FR_NO_FILE) {
-        robot_log("core1: unlink %s failed (%s)", path, FRESULT_str(ur));
+    char bak[64];
+    snprintf(bak, sizeof(bak), "%s.bak", path);
+    FRESULT ub = f_unlink(bak);
+    if (ub != FR_OK && ub != FR_NO_FILE) {
+        robot_log("core1: unlink %s failed (%s)", bak, FRESULT_str(ub));
+        f_unlink(tmp);
+        return false;
+    }
+    FRESULT br = f_rename(path, bak);
+    bool backed_up = (br == FR_OK);
+    if (br != FR_OK && br != FR_NO_FILE) {
+        robot_log("core1: backup %s -> %s failed (%s)", path, bak,
+            FRESULT_str(br));
         f_unlink(tmp);
         return false;
     }
@@ -5301,6 +5336,9 @@ static bool p2_write_file(const char *path, const char *text) {
     if (rr != FR_OK) {
         robot_log("core1: rename %s -> %s failed (%s)", tmp, path,
             FRESULT_str(rr));
+        if (backed_up) {
+            (void)f_rename(bak, path);
+        }
         f_unlink(tmp);
         return false;
     }
@@ -5312,6 +5350,7 @@ static void p2_boot_autostart(void) {
         return;
     }
     FILINFO fno;
+    p2_recover_config("/boot.txt");
     if (f_stat("/boot.txt", &fno) != FR_OK) {
         return;
     }
@@ -5476,6 +5515,7 @@ void robot_core1(void) {
             break;
         case ROBOT_CMD_PROFILE: {
             char profile[32];
+            p2_recover_config("/profile.txt");
             size_t n = p2_read_file("/profile.txt", profile, sizeof(profile));
             if (n > 0) {
                 robot_log("core1: /profile.txt = %s", p2_trim(profile));
@@ -6012,6 +6052,7 @@ void robot_core1(void) {
         case ROBOT_CMD_AUTOSTART: {
             if (cmd.arg[0] == '\0') {
                 char buf[128];
+                p2_recover_config("/boot.txt");
                 size_t n = p2_read_file("/boot.txt", buf, sizeof(buf));
                 if (n == 0) {
                     robot_log("core1: /boot.txt unavailable or empty");
