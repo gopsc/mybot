@@ -50,7 +50,7 @@ static volatile bool robot_stop;
 static volatile bool robot_busy;
 static int last_lua_heap_kb;
 static char p2_profile_override[ROBOT_CMD_ARG];
-static char lua_file_buf[32 * 1024];
+static char lua_file_buf[24 * 1024];
 
 /* ---- P2：结构 SQL / MT 的最小运行期解析 --------------------------------
  * 这一阶段只覆盖 mybot 的启动期结构脚本和 @Action 叶子块：
@@ -127,9 +127,9 @@ typedef struct {
 } p2_struct_t;
 static p2_struct_t p2_structs[P2_MAX_STRUCTS];
 static int p2_nstructs;
-#define P2_MERGE_FILES 4
-#define P2_MERGE_ROWS 8
-#define P2_MERGE_COLS 8
+#define P2_MERGE_FILES 2
+#define P2_MERGE_ROWS 4
+#define P2_MERGE_COLS 6
 typedef struct {
     int phase;
     int ncols;
@@ -142,8 +142,6 @@ static int p2_merge_nsrc;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
 static char p2_expanded_buf[P2_MT_MAX * 2];
-static char p2_include_work[P2_MT_MAX];
-static char p2_include_file[P2_MT_MAX];
 static char *p2_lines[P2_MAX_LINES];
 static int p2_nlines;
 
@@ -2489,16 +2487,17 @@ static void p2_exec_struct(int header, int close) {
 static void p2_include_path(const char *row, char *out, size_t cap);
 
 static bool p2_load_merge_file(const char *path, int phase, p2_merge_src_t *src) {
-    if (p2_read_file(path, p2_include_file, sizeof(p2_include_file)) == 0) {
+    /* SQL 已经装配完，p2_sql_buf 此时空闲，复用它读入 @Merge 片段。 */
+    if (p2_read_file(path, p2_sql_buf, sizeof(p2_sql_buf)) == 0) {
         return false;
     }
-    p2_strip_comments(p2_include_file);
+    p2_strip_comments(p2_sql_buf);
     memset(src, 0, sizeof(*src));
     src->phase = phase;
     bool found = false;
     bool header = false;
     char *save = NULL;
-    char *line = strtok_r(p2_include_file, "\n", &save);
+    char *line = strtok_r(p2_sql_buf, "\n", &save);
     while (line != NULL) {
         char *t = p2_trim(line);
         if (*t == '\0') {
@@ -2730,11 +2729,12 @@ static void p2_include_path(const char *row, char *out, size_t cap) {
 /* @Include 是顶层内容拷贝：在解析前把被包含文件的文本拼到当前位置。
  * 只支持一层；包含文件里的 @Include 不再递归展开。 */
 static bool p2_expand_includes(const char *src) {
-    memcpy(p2_include_work, src, strlen(src) + 1);
+    (void)src;
     size_t out = 0;
     p2_expanded_buf[0] = '\0';
     char *save = NULL;
-    char *line = strtok_r(p2_include_work, "\n", &save);
+    /* p2_mt_buf 是原始输入；tokenize 后不再需要原文本。 */
+    char *line = strtok_r(p2_mt_buf, "\n", &save);
     bool in_include = false;
     bool expect_header = false;
     int included = 0;
@@ -2754,11 +2754,11 @@ static bool p2_expand_includes(const char *src) {
             }
             char path[128];
             p2_include_path(t, path, sizeof(path));
-            size_t n = p2_read_file(path, p2_include_file,
-                sizeof(p2_include_file));
+            size_t n = p2_read_file(path, p2_sql_buf,
+                sizeof(p2_sql_buf));
             if (n > 0) {
                 if (out + n + 2 < sizeof(p2_expanded_buf)) {
-                    memcpy(p2_expanded_buf + out, p2_include_file, n);
+                    memcpy(p2_expanded_buf + out, p2_sql_buf, n);
                     out += n;
                     p2_expanded_buf[out++] = '\n';
                     p2_expanded_buf[out] = '\0';

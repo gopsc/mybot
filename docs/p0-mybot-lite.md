@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -13,6 +13,7 @@
 9. **算术表达式、括号条件和字符串拼接**
 10. **简化版 `@Merge` 相位时间线**
 11. **trigger 前置调用**
+12. **静态内存收敛（约 166KB → 138KB）**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -70,7 +71,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-879956    0 166096
+879924    0 138456
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -94,7 +95,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-256556     0 115684
+256516     0  88044
 ```
 
 此时：
@@ -1091,7 +1092,7 @@ cb.reading;
 - 多个片段按拍合成一次 `call`
 - 片段耗尽后保持最后一行（类似姿势保持）
 - 设备集最好不相交；重复设备会按现有 `p2_execute_row` 规则合并
-- 最多 4 个片段、每片段 8 行
+- 最多 2 个片段、每片段 4 行、每片段最多 6 列
 
 预期时间线：
 
@@ -1188,6 +1189,35 @@ P2: controller timer-0 result=OK slept=0
 - 最多 2 个 trigger 列
 - trigger 目标必须先声明
 - 还没有 trigger 递归深度防线
+
+## P11：内存收敛
+
+P11-A 把静态 BSS 从约 166KB 降到约 138KB：
+
+- Lua 源码缓冲从 32KB 降到 24KB（当前最大 `ADS1015.lua` 约 23KB）
+- `@Include` 不再单独保留 work/file 缓冲，复用 `p2_sql_buf`
+- `@Merge` 上限收紧为 2 个片段、每片段 4 行、6 列
+- 原有 `p2_expanded_buf` 保留，用于文本展开
+
+结果：
+
+```text
+text    data   bss
+879924     0 138456
+```
+
+headless：
+
+```text
+text    data   bss
+256516     0  88044
+```
+
+代价：
+
+- 单个 Lua 驱动源码必须小于 24KB
+- `@Merge` 片段数量/行数/列数上限变小
+- `/mem` 仍然推荐在真实 profile 跑完后检查 core1 栈和 Lua 堆
 
 ## 运行现象
 
