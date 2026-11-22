@@ -44,6 +44,8 @@ typedef enum {
     ROBOT_CMD_STRUCTS,
     ROBOT_CMD_LOOP,
     ROBOT_CMD_RELOAD,
+    ROBOT_CMD_USE,
+    ROBOT_CMD_AUTOSTART,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -4437,6 +4439,14 @@ void robot_send_reload(void) {
     robot_send_cmd(ROBOT_CMD_RELOAD, NULL);
 }
 
+void robot_send_use(const char *name) {
+    robot_send_cmd(ROBOT_CMD_USE, name);
+}
+
+void robot_send_autostart(const char *arg) {
+    robot_send_cmd(ROBOT_CMD_AUTOSTART, arg);
+}
+
 static bool p2_path_stem(const char *path, char *out, size_t cap) {
     const char *base = strrchr(path, '/');
     base = base != NULL ? base + 1 : path;
@@ -4471,6 +4481,24 @@ static bool p2_parse_uint_arg(const char **pp, int *out) {
     }
     *out = v;
     *pp = p;
+    return true;
+}
+
+static bool p2_write_file(const char *path, const char *text) {
+    FIL fp;
+    FRESULT fr = f_open(&fp, path, FA_WRITE | FA_CREATE_ALWAYS);
+    if (fr != FR_OK) {
+        robot_log("core1: cannot write %s (%s)", path, FRESULT_str(fr));
+        return false;
+    }
+    UINT wrote = 0;
+    size_t len = strlen(text);
+    fr = f_write(&fp, text, (UINT)len, &wrote);
+    FRESULT cf = f_close(&fp);
+    if (fr != FR_OK || cf != FR_OK || wrote != len) {
+        robot_log("core1: write %s failed", path);
+        return false;
+    }
     return true;
 }
 
@@ -4943,6 +4971,112 @@ void robot_core1(void) {
             p2_script_override[0] = '\0';
             robot_log("core1: reload finished, %s", p2_active
                 ? "profile active" : "idle");
+            break;
+        }
+        case ROBOT_CMD_USE: {
+            if (cmd.arg[0] == '\0') {
+                robot_log("core1: /use usage: /use <profile>");
+                break;
+            }
+            bool valid = true;
+            for (const char *q = cmd.arg; *q != '\0'; ++q) {
+                if (!isalnum((unsigned char)*q) && *q != '_' && *q != '-') {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid) {
+                robot_log("core1: invalid /use name");
+                break;
+            }
+            char sql[64];
+            snprintf(sql, sizeof(sql), "/robots/%s.sql", cmd.arg);
+            FILINFO fno;
+            if (f_stat(sql, &fno) != FR_OK) {
+                robot_log("core1: /use profile %s has no SQL", cmd.arg);
+                break;
+            }
+            char text[40];
+            snprintf(text, sizeof(text), "%s\n", cmd.arg);
+            if (p2_write_file("/profile.txt", text)) {
+                robot_log("core1: profile set to %s (next /run)", cmd.arg);
+            }
+            break;
+        }
+        case ROBOT_CMD_AUTOSTART: {
+            if (cmd.arg[0] == '\0') {
+                char buf[128];
+                size_t n = p2_read_file("/boot.txt", buf, sizeof(buf));
+                if (n == 0) {
+                    robot_log("core1: /boot.txt unavailable or empty");
+                    break;
+                }
+                char *save = NULL;
+                char *line = strtok_r(buf, "\n", &save);
+                char *shown = NULL;
+                while (line != NULL) {
+                    char *t = p2_trim(line);
+                    if (*t != '\0' && *t != '#') {
+                        shown = t;
+                        break;
+                    }
+                    line = strtok_r(NULL, "\n", &save);
+                }
+                robot_log("core1: boot autostart = %s",
+                    shown != NULL ? shown : "disabled");
+                break;
+            }
+            if (strcmp(cmd.arg, "off") == 0) {
+                if (p2_write_file("/boot.txt", "off\n")) {
+                    robot_log("core1: boot autostart disabled (next boot)");
+                }
+                break;
+            }
+            char name[P2_MAX_NAME];
+            int ni = 0;
+            bool name_ok = true;
+            char *ap = cmd.arg;
+            while (*ap != '\0' && !isspace((unsigned char)*ap)) {
+                if (ni >= (int)sizeof(name) - 1) {
+                    name_ok = false;
+                    break;
+                }
+                name[ni++] = *ap++;
+            }
+            name[ni] = '\0';
+            int period_ms = 0;
+            const char *cp = ap;
+            if (*cp == '\0' || !p2_parse_uint_arg(&cp, &period_ms)) {
+                period_ms = -1;
+            }
+            while (*cp != '\0' && isspace((unsigned char)*cp)) {
+                ++cp;
+            }
+            bool valid = name_ok && name[0] != '\0';
+            for (int q = 0; name[q] != '\0'; ++q) {
+                if (!isalnum((unsigned char)name[q]) && name[q] != '_' &&
+                    name[q] != '-') {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid || period_ms < 50 || period_ms > 60000 || *cp != '\0') {
+                robot_log("core1: /autostart usage: /autostart <action> <period_ms> | off");
+                break;
+            }
+            char script[64];
+            snprintf(script, sizeof(script), "/scripts/%s.mt", name);
+            FILINFO fno;
+            if (f_stat(script, &fno) != FR_OK) {
+                robot_log("core1: /autostart script %s unavailable", script);
+                break;
+            }
+            char text[64];
+            snprintf(text, sizeof(text), "%s %d\n", name, period_ms);
+            if (p2_write_file("/boot.txt", text)) {
+                robot_log("core1: boot autostart set to %s %dms (next boot)",
+                    name, period_ms);
+            }
             break;
         }
         case ROBOT_CMD_UNLOAD:

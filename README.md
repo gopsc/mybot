@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-270544     0  106548
+273776     0  106548
 ```
 
 ## SD 卡（必需）
@@ -99,6 +99,10 @@ p23
 /loop name period_ms  周期执行动作脚本
 /loop stop            停止周期循环
 /reload      重读当前 SQL + 原始动作脚本
+/use name    写入 /profile.txt
+/autostart name period_ms  写入 /boot.txt
+/autostart off              禁用开机自动循环
+/autostart                  查看开机配置
 /devices     列出 active 设备
 /vars        列出 active 变量/别名
 /structs     列出 active @Struct 字段

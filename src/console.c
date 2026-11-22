@@ -234,10 +234,17 @@ static void console_dispatch(void) {
     } else if (strcmp(cmd, "reload") == 0) {
         robot_send_reload();
         console_line("[reload]");
+    } else if (strcmp(cmd, "use") == 0) {
+        robot_send_use(arg[0] != '\0' ? arg : NULL);
+        console_line("[use]");
+    } else if (strcmp(cmd, "autostart") == 0) {
+        robot_send_autostart(arg[0] != '\0' ? arg : NULL);
+        console_line("[autostart]");
     } else if (strcmp(cmd, "help") == 0) {
         console_line("run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]");
         console_line("loop <name> <period_ms> | loop stop | stop | status | profile | mem | list");
-        console_line("reload | devices | vars | structs | unload | help");
+        console_line("reload | use <profile> | autostart <action> <period_ms> | autostart off");
+        console_line("devices | vars | structs | unload | help");
         console_line("history: terminal up/down (ANSI)");
     } else {
         console_line("unknown command");

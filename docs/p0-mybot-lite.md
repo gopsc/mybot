@@ -44,6 +44,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 36. **P35：`/loop` 周期动作循环**
 37. **P36：`/reload` 重载 active profile**
 38. **P37：`/boot.txt` 开机自动周期动作**
+39. **P38：`/use` 与 `/autostart` 持久化开机配置**
 
 还没有实现：完整 `@Merge` 语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -120,7 +121,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-270544    0 106548
+273776    0 106548
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -166,6 +167,10 @@ RX GP1
 /loop name period_ms             周期执行动作脚本
 /loop stop                       停止周期循环
 /reload       重读当前 SQL + 原始动作脚本
+/use name     写入 /profile.txt（下次 /run 或开机）
+/autostart name period_ms  写入 /boot.txt
+/autostart off              禁用开机自动循环
+/autostart                  查看当前开机配置
 /devices      列出 active 设备
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
@@ -850,6 +855,10 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /loop name period_ms             周期执行动作脚本
 /loop stop                       停止周期循环
 /reload       重读当前 SQL + 原始动作脚本
+/use name     写入 /profile.txt（下次 /run 或开机）
+/autostart name period_ms  写入 /boot.txt
+/autostart off              禁用开机自动循环
+/autostart                  查看当前开机配置
 /devices      列出 active 设备
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
@@ -1690,6 +1699,7 @@ P18-A 增加两个控制台命令：
 ```text
 run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
+use <profile> | autostart <action> <period_ms> | autostart off | autostart
 devices | vars | structs | unload | help
 history: terminal up/down (ANSI)
 ```
@@ -1709,6 +1719,10 @@ history: terminal up/down (ANSI)
 /loop <name> <period_ms>
 /loop stop
 /reload
+/use <profile>
+/autostart <action> <period_ms>
+/autostart off
+/autostart
 /devices
 /vars
 /structs
@@ -2142,7 +2156,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-270544     0  106548
+273776     0  106548
 ```
 
 构建：
@@ -2826,6 +2840,64 @@ P2: base.call result=OK
 - 开机自动启动依赖 profile 已经成功 active
 - 动作脚本缺失时只报错并保持 idle
 - 没有看门狗/失效重启机制
+
+## P38：/use 与 /autostart 持久化开机配置
+
+P38-A 增加两个写 SD 配置的命令：
+
+```text
+/use <profile>
+/autostart <action> <period_ms>
+/autostart off
+/autostart
+```
+
+`/use`：
+
+- 校验 `/robots/<profile>.sql` 存在
+- 写入 `/profile.txt`（内容为 profile 名 + 换行）
+- 不立即重载 active profile；下次 `/run`（无参数）或重新开机生效
+
+`/autostart`：
+
+- 校验 `/scripts/<action>.mt` 存在
+- 写入 `/boot.txt`（内容为 `<action> <period_ms>`）
+- 下次开机由 P37 自动启动
+- `off` 写入显式禁用
+- 不带参数时读取 `/boot.txt` 并显示第一条有效行
+
+测试：
+
+```text
+/use p28
+/autostart p29 200
+/profile
+/autostart
+```
+
+预期：
+
+```text
+core1: profile set to p28 (next /run)
+core1: boot autostart set to p29 200ms (next boot)
+core1: /profile.txt = p28
+core1: boot autostart = p29 200
+```
+
+重新上电后：
+
+```text
+core1: boot autostart /scripts/p29.mt period=200ms
+```
+
+限制：
+
+- 直接覆盖写，没有临时文件/原子 rename；掉电可能截断
+- `/use` 只改 `/profile.txt`，不会立即切 profile
+- `/autostart` 只改 `/boot.txt`，不会立即启动循环
+- 需要 SD 可写
+- 写入失败只报日志，不自动回滚
+- 文件内容很小：profile 一行，boot 一行
 
 ## 运行现象
 
