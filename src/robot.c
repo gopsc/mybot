@@ -3744,6 +3744,8 @@ static bool p2_hot_apply_sql(lua_State *L, char *sql) {
     return !p2_hot_error;
 }
 
+static bool p2_hot_apply_transaction(lua_State *L, char *sql);
+
 static void p2_exec_sql_block(lua_State *L, int start, int end) {
     size_t off = 0;
     p2_sql_buf[0] = '\0';
@@ -3764,9 +3766,8 @@ static void p2_exec_sql_block(lua_State *L, int start, int end) {
         return;
     }
     robot_log("P25: @SQL block %u bytes", (unsigned)off);
-    if (!p2_hot_apply_sql(L, p2_sql_buf)) {
-        robot_log("P25: @SQL completed with errors");
-    }
+    bool ok = p2_hot_apply_transaction(L, p2_sql_buf);
+    robot_log("P25: @SQL %s", ok ? "applied" : "rolled back");
 }
 
 static void p2_exec_lines(lua_State *L, int start, int end) {

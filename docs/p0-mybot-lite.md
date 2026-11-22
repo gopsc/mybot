@@ -39,8 +39,9 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 31. **P30：`/repeat` 批量重播动作脚本**
 32. **P31：active 状态诊断 `/devices` / `/vars` / `/structs`**
 33. **P32：`/sql` 事务回滚**
+34. **P33：`@SQL` 块事务回滚**
 
-还没有实现：完整 `@Merge` 语义、`@SQL` 块事务回滚、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
+还没有实现：完整 `@Merge` 语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
 ## 当前硬件形态
 
@@ -115,7 +116,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-268832    0 106404
+268648    0 106404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -259,6 +260,7 @@ sdcard/
     p25.sql
     p27.sql
     p28.sql
+    p33.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -292,6 +294,7 @@ sdcard/
     p27.mt
     p28.mt
     p29.mt
+    p33.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -596,6 +599,7 @@ p25             -> /robots/p25.sql + /scripts/p25.mt（@SQL 热插拔 INSERT/DEL
 p27             -> /robots/p27.sql + /scripts/p27.mt（@SQL UPDATE/DROP）
 p28             -> /robots/p28.sql + /scripts/p28.mt（常驻状态 + /sql）
 p29             -> /scripts/p29.mt（/action 重播测试，无独立 SQL）
+p33             -> /robots/p33.sql + /scripts/p33.mt（@SQL 事务回滚）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2120,7 +2124,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-268832     0  106404
+268648     0  106404
 ```
 
 构建：
@@ -2209,7 +2213,7 @@ P2: unknown device hot
 - `UPDATE ... WHERE` 只支持 `name = '...'`
 - 不支持 `UPDATE` 与同批次其它行级语句的独占检查
 - `SET` 值只能是简单文本；不支持表达式求值
-- `@SQL` 块内没有事务回滚；UART `/sql` 命令有 P32 事务回滚
+- P33 起 `@SQL` 块和 UART `/sql` 都会在失败时回滚到执行前快照
 - `DROP TABLE` 只摘设备行，没有单独的“表壳/列定义”需要维护
 - SQL 值里的 `)` 仍会截断 `VALUES (...)`
 
@@ -2402,7 +2406,7 @@ core1: status idle active=1 devices=1 sql=/robots/p28.sql action=/scripts/p29.mt
 - 没有后台循环；`/repeat` 是同步执行，结束才回到命令循环
 - `/stop` 命令在 `/repeat` 期间不会被 core1 处理；需要 `Ctrl-C`
 - 脚本里的 `@SQL` 每轮都会执行，可能重复 INSERT / 重复 UPDATE
-- `/repeat` 本身没有事务；`@SQL` 失败可能留下部分变更
+- `/repeat` 本身没有事务；单次 `@SQL` 失败会回滚，但前面已成功的迭代不会撤销
 
 ## P31：active 状态诊断
 
@@ -2526,9 +2530,76 @@ core1: dev[0] base driver=P5Check controller=- triggers=0 env=yes
 
 - 回滚是“重建快照”，不是保留原 Lua 驱动内部状态；所有设备会重新 destroy/build
 - 物理器件会在回滚过程中断电/重新初始化
-- `@SQL` 块在动作脚本内仍是非事务的；只有 UART `/sql` 命令走事务
+- P33 起 `@SQL` 块也走同一事务；失败会回滚
 - 如果回滚重建本身失败，状态可能不完整，日志会显示 build 失败
 - 快照保存在 BSS（约 6KB），只支持当前设备/变量/别名，不包含驱动内部状态
+
+## P33：@SQL 块事务回滚
+
+P33-A 把动作脚本里的 `@SQL` 也接到 P32 事务层：
+
+- 执行前快照设备、`@Vars`、`@Alias`
+- 块内任一语句失败 → 销毁当前设备、恢复快照、重新 build
+- 回滚后动作脚本继续执行后续块
+- 成功则正常提交
+
+测试 profile：
+
+```text
+p33
+```
+
+脚本：
+
+```mt
+@Action
+base.value;
+   1;
+@
+
+@SQL
+INSERT INTO P5Check (name, value) VALUES ('hot', '42');
+DELETE FROM P5Check WHERE name='missing';
+@
+
+@Action
+base.value;
+   2;
+@
+```
+
+预期关键日志：
+
+```text
+P5Check: call value=1 name=base item=nil angle=nil
+P2: base.call result=OK
+P25: @SQL block ... bytes
+P25: hot insert hot driver=P5Check
+P5Check: build value=42 name=hot item=nil angle=nil
+P2: hot.build result=OK
+P25: DELETE P5Check name=missing -> 0 removed, 0 blocked
+P25: DELETE P5Check matched no row
+P32: rollback start
+Lua: P5Check: destroy
+P2: hot.destroy result=OK
+Lua: P5Check: destroy
+P2: base.destroy result=OK
+P5Check: build value=1 name=base item=nil angle=nil
+P2: base.build result=OK
+P32: rollback done, devices=1
+P25: @SQL rolled back
+P5Check: call value=2 name=base item=nil angle=nil
+P2: base.call result=OK
+P2: profile active, devices=1 heap=...KB
+```
+
+限制：
+
+- 回滚会重建设备，驱动内部状态丢失
+- 物理器件会在回滚时重新初始化
+- 回滚重建失败时状态可能不完整
+- `@SQL` 仍只支持当前子集（INSERT/DELETE/UPDATE/DROP）
+- 事务快照不包含驱动内部状态
 
 ## 运行现象
 

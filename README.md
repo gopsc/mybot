@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-268832     0  106404
+268648     0  106404
 ```
 
 ## SD 卡（必需）
@@ -113,7 +113,7 @@ Ctrl-C       发送停止请求
 `@Alias`、`@Include`、`@Merge`、`@Reflex`、`@Trigger` 等当前子集。
 
 `/run` 执行完后设备保持 active；用 `/sql <name>` 应用 `/sql/<name>.sql` 热补丁，
-失败会回滚到执行前快照；用 `/unload` 销毁设备并关闭 Lua。完整阶段说明见
+失败会回滚到执行前快照；动作脚本里的 `@SQL` 也同样事务化。用 `/unload` 销毁设备并关闭 Lua。完整阶段说明见
 [docs/p0-mybot-lite.md](docs/p0-mybot-lite.md)。
 
 ## 许可
