@@ -62,6 +62,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 54. **P53：跨顶层/嵌套的 include-once**
 55. **P54：`/reboot` 软重启**
 56. **P55：`/uarttest` 串口自检**
+57. **P56：`/spitest` SPI 回环自检**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -138,7 +139,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-280544    0 140392
+281232    0 140404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -193,6 +194,7 @@ RX GP1
 /device name  显示单个设备 meta/拓扑
 /i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
 /uarttest [baud]  UART1 发 PING 并读回
+/spitest [speed]  SPI1 回环测试
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -938,6 +940,7 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /device name  显示单个设备 meta/拓扑
 /i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
 /uarttest [baud]  UART1 发 PING 并读回
+/spitest [speed]  SPI1 回环测试
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -1778,8 +1781,8 @@ P18-A 增加两个控制台命令：
 run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 use <profile> | autostart <action> <period_ms> | autostart off | autostart
-devices | device <name> | i2cscan [0|1] | uarttest [baud] | vars | structs
-unload | reboot | help
+devices | device <name> | i2cscan [0|1] | uarttest [baud] | spitest [speed]
+vars | structs | unload | reboot | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1807,6 +1810,7 @@ history: terminal up/down (ANSI)
 /device <name>
 /i2cscan [0|1]
 /uarttest [baud]
+/spitest [speed]
 /vars
 /structs
 /unload
@@ -2239,7 +2243,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-280544     0  140392
+281232     0  140404
 ```
 
 构建：
@@ -3325,7 +3329,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-280544     0  140392
+281232     0  140404
 ```
 
 限制：
@@ -3937,6 +3941,43 @@ core1: uarttest baud=115200 wrote=6 read=6 [50 49 4E 47 0D 0A]
 - 没有自动流控/校验
 - 回环需要手动短接 TX/RX
 - 只读取 50ms，较慢设备可能无响应
+- 尚未上板实测
+
+## P56：/spitest SPI 回环自检
+
+P56-A 增加 SPI1 回环测试：
+
+```text
+/spitest
+/spitest 500000
+```
+
+行为：
+
+- 默认 1MHz，范围 100kHz ~ 1MHz
+- 使用 SPI1：SCK GP10、MOSI GP11、MISO GP12、CS GP13
+- 模式 0、8 位、MSB first
+- 发送 `55 AA 5A A5`
+- 同时读回 4 字节
+- 日志输出 match 数和读回内容：
+
+```text
+core1: spitest speed=1000000 wrote=4 read=4 match=4 [55 AA 5A A5]
+```
+
+回环接法：
+
+```text
+GP11 (MOSI) --- GP12 (MISO)
+```
+
+限制：
+
+- 需要手动短接 MOSI/MISO 才能 match=4
+- 会重新配置 SPI1 模式/波特率，可能干扰正在工作的 AD9833/SPI 设备，建议 idle 时运行
+- 只支持 SPI1 GP10-13
+- 没有自动 CS 极性/多设备选择
+- 速度上限 1MHz（沿用现有 UART 参数解析上限）
 - 尚未上板实测
 
 ## 运行现象

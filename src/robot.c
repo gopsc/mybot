@@ -49,6 +49,7 @@ typedef enum {
     ROBOT_CMD_DEVICE,
     ROBOT_CMD_I2CSCAN,
     ROBOT_CMD_UARTTEST,
+    ROBOT_CMD_SPITEST,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -508,9 +509,33 @@ typedef struct {
     bool fake;
     spi_inst_t *inst;
     uint16_t delay_us;
+    uint32_t speed_hz;
 } p3_spi_t;
 
 static p3_spi_t p3_spi[3];
+
+static int p3_spi_open_speed(uint32_t speed_hz) {
+    p3_spi_t *slot = &p3_spi[1];
+    if (!slot->open) {
+        slot->inst = spi1;
+        slot->delay_us = 0;
+        spi_init(slot->inst, speed_hz);
+        gpio_set_function(10, GPIO_FUNC_SPI);
+        gpio_set_function(11, GPIO_FUNC_SPI);
+        gpio_set_function(12, GPIO_FUNC_SPI);
+        gpio_init(13);
+        gpio_set_dir(13, GPIO_OUT);
+        gpio_put(13, 1);
+        slot->open = true;
+        slot->fake = false;
+        slot->speed_hz = speed_hz;
+        robot_log("SPI: opened SPI1 (SCK GP10, MOSI GP11, MISO GP12, CS GP13)");
+    } else {
+        spi_set_baudrate(slot->inst, speed_hz);
+        slot->speed_hz = speed_hz;
+    }
+    return 1;
+}
 
 static int robot_lua_spi_open(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
@@ -525,21 +550,7 @@ static int robot_lua_spi_open(lua_State *L) {
         lua_pushinteger(L, -1);
         return 1;
     }
-    p3_spi_t *slot = &p3_spi[1];
-    if (!slot->open) {
-        slot->inst = spi1;
-        slot->delay_us = 0;
-        spi_init(slot->inst, 1000 * 1000);
-        gpio_set_function(10, GPIO_FUNC_SPI);   /* SCK */
-        gpio_set_function(11, GPIO_FUNC_SPI);   /* MOSI */
-        gpio_set_function(12, GPIO_FUNC_SPI);   /* MISO */
-        gpio_init(13);
-        gpio_set_dir(13, GPIO_OUT);
-        gpio_put(13, 1);
-        slot->open = true;
-        slot->fake = false;
-        robot_log("SPI: opened SPI1 (SCK GP10, MOSI GP11, MISO GP12, CS GP13)");
-    }
+    p3_spi_open_speed(1000 * 1000);
     lua_pushinteger(L, 1);
     return 1;
 }
@@ -576,6 +587,7 @@ static int robot_lua_spi_setup(lua_State *L) {
         spi_cpha_t cpha = (mode & 1) ? SPI_CPHA_1 : SPI_CPHA_0;
         spi_set_format(p3_spi[fd].inst, (uint)bits, cpol, cpha, SPI_MSB_FIRST);
         spi_set_baudrate(p3_spi[fd].inst, (uint)speed);
+        p3_spi[fd].speed_hz = (uint32_t)speed;
     }
     lua_pushinteger(L, 0);
     return 1;
@@ -4896,6 +4908,10 @@ void robot_send_uarttest(const char *arg) {
     robot_send_cmd(ROBOT_CMD_UARTTEST, arg);
 }
 
+void robot_send_spitest(const char *arg) {
+    robot_send_cmd(ROBOT_CMD_SPITEST, arg);
+}
+
 static bool p2_path_stem(const char *path, char *out, size_t cap) {
     const char *base = strrchr(path, '/');
     base = base != NULL ? base + 1 : path;
@@ -5300,6 +5316,41 @@ void robot_core1(void) {
                     d->env_ref != LUA_NOREF ? "yes" : "no");
             }
             break;
+        case ROBOT_CMD_SPITEST: {
+            int speed = 1000000;
+            if (cmd.arg[0] != '\0') {
+                const char *cp = cmd.arg;
+                if (!p2_parse_uint_arg(&cp, &speed)) {
+                    speed = -1;
+                }
+                while (*cp != '\0' && isspace((unsigned char)*cp)) {
+                    ++cp;
+                }
+                if (*cp != '\0') {
+                    speed = -1;
+                }
+            }
+            if (speed < 100000 || speed > 1000000) {
+                robot_log("core1: /spitest usage: /spitest [100000..1000000]");
+                break;
+            }
+            p3_spi_open_speed((uint32_t)speed);
+            spi_set_format(spi1, 8, SPI_CPOL_0, SPI_CPHA_0, SPI_MSB_FIRST);
+            uint8_t tx[4] = {0x55, 0xAA, 0x5A, 0xA5};
+            uint8_t rx[4] = {0, 0, 0, 0};
+            gpio_put(13, 0);
+            spi_write_read_blocking(spi1, tx, rx, sizeof(tx));
+            gpio_put(13, 1);
+            int match = 0;
+            for (int i = 0; i < 4; ++i) {
+                if (tx[i] == rx[i]) {
+                    ++match;
+                }
+            }
+            robot_log("core1: spitest speed=%d wrote=4 read=4 match=%d [%02X %02X %02X %02X]",
+                speed, match, rx[0], rx[1], rx[2], rx[3]);
+            break;
+        }
         case ROBOT_CMD_UARTTEST: {
             int baud = 115200;
             if (cmd.arg[0] != '\0') {
