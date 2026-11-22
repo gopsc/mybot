@@ -4,6 +4,7 @@
 #include "console.h"
 #include "robot.h"
 #include "try.h"
+#include <string.h>
 #include <wchar.h>
 
 /* 帧缓冲区打印点游标 */
@@ -303,9 +304,107 @@ static void _outputto(wchar_t wc) {
 }
 
 
+/* ---- P4-B 命令行：输入 /run p4、/stop、/status、/profile ---- */
+static wchar_t cmd_buf[ROBOT_CMD_ARG];
+static int cmd_top = 0;
+static int cmd_x = 0;
+static int cmd_mode = 0;
+
+static void clear_cmd_line(void) {
+    rectangle(0, JIPT_H, ONE_LINE_BITS - 1, JIPT_H + CHAR_HEIGHT - 1, 1, 1);
+    cmd_top = 0;
+    cmd_x = 0;
+}
+
+static void cmd_put(wchar_t wc) {
+    if (cmd_top >= ROBOT_CMD_ARG - 1) {
+        return;
+    }
+    cmd_buf[cmd_top++] = wc;
+    cmd_buf[cmd_top] = L'\0';
+    wchar_t buf[] = {wc, L'\0'};
+    printvgaat(buf, cmd_x, JIPT_H);
+    cmd_x += CHAR_WIDTH_EN;
+}
+
+static void cmd_backspace(void) {
+    if (cmd_top <= 0) {
+        return;
+    }
+    --cmd_top;
+    cmd_buf[cmd_top] = L'\0';
+    cmd_x -= CHAR_WIDTH_EN;
+    rectangle(cmd_x, JIPT_H, cmd_x + CHAR_WIDTH_EN - 1,
+        JIPT_H + CHAR_HEIGHT - 1, 1, 1);
+}
+
+static void cmd_dispatch(void) {
+    char text[ROBOT_CMD_ARG];
+    int n = 0;
+    for (int i = 0; i < cmd_top && i < (int)sizeof(text) - 1; ++i) {
+        text[n++] = (char)cmd_buf[i];
+    }
+    text[n] = '\0';
+    clear_cmd_line();
+    cmd_mode = 0;
+    printtovga(L"\n");
+
+    char *p = text;
+    while (*p == ' ' || *p == '\t') ++p;
+    char *cmd = p;
+    while (*p != '\0' && *p != ' ' && *p != '\t') ++p;
+    if (*p != '\0') {
+        *p++ = '\0';
+        while (*p == ' ' || *p == '\t') ++p;
+    }
+    char *arg = p;
+    if (strcmp(cmd, "run") == 0) {
+        /* 键盘没有下划线，提供几个 profile 简称。 */
+        if (strcmp(arg, "pca") == 0) arg = "pca9685";
+        else if (strcmp(arg, "pcafake") == 0) arg = "pca9685_fake";
+        else if (strcmp(arg, "ads") == 0) arg = "ads1015";
+        else if (strcmp(arg, "spifake") == 0) arg = "spi_fake";
+        else if (strcmp(arg, "uartfake") == 0) arg = "uart_fake";
+        else if (strcmp(arg, "relay") == 0) arg = "relay-test";
+        robot_send_run(arg[0] != '\0' ? arg : NULL);
+        printtovga(L"[run]\n");
+    } else if (strcmp(cmd, "stop") == 0) {
+        robot_send_stop();
+        printtovga(L"[stop]\n");
+    } else if (strcmp(cmd, "status") == 0) {
+        robot_send_status();
+        printtovga(L"[status]\n");
+    } else if (strcmp(cmd, "profile") == 0) {
+        robot_send_profile();
+        printtovga(L"[profile]\n");
+    } else if (cmd[0] != '\0') {
+        printtovga(L"unknown command\n");
+    }
+}
+
 /* 处理一个键盘事件。函数只做状态变更，不负责排空队列。 */
 static void handle_key(uint16_t k) {
     /* P0 临时停止键：Tab（输入法缓冲区为空时）。P1 换成 :stop 命令行。 */
+    if (cmd_mode) {
+        if (k == L'\r') {
+            cmd_dispatch();
+        } else if (k == L'\b') {
+            cmd_backspace();
+        } else if (k >= 32 && k < 127) {
+            cmd_put((wchar_t)k);
+        }
+        return;
+    }
+
+    if (k == L'/' && jipt_top == 0) {
+        cmd_mode = 1;
+        clear_cmd_line();
+        cmd_put(L'/');
+        cmd_top = 0;   /* 斜杠只是提示符，不进入命令文本 */
+        cmd_x = CHAR_WIDTH_EN;
+        return;
+    }
+
     if (k == L'\t' && jipt_top == 0) {
         robot_request_stop();
         clear_cursor();

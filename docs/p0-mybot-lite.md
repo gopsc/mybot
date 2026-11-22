@@ -1,15 +1,15 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4-B 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
 3. **Lua 驱动从 SD 加载，每个驱动有独立 env**
 4. **运行期解析 `.sql` / `.mt`，支持 `$ref` / `@Alias` / `@Vars`**
 5. **真实 I2C/SPI/UART HAL，以及 PCA9685/ADS1015/AD9833 驱动接入**
-6. **`@if` / `@while` 控制流与动作捕获**
+6. **`@if` / `@while` 控制流、动作捕获、命令系统与热重载**
 
-还没有实现：`@Struct`、动态 SQL、命令系统、热重载。那些属于 P4 后续。
+还没有实现：`@Struct`、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
 
 ## 改动
 
@@ -65,7 +65,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-868020    0 129252
+870564    0 129444
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -89,7 +89,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-246148     0  78984
+247268     0  79032
 ```
 
 此时：
@@ -675,6 +675,54 @@ P2: cnt.call result=OK
 - 不支持括号嵌套表达式
 - 不支持 `@Struct` / `@Include` / `@Merge`
 - `@if`/`@while` 的条件错误目前是日志 + 跳过，不是完整异常契约
+
+## P4-B：命令系统与热重载
+
+core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
+
+```text
+/run p4       运行 /robots/p4.sql + /scripts/p4.mt
+/run          重新读 /profile.txt 并运行
+/stop         停止当前运行
+/status       查看 core1 状态
+/profile      显示 /profile.txt
+```
+
+`/run` 的完整流程：
+
+```text
+停止当前动作（stop 标志）
+  → 重新挂载/读取 SD
+  → 重新读 profile / SQL / MT
+  → 重新创建 Lua state 和每个设备 env
+  → 执行脚本
+  → 返回 idle，等待下一条命令
+```
+
+所以改完 SD 上的 `.sql`/`.mt` 后，不需要重新烧固件，输入 `/run` 即可热重载。
+
+键盘没有下划线，提供几个简称：
+
+```text
+/run pca       -> pca9685
+/run pcafake   -> pca9685_fake
+/run ads       -> ads1015
+/run spifake   -> spi_fake
+/run uartfake  -> uart_fake
+/run relay     -> relay-test
+```
+
+命令反馈会回到 VGA/串口日志，例如：
+
+```text
+core1: run profile p4
+...
+core1: run finished, idle
+core1: status idle
+core1: /profile.txt = p4
+```
+
+`/stop` 立即置 stop 标志；`@while`、`milli_sleep` 和动作派发行会在各自的检查点看到它。长时间阻塞在器件驱动内部的 I2C/SPI/UART 调用只能等超时。
 
 ## 运行现象
 

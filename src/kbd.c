@@ -106,6 +106,7 @@ static const uint8_t hid_to_mac[256] = {
         [HID_KEY_COMMA] = ',',
         [HID_KEY_EQUAL] = '=',
 	[HID_KEY_MINUS] = '-',
+        [HID_KEY_SLASH] = '/',
         //[HID_KEY_A] = 255, // Hack for MKC_A,
         //[HID_KEY_ESCAPE] = MKC_Escape,
         //[HID_KEY_MINUS] = MKC_Minus,

@@ -31,8 +31,23 @@ typedef struct {
     char text[ROBOT_LOG_LINE];
 } robot_log_msg_t;
 
+typedef enum {
+    ROBOT_CMD_RUN = 1,
+    ROBOT_CMD_STOP,
+    ROBOT_CMD_STATUS,
+    ROBOT_CMD_PROFILE,
+} robot_cmd_type_t;
+
+typedef struct {
+    uint8_t type;
+    char arg[ROBOT_CMD_ARG];
+} robot_cmd_msg_t;
+
 static queue_t robot_log_queue;
+static queue_t robot_cmd_queue;
 static volatile bool robot_stop;
+static volatile bool robot_busy;
+static char p2_profile_override[ROBOT_CMD_ARG];
 static char lua_file_buf[32 * 1024];
 
 /* ---- P2：结构 SQL / MT 的最小运行期解析 --------------------------------
@@ -2031,27 +2046,45 @@ static bool robot_p2_run(lua_State *L) {
     const char *mt_path = NULL;
     size_t n = 0;
 
-    size_t profile_len = p2_read_file("/profile.txt", profile, sizeof(profile));
-    if (profile_len > 0) {
-        char *name = p2_trim(profile);
-        bool valid = *name != '\0';
-        for (const char *p = name; *p != '\0'; ++p) {
-            if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
-                valid = false;
-                break;
-            }
+    if (p2_profile_override[0] != '\0') {
+        snprintf(profile_sql, sizeof(profile_sql), "/robots/%s.sql",
+            p2_profile_override);
+        snprintf(profile_mt, sizeof(profile_mt), "/scripts/%s.mt",
+            p2_profile_override);
+        n = p2_read_file(profile_sql, p2_sql_buf, sizeof(p2_sql_buf));
+        if (n > 0) {
+            sql_path = profile_sql;
+            mt_path = profile_mt;
+            robot_log("P2: command profile=%s", p2_profile_override);
+        } else {
+            robot_log("P2: command profile %s has no SQL; falling back",
+                p2_profile_override);
         }
-        if (valid) {
-            snprintf(profile_sql, sizeof(profile_sql), "/robots/%s.sql", name);
-            snprintf(profile_mt, sizeof(profile_mt), "/scripts/%s.mt", name);
-            n = p2_read_file(profile_sql, p2_sql_buf, sizeof(p2_sql_buf));
-            if (n > 0) {
-                sql_path = profile_sql;
-                mt_path = profile_mt;
-                robot_log("P2: profile=%s", name);
-            } else {
-                robot_log("P2: profile %s has no %s; falling back", name,
-                    profile_sql);
+    }
+
+    if (n == 0) {
+        size_t profile_len = p2_read_file("/profile.txt", profile, sizeof(profile));
+        if (profile_len > 0) {
+            char *name = p2_trim(profile);
+            bool valid = *name != '\0';
+            for (const char *p = name; *p != '\0'; ++p) {
+                if (!isalnum((unsigned char)*p) && *p != '_' && *p != '-') {
+                    valid = false;
+                    break;
+                }
+            }
+            if (valid) {
+                snprintf(profile_sql, sizeof(profile_sql), "/robots/%s.sql", name);
+                snprintf(profile_mt, sizeof(profile_mt), "/scripts/%s.mt", name);
+                n = p2_read_file(profile_sql, p2_sql_buf, sizeof(p2_sql_buf));
+                if (n > 0) {
+                    sql_path = profile_sql;
+                    mt_path = profile_mt;
+                    robot_log("P2: profile=%s", name);
+                } else {
+                    robot_log("P2: profile %s has no %s; falling back", name,
+                        profile_sql);
+                }
             }
         }
     }
@@ -2194,7 +2227,9 @@ static void robot_lua_smoke(void) {
 
 void robot_init(void) {
     robot_stop = false;
+    robot_busy = false;
     queue_init(&robot_log_queue, sizeof(robot_log_msg_t), ROBOT_LOG_QUEUE_DEPTH);
+    queue_init(&robot_cmd_queue, sizeof(robot_cmd_msg_t), ROBOT_CMD_QUEUE_DEPTH);
 }
 
 void robot_start(void) {
@@ -2242,26 +2277,90 @@ void robot_request_stop(void) {
 }
 
 bool robot_is_running(void) {
-    return !robot_stop;
+    return robot_busy && !robot_stop;
+}
+
+static void robot_send_cmd(uint8_t type, const char *arg) {
+    robot_cmd_msg_t msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.type = type;
+    if (arg != NULL) {
+        snprintf(msg.arg, sizeof(msg.arg), "%s", arg);
+    }
+    (void)queue_try_add(&robot_cmd_queue, &msg);
+}
+
+void robot_send_run(const char *profile) {
+    robot_stop = false;
+    robot_send_cmd(ROBOT_CMD_RUN, profile);
+}
+
+void robot_send_stop(void) {
+    robot_stop = true;
+    robot_send_cmd(ROBOT_CMD_STOP, NULL);
+}
+
+void robot_send_status(void) {
+    robot_send_cmd(ROBOT_CMD_STATUS, NULL);
+}
+
+void robot_send_profile(void) {
+    robot_send_cmd(ROBOT_CMD_PROFILE, NULL);
 }
 
 void robot_core1(void) {
     robot_log("core1: robot runtime started");
+    robot_busy = true;
     robot_lua_smoke();
+    robot_busy = false;
     robot_log("core1: stack high-water %u / %u bytes",
         (unsigned)robot_stack_used(), (unsigned)sizeof(robot_core1_stack));
+    robot_log("core1: ready for commands");
 
-    /* P0 心跳：持续 1s 分片睡眠，验证 core0 的 VGA/键盘不受影响，同时让
-     * 停止请求能在 50ms 粒度内被看到。 */
-    while (!robot_stop) {
-        for (int i = 0; i < 20 && !robot_stop; ++i) {
-            sleep_ms(50);
-        }
-        robot_log("core1: heartbeat (idle)");
-    }
-
-    robot_log("core1: stop requested, runtime idle");
     while (true) {
-        tight_loop_contents();
+        robot_cmd_msg_t cmd;
+        if (!queue_try_remove(&robot_cmd_queue, &cmd)) {
+            sleep_ms(20);
+            continue;
+        }
+        switch (cmd.type) {
+        case ROBOT_CMD_RUN:
+            robot_stop = false;
+            if (cmd.arg[0] != '\0') {
+                snprintf(p2_profile_override, sizeof(p2_profile_override), "%s",
+                    cmd.arg);
+                robot_log("core1: run profile %s", cmd.arg);
+            } else {
+                p2_profile_override[0] = '\0';
+                robot_log("core1: run profile from /profile.txt");
+            }
+            robot_busy = true;
+            robot_lua_smoke();
+            robot_busy = false;
+            p2_profile_override[0] = '\0';
+            robot_log("core1: run finished, idle");
+            break;
+        case ROBOT_CMD_STOP:
+            robot_stop = true;
+            robot_log("core1: stop requested");
+            break;
+        case ROBOT_CMD_STATUS:
+            robot_log("core1: status %s", robot_busy
+                ? (robot_stop ? "stopping" : "running")
+                : (robot_stop ? "stopped" : "idle"));
+            break;
+        case ROBOT_CMD_PROFILE: {
+            char profile[32];
+            size_t n = p2_read_file("/profile.txt", profile, sizeof(profile));
+            if (n > 0) {
+                robot_log("core1: /profile.txt = %s", p2_trim(profile));
+            } else {
+                robot_log("core1: /profile.txt unavailable");
+            }
+            break;
+        }
+        default:
+            break;
+        }
     }
 }
