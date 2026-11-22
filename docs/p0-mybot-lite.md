@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -10,8 +10,9 @@
 6. **`@if` / `@while` 控制流、动作捕获、命令系统与热重载**
 7. **`@Struct` JSON 对象/数组与字段选择**
 8. **顶层 `@Include` 脚本片段**
+9. **算术表达式与括号条件**
 
-还没有实现：@Merge、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
+还没有实现：@Merge、动态 SQL、完整 mybot 表达式 AST（字符串拼接等）。那些属于后续阶段。
 
 ## 改动
 
@@ -67,7 +68,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-874884    0 156376
+875972    0 156376
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -91,7 +92,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-251588     0 105964
+252684     0 105964
 ```
 
 此时：
@@ -179,6 +180,7 @@ sdcard/
     p5b.sql
     p5c.sql
     p6.sql
+    p7.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -195,6 +197,7 @@ sdcard/
     p5b.mt
     p5c.mt
     p6.mt
+    p7.mt
     parts/inc_p5.mt
     pca9685.mt
     ads1015.mt
@@ -473,6 +476,7 @@ p5              -> /robots/p5.sql + /scripts/p5.mt（平坦 @Struct）
 p5b             -> /robots/p5b.sql + /scripts/p5b.mt（嵌套对象/数组）
 p5c             -> /robots/p5c.sql + /scripts/p5c.mt（@Struct 字段捕获）
 p6              -> /robots/p6.sql + /scripts/p6.mt（@Include）
+p7              -> /robots/p7.sql + /scripts/p7.mt（算术表达式）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -908,6 +912,73 @@ P2: @Struct cfg.value = 9
 P2: device p6 driver=P5Check controller=-
 P5Check: call value=9 name=nil item=nil
 ```
+
+## P7：算术表达式
+
+P7-A 给 `$(...)` 和条件加入数值表达式：
+
+```mt
+@Struct(cfg)
+{ "value": 7 }
+@
+
+@Vars
+name  value;
+ count  2;
+@
+
+@Action
+p5.value  p5.item;
+ $(cfg.value*count+1) $(cfg.value+1);
+@
+
+@if((count+2)*2==8)
+p5.ok;
+   1;
+@
+```
+
+支持：
+
+- `+`、`-`、`*`、`/`、`%`
+- 括号
+- 一元 `+` / `-`
+- 变量、struct 字段、数组下标作为操作数
+- 比较 `==`、`!=`、`<`、`>`、`<=`、`>=`
+- `&&` / `||`
+
+示例结果：
+
+```text
+$(cfg.value*count+1) = 15
+$(cfg.value+1)       = 8
+(count+2)*2==8       = true
+```
+
+测试 profile：
+
+```text
+p7
+```
+
+预期 VGA：
+
+```text
+P2: profile=p7
+P2: @Struct cfg.value = 7
+P2: @Vars count = 2
+P5Check: call value=15 name=nil item=8
+P2: p7.call result=OK
+P5Check: call value=nil name=nil item=nil
+P2: p7 call ok
+...
+```
+
+当前限制：
+
+- 字符串拼接 `+` 尚未实现
+- 表达式仍是精简 AST，不是完整 mybot 表达式
+- 逻辑运算符对括号内的 `&&`/`||` 支持有限
 
 ## 运行现象
 

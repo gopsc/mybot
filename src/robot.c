@@ -1572,6 +1572,8 @@ static void p2_add_meta_fields(const p2_device_t *d, p2_field_t *fields, int *n)
     }
 }
 
+static bool p2_eval_numeric(const char *s, double *out);
+
 static const char *p2_expand_value(const char *value, char *buf, size_t cap) {
     const char *name = NULL;
     size_t len = 0;
@@ -1591,6 +1593,11 @@ static const char *p2_expand_value(const char *value, char *buf, size_t cap) {
     char key[P2_MAX_NAME];
     memcpy(key, name, len);
     key[len] = '\0';
+    double num = 0;
+    if (p2_eval_numeric(key, &num)) {
+        snprintf(buf, cap, "%g", num);
+        return buf;
+    }
     if (!p2_lookup_value(key, buf, cap)) {
         return value;
     }
@@ -1820,12 +1827,144 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
     }
 }
 
+static void p2_expr_skip(const char **pp) {
+    while (isspace((unsigned char)**pp)) {
+        ++*pp;
+    }
+}
+
+static bool p2_expr_expression(const char **pp, double *out);
+
+static bool p2_expr_factor(const char **pp, double *out) {
+    const char *p = *pp;
+    p2_expr_skip(&p);
+    if (*p == '+') {
+        *pp = p + 1;
+        return p2_expr_factor(pp, out);
+    }
+    if (*p == '-') {
+        *pp = p + 1;
+        if (!p2_expr_factor(pp, out)) {
+            return false;
+        }
+        *out = -*out;
+        return true;
+    }
+    if (*p == '(') {
+        *pp = p + 1;
+        if (!p2_expr_expression(pp, out)) {
+            return false;
+        }
+        p2_expr_skip(pp);
+        if (**pp != ')') {
+            return false;
+        }
+        ++*pp;
+        return true;
+    }
+    if (isdigit((unsigned char)*p) || *p == '.') {
+        char *end = NULL;
+        double v = strtod(p, &end);
+        if (end == p) {
+            return false;
+        }
+        *out = v;
+        *pp = end;
+        return true;
+    }
+    if (isalpha((unsigned char)*p) || *p == '_') {
+        const char *start = p;
+        while (isalnum((unsigned char)*p) || *p == '_' || *p == '.' ||
+               *p == '[' || *p == ']') {
+            ++p;
+        }
+        char name[P2_MAX_NAME];
+        p2_copy_trim(name, sizeof(name), start, p);
+        char value[P2_MAX_VALUE];
+        if (!p2_lookup_value(name, value, sizeof(value))) {
+            return false;
+        }
+        char *end = NULL;
+        double v = strtod(value, &end);
+        while (end != NULL && isspace((unsigned char)*end)) {
+            ++end;
+        }
+        if (end == value || end == NULL || *end != '\0') {
+            return false;
+        }
+        *out = v;
+        *pp = p;
+        return true;
+    }
+    return false;
+}
+
+static bool p2_expr_term(const char **pp, double *out) {
+    if (!p2_expr_factor(pp, out)) {
+        return false;
+    }
+    for (;;) {
+        p2_expr_skip(pp);
+        char op = **pp;
+        if (op != '*' && op != '/' && op != '%') {
+            return true;
+        }
+        ++*pp;
+        double rhs = 0;
+        if (!p2_expr_factor(pp, &rhs)) {
+            return false;
+        }
+        if ((op == '/' || op == '%') && rhs == 0.0) {
+            return false;
+        }
+        if (op == '*') {
+            *out *= rhs;
+        } else if (op == '/') {
+            *out /= rhs;
+        } else {
+            *out = (double)((long long)*out % (long long)rhs);
+        }
+    }
+}
+
+static bool p2_expr_expression(const char **pp, double *out) {
+    if (!p2_expr_term(pp, out)) {
+        return false;
+    }
+    for (;;) {
+        p2_expr_skip(pp);
+        char op = **pp;
+        if (op != '+' && op != '-') {
+            return true;
+        }
+        ++*pp;
+        double rhs = 0;
+        if (!p2_expr_term(pp, &rhs)) {
+            return false;
+        }
+        *out = (op == '+') ? (*out + rhs) : (*out - rhs);
+    }
+}
+
+static bool p2_eval_numeric(const char *s, double *out) {
+    const char *p = s;
+    if (!p2_expr_expression(&p, out)) {
+        return false;
+    }
+    p2_expr_skip(&p);
+    return *p == '\0';
+}
+
 static bool p2_operand_value(const char *s, double *num, char *text,
         size_t cap, bool *isnum) {
     p2_copy_trim(text, cap, s, NULL);
     if (text[0] == '\'' || text[0] == '"') {
         p2_unquote(text);
         *isnum = false;
+        return true;
+    }
+    if (p2_eval_numeric(s, num)) {
+        *isnum = true;
         return true;
     }
     char lookup[P2_MAX_VALUE];
