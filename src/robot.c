@@ -1987,70 +1987,69 @@ static void p2_json_skip_ws(const char **pp) {
     }
 }
 
-static bool p2_parse_json_object(const char *json, p2_struct_t *st) {
-    const char *p = json;
-    p2_json_skip_ws(&p);
-    if (*p != '{') {
+static void p2_struct_add(p2_struct_t *st, const char *key, const char *value) {
+    if (st->nfields >= P2_MAX_FIELDS) {
+        return;
+    }
+    p2_copy_trim(st->fields[st->nfields].key,
+        sizeof(st->fields[st->nfields].key), key, NULL);
+    p2_copy_trim(st->fields[st->nfields].value,
+        sizeof(st->fields[st->nfields].value), value, NULL);
+    ++st->nfields;
+}
+
+static bool p2_json_parse_string(const char **pp, char *out, size_t cap) {
+    const char *p = *pp;
+    if (*p != '"') {
         return false;
     }
     ++p;
-    st->nfields = 0;
+    size_t n = 0;
+    while (*p != '\0' && *p != '"' && n + 1 < cap) {
+        if (*p == '\\' && p[1] != '\0') {
+            ++p;
+        }
+        out[n++] = *p++;
+    }
+    out[n] = '\0';
+    if (*p != '"') {
+        return false;
+    }
+    *pp = p + 1;
+    return true;
+}
+
+static bool p2_json_parse_value(const char **pp, const char *path,
+        p2_struct_t *st);
+
+static bool p2_json_parse_object(const char **pp, const char *path,
+        p2_struct_t *st) {
+    const char *p = *pp;
+    ++p;   /* { */
+    p2_json_skip_ws(&p);
+    if (*p == '}') {
+        *pp = p + 1;
+        return true;
+    }
     for (;;) {
         p2_json_skip_ws(&p);
-        if (*p == '}') {
-            return true;
-        }
-        if (*p != '"') {
-            return false;
-        }
-        ++p;
         char key[P2_MAX_NAME];
-        size_t k = 0;
-        while (*p != '\0' && *p != '"' && k + 1 < sizeof(key)) {
-            if (*p == '\\' && p[1] != '\0') {
-                ++p;
-            }
-            key[k++] = *p++;
-        }
-        key[k] = '\0';
-        if (*p != '"') {
+        if (!p2_json_parse_string(&p, key, sizeof(key))) {
             return false;
         }
-        ++p;
         p2_json_skip_ws(&p);
         if (*p != ':') {
             return false;
         }
         ++p;
-        p2_json_skip_ws(&p);
-
-        char value[P2_MAX_VALUE];
-        size_t v = 0;
-        if (*p == '"') {
-            ++p;
-            while (*p != '\0' && *p != '"' && v + 1 < sizeof(value)) {
-                if (*p == '\\' && p[1] != '\0') {
-                    ++p;
-                }
-                value[v++] = *p++;
-            }
-            if (*p != '"') {
-                return false;
-            }
-            ++p;
+        char child[P2_MAX_VALUE];
+        if (path[0] == '\0') {
+            snprintf(child, sizeof(child), "%s", key);
         } else {
-            while (*p != '\0' && *p != ',' && *p != '}' &&
-                   !isspace((unsigned char)*p) && v + 1 < sizeof(value)) {
-                value[v++] = *p++;
-            }
+            snprintf(child, sizeof(child), "%s.%s", path, key);
         }
-        value[v] = '\0';
-        if (st->nfields < P2_MAX_FIELDS) {
-            p2_copy_trim(st->fields[st->nfields].key,
-                sizeof(st->fields[st->nfields].key), key, NULL);
-            p2_copy_trim(st->fields[st->nfields].value,
-                sizeof(st->fields[st->nfields].value), value, NULL);
-            ++st->nfields;
+        if (!p2_json_parse_value(&p, child, st)) {
+            return false;
         }
         p2_json_skip_ws(&p);
         if (*p == ',') {
@@ -2058,10 +2057,93 @@ static bool p2_parse_json_object(const char *json, p2_struct_t *st) {
             continue;
         }
         if (*p == '}') {
+            *pp = p + 1;
             return true;
         }
         return false;
     }
+}
+
+static bool p2_json_parse_array(const char **pp, const char *path,
+        p2_struct_t *st) {
+    const char *p = *pp;
+    ++p;   /* [ */
+    p2_json_skip_ws(&p);
+    if (*p == ']') {
+        *pp = p + 1;
+        return true;
+    }
+    int index = 0;
+    for (;;) {
+        char child[P2_MAX_VALUE];
+        snprintf(child, sizeof(child), "%s[%d]", path, index++);
+        if (!p2_json_parse_value(&p, child, st)) {
+            return false;
+        }
+        p2_json_skip_ws(&p);
+        if (*p == ',') {
+            ++p;
+            continue;
+        }
+        if (*p == ']') {
+            *pp = p + 1;
+            return true;
+        }
+        return false;
+    }
+}
+
+static bool p2_json_parse_value(const char **pp, const char *path,
+        p2_struct_t *st) {
+    const char *p = *pp;
+    p2_json_skip_ws(&p);
+    if (*p == '{') {
+        bool ok = p2_json_parse_object(&p, path, st);
+        *pp = p;
+        return ok;
+    }
+    if (*p == '[') {
+        bool ok = p2_json_parse_array(&p, path, st);
+        *pp = p;
+        return ok;
+    }
+    if (*p == '"') {
+        char text[P2_MAX_VALUE];
+        if (!p2_json_parse_string(&p, text, sizeof(text))) {
+            return false;
+        }
+        p2_struct_add(st, path, text);
+        *pp = p;
+        return true;
+    }
+
+    const char *start = p;
+    while (*p != '\0' && *p != ',' && *p != '}' && *p != ']' &&
+           !isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (p == start) {
+        return false;
+    }
+    char text[P2_MAX_VALUE];
+    p2_copy_trim(text, sizeof(text), start, p);
+    p2_struct_add(st, path, text);
+    *pp = p;
+    return true;
+}
+
+static bool p2_parse_json_object(const char *json, p2_struct_t *st) {
+    const char *p = json;
+    p2_json_skip_ws(&p);
+    if (*p != '{') {
+        return false;
+    }
+    st->nfields = 0;
+    if (!p2_json_parse_object(&p, "", st)) {
+        return false;
+    }
+    p2_json_skip_ws(&p);
+    return *p == '\0';
 }
 
 static void p2_exec_struct(int header, int close) {

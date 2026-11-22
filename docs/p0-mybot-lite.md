@@ -8,9 +8,9 @@
 4. **运行期解析 `.sql` / `.mt`，支持 `$ref` / `@Alias` / `@Vars`**
 5. **真实 I2C/SPI/UART HAL，以及 PCA9685/ADS1015/AD9833 驱动接入**
 6. **`@if` / `@while` 控制流、动作捕获、命令系统与热重载**
-7. **`@Struct` 平坦 JSON 对象与字段选择**
+7. **`@Struct` JSON 对象/数组与字段选择**
 
-还没有实现：嵌套 `@Struct`、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
+还没有实现：`@Struct` 字段捕获、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
 
 ## 改动
 
@@ -66,7 +66,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-872156    0 131800
+873084    0 131800
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -90,7 +90,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-248860     0  81388
+249796     0  81388
 ```
 
 此时：
@@ -175,6 +175,7 @@ sdcard/
     p3.sql
     p4.sql
     p5.sql
+    p5b.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -188,6 +189,7 @@ sdcard/
     p3.mt
     p4.mt
     p5.mt
+    p5b.mt
     pca9685.mt
     ads1015.mt
     spi.mt
@@ -461,7 +463,8 @@ spi             -> /robots/spi.sql + /scripts/spi.mt（真实 AD9833）
 uart_fake       -> /robots/uart_fake.sql + /scripts/uart.mt
 uart            -> /robots/uart.sql + /scripts/uart.mt（真实 UART1）
 p4              -> /robots/p4.sql + /scripts/p4.mt（@if/@while 控制流）
-p5              -> /robots/p5.sql + /scripts/p5.mt（@Struct）
+p5              -> /robots/p5.sql + /scripts/p5.mt（平坦 @Struct）
+p5b             -> /robots/p5b.sql + /scripts/p5b.mt（嵌套对象/数组）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -731,7 +734,7 @@ core1: /profile.txt = p4
 
 ## P5：@Struct
 
-新增 `@Struct(name)` 平坦 JSON 对象支持：
+新增 `@Struct(name)` JSON 对象支持（平坦对象 + 嵌套对象/数组）。
 
 ```mt
 @Struct(cfg)
@@ -749,19 +752,38 @@ p5.ok;
 @
 ```
 
+嵌套/数组示例（profile `p5b`）：
+
+```mt
+@Struct(cfg)
+{
+  "value": 7,
+  "inner": { "name": "pico" },
+  "items": [10, 20]
+}
+@
+
+@Action
+p5.value  p5.name  p5.item;
+ $(cfg.value) $(cfg.inner.name) $(cfg.items[1]);
+@
+```
+
 已实现：
 
 - `@Struct(name)` 块
-- 平坦 JSON 对象：字符串、数字、布尔/null 文本
+- 字符串、数字、布尔/null 文本
+- 嵌套对象：`cfg.inner.name`
+- 数组下标：`cfg.items[1]`
 - `$(cfg.field)` 动作值替换
 - `cfg.field` 条件表达式
 - struct 只在当前 MT 运行内有效
 
 限制：
 
-- 只支持平坦对象，不支持嵌套对象/数组
-- 不支持 `@Struct` 字段捕获
-- 不支持数组下标 `items[0]`
+- JSON 解析器是精简实现，不支持非常复杂的转义/深度
+- `@Struct` 字段捕获尚未实现
+- 数组只支持固定下标，不支持表达式下标
 
 测试 profile：
 
@@ -785,6 +807,16 @@ P5Check: call value=nil name=nil
 P2: p5.call result=OK
 P2: p5 call ok
 ...
+```
+
+嵌套/数组版 `p5b` 的关键输出：
+
+```text
+P2: @Struct cfg.value = 7
+P2: @Struct cfg.inner.name = pico
+P2: @Struct cfg.items[0] = 10
+P2: @Struct cfg.items[1] = 20
+P5Check: call value=7 name=pico item=20
 ```
 
 ## 运行现象
