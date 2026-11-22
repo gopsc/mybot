@@ -109,6 +109,8 @@ p23
 /i2cscan [0|1] 扫描 I2C 总线
 /uarttest [baud]  UART1 发 PING 并读回
 /spitest [speed]  SPI1 回环测试
+/set name value  设置 active 变量
+/get name    读取 active 变量/别名
 /vars        列出 active 变量/别名
 /structs     列出 active @Struct 字段
 /unload      销毁 active 设备并关闭 Lua

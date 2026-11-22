@@ -50,6 +50,8 @@ typedef enum {
     ROBOT_CMD_I2CSCAN,
     ROBOT_CMD_UARTTEST,
     ROBOT_CMD_SPITEST,
+    ROBOT_CMD_SET,
+    ROBOT_CMD_GET,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -5003,6 +5005,14 @@ void robot_send_spitest(const char *arg) {
     robot_send_cmd(ROBOT_CMD_SPITEST, arg);
 }
 
+void robot_send_set(const char *arg) {
+    robot_send_cmd(ROBOT_CMD_SET, arg);
+}
+
+void robot_send_get(const char *arg) {
+    robot_send_cmd(ROBOT_CMD_GET, arg);
+}
+
 static bool p2_path_stem(const char *path, char *out, size_t cap) {
     const char *base = strrchr(path, '/');
     base = base != NULL ? base + 1 : path;
@@ -5407,6 +5417,66 @@ void robot_core1(void) {
                     d->env_ref != LUA_NOREF ? "yes" : "no");
             }
             break;
+        case ROBOT_CMD_SET: {
+            if (!p2_active) {
+                robot_log("core1: /set needs an active profile");
+                break;
+            }
+            char *ap = cmd.arg;
+            while (*ap != '\0' && isspace((unsigned char)*ap)) {
+                ++ap;
+            }
+            char name[P2_MAX_NAME];
+            int ni = 0;
+            while (*ap != '\0' && !isspace((unsigned char)*ap)) {
+                if (ni >= (int)sizeof(name) - 1) {
+                    ni = -1;
+                    break;
+                }
+                name[ni++] = *ap++;
+            }
+            if (ni < 0) {
+                robot_log("core1: /set name too long");
+                break;
+            }
+            name[ni] = '\0';
+            while (*ap != '\0' && isspace((unsigned char)*ap)) {
+                ++ap;
+            }
+            bool valid = name[0] != '\0' && *ap != '\0';
+            for (int q = 0; name[q] != '\0'; ++q) {
+                if (!isalnum((unsigned char)name[q]) && name[q] != '_' &&
+                    name[q] != '-') {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid) {
+                robot_log("core1: /set usage: /set <name> <value>");
+                break;
+            }
+            p2_set_var(name, ap);
+            robot_log("core1: set %s=%s", name, ap);
+            break;
+        }
+        case ROBOT_CMD_GET: {
+            if (cmd.arg[0] == '\0') {
+                robot_log("core1: /get usage: /get <name>");
+                break;
+            }
+            const char *value = p2_find_var(cmd.arg);
+            if (value != NULL) {
+                robot_log("core1: get %s=%s", cmd.arg, value);
+                break;
+            }
+            value = p2_find_alias(cmd.arg);
+            if (value != NULL) {
+                robot_log("core1: get %s=%s (alias)", cmd.arg, value);
+            } else {
+                robot_log("core1: get %s unknown", cmd.arg);
+            }
+            break;
+        }
         case ROBOT_CMD_SPITEST: {
             int speed = 1000000;
             if (cmd.arg[0] != '\0') {

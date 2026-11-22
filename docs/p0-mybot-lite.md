@@ -65,6 +65,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 57. **P56：`/spitest` SPI 回环自检**
 58. **P57：include/merge 路径规范化与安全校验**
 59. **P58：`?` 返回表打印格**
+60. **P59：`/set` / `/get` 运行时变量**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -141,7 +142,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-282056    0 140404
+283016    0 140404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -197,6 +198,8 @@ RX GP1
 /i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
 /uarttest [baud]  UART1 发 PING 并读回
 /spitest [speed]  SPI1 回环测试
+/set name value  设置 active 变量
+/get name     读取 active 变量/别名
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -315,6 +318,7 @@ sdcard/
     p53.sql
     p57.sql
     p58.sql
+    p59.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -367,6 +371,7 @@ sdcard/
     p57.mt
     p57_bad.mt
     p58.mt
+    p59.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -701,6 +706,7 @@ p52             -> /robots/p52.sql + /scripts/p52.mt（@Merge 片段递归）
 p53             -> /robots/p53.sql + /scripts/p53.mt（跨层 include-once）
 p57             -> /robots/p57.sql + /scripts/p57.mt（路径规范化）
 p58             -> /robots/p58.sql + /scripts/p58.mt（? 打印格）
+p59             -> /robots/p59.sql + /scripts/p59.mt（/set /get）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -950,6 +956,8 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
 /uarttest [baud]  UART1 发 PING 并读回
 /spitest [speed]  SPI1 回环测试
+/set name value  设置 active 变量
+/get name     读取 active 变量/别名
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -1791,7 +1799,7 @@ run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_m
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 use <profile> | autostart <action> <period_ms> | autostart off | autostart
 devices | device <name> | i2cscan [0|1] | uarttest [baud] | spitest [speed]
-vars | structs | unload | reboot | help
+set <name> <value> | get <name> | vars | structs | unload | reboot | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1820,6 +1828,8 @@ history: terminal up/down (ANSI)
 /i2cscan [0|1]
 /uarttest [baud]
 /spitest [speed]
+/set <name> <value>
+/get <name>
 /vars
 /structs
 /unload
@@ -2252,7 +2262,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-282056     0  140404
+283016     0  140404
 ```
 
 构建：
@@ -3338,7 +3348,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-282056     0  140404
+283016     0  140404
 ```
 
 限制：
@@ -4108,6 +4118,70 @@ P2: [?] cnt.reading result=OK reading=2
 - 输出走机器人日志队列和 UART
 - 单行缓冲 128 字节，字段过多会截断
 - `?` 是保留标记，要传字面文本需用 `$("?")`
+- 尚未上板实测
+
+## P59：/set /get 运行时变量
+
+P59-A 增加运行时变量读写：
+
+```text
+/set gain 42
+/get gain
+```
+
+行为：
+
+- `/set` 更新已有 `@Vars`，不存在则新建
+- 值取命令剩余文本（可含空格）
+- 变量名只允许字母/数字/`_`/`-`
+- `/set` 需要 active profile
+- `/get` 先查 `@Vars`，再查 `@Alias`
+- 变量只存在于当前 active 会话，重启/`/run`/`/unload` 后丢失
+
+测试 profile：
+
+```text
+p59
+```
+
+脚本：
+
+```mt
+@Vars
+name value;
+  gain 1;
+@
+
+@Action
+p59.value;
+  $(gain);
+@
+```
+
+流程：
+
+```text
+/run p59
+/set gain 42
+/action
+/get gain
+```
+
+预期：
+
+```text
+core1: set gain=42
+P5Check: call value=42 name=p59 item=nil angle=nil
+core1: get gain=42
+```
+
+限制：
+
+- 不做数值校验，值可以是任意文本
+- `/set` 不修改 SD 文件或 `profile.txt`
+- 同名 `@Alias` 不会被 `/set` 修改
+- 变量查找仍是首个定义优先
+- 没有变量删除命令
 - 尚未上板实测
 
 ## 运行现象
