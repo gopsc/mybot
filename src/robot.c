@@ -2489,14 +2489,13 @@ static void p2_exec_struct(int header, int close) {
 static void p2_include_path(const char *row, char *out, size_t cap);
 
 static bool p2_load_merge_file(const char *path, int phase, p2_merge_src_t *src) {
-    /* SQL 已经装配完，p2_sql_buf 此时空闲，复用它读入 @Merge 片段。 */
     if (p2_read_file(path, p2_sql_buf, sizeof(p2_sql_buf)) == 0) {
         return false;
     }
     p2_strip_comments(p2_sql_buf);
     memset(src, 0, sizeof(*src));
     src->phase = phase;
-    bool found = false;
+    enum { SCAN, IN_ALIAS, IN_VARS, IN_ACTION } state = SCAN;
     bool header = false;
     char *save = NULL;
     char *line = strtok_r(p2_sql_buf, "\n", &save);
@@ -2506,38 +2505,76 @@ static bool p2_load_merge_file(const char *path, int phase, p2_merge_src_t *src)
             line = strtok_r(NULL, "\n", &save);
             continue;
         }
-        if (!found) {
-            if (strncmp(t, "@Action", 7) == 0) {
-                found = true;
+        if (state == SCAN) {
+            if (strncmp(t, "@Alias", 6) == 0) {
+                state = IN_ALIAS;
+                header = false;
+            } else if (strncmp(t, "@Vars", 5) == 0) {
+                state = IN_VARS;
+                header = false;
+            } else if (strncmp(t, "@Action", 7) == 0) {
+                state = IN_ACTION;
+                header = false;
             }
             line = strtok_r(NULL, "\n", &save);
             continue;
         }
-        if (*t == '@') {
-            break;
+        if (state == IN_ALIAS || state == IN_VARS) {
+            if (*t == '@') {
+                state = SCAN;
+            } else if (!header) {
+                header = true;
+            } else {
+                char *cells[4];
+                int n = p2_split_ws(t, cells, 4);
+                if (n >= 2) {
+                    if (state == IN_ALIAS) {
+                        p2_add_alias(cells[0], cells[1]);
+                    } else {
+                        p2_add_var(cells[0], cells[1]);
+                    }
+                }
+            }
+            line = strtok_r(NULL, "\n", &save);
+            continue;
         }
-        if (!header) {
-            char *cells[P2_MERGE_COLS];
-            int n = p2_split_ws(t, cells, P2_MERGE_COLS);
-            src->ncols = n;
-            for (int i = 0; i < n; ++i) {
-                p2_copy_trim(src->headers[i], sizeof(src->headers[i]),
-                    cells[i], NULL);
+        if (state == IN_ACTION) {
+            if (*t == '@') {
+                break;
             }
-            header = true;
-        } else if (src->nrows < P2_MERGE_ROWS) {
-            char *vals[P2_MERGE_COLS];
-            int n = p2_split_ws(t, vals, P2_MERGE_COLS);
-            for (int i = 0; i < src->ncols; ++i) {
-                p2_copy_trim(src->rows[src->nrows][i],
-                    sizeof(src->rows[src->nrows][i]),
-                    i < n ? vals[i] : "-", NULL);
+            if (!header) {
+                char *cells[P2_MERGE_COLS];
+                int n = p2_split_ws(t, cells, P2_MERGE_COLS);
+                src->ncols = n;
+                for (int i = 0; i < n; ++i) {
+                    p2_copy_trim(src->headers[i], sizeof(src->headers[i]),
+                        cells[i], NULL);
+                }
+                header = true;
+            } else if (src->nrows < P2_MERGE_ROWS) {
+                char *vals[P2_MERGE_COLS];
+                int n = p2_split_ws(t, vals, P2_MERGE_COLS);
+                for (int i = 0; i < src->ncols; ++i) {
+                    p2_copy_trim(src->rows[src->nrows][i],
+                        sizeof(src->rows[src->nrows][i]),
+                        i < n ? vals[i] : "-", NULL);
+                }
+                ++src->nrows;
             }
-            ++src->nrows;
         }
         line = strtok_r(NULL, "\n", &save);
     }
     return src->ncols > 0 && src->nrows > 0;
+}
+
+static void p2_header_device(const char *header, char *out, size_t cap) {
+    char tmp[P2_MAX_NAME];
+    p2_copy_trim(tmp, sizeof(tmp), header, NULL);
+    char *dot = strchr(tmp, '.');
+    if (dot != NULL) {
+        *dot = '\0';
+    }
+    p2_copy_trim(out, cap, tmp, NULL);
 }
 
 static bool p2_parse_action_src(int header, int end, p2_merge_src_t *src) {
@@ -2628,6 +2665,27 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
     if (p2_merge_nsrc == 0) {
         return;
     }
+    /* 设备集必须不相交；相交时拒绝整次归并，避免同一行重复驱动物理设备。 */
+    for (int a = 0; a < p2_merge_nsrc; ++a) {
+        for (int b = a + 1; b < p2_merge_nsrc; ++b) {
+            for (int ca = 0; ca < p2_merge_srcs[a].ncols; ++ca) {
+                char da[P2_MAX_NAME];
+                p2_header_device(p2_merge_srcs[a].headers[ca], da, sizeof(da));
+                for (int cb = 0; cb < p2_merge_srcs[b].ncols; ++cb) {
+                    char db[P2_MAX_NAME];
+                    p2_header_device(p2_merge_srcs[b].headers[cb], db,
+                        sizeof(db));
+                    if (da[0] != '\0' && strcmp(da, db) == 0) {
+                        robot_log("P2: @Merge device overlap: %s", da);
+                        p2_merge_skip_start = -1;
+                        p2_merge_skip_end = -1;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     int beats = 0;
     for (int s = 0; s < p2_merge_nsrc; ++s) {
         int end_beat = p2_merge_srcs[s].phase + p2_merge_srcs[s].nrows;
