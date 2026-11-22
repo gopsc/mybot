@@ -1,14 +1,15 @@
-# P0：mybot-lite 双核、Lua、脚本解析与 I2C/SPI/UART HAL
+# P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3-C 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
 3. **Lua 驱动从 SD 加载，每个驱动有独立 env**
 4. **运行期解析 `.sql` / `.mt`，支持 `$ref` / `@Alias` / `@Vars`**
 5. **真实 I2C/SPI/UART HAL，以及 PCA9685/ADS1015/AD9833 驱动接入**
+6. **`@if` / `@while` 控制流与动作捕获**
 
-还没有实现：`@if/@while`、`@Struct`、动态 SQL、命令系统。那些属于 P4。
+还没有实现：`@Struct`、动态 SQL、命令系统、热重载。那些属于 P4 后续。
 
 ## 改动
 
@@ -64,7 +65,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-864012    0 128864
+868020    0 129252
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -88,7 +89,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-242148     0  78596
+246148     0  78984
 ```
 
 此时：
@@ -160,6 +161,7 @@ sdcard/
     UART.lua
     AD9833.lua
     UartCheck.lua
+    Counter.lua
     bitcompat.lua
     lib/
       HAL.lua
@@ -169,6 +171,7 @@ sdcard/
     relay-test.sql
     p2b.sql
     p3.sql
+    p4.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -180,6 +183,7 @@ sdcard/
     relay-test.mt
     p2b.mt
     p3.mt
+    p4.mt
     pca9685.mt
     ads1015.mt
     spi.mt
@@ -452,6 +456,7 @@ spi_fake        -> /robots/spi_fake.sql + /scripts/spi.mt
 spi             -> /robots/spi.sql + /scripts/spi.mt（真实 AD9833）
 uart_fake       -> /robots/uart_fake.sql + /scripts/uart.mt
 uart            -> /robots/uart.sql + /scripts/uart.mt（真实 UART1）
+p4              -> /robots/p4.sql + /scripts/p4.mt（@if/@while 控制流）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -601,6 +606,75 @@ UartCheck: write=2 read=4 [00,00,00,00]
 - CS 固定 GP13，单设备。
 - UART 固定 8N1，无流控。
 - SPI/UART 的真实器件验证仍需要上板。
+
+## P4：@if / @while 控制流
+
+P4-A 在精简 MT 解析器里加入块级控制流：
+
+```mt
+@Vars
+name  value;
+ count  0;
+@
+
+@while(count<3)
+cnt.reading;
+ $count=reading;
+@
+
+@if(count>0)
+cnt.flag;
+   1;
+@
+```
+
+支持：
+
+- `@if(cond)` / `@while(cond)`
+- 数值/字符串比较：`== != < > <= >=`
+- `&&` / `||`
+- `@Vars` 变量作为条件
+- 动作格捕获 `$var=field`，把驱动返回字段写回 `@Vars`
+- 控制块内直接动作行
+- 控制块嵌套
+- 循环上限 1000 次，且每轮检查 stop
+
+测试 profile：
+
+```text
+p4
+```
+
+`p4.sql` 只有一个 `Counter`；`p4.mt` 会：
+
+1. `count=0`
+2. `@while(count<3)` 调 `cnt.reading` 三次，每次捕获 `count=reading`
+3. `@if(count>0)` 再调一次 `cnt.flag`
+
+预期 VGA：
+
+```text
+P2: profile=p4
+P2: device cnt driver=Counter controller=-
+P2: cnt.build result=OK
+P2: @Vars count = 0
+Counter: reading=1
+P2: capture count=1
+Counter: reading=2
+P2: capture count=2
+Counter: reading=3
+P2: capture count=3
+P2: [while] count<3 -> 3 iteration(s)
+Counter: reading=4
+P2: cnt.call result=OK
+```
+
+当前限制：
+
+- 条件解析器只覆盖简单比较/逻辑，不是完整 mybot 表达式 AST
+- 不支持括号嵌套表达式
+- 不支持 `@Struct` / `@Include` / `@Merge`
+- `@if`/`@while` 的条件错误目前是日志 + 跳过，不是完整异常契约
 
 ## 运行现象
 

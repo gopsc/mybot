@@ -48,6 +48,7 @@ static char lua_file_buf[32 * 1024];
 #define P2_MAX_FIELDS 10
 #define P2_MAX_ALIASES 8
 #define P2_MAX_VARS 8
+#define P2_MAX_LINES 96
 #define P2_MAX_NAME 24
 #define P2_MAX_VALUE 32
 #define P2_SQL_MAX (12 * 1024)
@@ -100,6 +101,8 @@ static p2_alias_t p2_aliases[P2_MAX_ALIASES];
 static int p2_naliases;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
+static char *p2_lines[P2_MAX_LINES];
+static int p2_nlines;
 
 /* core1 栈放在普通 BSS，而不是 SDK 默认的 SCRATCH_X（只有 4KB）。
  * multicore_launch_core1_with_stack 会把 SP 设到数组末尾。 */
@@ -1188,6 +1191,16 @@ static void p2_add_var(const char *name, const char *value) {
     ++p2_nvars;
 }
 
+static void p2_set_var(const char *name, const char *value) {
+    for (int i = 0; i < p2_nvars; ++i) {
+        if (strcmp(p2_vars[i].name, name) == 0) {
+            p2_copy_trim(p2_vars[i].value, sizeof(p2_vars[i].value), value, NULL);
+            return;
+        }
+    }
+    p2_add_var(name, value);
+}
+
 static const char *p2_find_alias(const char *name) {
     for (int i = p2_naliases - 1; i >= 0; --i) {
         if (strcmp(p2_aliases[i].name, name) == 0) {
@@ -1587,6 +1600,51 @@ static bool p2_build_devices(lua_State *L) {
     return true;
 }
 
+static bool p2_capture_cell(const char *cell, char *var, size_t vcap,
+        char *field, size_t fcap) {
+    if (cell[0] != '$' || cell[1] == '\0') {
+        return false;
+    }
+    const char *eq = strchr(cell + 1, '=');
+    if (eq == NULL || eq == cell + 1 || eq[1] == '\0') {
+        return false;
+    }
+    p2_copy_trim(var, vcap, cell + 1, eq);
+    p2_copy_trim(field, fcap, eq + 1, NULL);
+    return var[0] != '\0' && field[0] != '\0';
+}
+
+static void p2_apply_captures(const p2_device_t *d, char **vals, int nvals,
+        const p2_call_result_t *res) {
+    for (int j = 0; j < P2_MAX_COLS; ++j) {
+        if (p2_action_cols[j].device[0] == '\0') {
+            break;
+        }
+        if (strcmp(p2_action_cols[j].device, d->name) != 0 || j >= nvals) {
+            continue;
+        }
+        char var[P2_MAX_NAME];
+        char field[P2_MAX_NAME];
+        if (!p2_capture_cell(vals[j], var, sizeof(var), field, sizeof(field))) {
+            continue;
+        }
+        const char *value = NULL;
+        for (int k = 0; k < res->nfields; ++k) {
+            if (strcmp(res->fields[k].key, field) == 0) {
+                value = res->fields[k].value;
+                break;
+            }
+        }
+        if (value == NULL) {
+            robot_log("P2: capture %s=%s missing from %s result", var, field,
+                d->name);
+            continue;
+        }
+        p2_set_var(var, value);
+        robot_log("P2: capture %s=%s", var, value);
+    }
+}
+
 static void p2_execute_row(lua_State *L, char **vals, int nvals) {
     for (int i = 0; i < P2_MAX_COLS; ++i) {
         if (p2_action_cols[i].device[0] == '\0') {
@@ -1616,6 +1674,12 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
                 break;
             }
             if (strcmp(p2_action_cols[j].device, d->name) == 0 && j < nvals) {
+                char cap_var[P2_MAX_NAME];
+                char cap_field[P2_MAX_NAME];
+                if (p2_capture_cell(vals[j], cap_var, sizeof(cap_var),
+                        cap_field, sizeof(cap_field))) {
+                    continue;
+                }
                 char value_buf[P2_MAX_VALUE];
                 const char *value = p2_expand_value(vals[j], value_buf,
                     sizeof(value_buf));
@@ -1635,6 +1699,7 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
         } else {
             robot_log("P2: %s call ok", d->name);
         }
+        p2_apply_captures(d, vals, nvals, &res);
 
         if (d->controller[0] != '\0') {
             p2_device_t *ctl = p2_find_device(d->controller);
@@ -1660,108 +1725,289 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
     }
 }
 
-static bool p2_run_mt(lua_State *L) {
-    p2_strip_comments(p2_mt_buf);
-    char *save = NULL;
-    char *line = strtok_r(p2_mt_buf, "\n", &save);
-    bool in_action = false;
-    bool in_alias = false;
-    bool in_vars = false;
-    int ncols = 0;
-    int alias_header = 0;
-    int vars_header = 0;
-    memset(p2_action_cols, 0, sizeof(p2_action_cols));
+static bool p2_operand_value(const char *s, double *num, char *text,
+        size_t cap, bool *isnum) {
+    p2_copy_trim(text, cap, s, NULL);
+    if (text[0] == '\'' || text[0] == '"') {
+        p2_unquote(text);
+        *isnum = false;
+        return true;
+    }
+    const char *var = p2_find_var(text);
+    if (var != NULL) {
+        p2_copy_trim(text, cap, var, NULL);
+    }
+    char *end = NULL;
+    double d = strtod(text, &end);
+    while (end != NULL && isspace((unsigned char)*end)) {
+        ++end;
+    }
+    if (end != NULL && end != text && *end == '\0') {
+        *num = d;
+        *isnum = true;
+    } else {
+        *isnum = false;
+    }
+    return true;
+}
 
-    while (line != NULL) {
-        line = p2_trim(line);
-        if (*line == '\0') {
-            line = strtok_r(NULL, "\n", &save);
-            continue;
-        }
+static bool p2_eval_condition(const char *expr) {
+    char buf[128];
+    p2_copy_trim(buf, sizeof(buf), expr, NULL);
+    if (buf[0] == '\0') {
+        return false;
+    }
 
-        if (in_alias) {
-            if (line[0] == '@') {
-                in_alias = false;
-            } else if (alias_header == 0) {
-                alias_header = 1;   /* name alias; */
-            } else {
-                char *cells[4];
-                int n = p2_split_ws(line, cells, 4);
-                if (n >= 2) {
-                    p2_add_alias(cells[0], cells[1]);
-                    robot_log("P2: @Alias %s -> %s", cells[0], cells[1]);
-                }
-            }
-            line = strtok_r(NULL, "\n", &save);
-            continue;
-        }
+    char *p = strstr(buf, "||");
+    if (p != NULL) {
+        *p = '\0';
+        return p2_eval_condition(buf) || p2_eval_condition(p + 2);
+    }
+    p = strstr(buf, "&&");
+    if (p != NULL) {
+        *p = '\0';
+        return p2_eval_condition(buf) && p2_eval_condition(p + 2);
+    }
 
-        if (in_vars) {
-            if (line[0] == '@') {
-                in_vars = false;
-            } else if (vars_header == 0) {
-                vars_header = 1;    /* name value; */
-            } else {
-                char *cells[4];
-                int n = p2_split_ws(line, cells, 4);
-                if (n >= 2) {
-                    p2_add_var(cells[0], cells[1]);
-                    robot_log("P2: @Vars %s = %s", cells[0], cells[1]);
-                }
-            }
-            line = strtok_r(NULL, "\n", &save);
-            continue;
-        }
-
-        if (!in_action) {
-            if (strncmp(line, "@Alias", 6) == 0) {
-                in_alias = true;
-                alias_header = 0;
-            } else if (strncmp(line, "@Vars", 5) == 0) {
-                in_vars = true;
-                vars_header = 0;
-            } else if (strncmp(line, "@Action", 7) == 0) {
-                in_action = true;
-            }
-            line = strtok_r(NULL, "\n", &save);
-            continue;
-        }
-
-        if (line[0] == '@') {
+    char *op = NULL;
+    int oplen = 0;
+    for (char *q = buf; *q != '\0'; ++q) {
+        if ((q[0] == '=' && q[1] == '=') || (q[0] == '!' && q[1] == '=') ||
+            (q[0] == '<' && q[1] == '=') || (q[0] == '>' && q[1] == '=')) {
+            op = q;
+            oplen = 2;
             break;
         }
-
-        if (ncols == 0) {
-            char *cells[P2_MAX_COLS];
-            int n = p2_split_ws(line, cells, P2_MAX_COLS);
-            for (int i = 0; i < n; ++i) {
-                char *dot = strchr(cells[i], '.');
-                if (dot == NULL) {
-                    continue;
-                }
-                *dot = '\0';
-                p2_copy_trim(p2_action_cols[ncols].device,
-                    sizeof(p2_action_cols[ncols].device), cells[i], NULL);
-                const char *param = dot + 1;
-                const char *alias = p2_find_alias(param);
-                if (alias != NULL) {
-                    param = alias;
-                }
-                p2_copy_trim(p2_action_cols[ncols].param,
-                    sizeof(p2_action_cols[ncols].param), param, NULL);
-                ++ncols;
-            }
-            robot_log("P2: @Action columns=%d", ncols);
-        } else {
-            char *vals[P2_MAX_COLS];
-            int n = p2_split_ws(line, vals, P2_MAX_COLS);
-            if (n > 0) {
-                p2_execute_row(L, vals, n);
-            }
+        if (q[0] == '<' || q[0] == '>') {
+            op = q;
+            oplen = 1;
+            break;
         }
+    }
+
+    if (op == NULL) {
+        double num = 0;
+        char text[P2_MAX_VALUE];
+        bool isnum = false;
+        p2_operand_value(buf, &num, text, sizeof(text), &isnum);
+        return isnum ? num != 0.0 : text[0] != '\0';
+    }
+
+    char opbuf[3] = {0};
+    memcpy(opbuf, op, (size_t)oplen);
+    *op = '\0';
+    char *rhs = op + oplen;
+    double ln = 0, rn = 0;
+    char lt[P2_MAX_VALUE], rt[P2_MAX_VALUE];
+    bool li = false, ri = false;
+    p2_operand_value(buf, &ln, lt, sizeof(lt), &li);
+    p2_operand_value(rhs, &rn, rt, sizeof(rt), &ri);
+
+    if (li && ri) {
+        if (strcmp(opbuf, "==") == 0) return ln == rn;
+        if (strcmp(opbuf, "!=") == 0) return ln != rn;
+        if (strcmp(opbuf, "<") == 0) return ln < rn;
+        if (strcmp(opbuf, ">") == 0) return ln > rn;
+        if (strcmp(opbuf, "<=") == 0) return ln <= rn;
+        if (strcmp(opbuf, ">=") == 0) return ln >= rn;
+    } else {
+        int cmp = strcmp(lt, rt);
+        if (strcmp(opbuf, "==") == 0) return cmp == 0;
+        if (strcmp(opbuf, "!=") == 0) return cmp != 0;
+        if (strcmp(opbuf, "<") == 0) return cmp < 0;
+        if (strcmp(opbuf, ">") == 0) return cmp > 0;
+        if (strcmp(opbuf, "<=") == 0) return cmp <= 0;
+        if (strcmp(opbuf, ">=") == 0) return cmp >= 0;
+    }
+    return false;
+}
+
+static bool p2_block_cond(const char *line, const char *keyword, char *out,
+        size_t cap) {
+    const char *lp = strchr(line, '(');
+    const char *rp = strrchr(line, ')');
+    if (lp == NULL || rp == NULL || rp <= lp) {
+        robot_log("P2: %s block missing condition", keyword);
+        return false;
+    }
+    p2_copy_trim(out, cap, lp + 1, rp);
+    if (out[0] == '\0') {
+        robot_log("P2: %s block empty condition", keyword);
+        return false;
+    }
+    return true;
+}
+
+static int p2_find_matching(int header, int end) {
+    int depth = 1;
+    for (int i = header + 1; i < end; ++i) {
+        char *line = p2_trim(p2_lines[i]);
+        if (line[0] != '@') {
+            continue;
+        }
+        if (line[1] == '\0') {
+            if (--depth == 0) {
+                return i;
+            }
+        } else {
+            ++depth;
+        }
+    }
+    return end;
+}
+
+static void p2_parse_directive(int start, int end, bool vars) {
+    /* start 是 @Vars/@Alias 行，start+1 是 name/value 表头，数据从 start+2 开始。 */
+    for (int i = start + 2; i < end; ++i) {
+        char *line = p2_trim(p2_lines[i]);
+        if (*line == '\0') {
+            continue;
+        }
+        char *cells[4];
+        int n = p2_split_ws(line, cells, 4);
+        if (n < 2) {
+            continue;
+        }
+        if (vars) {
+            p2_add_var(cells[0], cells[1]);
+            robot_log("P2: @Vars %s = %s", cells[0], cells[1]);
+        } else {
+            p2_add_alias(cells[0], cells[1]);
+            robot_log("P2: @Alias %s -> %s", cells[0], cells[1]);
+        }
+    }
+}
+
+static void p2_exec_action(lua_State *L, int start, int end) {
+    if (start >= end) {
+        return;
+    }
+    char header_buf[256];
+    p2_copy_trim(header_buf, sizeof(header_buf), p2_lines[start], NULL);
+    char *header = header_buf;
+    char *cells[P2_MAX_COLS];
+    int n = p2_split_ws(header, cells, P2_MAX_COLS);
+    memset(p2_action_cols, 0, sizeof(p2_action_cols));
+    int ncols = 0;
+    for (int i = 0; i < n; ++i) {
+        char *dot = strchr(cells[i], '.');
+        if (dot == NULL) {
+            continue;
+        }
+        *dot = '\0';
+        p2_copy_trim(p2_action_cols[ncols].device,
+            sizeof(p2_action_cols[ncols].device), cells[i], NULL);
+        const char *param = dot + 1;
+        const char *alias = p2_find_alias(param);
+        if (alias != NULL) {
+            param = alias;
+        }
+        p2_copy_trim(p2_action_cols[ncols].param,
+            sizeof(p2_action_cols[ncols].param), param, NULL);
+        ++ncols;
+    }
+    if (ncols == 0) {
+        return;
+    }
+    robot_log("P2: @Action columns=%d", ncols);
+    for (int i = start + 1; i < end; ++i) {
+        char row_buf[256];
+        p2_copy_trim(row_buf, sizeof(row_buf), p2_lines[i], NULL);
+        if (row_buf[0] == '\0') {
+            continue;
+        }
+        char *vals[P2_MAX_COLS];
+        int nv = p2_split_ws(row_buf, vals, P2_MAX_COLS);
+        if (nv > 0) {
+            p2_execute_row(L, vals, nv);
+        }
+    }
+}
+
+static void p2_exec_lines(lua_State *L, int start, int end) {
+    int i = start;
+    while (i < end) {
+        char *line = p2_trim(p2_lines[i]);
+        if (*line == '\0') {
+            ++i;
+            continue;
+        }
+
+        if (strncmp(line, "@Alias", 6) == 0) {
+            int close = p2_find_matching(i, end);
+            p2_parse_directive(i, close, false);
+            i = close + 1;
+            continue;
+        }
+        if (strncmp(line, "@Vars", 5) == 0) {
+            int close = p2_find_matching(i, end);
+            p2_parse_directive(i, close, true);
+            i = close + 1;
+            continue;
+        }
+        if (strncmp(line, "@Action", 7) == 0) {
+            int close = p2_find_matching(i, end);
+            p2_exec_action(L, i + 1, close);
+            i = close + 1;
+            continue;
+        }
+        if (strncmp(line, "@if(", 4) == 0) {
+            char cond[96];
+            int close = p2_find_matching(i, end);
+            if (p2_block_cond(line, "if", cond, sizeof(cond))) {
+                if (p2_eval_condition(cond)) {
+                    p2_exec_lines(L, i + 1, close);
+                } else {
+                    robot_log("P2: [if] condition not met: %s", cond);
+                }
+            }
+            i = close + 1;
+            continue;
+        }
+        if (strncmp(line, "@while(", 7) == 0) {
+            char cond[96];
+            int close = p2_find_matching(i, end);
+            if (p2_block_cond(line, "while", cond, sizeof(cond))) {
+                int iterations = 0;
+                while (!robot_stop && iterations < 1000 && p2_eval_condition(cond)) {
+                    p2_exec_lines(L, i + 1, close);
+                    ++iterations;
+                }
+                robot_log("P2: [while] %s -> %d iteration(s)", cond, iterations);
+            }
+            i = close + 1;
+            continue;
+        }
+        if (line[0] == '@') {
+            ++i;
+            continue;
+        }
+
+        /* 控制块体内没有显式 @Action 头的直接动作行。 */
+        int body_end = i;
+        while (body_end < end) {
+            char *l = p2_trim(p2_lines[body_end]);
+            if (*l == '\0' || l[0] == '@') {
+                break;
+            }
+            ++body_end;
+        }
+        p2_exec_action(L, i, body_end);
+        i = body_end;
+    }
+}
+
+static bool p2_run_mt(lua_State *L) {
+    p2_strip_comments(p2_mt_buf);
+    p2_nlines = 0;
+    char *save = NULL;
+    char *line = strtok_r(p2_mt_buf, "\n", &save);
+    while (line != NULL && p2_nlines < P2_MAX_LINES) {
+        p2_lines[p2_nlines++] = line;
         line = strtok_r(NULL, "\n", &save);
     }
-    return ncols > 0;
+    p2_exec_lines(L, 0, p2_nlines);
+    return p2_nlines > 0;
 }
 
 static void p2_destroy_devices(lua_State *L) {
