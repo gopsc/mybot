@@ -49,6 +49,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 41. **P40：`@Action` 行内 `-` 继承**
 42. **P41：`@Reflex` / `@Merge` 的 `-` 继承**
 43. **P42：动作行缺列按 `-` 补齐**
+44. **P43：全 fake HAL 回归 profile + `/device` 详情**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -125,7 +126,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-275200    0 110544
+276032    0 110544
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -176,6 +177,7 @@ RX GP1
 /autostart off              禁用开机自动循环
 /autostart                  查看当前开机配置
 /devices      列出 active 设备
+/device name  显示单个设备 meta/拓扑
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -282,6 +284,7 @@ sdcard/
     p40.sql
     p41.sql
     p42.sql
+    p43.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -321,6 +324,7 @@ sdcard/
     p40.mt
     p41.mt
     p42.mt
+    p43.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -638,6 +642,7 @@ p39             -> /robots/p39.sql + /scripts/p39.mt（@Merge 容量/相位）
 p40             -> /robots/p40.sql + /scripts/p40.mt（@Action 行内 - 继承）
 p41             -> /robots/p41.sql + /scripts/p41.mt（Reflex/Merge - 继承）
 p42             -> /robots/p42.sql + /scripts/p42.mt（缺列按 - 补齐）
+p43             -> /robots/p43.sql + /scripts/p43.mt（全 fake HAL 回归）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -882,6 +887,7 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /autostart off              禁用开机自动循环
 /autostart                  查看当前开机配置
 /devices      列出 active 设备
+/device name  显示单个设备 meta/拓扑
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -1722,7 +1728,7 @@ P18-A 增加两个控制台命令：
 run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 use <profile> | autostart <action> <period_ms> | autostart off | autostart
-devices | vars | structs | unload | help
+devices | device <name> | vars | structs | unload | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1746,6 +1752,7 @@ history: terminal up/down (ANSI)
 /autostart off
 /autostart
 /devices
+/device <name>
 /vars
 /structs
 /unload
@@ -2178,7 +2185,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-275200     0  110544
+276032     0  110544
 ```
 
 构建：
@@ -3157,6 +3164,74 @@ P5Check: call value=8 name=p42 item=30 angle=20
 - 缺列补 `-` 后仍遵循首行无继承的规则
 - 缓存仍是原始文本，不是求值结果
 - 没有根据表头类型做缺列校验
+
+## P43：全 fake HAL 回归 profile + /device 详情
+
+P43-A 增加一个不需要真实器件的综合回归 profile：
+
+```text
+p43
+```
+
+设备：
+
+```text
+i2c-f    I2C         /dev/i2c-fake
+pca-0    PCA9685     $i2c-f 0x40
+ads-0    ADS1015     $i2c-f 0x48
+t0       Timer
+spi-f    SPI         /dev/spidev-fake
+sig0     AD9833      $spi-f 1000Hz sine
+uart-f   UART        /dev/tty-fake 115200
+uc       UartCheck   $uart-f
+```
+
+动作：
+
+```mt
+@Action
+pca-0.angle  ads-0.channel  sig0.freq  uc.send  t0.delay;
+   90          0              1000       1        50;
+   45          1              2000       2        50;
+@
+```
+
+运行：
+
+```text
+/run p43
+```
+
+预期：
+
+- 8 个设备全部 build
+- 两拍动作依次驱动 PCA9685、ADS1015、AD9833、UartCheck、Timer
+- Timer 两拍各睡 50ms
+- profile 保持 active
+
+新增 `/device <name>`：
+
+```text
+/device pca-0
+```
+
+输出设备级详情：
+
+```text
+core1: device pca-0 driver=PCA9685 controller=- triggers=0 env=yes
+core1: device pca-0 meta name=pca-0
+core1: device pca-0 meta I2C=<fd>
+core1: device pca-0 meta address=0x40
+core1: device pca-0 meta channel=0
+```
+
+限制：
+
+- 只验证 fake HAL 路径，不验证真实器件时序/电气
+- fake 驱动仍走真实 Lua 驱动代码，但总线由假后端返回
+- 8 个设备已达到当前 `P2_MAX_DEVICES` 上限
+- ADS1015/PCA9685 共用同一个 fake I2C fd
+- 真实硬件仍需逐器件回归
 
 ## 运行现象
 

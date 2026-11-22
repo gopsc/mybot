@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-275200     0  110544
+276032     0  110544
 ```
 
 ## SD 卡（必需）
@@ -104,6 +104,7 @@ p23
 /autostart off              禁用开机自动循环
 /autostart                  查看开机配置
 /devices     列出 active 设备
+/device name 显示单个设备 meta/拓扑
 /vars        列出 active 变量/别名
 /structs     列出 active @Struct 字段
 /unload      销毁 active 设备并关闭 Lua

@@ -46,6 +46,7 @@ typedef enum {
     ROBOT_CMD_RELOAD,
     ROBOT_CMD_USE,
     ROBOT_CMD_AUTOSTART,
+    ROBOT_CMD_DEVICE,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -4564,6 +4565,10 @@ void robot_send_autostart(const char *arg) {
     robot_send_cmd(ROBOT_CMD_AUTOSTART, arg);
 }
 
+void robot_send_device(const char *name) {
+    robot_send_cmd(ROBOT_CMD_DEVICE, name);
+}
+
 static bool p2_path_stem(const char *path, char *out, size_t cap) {
     const char *base = strrchr(path, '/');
     base = base != NULL ? base + 1 : path;
@@ -4968,6 +4973,30 @@ void robot_core1(void) {
                     d->env_ref != LUA_NOREF ? "yes" : "no");
             }
             break;
+        case ROBOT_CMD_DEVICE: {
+            if (cmd.arg[0] == '\0') {
+                robot_log("core1: /device usage: /device <name>");
+                break;
+            }
+            p2_device_t *d = p2_find_device(cmd.arg);
+            if (d == NULL) {
+                robot_log("core1: device %s not found", cmd.arg);
+                break;
+            }
+            robot_log("core1: device %s driver=%s controller=%s triggers=%d env=%s",
+                d->name, d->driver,
+                d->controller[0] != '\0' ? d->controller : "-",
+                d->ntriggers, d->env_ref != LUA_NOREF ? "yes" : "no");
+            for (int t = 0; t < d->ntriggers; ++t) {
+                robot_log("core1: device %s trigger[%d]=%s", d->name, t,
+                    d->triggers[t]);
+            }
+            for (int m = 0; m < d->nmeta; ++m) {
+                robot_log("core1: device %s meta %s=%s", d->name,
+                    d->meta[m].key, d->meta[m].value);
+            }
+            break;
+        }
         case ROBOT_CMD_VARS:
             if (p2_nvars == 0 && p2_naliases == 0) {
                 robot_log("core1: no active vars/aliases");

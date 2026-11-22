@@ -222,6 +222,9 @@ static void console_dispatch(void) {
     } else if (strcmp(cmd, "devices") == 0) {
         robot_send_devices();
         console_line("[devices]");
+    } else if (strcmp(cmd, "device") == 0) {
+        robot_send_device(arg[0] != '\0' ? arg : NULL);
+        console_line("[device]");
     } else if (strcmp(cmd, "vars") == 0) {
         robot_send_vars();
         console_line("[vars]");
@@ -244,7 +247,7 @@ static void console_dispatch(void) {
         console_line("run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]");
         console_line("loop <name> <period_ms> | loop stop | stop | status | profile | mem | list");
         console_line("reload | use <profile> | autostart <action> <period_ms> | autostart off");
-        console_line("devices | vars | structs | unload | help");
+        console_line("devices | device <name> | vars | structs | unload | help");
         console_line("history: terminal up/down (ANSI)");
     } else {
         console_line("unknown command");

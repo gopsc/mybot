@@ -51,6 +51,7 @@ void robot_send_loop(const char *arg);
 void robot_send_reload(void);
 void robot_send_use(const char *name);
 void robot_send_autostart(const char *arg);
+void robot_send_device(const char *name);
 
 /* 供 core1 内部/后续驱动使用：非阻塞写入日志队列。 */
 void robot_log(const char *fmt, ...);
