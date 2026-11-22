@@ -39,6 +39,9 @@ typedef enum {
     ROBOT_CMD_UNLOAD,
     ROBOT_CMD_ACTION,
     ROBOT_CMD_REPEAT,
+    ROBOT_CMD_DEVICES,
+    ROBOT_CMD_VARS,
+    ROBOT_CMD_STRUCTS,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -4302,6 +4305,18 @@ void robot_send_repeat(const char *arg) {
     robot_send_cmd(ROBOT_CMD_REPEAT, arg);
 }
 
+void robot_send_devices(void) {
+    robot_send_cmd(ROBOT_CMD_DEVICES, NULL);
+}
+
+void robot_send_vars(void) {
+    robot_send_cmd(ROBOT_CMD_VARS, NULL);
+}
+
+void robot_send_structs(void) {
+    robot_send_cmd(ROBOT_CMD_STRUCTS, NULL);
+}
+
 static bool p2_parse_uint_arg(const char **pp, int *out) {
     const char *p = *pp;
     while (*p != '\0' && isspace((unsigned char)*p)) {
@@ -4548,6 +4563,49 @@ void robot_core1(void) {
                 done, count, p2_ndevices, last_lua_heap_kb);
             break;
         }
+        case ROBOT_CMD_DEVICES:
+            if (p2_ndevices == 0) {
+                robot_log("core1: no active devices");
+                break;
+            }
+            for (int i = 0; i < p2_ndevices; ++i) {
+                p2_device_t *d = &p2_devices[i];
+                robot_log("core1: dev[%d] %s driver=%s controller=%s triggers=%d env=%s",
+                    i, d->name, d->driver,
+                    d->controller[0] != '\0' ? d->controller : "-",
+                    d->ntriggers,
+                    d->env_ref != LUA_NOREF ? "yes" : "no");
+            }
+            break;
+        case ROBOT_CMD_VARS:
+            if (p2_nvars == 0 && p2_naliases == 0) {
+                robot_log("core1: no active vars/aliases");
+                break;
+            }
+            for (int i = 0; i < p2_nvars; ++i) {
+                robot_log("core1: var %s=%s", p2_vars[i].name,
+                    p2_vars[i].value);
+            }
+            for (int i = 0; i < p2_naliases; ++i) {
+                robot_log("core1: alias %s=%s", p2_aliases[i].name,
+                    p2_aliases[i].target);
+            }
+            break;
+        case ROBOT_CMD_STRUCTS:
+            if (p2_nstructs == 0) {
+                robot_log("core1: no active structs");
+                break;
+            }
+            for (int i = 0; i < p2_nstructs; ++i) {
+                robot_log("core1: struct %s fields=%d", p2_structs[i].name,
+                    p2_structs[i].nfields);
+                for (int f = 0; f < p2_structs[i].nfields; ++f) {
+                    robot_log("core1: struct %s.%s=%s", p2_structs[i].name,
+                        p2_structs[i].fields[f].key,
+                        p2_structs[i].fields[f].value);
+                }
+            }
+            break;
         case ROBOT_CMD_UNLOAD:
             robot_runtime_close();
             robot_log("core1: unloaded, idle");

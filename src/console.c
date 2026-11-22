@@ -219,8 +219,18 @@ static void console_dispatch(void) {
     } else if (strcmp(cmd, "repeat") == 0) {
         robot_send_repeat(arg[0] != '\0' ? arg : NULL);
         console_line("[repeat]");
+    } else if (strcmp(cmd, "devices") == 0) {
+        robot_send_devices();
+        console_line("[devices]");
+    } else if (strcmp(cmd, "vars") == 0) {
+        robot_send_vars();
+        console_line("[vars]");
+    } else if (strcmp(cmd, "structs") == 0) {
+        robot_send_structs();
+        console_line("[structs]");
     } else if (strcmp(cmd, "help") == 0) {
-        console_line("run [sql] [script] | stop | status | profile | mem | list | sql <name> | action [name] | repeat <name> [count] [delay_ms] | unload | help");
+        console_line("run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]");
+        console_line("stop | status | profile | mem | list | devices | vars | structs | unload | help");
         console_line("history: terminal up/down (ANSI)");
     } else {
         console_line("unknown command");

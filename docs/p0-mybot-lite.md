@@ -37,6 +37,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 29. **P28：常驻 Lua 状态 + UART `/sql` 热补丁**
 30. **P29：`/action` 在 active 结构上重播动作脚本**
 31. **P30：`/repeat` 批量重播动作脚本**
+32. **P31：active 状态诊断 `/devices` / `/vars` / `/structs`**
 
 还没有实现：完整 `@Merge` 语义、热 SQL 事务回滚、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -113,7 +114,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-266752    0 100020
+268024    0 100020
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -156,6 +157,9 @@ RX GP1
 /action name  在 active 结构上重播 /scripts/name.mt
 /action       重播最近一次动作脚本
 /repeat name [count] [delay_ms]  批量重播
+/devices      列出 active 设备
+/vars         列出 active 变量/别名
+/structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
 /help         显示命令摘要
 ↑ / ↓         命令历史（ANSI，最近 8 条）
@@ -826,6 +830,9 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /action name  在 active 结构上重播 /scripts/name.mt
 /action       重播最近一次动作脚本
 /repeat name [count] [delay_ms]  批量重播
+/devices      列出 active 设备
+/vars         列出 active 变量/别名
+/structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
 /help         显示命令摘要
 ↑ / ↓         命令历史（ANSI，最近 8 条）
@@ -1661,7 +1668,8 @@ P18-A 增加两个控制台命令：
 `/help` 直接在 core0 通过 UART 显示：
 
 ```text
-run [sql] [script] | stop | status | profile | mem | list | sql <name> | action [name] | repeat <name> [count] [delay_ms] | unload | help
+run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
+stop | status | profile | mem | list | devices | vars | structs | unload | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1677,6 +1685,9 @@ history: terminal up/down (ANSI)
 /sql <name>
 /action [name]
 /repeat <name> [count] [delay_ms]
+/devices
+/vars
+/structs
 /unload
 /help
 ```
@@ -2107,7 +2118,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-266752     0  100020
+268024     0  100020
 ```
 
 构建：
@@ -2389,6 +2400,66 @@ core1: status idle active=1 devices=1 sql=/robots/p28.sql action=/scripts/p29.mt
 - `/stop` 命令在 `/repeat` 期间不会被 core1 处理；需要 `Ctrl-C`
 - 脚本里的 `@SQL` 每轮都会执行，可能重复 INSERT / 重复 UPDATE
 - 没有事务回滚
+
+## P31：active 状态诊断
+
+P31-A 增加三个只读命令：
+
+```text
+/devices    列出 active 设备
+/vars       列出 active @Vars 和 @Alias
+/structs    列出 active @Struct 及字段
+```
+
+示例：
+
+```text
+/run p22
+/devices
+/vars
+/structs
+/unload
+```
+
+`/devices`：
+
+```text
+core1: dev[0] p22 driver=P5Check controller=- triggers=0 env=yes
+core1: dev[1] cnt driver=Counter controller=- triggers=0 env=yes
+```
+
+`/vars`：
+
+```text
+core1: var idx=1
+core1: var count=2
+```
+
+`/structs`：
+
+```text
+core1: struct cfg fields=4
+core1: struct cfg.items[0]=10
+core1: struct cfg.items[1]=20
+core1: struct cfg.items[2]=30
+core1: struct cfg.name=pico-x
+```
+
+行为：
+
+- 只读，不改变设备、变量或 struct
+- `/devices` 显示设备名、驱动、controller、trigger 数和 env 是否建立
+- `/vars` 同时列出 `@Vars` 和 `@Alias`
+- `/structs` 先列字段数，再逐字段列出
+- 没有 active 状态时显示 no active devices / no active vars/aliases / no active structs
+- 日志队列深度从 16 提升到 64，避免一次性列出 struct 字段时丢日志
+
+限制：
+
+- 输出是逐行文本，没有分页
+- 设备 meta 的全部字段没有展开；当前只显示名称、驱动、controller、trigger 数
+- 大量 struct 字段会占用较长的 UART 输出时间
+- 不能通过命令修改这些状态，只能通过 `/sql` / `/action` / `/run`
 
 ## 运行现象
 
