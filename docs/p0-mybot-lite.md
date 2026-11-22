@@ -60,6 +60,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 52. **P51：`/i2cscan` 硬件总线扫描**
 53. **P52：`@Merge` 片段递归**
 54. **P53：跨顶层/嵌套的 include-once**
+55. **P54：`/reboot` 软重启**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -136,7 +137,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-279312    0 140376
+279568    0 140380
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -186,6 +187,7 @@ RX GP1
 /autostart name period_ms  写入 /boot.txt
 /autostart off              禁用开机自动循环
 /autostart                  查看当前开机配置
+/reboot       软重启 Pico
 /devices      列出 active 设备
 /device name  显示单个设备 meta/拓扑
 /i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
@@ -929,6 +931,7 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /autostart name period_ms  写入 /boot.txt
 /autostart off              禁用开机自动循环
 /autostart                  查看当前开机配置
+/reboot       软重启 Pico
 /devices      列出 active 设备
 /device name  显示单个设备 meta/拓扑
 /i2cscan [0|1] 扫描 I2C 总线 0x08..0x77
@@ -1772,7 +1775,7 @@ P18-A 增加两个控制台命令：
 run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 use <profile> | autostart <action> <period_ms> | autostart off | autostart
-devices | device <name> | i2cscan [0|1] | vars | structs | unload | help
+devices | device <name> | i2cscan [0|1] | vars | structs | unload | reboot | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1795,6 +1798,7 @@ history: terminal up/down (ANSI)
 /autostart <action> <period_ms>
 /autostart off
 /autostart
+/reboot
 /devices
 /device <name>
 /i2cscan [0|1]
@@ -2230,7 +2234,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-279312     0  140376
+279568     0  140380
 ```
 
 构建：
@@ -3316,7 +3320,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-279312     0  140376
+279568     0  140380
 ```
 
 限制：
@@ -3853,6 +3857,42 @@ P5Check: call value=20 name=m2 item=nil angle=nil
 - 路径表 16 项，超出会中止
 - `.once.mt` 后缀必须完全匹配
 - 只对 `@Merge` 片段生效，不影响 `@Include`
+- 尚未上板实测
+
+## P54：/reboot 软重启
+
+P54-A 增加：
+
+```text
+/reboot
+```
+
+行为：
+
+- 打印 `rebooting...`
+- 等待 50ms 让 UART 输出排空
+- 调用 `watchdog_reboot(0, 0, 100)`
+- 100ms 后 Pico 软重启
+- 重启后按 `/profile.txt` 和 `/boot.txt` 重新加载
+- active 状态、热 SQL、循环全部丢失
+
+典型流程：
+
+```text
+/use p28
+/autostart p29 200
+/reboot
+```
+
+重启后自动进入 p28 + p29 周期动作。
+
+限制：
+
+- 没有确认提示，输入即重启
+- 不保存当前 active 状态或热 SQL 补丁
+- 依赖 `/profile.txt` / `/boot.txt` 持久化配置
+- 如果 `/boot.txt` 无效，重启后保持 idle
+- 没有重启原因/日志持久化
 - 尚未上板实测
 
 ## 运行现象

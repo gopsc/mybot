@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "pico/stdlib.h"
+#include "hardware/watchdog.h"
 
 #define CONSOLE_HISTORY_MAX 8
 
@@ -246,11 +247,18 @@ static void console_dispatch(void) {
     } else if (strcmp(cmd, "autostart") == 0) {
         robot_send_autostart(arg[0] != '\0' ? arg : NULL);
         console_line("[autostart]");
+    } else if (strcmp(cmd, "reboot") == 0) {
+        console_line("rebooting...");
+        sleep_ms(50);
+        watchdog_reboot(0, 0, 100);
+        while (true) {
+            tight_loop_contents();
+        }
     } else if (strcmp(cmd, "help") == 0) {
         console_line("run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]");
         console_line("loop <name> <period_ms> | loop stop | stop | status | profile | mem | list");
         console_line("reload | use <profile> | autostart <action> <period_ms> | autostart off");
-        console_line("devices | device <name> | i2cscan [0|1] | vars | structs | unload | help");
+        console_line("devices | device <name> | i2cscan [0|1] | vars | structs | unload | reboot | help");
         console_line("history: terminal up/down (ANSI)");
     } else {
         console_line("unknown command");

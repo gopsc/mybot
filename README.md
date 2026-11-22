@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-279312     0  140376
+279568     0  140380
 ```
 
 ## SD 卡（必需）
@@ -103,6 +103,7 @@ p23
 /autostart name period_ms  写入 /boot.txt
 /autostart off              禁用开机自动循环
 /autostart                  查看开机配置
+/reboot      软重启 Pico
 /devices     列出 active 设备
 /device name 显示单个设备 meta/拓扑
 /i2cscan [0|1] 扫描 I2C 总线
