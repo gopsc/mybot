@@ -2184,113 +2184,445 @@ static bool p2_eval_text(const char *s, char *out, size_t cap) {
     return false;
 }
 
-static bool p2_operand_value(const char *s, double *num, char *text,
-        size_t cap, bool *isnum) {
-    p2_copy_trim(text, cap, s, NULL);
-    size_t tlen = strlen(text);
-    if (tlen >= 2 && (text[0] == '\'' || text[0] == '"') &&
-        text[tlen - 1] == text[0]) {
-        p2_unquote(text);
-        *isnum = false;
-        return true;
+/* ---- P22：条件/表达式值解析 ---------------------------------------------
+ * 递归下降，优先级同 C：一元 ! + - > * / % > + - > 比较 > && > ||。
+ * 值分数值/文本/布尔；+ 在两数值上是加法，否则按文本拼接。
+ * 比较保持宽松兼容：两边都是数值按数值，否则按文本。
+ */
+typedef enum {
+    P2_VAL_NUM = 0,
+    P2_VAL_TEXT,
+    P2_VAL_BOOL,
+} p2_val_type_t;
+
+typedef struct {
+    p2_val_type_t type;
+    double num;
+    int boolean;
+    char text[P2_MAX_VALUE];
+} p2_val_t;
+
+static void p2_val_set_num(p2_val_t *v, double n) {
+    memset(v, 0, sizeof(*v));
+    v->type = P2_VAL_NUM;
+    v->num = n;
+    snprintf(v->text, sizeof(v->text), "%g", n);
+}
+
+static void p2_val_set_text(p2_val_t *v, const char *s) {
+    memset(v, 0, sizeof(*v));
+    v->type = P2_VAL_TEXT;
+    snprintf(v->text, sizeof(v->text), "%s", s);
+}
+
+static void p2_val_set_bool(p2_val_t *v, bool b) {
+    memset(v, 0, sizeof(*v));
+    v->type = P2_VAL_BOOL;
+    v->boolean = b ? 1 : 0;
+    snprintf(v->text, sizeof(v->text), "%s", b ? "true" : "false");
+}
+
+static void p2_val_as_text(const p2_val_t *v, char *out, size_t cap) {
+    if (v->type == P2_VAL_BOOL) {
+        snprintf(out, cap, "%s", v->boolean ? "true" : "false");
+    } else if (v->type == P2_VAL_NUM) {
+        snprintf(out, cap, "%g", v->num);
+    } else {
+        snprintf(out, cap, "%s", v->text);
     }
-    if (p2_eval_numeric(s, num)) {
-        *isnum = true;
-        return true;
+}
+
+static bool p2_val_truthy(const p2_val_t *v) {
+    if (v->type == P2_VAL_BOOL) {
+        return v->boolean != 0;
     }
-    char textval[P2_MAX_VALUE];
-    if (p2_eval_text(s, textval, sizeof(textval))) {
-        p2_copy_trim(text, cap, textval, NULL);
-        *isnum = false;
-        return true;
+    if (v->type == P2_VAL_NUM) {
+        return v->num != 0.0;
     }
-    char lookup[P2_MAX_VALUE];
-    if (p2_lookup_value(text, lookup, sizeof(lookup))) {
-        p2_copy_trim(text, cap, lookup, NULL);
-    }
+    return v->text[0] != '\0';
+}
+
+static bool p2_text_number(const char *s, double *out) {
     char *end = NULL;
-    double d = strtod(text, &end);
+    double d = strtod(s, &end);
     while (end != NULL && isspace((unsigned char)*end)) {
         ++end;
     }
-    if (end != NULL && end != text && *end == '\0') {
-        *num = d;
-        *isnum = true;
-    } else {
-        *isnum = false;
+    if (end == s || end == NULL || *end != '\0') {
+        return false;
     }
+    *out = d;
+    return true;
+}
+
+static void p2_val_skip(const char **pp) {
+    while (isspace((unsigned char)**pp)) {
+        ++*pp;
+    }
+}
+
+static bool p2_val_parse_or(const char **pp, p2_val_t *v, bool eval);
+
+static bool p2_val_parse_primary(const char **pp, p2_val_t *v, bool eval) {
+    p2_val_skip(pp);
+    if (**pp == '(') {
+        ++*pp;
+        if (!p2_val_parse_or(pp, v, eval)) {
+            return false;
+        }
+        p2_val_skip(pp);
+        if (**pp != ')') {
+            return false;
+        }
+        ++*pp;
+        return true;
+    }
+    if (**pp == '\'' || **pp == '"') {
+        char quote = **pp;
+        ++*pp;
+        char out[P2_MAX_VALUE];
+        size_t n = 0;
+        while (**pp != '\0' && **pp != quote) {
+            char c = **pp;
+            if (c == '\\' && (*pp)[1] != '\0') {
+                ++*pp;
+                c = **pp;
+                if (c == 'n') {
+                    c = '\n';
+                } else if (c == 't') {
+                    c = '\t';
+                }
+            }
+            if (n + 1 < sizeof(out)) {
+                out[n++] = c;
+            }
+            ++*pp;
+        }
+        if (**pp != quote) {
+            return false;
+        }
+        ++*pp;
+        out[n] = '\0';
+        p2_val_set_text(v, out);
+        return true;
+    }
+    if (isdigit((unsigned char)**pp) ||
+        (**pp == '.' && isdigit((unsigned char)(*pp)[1]))) {
+        char *end = NULL;
+        double d = strtod(*pp, &end);
+        if (end == *pp) {
+            return false;
+        }
+        *pp = end;
+        p2_val_set_num(v, d);
+        return true;
+    }
+    if (isalpha((unsigned char)**pp) || **pp == '_') {
+        const char *start = *pp;
+        int depth = 0;
+        for (;;) {
+            char c = **pp;
+            if (depth == 0) {
+                if (isalnum((unsigned char)c) || c == '_' || c == '.') {
+                    ++*pp;
+                } else if (c == '[') {
+                    depth = 1;
+                    ++*pp;
+                } else {
+                    break;
+                }
+            } else {
+                if (c == '[') {
+                    ++depth;
+                } else if (c == ']') {
+                    --depth;
+                } else if (c == '\0') {
+                    break;
+                }
+                ++*pp;
+            }
+        }
+        char name[P2_MAX_NAME];
+        p2_copy_trim(name, sizeof(name), start, *pp);
+        if (strcmp(name, "true") == 0) {
+            p2_val_set_bool(v, true);
+            return true;
+        }
+        if (strcmp(name, "false") == 0) {
+            p2_val_set_bool(v, false);
+            return true;
+        }
+        if (!eval) {
+            p2_val_set_num(v, 0);
+            return true;
+        }
+        char value[P2_MAX_VALUE];
+        if (!p2_lookup_value(name, value, sizeof(value))) {
+            return false;
+        }
+        double d = 0;
+        if (p2_text_number(value, &d)) {
+            p2_val_set_num(v, d);
+        } else {
+            p2_val_set_text(v, value);
+        }
+        return true;
+    }
+    return false;
+}
+
+static bool p2_val_parse_unary(const char **pp, p2_val_t *v, bool eval) {
+    p2_val_skip(pp);
+    if (**pp == '!') {
+        ++*pp;
+        p2_val_t t;
+        if (!p2_val_parse_unary(pp, &t, eval)) {
+            return false;
+        }
+        p2_val_set_bool(v, eval ? !p2_val_truthy(&t) : false);
+        return true;
+    }
+    if (**pp == '+' || **pp == '-') {
+        char op = **pp;
+        ++*pp;
+        p2_val_t t;
+        if (!p2_val_parse_unary(pp, &t, eval)) {
+            return false;
+        }
+        if (!eval) {
+            p2_val_set_num(v, 0);
+            return true;
+        }
+        if (t.type != P2_VAL_NUM) {
+            return false;
+        }
+        p2_val_set_num(v, op == '-' ? -t.num : t.num);
+        return true;
+    }
+    return p2_val_parse_primary(pp, v, eval);
+}
+
+static bool p2_val_parse_mul(const char **pp, p2_val_t *v, bool eval) {
+    p2_val_t lhs;
+    if (!p2_val_parse_unary(pp, &lhs, eval)) {
+        return false;
+    }
+    for (;;) {
+        p2_val_skip(pp);
+        char op = **pp;
+        if (op != '*' && op != '/' && op != '%') {
+            break;
+        }
+        ++*pp;
+        p2_val_t rhs;
+        if (!p2_val_parse_unary(pp, &rhs, eval)) {
+            return false;
+        }
+        if (!eval) {
+            continue;
+        }
+        if (lhs.type != P2_VAL_NUM || rhs.type != P2_VAL_NUM) {
+            return false;
+        }
+        if ((op == '/' || op == '%') && rhs.num == 0.0) {
+            return false;
+        }
+        if (op == '*') {
+            p2_val_set_num(&lhs, lhs.num * rhs.num);
+        } else if (op == '/') {
+            p2_val_set_num(&lhs, lhs.num / rhs.num);
+        } else {
+            p2_val_set_num(&lhs,
+                (double)((long long)lhs.num % (long long)rhs.num));
+        }
+    }
+    *v = lhs;
+    return true;
+}
+
+static bool p2_val_parse_add(const char **pp, p2_val_t *v, bool eval) {
+    p2_val_t lhs;
+    if (!p2_val_parse_mul(pp, &lhs, eval)) {
+        return false;
+    }
+    for (;;) {
+        p2_val_skip(pp);
+        char op = **pp;
+        if (op != '+' && op != '-') {
+            break;
+        }
+        ++*pp;
+        p2_val_t rhs;
+        if (!p2_val_parse_mul(pp, &rhs, eval)) {
+            return false;
+        }
+        if (!eval) {
+            continue;
+        }
+        if (op == '-') {
+            if (lhs.type != P2_VAL_NUM || rhs.type != P2_VAL_NUM) {
+                return false;
+            }
+            p2_val_set_num(&lhs, lhs.num - rhs.num);
+        } else if (lhs.type == P2_VAL_NUM && rhs.type == P2_VAL_NUM) {
+            p2_val_set_num(&lhs, lhs.num + rhs.num);
+        } else {
+            char a[P2_MAX_VALUE];
+            char b[P2_MAX_VALUE];
+            char joined[P2_MAX_VALUE * 2];
+            p2_val_as_text(&lhs, a, sizeof(a));
+            p2_val_as_text(&rhs, b, sizeof(b));
+            snprintf(joined, sizeof(joined), "%s%s", a, b);
+            p2_val_set_text(&lhs, joined);
+        }
+    }
+    *v = lhs;
+    return true;
+}
+
+static bool p2_val_parse_rel(const char **pp, p2_val_t *v, bool eval) {
+    p2_val_t lhs;
+    if (!p2_val_parse_add(pp, &lhs, eval)) {
+        return false;
+    }
+    for (;;) {
+        p2_val_skip(pp);
+        char op = **pp;
+        if (op != '<' && op != '>') {
+            break;
+        }
+        int oplen = ((*pp)[1] == '=') ? 2 : 1;
+        *pp += oplen;
+        p2_val_t rhs;
+        if (!p2_val_parse_add(pp, &rhs, eval)) {
+            return false;
+        }
+        if (!eval) {
+            p2_val_set_bool(&lhs, false);
+            continue;
+        }
+        int cmp = 0;
+        if (lhs.type == P2_VAL_NUM && rhs.type == P2_VAL_NUM) {
+            cmp = lhs.num < rhs.num ? -1 : (lhs.num > rhs.num ? 1 : 0);
+        } else {
+            char a[P2_MAX_VALUE];
+            char b[P2_MAX_VALUE];
+            p2_val_as_text(&lhs, a, sizeof(a));
+            p2_val_as_text(&rhs, b, sizeof(b));
+            cmp = strcmp(a, b);
+        }
+        bool r = false;
+        if (op == '<') {
+            r = oplen == 2 ? cmp <= 0 : cmp < 0;
+        } else {
+            r = oplen == 2 ? cmp >= 0 : cmp > 0;
+        }
+        p2_val_set_bool(&lhs, r);
+    }
+    *v = lhs;
+    return true;
+}
+
+static bool p2_val_parse_eq(const char **pp, p2_val_t *v, bool eval) {
+    p2_val_t lhs;
+    if (!p2_val_parse_rel(pp, &lhs, eval)) {
+        return false;
+    }
+    for (;;) {
+        p2_val_skip(pp);
+        bool eq = ((*pp)[0] == '=' && (*pp)[1] == '=');
+        bool ne = ((*pp)[0] == '!' && (*pp)[1] == '=');
+        if (!eq && !ne) {
+            break;
+        }
+        *pp += 2;
+        p2_val_t rhs;
+        if (!p2_val_parse_rel(pp, &rhs, eval)) {
+            return false;
+        }
+        if (!eval) {
+            p2_val_set_bool(&lhs, false);
+            continue;
+        }
+        bool same = false;
+        if (lhs.type == P2_VAL_NUM && rhs.type == P2_VAL_NUM) {
+            same = lhs.num == rhs.num;
+        } else if (lhs.type == P2_VAL_BOOL && rhs.type == P2_VAL_BOOL) {
+            same = lhs.boolean == rhs.boolean;
+        } else {
+            char a[P2_MAX_VALUE];
+            char b[P2_MAX_VALUE];
+            p2_val_as_text(&lhs, a, sizeof(a));
+            p2_val_as_text(&rhs, b, sizeof(b));
+            same = strcmp(a, b) == 0;
+        }
+        p2_val_set_bool(&lhs, ne ? !same : same);
+    }
+    *v = lhs;
+    return true;
+}
+
+static bool p2_val_parse_and(const char **pp, p2_val_t *v, bool eval) {
+    p2_val_t lhs;
+    if (!p2_val_parse_eq(pp, &lhs, eval)) {
+        return false;
+    }
+    for (;;) {
+        p2_val_skip(pp);
+        if ((*pp)[0] != '&' || (*pp)[1] != '&') {
+            break;
+        }
+        *pp += 2;
+        bool l = eval && p2_val_truthy(&lhs);
+        p2_val_t rhs;
+        if (!p2_val_parse_eq(pp, &rhs, eval && l)) {
+            return false;
+        }
+        bool r = eval && l && p2_val_truthy(&rhs);
+        if (eval) {
+            p2_val_set_bool(&lhs, r);
+        }
+    }
+    *v = lhs;
+    return true;
+}
+
+static bool p2_val_parse_or(const char **pp, p2_val_t *v, bool eval) {
+    p2_val_t lhs;
+    if (!p2_val_parse_and(pp, &lhs, eval)) {
+        return false;
+    }
+    for (;;) {
+        p2_val_skip(pp);
+        if ((*pp)[0] != '|' || (*pp)[1] != '|') {
+            break;
+        }
+        *pp += 2;
+        bool l = eval && p2_val_truthy(&lhs);
+        p2_val_t rhs;
+        if (!p2_val_parse_and(pp, &rhs, eval && !l)) {
+            return false;
+        }
+        bool r = eval && !l && p2_val_truthy(&rhs);
+        if (eval) {
+            p2_val_set_bool(&lhs, l || r);
+        }
+    }
+    *v = lhs;
     return true;
 }
 
 static bool p2_eval_condition(const char *expr) {
-    char buf[128];
-    p2_copy_trim(buf, sizeof(buf), expr, NULL);
-    if (buf[0] == '\0') {
+    const char *p = expr;
+    p2_val_t v;
+    if (!p2_val_parse_or(&p, &v, true)) {
         return false;
     }
-
-    char *p = strstr(buf, "||");
-    if (p != NULL) {
-        *p = '\0';
-        return p2_eval_condition(buf) || p2_eval_condition(p + 2);
+    p2_val_skip(&p);
+    if (*p != '\0') {
+        return false;
     }
-    p = strstr(buf, "&&");
-    if (p != NULL) {
-        *p = '\0';
-        return p2_eval_condition(buf) && p2_eval_condition(p + 2);
-    }
-
-    char *op = NULL;
-    int oplen = 0;
-    for (char *q = buf; *q != '\0'; ++q) {
-        if ((q[0] == '=' && q[1] == '=') || (q[0] == '!' && q[1] == '=') ||
-            (q[0] == '<' && q[1] == '=') || (q[0] == '>' && q[1] == '=')) {
-            op = q;
-            oplen = 2;
-            break;
-        }
-        if (q[0] == '<' || q[0] == '>') {
-            op = q;
-            oplen = 1;
-            break;
-        }
-    }
-
-    if (op == NULL) {
-        double num = 0;
-        char text[P2_MAX_VALUE];
-        bool isnum = false;
-        p2_operand_value(buf, &num, text, sizeof(text), &isnum);
-        return isnum ? num != 0.0 : text[0] != '\0';
-    }
-
-    char opbuf[3] = {0};
-    memcpy(opbuf, op, (size_t)oplen);
-    *op = '\0';
-    char *rhs = op + oplen;
-    double ln = 0, rn = 0;
-    char lt[P2_MAX_VALUE], rt[P2_MAX_VALUE];
-    bool li = false, ri = false;
-    p2_operand_value(buf, &ln, lt, sizeof(lt), &li);
-    p2_operand_value(rhs, &rn, rt, sizeof(rt), &ri);
-
-    if (li && ri) {
-        if (strcmp(opbuf, "==") == 0) return ln == rn;
-        if (strcmp(opbuf, "!=") == 0) return ln != rn;
-        if (strcmp(opbuf, "<") == 0) return ln < rn;
-        if (strcmp(opbuf, ">") == 0) return ln > rn;
-        if (strcmp(opbuf, "<=") == 0) return ln <= rn;
-        if (strcmp(opbuf, ">=") == 0) return ln >= rn;
-    } else {
-        int cmp = strcmp(lt, rt);
-        if (strcmp(opbuf, "==") == 0) return cmp == 0;
-        if (strcmp(opbuf, "!=") == 0) return cmp != 0;
-        if (strcmp(opbuf, "<") == 0) return cmp < 0;
-        if (strcmp(opbuf, ">") == 0) return cmp > 0;
-        if (strcmp(opbuf, "<=") == 0) return cmp <= 0;
-        if (strcmp(opbuf, ">=") == 0) return cmp >= 0;
-    }
-    return false;
+    return p2_val_truthy(&v);
 }
 
 static bool p2_block_cond(const char *line, const char *keyword, char *out,

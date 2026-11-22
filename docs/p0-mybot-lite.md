@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19/P20/P21 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19/P20/P21/P22 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -24,6 +24,7 @@
 20. **两层 `@Include`**
 21. **SQL 与动作脚本分离选择**
 22. **命令历史（↑/↓）**
+23. **条件解析 v2（分组/一元 !/短路）**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -81,7 +82,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-893068    0 153500
+896044    0 153500
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -105,7 +106,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-267628     0 102056
+270604     0 102056
 ```
 
 此时：
@@ -204,6 +205,7 @@ sdcard/
     p16.sql
     p17.sql
     p19.sql
+    p22.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -231,6 +233,7 @@ sdcard/
     p16.mt
     p17.mt
     p19.mt
+    p22.mt
     parts/inc_p5.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -525,6 +528,7 @@ p15             -> /robots/p15.sql + /scripts/p15.mt（named @Reflex）
 p16             -> /robots/p16.sql + /scripts/p16.mt（reflex 递归防线）
 p17             -> /robots/p17.sql + /scripts/p17.mt（动态数组下标）
 p19             -> /robots/p19.sql + /scripts/p19.mt（嵌套 @Include）
+p22             -> /robots/p22.sql + /scripts/p22.mt（条件解析 v2）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -1359,7 +1363,7 @@ headless：
 
 ```text
 text    data   bss
-267628     0 102056
+270604     0 102056
 ```
 
 代价：
@@ -1733,6 +1737,82 @@ P21-A 给控制台命令模式加上历史：
 - 只在 RAM 中保存，重启后丢失
 - 只支持上/下，不支持搜索
 - 回看时当前未提交的半截输入会被覆盖
+
+## P22：条件解析 v2
+
+P22-A 把 `@if` / `@while` 的条件求值换成递归下降解析器，优先级同 C：
+
+```text
+一元 ! + -
+  > * / %
+  > + -
+  > 比较 > == !=
+  > &&
+  > ||
+```
+
+支持：
+
+- 括号分组：`(a == 1 || b == 2) && c > 0`
+- 一元逻辑非：`!(count == 2)`
+- 一元正负：`-3 + 5 == 2`
+- `&&` / `||` 短路：被短路的一侧只做语法扫描，不查变量、不做除零
+- 字符串里的 `&&` / `||` 不再被误当运算符
+- 布尔字面量 `true` / `false`
+- 字符串转义：`\n`、`\t`、`\"`、`\\`
+- 标识符带表达式下标：`cfg.items[idx+1]`
+
+示例：
+
+```mt
+@if((cfg.items[idx] == 20 && !(cfg.items[idx] > 25)) || cfg.name == "a && b")
+p5.value;
+  $(cfg.items[idx+1]);
+@
+
+@if((1 == 2 && missing > 0) || cfg.name == "pico-x")
+p5.ok;
+  7;
+@
+
+@while((count < 3) && !(count == 2))
+cnt.reading;
+ $count=reading;
+@
+```
+
+测试 profile：
+
+```text
+p22
+```
+
+预期关键输出：
+
+```text
+P5Check: call value=30 name=nil item=nil angle=nil
+P5Check: call value=nil name=nil item=11 angle=nil
+P5Check: call value=nil name=nil item=nil angle=7
+Counter: reading=1
+Counter: reading=2
+P2: [while] (count < 3) && !(count == 2) -> 2 iteration(s)
+P5Check: call value=nil name=nil item=nil angle=45
+P2: p22.call result=OK
+```
+
+兼容策略：
+
+- 裸值仍按旧规则取真值（数值非零、文本非空）
+- `+` 在两个数值上是加法，否则是文本拼接
+- 排序比较两边都是数值时按数值，否则按文本
+- `==` / `!=` 数值比数值、布尔比布尔，其余按文本
+
+限制：
+
+- 还不是 mybot 的完整表达式 AST
+- 没有函数调用、成员函数、类型系统
+- `@if` / `@while` 条件里的空格仍依赖本实现，不保证与 mybot 块头词法完全一致
+- 布尔值只在条件语境使用，`$(...)` 文本/数值路径仍不接受布尔
 
 ## 运行现象
 
