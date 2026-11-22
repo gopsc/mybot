@@ -35,6 +35,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 27. **P26：取消无 SD 构建，SD 固定启用**
 28. **P27：`@SQL` UPDATE / DROP TABLE**
 29. **P28：常驻 Lua 状态 + UART `/sql` 热补丁**
+30. **P29：`/action` 在 active 结构上重播动作脚本**
 
 还没有实现：完整 `@Merge` 语义、热 SQL 事务回滚、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -111,7 +112,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-264928    0  99956
+265696    0 100020
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -135,7 +136,7 @@ RX GP1
 [robot] core1: robot runtime started
 [robot] SD: mounted 0:
 ...
-[robot] core1: status idle active=1 devices=2 sql=/robots/p3.sql
+[robot] core1: status idle active=1 devices=2 sql=/robots/p3.sql action=/scripts/p3.mt
 >
 ```
 
@@ -151,6 +152,8 @@ RX GP1
 /mem          core1 栈高水位和上次 Lua 堆
 /list         列出 /robots/*.sql
 /sql name     对当前 active 结构应用 /sql/name.sql
+/action name  在 active 结构上重播 /scripts/name.mt
+/action       重播最近一次动作脚本
 /unload       销毁 active 设备并关闭 Lua
 /help         显示命令摘要
 ↑ / ↓         命令历史（ANSI，最近 8 条）
@@ -281,6 +284,7 @@ sdcard/
     p25.mt
     p27.mt
     p28.mt
+    p29.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -583,6 +587,7 @@ p23             -> /robots/p23.sql + /scripts/p23.mt（统一表达式引擎）
 p25             -> /robots/p25.sql + /scripts/p25.mt（@SQL 热插拔 INSERT/DELETE）
 p27             -> /robots/p27.sql + /scripts/p27.mt（@SQL UPDATE/DROP）
 p28             -> /robots/p28.sql + /scripts/p28.mt（常驻状态 + /sql）
+p29             -> /scripts/p29.mt（/action 重播测试，无独立 SQL）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -816,6 +821,8 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /mem          core1 栈高水位和上次 Lua 堆
 /list         列出 /robots/*.sql
 /sql name     对当前 active 结构应用 /sql/name.sql
+/action name  在 active 结构上重播 /scripts/name.mt
+/action       重播最近一次动作脚本
 /unload       销毁 active 设备并关闭 Lua
 /help         显示命令摘要
 ↑ / ↓         命令历史（ANSI，最近 8 条）
@@ -852,7 +859,7 @@ Ctrl-C        发送停止请求
 [robot] core1: run sql=p4 script=(same)
 ...
 [robot] core1: run finished, profile active
-[robot] core1: status idle active=1 devices=1 sql=/robots/p4.sql
+[robot] core1: status idle active=1 devices=1 sql=/robots/p4.sql action=/scripts/p4.mt
 [robot] core1: /profile.txt = p4
 [robot] core1: mem stack=.../16384 heap_last=...KB busy=0 stop=0
 [robot] core1: profile p4.sql
@@ -1651,7 +1658,7 @@ P18-A 增加两个控制台命令：
 `/help` 直接在 core0 通过 UART 显示：
 
 ```text
-run [sql] [script] | stop | status | profile | mem | list | sql <name> | unload | help
+run [sql] [script] | stop | status | profile | mem | list | sql <name> | action [name] | unload | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1665,6 +1672,7 @@ history: terminal up/down (ANSI)
 /mem
 /list
 /sql <name>
+/action [name]
 /unload
 /help
 ```
@@ -2095,7 +2103,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-264928     0   99956
+265696     0  100020
 ```
 
 构建：
@@ -2269,6 +2277,57 @@ SD 布局新增：
 - 保持 Lua state 会持续占用堆，可用 `/mem` 观察
 - `/run` 会隐式 `/unload`，旧设备会先全部 destroy
 
+## P29：/action 重播动作脚本
+
+P29-A 增加 `/action`：
+
+```text
+/action p29    读取 /scripts/p29.mt 并在 active 设备上执行
+/action        重播最近一次动作脚本
+```
+
+行为：
+
+- 不销毁、不重建 active 设备
+- 动作脚本可以使用当前已 build 的设备、变量和别名
+- 脚本里的 `@SQL` 仍可继续热插拔
+- 每次 `/action` 会重置 `@Struct` / `@Reflex` / `@Merge` 的脚本级定义，但保留 active 设备
+- 动作脚本本身不改变 `p2_active_sql`
+- `/status` 增加 `action=` 字段，显示当前动作脚本
+- `/run` 会重新设置动作脚本路径
+
+测试：
+
+```text
+/run p28
+/action
+/action p29
+/status
+/unload
+```
+
+预期关键日志：
+
+```text
+core1: action /scripts/p28.mt
+P5Check: call value=1 name=base item=nil angle=nil
+P2: base.call result=OK
+core1: action finished, devices=1 heap=...KB
+core1: action /scripts/p29.mt
+P5Check: call value=5 name=base item=nil angle=nil
+P2: base.call result=OK
+core1: action finished, devices=1 heap=...KB
+core1: status idle active=1 devices=1 sql=/robots/p28.sql action=/scripts/p29.mt
+```
+
+限制：
+
+- 动作脚本不能新增持久设备，除非使用 `@SQL`
+- 动作脚本结束后没有后台循环
+- 每次 `/action` 只执行一遍脚本
+- 没有事务回滚
+- `/action` 依赖 active 状态；先 `/run`
+
 ## 运行现象
 
 上电后所有输出都在 UART0（GP0/GP1，115200 8N1），没有 VGA 输出：
@@ -2280,7 +2339,7 @@ SD 布局新增：
 [robot] SD: mounted 0:
 [robot] P2: using /robots/p3.sql
 ...
-[robot] core1: status idle active=1 devices=2 sql=/robots/p3.sql
+[robot] core1: status idle active=1 devices=2 sql=/robots/p3.sql action=/scripts/p3.mt
 >
 ```
 

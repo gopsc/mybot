@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-264928     0   99956
+265696     0  100020
 ```
 
 ## SD 卡（必需）
@@ -92,6 +92,8 @@ p23
 /mem         core1 栈高水位和 Lua 堆
 /list        列出 /robots/*.sql
 /sql name    对 active 结构应用 /sql/name.sql
+/action name 在 active 结构上重播 /scripts/name.mt
+/action      重播最近一次动作脚本
 /unload      销毁 active 设备并关闭 Lua
 /help        命令摘要
 ↑ / ↓        命令历史（ANSI）

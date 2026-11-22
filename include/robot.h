@@ -42,6 +42,7 @@ void robot_send_mem(void);
 void robot_send_list(void);
 void robot_send_sql(const char *name);
 void robot_send_unload(void);
+void robot_send_action(const char *name);
 
 /* 供 core1 内部/后续驱动使用：非阻塞写入日志队列。 */
 void robot_log(const char *fmt, ...);

@@ -213,8 +213,11 @@ static void console_dispatch(void) {
     } else if (strcmp(cmd, "unload") == 0) {
         robot_send_unload();
         console_line("[unload]");
+    } else if (strcmp(cmd, "action") == 0) {
+        robot_send_action(arg[0] != '\0' ? arg : NULL);
+        console_line("[action]");
     } else if (strcmp(cmd, "help") == 0) {
-        console_line("run [sql] [script] | stop | status | profile | mem | list | sql <name> | unload | help");
+        console_line("run [sql] [script] | stop | status | profile | mem | list | sql <name> | action [name] | unload | help");
         console_line("history: terminal up/down (ANSI)");
     } else {
         console_line("unknown command");

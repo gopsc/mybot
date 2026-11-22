@@ -37,6 +37,7 @@ typedef enum {
     ROBOT_CMD_LIST,
     ROBOT_CMD_SQL,
     ROBOT_CMD_UNLOAD,
+    ROBOT_CMD_ACTION,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -166,6 +167,7 @@ static int p2_nlines;
 static lua_State *p2_active_L;
 static bool p2_active;
 static char p2_active_sql[64];
+static char p2_active_mt[64];
 
 /* core1 栈放在普通 BSS，而不是 SDK 默认的 SCRATCH_X（只有 4KB）。
  * multicore_launch_core1_with_stack 会把 SP 设到数组末尾。 */
@@ -3989,6 +3991,7 @@ static void robot_runtime_close(void) {
     }
     p2_active = false;
     p2_active_sql[0] = '\0';
+    p2_active_mt[0] = '\0';
     p2_ndevices = 0;
     p2_nvars = 0;
     p2_naliases = 0;
@@ -4068,6 +4071,7 @@ static bool robot_p2_run(lua_State *L) {
     }
     robot_log("P2: using %s", sql_path);
     snprintf(p2_active_sql, sizeof(p2_active_sql), "%s", sql_path);
+    snprintf(p2_active_mt, sizeof(p2_active_mt), "%s", mt_path);
     p2_parse_sql();
     robot_log("P2: parsed %d device(s)", p2_ndevices);
     if (p2_ndevices == 0) {
@@ -4188,6 +4192,7 @@ static void robot_lua_smoke(void) {
     lua_close(L);
     p2_active = false;
     p2_active_sql[0] = '\0';
+    p2_active_mt[0] = '\0';
     p2_ndevices = 0;
     p2_nvars = 0;
     p2_naliases = 0;
@@ -4288,6 +4293,10 @@ void robot_send_unload(void) {
     robot_send_cmd(ROBOT_CMD_UNLOAD, NULL);
 }
 
+void robot_send_action(const char *name) {
+    robot_send_cmd(ROBOT_CMD_ACTION, name);
+}
+
 void robot_core1(void) {
     robot_log("core1: robot runtime started");
     robot_busy = true;
@@ -4338,11 +4347,12 @@ void robot_core1(void) {
             robot_log("core1: stop requested");
             break;
         case ROBOT_CMD_STATUS:
-            robot_log("core1: status %s active=%d devices=%d sql=%s",
+            robot_log("core1: status %s active=%d devices=%d sql=%s action=%s",
                 robot_busy ? (robot_stop ? "stopping" : "running")
                            : (robot_stop ? "stopped" : "idle"),
                 p2_active ? 1 : 0, p2_ndevices,
-                p2_active_sql[0] != '\0' ? p2_active_sql : "-");
+                p2_active_sql[0] != '\0' ? p2_active_sql : "-",
+                p2_active_mt[0] != '\0' ? p2_active_mt : "-");
             break;
         case ROBOT_CMD_PROFILE: {
             char profile[32];
@@ -4393,6 +4403,45 @@ void robot_core1(void) {
             last_lua_heap_kb = lua_heap_kb(p2_active_L);
             robot_log("core1: active sql=%s devices=%d heap=%dKB",
                 p2_active_sql, p2_ndevices, last_lua_heap_kb);
+            break;
+        }
+        case ROBOT_CMD_ACTION: {
+            if (!p2_active || p2_active_L == NULL) {
+                robot_log("core1: /action needs an active profile; use /run first");
+                break;
+            }
+            char path[64];
+            if (cmd.arg[0] == '\0') {
+                if (p2_active_mt[0] == '\0') {
+                    robot_log("core1: /action needs a script name");
+                    break;
+                }
+                snprintf(path, sizeof(path), "%s", p2_active_mt);
+            } else {
+                bool valid = true;
+                for (const char *q = cmd.arg; *q != '\0'; ++q) {
+                    if (!isalnum((unsigned char)*q) && *q != '_' && *q != '-') {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) {
+                    robot_log("core1: invalid /action name");
+                    break;
+                }
+                snprintf(path, sizeof(path), "/scripts/%s.mt", cmd.arg);
+            }
+            size_t n = p2_read_file(path, p2_mt_buf, sizeof(p2_mt_buf));
+            if (n == 0) {
+                break;
+            }
+            snprintf(p2_active_mt, sizeof(p2_active_mt), "%s", path);
+            robot_stop = false;
+            robot_log("core1: action %s", path);
+            p2_run_mt(p2_active_L);
+            last_lua_heap_kb = lua_heap_kb(p2_active_L);
+            robot_log("core1: action finished, devices=%d heap=%dKB",
+                p2_ndevices, last_lua_heap_kb);
             break;
         }
         case ROBOT_CMD_UNLOAD:
