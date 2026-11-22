@@ -2971,7 +2971,7 @@ static void p2_exec_struct(int header, int close) {
     }
 }
 
-static void p2_include_path(const char *row, char *out, size_t cap);
+static bool p2_include_path(const char *row, char *out, size_t cap);
 
 static bool p2_load_merge_file(const char *path, int phase, p2_merge_src_t *src) {
     if (p2_read_file(path, p2_sql_buf, sizeof(p2_sql_buf)) == 0) {
@@ -3329,7 +3329,10 @@ static void p2_merge_load_nested(const char *path, int base_phase, int depth) {
             return;
         }
         char nested[128];
-        p2_include_path(cells[0], nested, sizeof(nested));
+        if (!p2_include_path(cells[0], nested, sizeof(nested))) {
+            p2_merge_failed = true;
+            return;
+        }
         int reg = p2_merge_register_path(nested);
         if (reg == 1) {
             robot_log("P2: @Merge nested once skipped: %s", nested);
@@ -3399,7 +3402,10 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
             phase = 100000;
         }
         char path[128];
-        p2_include_path(cells[0], path, sizeof(path));
+        if (!p2_include_path(cells[0], path, sizeof(path))) {
+            p2_merge_failed = true;
+            break;
+        }
         int reg = p2_merge_register_path(path);
         if (reg == 1) {
             robot_log("P2: @Merge once fragment skipped: %s", path);
@@ -4336,7 +4342,7 @@ static void p2_exec_lines(lua_State *L, int start, int end) {
     }
 }
 
-static void p2_include_path(const char *row, char *out, size_t cap) {
+static bool p2_include_path(const char *row, char *out, size_t cap) {
     char tmp[128];
     p2_copy_trim(tmp, sizeof(tmp), row, NULL);
     size_t n = strlen(tmp);
@@ -4344,13 +4350,62 @@ static void p2_include_path(const char *row, char *out, size_t cap) {
         tmp[--n] = '\0';
     }
     p2_trim(tmp);
-    if (tmp[0] == '/') {
-        snprintf(out, cap, "%s", tmp);
-    } else if (strncmp(tmp, "scripts/", 8) == 0) {
-        snprintf(out, cap, "/%s", tmp);
-    } else {
-        snprintf(out, cap, "/scripts/%s", tmp);
+    if (tmp[0] == '\0') {
+        robot_log("P2: empty include path");
+        return false;
     }
+    char full[160];
+    if (tmp[0] == '/') {
+        snprintf(full, sizeof(full), "%s", tmp);
+    } else if (strncmp(tmp, "scripts/", 8) == 0) {
+        snprintf(full, sizeof(full), "/%s", tmp);
+    } else {
+        snprintf(full, sizeof(full), "/scripts/%s", tmp);
+    }
+
+    char norm[160];
+    size_t no = 0;
+    norm[no++] = '/';
+    norm[no] = '\0';
+    const char *p = full;
+    while (*p != '\0') {
+        while (*p == '/') {
+            ++p;
+        }
+        const char *seg = p;
+        while (*p != '\0' && *p != '/') {
+            ++p;
+        }
+        size_t len = (size_t)(p - seg);
+        if (len == 0 || (len == 1 && seg[0] == '.')) {
+            continue;
+        }
+        if (len == 2 && seg[0] == '.' && seg[1] == '.') {
+            robot_log("P2: unsafe include path: %s", full);
+            return false;
+        }
+        if (no > 1) {
+            norm[no++] = '/';
+        }
+        if (no + len + 1 >= sizeof(norm)) {
+            robot_log("P2: include path too long: %s", full);
+            return false;
+        }
+        memcpy(norm + no, seg, len);
+        no += len;
+        norm[no] = '\0';
+    }
+    if (no <= 1) {
+        robot_log("P2: empty normalized include path");
+        return false;
+    }
+    n = strlen(norm);
+    if (n < 3 || strcmp(norm + n - 3, ".mt") != 0) {
+        robot_log("P2: include path must end .mt: %s", norm);
+        return false;
+    }
+    snprintf(out, cap, "%s", norm);
+    return true;
 }
 
 /* @Include 是顶层内容拷贝：在解析前把被包含文件的文本拼到当前位置。
@@ -4389,7 +4444,9 @@ static bool p2_expand_level(char *src, int depth) {
                 continue;
             }
             char path[128];
-            p2_include_path(t, path, sizeof(path));
+            if (!p2_include_path(t, path, sizeof(path))) {
+                return false;
+            }
             if (depth >= P2_INCLUDE_MAX_DEPTH) {
                 robot_log("P2: @Include depth limit at %s", path);
                 return false;

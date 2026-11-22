@@ -63,6 +63,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 55. **P54：`/reboot` 软重启**
 56. **P55：`/uarttest` 串口自检**
 57. **P56：`/spitest` SPI 回环自检**
+58. **P57：include/merge 路径规范化与安全校验**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -139,7 +140,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-281232    0 140404
+281816    0 140404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -311,6 +312,7 @@ sdcard/
     p50.sql
     p52.sql
     p53.sql
+    p57.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -360,6 +362,8 @@ sdcard/
     p50.mt
     p52.mt
     p53.mt
+    p57.mt
+    p57_bad.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -692,6 +696,7 @@ p49             -> /robots/p49.sql + /scripts/p49.mt（@Merge 主从覆盖）
 p50             -> /robots/p50.sql + /scripts/p50.mt（@Merge include-once）
 p52             -> /robots/p52.sql + /scripts/p52.mt（@Merge 片段递归）
 p53             -> /robots/p53.sql + /scripts/p53.mt（跨层 include-once）
+p57             -> /robots/p57.sql + /scripts/p57.mt（路径规范化）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2243,7 +2248,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-281232     0  140404
+281816     0  140404
 ```
 
 构建：
@@ -3329,7 +3334,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-281232     0  140404
+281816     0  140404
 ```
 
 限制：
@@ -3618,8 +3623,8 @@ P50-A 给 `@Merge` 加 include-once：
 
 - 同一路径第二次出现时，如果文件后缀是 `.once.mt`，跳过并记录
 - 同一路径第二次出现且不是 `.once.mt`，拒绝并中止整次 `@Merge`
-- 检查按路径字符串精确比较，不做 canonicalize
-- P52 起支持片段递归；嵌套源暂不参与顶层 include-once 去重
+- P57 起路径先规范化，再做 include-once 比较
+- P53 起顶层/嵌套源共享 include-once 路径表
 
 测试 profile：
 
@@ -3671,7 +3676,7 @@ P2: @Merge aborted by fragment duplicate
 
 限制：
 
-- 按路径文本精确匹配，`./x.mt` 与 `x.mt` 不视为同一文件
+- 路径会先规范化；`./x.mt`、`parts//x.mt` 与 `parts/x.mt` 视为同一文件
 - include-once 只跳过重复，不做菱形依赖递归
 - P52 起支持片段递归；P53 起嵌套源也参与 include-once
 - 主脚本动作表不算片段路径
@@ -3862,7 +3867,7 @@ P5Check: call value=20 name=m2 item=nil angle=nil
 
 限制：
 
-- 路径按文本精确匹配，不做 canonicalize
+- 路径先规范化（P57），再做 include-once 比较
 - 路径表 16 项，超出会中止
 - `.once.mt` 后缀必须完全匹配
 - 只对 `@Merge` 片段生效，不影响 `@Include`
@@ -3978,6 +3983,74 @@ GP11 (MOSI) --- GP12 (MISO)
 - 只支持 SPI1 GP10-13
 - 没有自动 CS 极性/多设备选择
 - 速度上限 1MHz（沿用现有 UART 参数解析上限）
+- 尚未上板实测
+
+## P57：include/merge 路径规范化与安全校验
+
+P57-A 统一 `@Include` / `@Merge` 路径处理：
+
+- 相对路径统一补 `/scripts/` 前缀
+- `scripts/...` 统一成 `/scripts/...`
+- 合并重复 `/`
+- 去掉 `.` 路径段
+- 拒绝任何 `..` 路径段
+- 只接受 `.mt` 后缀
+- 规范化后再做 include-once 比较
+
+测试 profile：
+
+```text
+p57
+```
+
+```mt
+@Merge
+path phase;
+  parts/merge_57_once.once.mt 0;
+  ./parts/merge_57_once.once.mt 0;
+@
+```
+
+第二个路径规范化后与第一个相同，被 include-once 跳过：
+
+```text
+P2: @Merge once fragment skipped: /scripts/parts/merge_57_once.once.mt
+P5Check: call value=57 name=a item=nil angle=nil
+```
+
+负例：
+
+```text
+/scripts/p57_bad.mt
+```
+
+```mt
+@Include
+path;
+  ../merge_57_once.once.mt;
+@
+```
+
+执行：
+
+```text
+/run p28
+/action p57_bad
+```
+
+预期：
+
+```text
+P2: unsafe include path: /scripts/../merge_57_once.once.mt
+```
+
+限制：
+
+- 只接受 `.mt` 后缀，大小写敏感
+- 不允许 `..` 逃逸
+- 不做符号链接检查
+- 路径长度上限 127/159 字节
+- 绝对路径仍允许，但同样禁止 `..` 和强制 `.mt`
 - 尚未上板实测
 
 ## 运行现象
