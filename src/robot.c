@@ -2649,26 +2649,20 @@ static const char *p2_eval_header_param(const char *raw, char *buf, size_t cap) 
     return alias != NULL ? alias : raw;
 }
 
-static void p2_exec_action(lua_State *L, int start, int end) {
-    if (start >= end) {
-        return;
-    }
-    char header_buf[256];
-    p2_copy_trim(header_buf, sizeof(header_buf), p2_lines[start], NULL);
-    char *header = header_buf;
-    char *cells[P2_MAX_COLS];
-    int n = p2_split_ws(header, cells, P2_MAX_COLS);
+static int p2_build_action_headers(char headers[][P2_MAX_NAME], int n) {
     memset(p2_action_cols, 0, sizeof(p2_action_cols));
     int ncols = 0;
     for (int i = 0; i < n; ++i) {
-        char *dot = p2_find_header_dot(cells[i]);
+        char cell[P2_MAX_NAME];
+        p2_copy_trim(cell, sizeof(cell), headers[i], NULL);
+        char *dot = p2_find_header_dot(cell);
         if (dot == NULL) {
             continue;
         }
         *dot = '\0';
         char dev_buf[P2_MAX_NAME];
         char param_buf[P2_MAX_NAME];
-        const char *device_name = p2_eval_header_device(cells[i], dev_buf,
+        const char *device_name = p2_eval_header_device(cell, dev_buf,
             sizeof(dev_buf));
         p2_copy_trim(p2_action_cols[ncols].device,
             sizeof(p2_action_cols[ncols].device), device_name, NULL);
@@ -2678,6 +2672,25 @@ static void p2_exec_action(lua_State *L, int start, int end) {
             sizeof(p2_action_cols[ncols].param), param, NULL);
         ++ncols;
     }
+    return ncols;
+}
+
+static void p2_exec_action(lua_State *L, int start, int end) {
+    if (start >= end) {
+        return;
+    }
+    char header_buf[256];
+    p2_copy_trim(header_buf, sizeof(header_buf), p2_lines[start], NULL);
+    char *cells[P2_MAX_COLS];
+    int n = p2_split_ws(header_buf, cells, P2_MAX_COLS);
+    char raw_headers[P2_MAX_COLS][P2_MAX_NAME];
+    int nheaders = 0;
+    for (int i = 0; i < n; ++i) {
+        p2_copy_trim(raw_headers[nheaders], sizeof(raw_headers[nheaders]),
+            cells[i], NULL);
+        ++nheaders;
+    }
+    int ncols = p2_build_action_headers(raw_headers, nheaders);
     if (ncols == 0) {
         return;
     }
@@ -2692,7 +2705,8 @@ static void p2_exec_action(lua_State *L, int start, int end) {
         }
         char *vals[P2_MAX_COLS];
         int nv = p2_split_ws(row_buf, vals, P2_MAX_COLS);
-        int row_n = p2_pad_missing_cells(vals, nv, ncols);
+        int row_cols = p2_build_action_headers(raw_headers, nheaders);
+        int row_n = p2_pad_missing_cells(vals, nv, row_cols);
         p2_apply_inheritance(vals, row_n, prev, has_prev);
         if (row_n > 0) {
             p2_execute_row(L, vals, row_n);

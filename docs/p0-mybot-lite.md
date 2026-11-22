@@ -52,6 +52,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 44. **P43：全 fake HAL 回归 profile + `/device` 详情**
 45. **P44：设备容量 8 → 16**
 46. **P45：列头设备位/参数位表达式**
+47. **P46：`@Action` 列头表达式按行重算**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -128,7 +129,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-275544    0 121616
+275632    0 121616
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -248,6 +249,7 @@ sdcard/
     UART.lua
     AD9833.lua
     UartCheck.lua
+    Switch.lua
     Counter.lua
     P5Check.lua
     bitcompat.lua
@@ -289,6 +291,7 @@ sdcard/
     p43.sql
     p44.sql
     p45.sql
+    p46.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -331,6 +334,7 @@ sdcard/
     p43.mt
     p44.mt
     p45.mt
+    p46.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -651,6 +655,7 @@ p42             -> /robots/p42.sql + /scripts/p42.mt（缺列按 - 补齐）
 p43             -> /robots/p43.sql + /scripts/p43.mt（全 fake HAL 回归）
 p44             -> /robots/p44.sql + /scripts/p44.mt（12 设备容量）
 p45             -> /robots/p45.sql + /scripts/p45.mt（列头表达式）
+p46             -> /robots/p46.sql + /scripts/p46.mt（列头按行重算）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2193,7 +2198,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-275544     0  121616
+275632     0  121616
 ```
 
 构建：
@@ -3279,7 +3284,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-275544     0  121616
+275632     0  121616
 ```
 
 限制：
@@ -3334,11 +3339,74 @@ P2: p45.call result=OK
 
 限制：
 
-- 列头表达式在动作块进入时求值一次，不随行内捕获变化重算
+- P46 起 `@Action` 每行重新求值；`@Reflex` / `@Merge` 仍在块/源进入时求值
 - 只支持整个设备位或参数位是 `$(...)`；不支持 `pre-$(x)` 这种混合拼接
 - 设备表达式结果只再解析一层别名
 - 求值失败会记录诊断并回退到原文本，最终可能报 unknown device/param
 - 表达式结果受 `P2_MAX_NAME` 长度限制
+
+## P46：@Action 列头表达式按行重算
+
+P46-A 让 `@Action` 的列头表达式在每一行派发前重新求值：
+
+- 上一行捕获写入的 `@Vars` 会影响下一行的设备位/参数位
+- 初始表头仍先求值一次用于列数诊断
+- 每行开始时重建 `p2_action_cols`
+- `@Reflex` / `@Merge` 仍保持块/源进入时求值
+
+测试设备：
+
+```sql
+CREATE TABLE P5Check (name String, value String);
+INSERT INTO P5Check (name, value) VALUES ('p46', '0');
+
+CREATE TABLE Switch (name String);
+INSERT INTO Switch (name) VALUES ('sw');
+```
+
+`Switch.lua` 每次 call 交替返回 `param=angle` / `param=item`。
+
+测试脚本：
+
+```mt
+@Vars
+name value;
+  p value;
+@
+
+@Action
+p46.$(p)  sw.pick;
+   5       $p=param;
+   6       $p=param;
+   7       $p=param;
+@
+```
+
+预期：
+
+```text
+P5Check: call value=5 name=p46 item=nil angle=nil
+Switch: pick=angle
+P5Check: call value=nil name=p46 item=nil angle=6
+Switch: pick=item
+P5Check: call value=nil name=p46 item=7 angle=nil
+```
+
+解释：
+
+- Row1 表头 `p=value` → `p46.value=5`
+- Switch 返回 `param=angle`，捕获 `p=angle`
+- Row2 重建表头 → `p46.angle=6`
+- Switch 返回 `param=item`，捕获 `p=item`
+- Row3 重建表头 → `p46.item=7`
+
+限制：
+
+- 只在行开始时重算；同一行内前面设备的捕获不会改变本行后续列头
+- `@Reflex` / `@Merge` 没有按行重算
+- 列数诊断仍按初始表头
+- 表达式求值失败仍回退原文本
+- 结果受 `P2_MAX_NAME` 长度限制
 
 ## 运行现象
 
