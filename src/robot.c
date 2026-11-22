@@ -154,6 +154,8 @@ typedef struct {
 } p2_reflex_t;
 static p2_reflex_t p2_reflexes[P2_MAX_REFLEXES];
 static int p2_nreflexes;
+static p2_reflex_t *p2_reflex_active[8];
+static int p2_reflex_depth;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
 static char p2_expanded_buf[P2_MT_MAX * 2];
@@ -1805,6 +1807,27 @@ static p2_reflex_t *p2_find_named_reflex(const char *name);
 static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row);
 static void p2_remove_var(const char *name);
 
+static bool p2_reflex_enter(p2_reflex_t *r) {
+    if (p2_reflex_depth >= 8) {
+        robot_log("P2: reflex depth limit reached at %s", r->name);
+        return false;
+    }
+    for (int i = 0; i < p2_reflex_depth; ++i) {
+        if (p2_reflex_active[i] == r) {
+            robot_log("P2: reflex recursion blocked: %s", r->name);
+            return false;
+        }
+    }
+    p2_reflex_active[p2_reflex_depth++] = r;
+    return true;
+}
+
+static void p2_reflex_leave(void) {
+    if (p2_reflex_depth > 0) {
+        --p2_reflex_depth;
+    }
+}
+
 static void p2_exec_named_reflex(lua_State *L, p2_reflex_t *rf,
         const char *device, char **vals, int nvals) {
     char saved_name[8][P2_MAX_NAME];
@@ -1833,10 +1856,15 @@ static void p2_exec_named_reflex(lua_State *L, p2_reflex_t *rf,
 
     p2_action_col_t outer[P2_MAX_COLS];
     memcpy(outer, p2_action_cols, sizeof(outer));
+    if (!p2_reflex_enter(rf)) {
+        memcpy(p2_action_cols, outer, sizeof(outer));
+        return;
+    }
     robot_log("P2: named reflex %s", rf->name);
     for (int row = 0; row < rf->nrows; ++row) {
         p2_exec_reflex_row(L, rf, row);
     }
+    p2_reflex_leave();
     memcpy(p2_action_cols, outer, sizeof(outer));
 
     for (int i = nsaved - 1; i >= 0; --i) {
@@ -2988,10 +3016,14 @@ static void p2_exec_reflex(lua_State *L, const char *name) {
         robot_log("P2: @Trigger unknown reflex %s", name);
         return;
     }
+    if (!p2_reflex_enter(r)) {
+        return;
+    }
     robot_log("P2: @Trigger %s", name);
     for (int row = 0; row < r->nrows; ++row) {
         p2_exec_reflex_row(L, r, row);
     }
+    p2_reflex_leave();
 }
 
 static void p2_trigger_line(lua_State *L, const char *raw) {
@@ -3264,6 +3296,7 @@ static bool p2_run_mt(lua_State *L) {
     p2_strip_comments(p2_expanded_buf);
     p2_nstructs = 0;
     p2_nreflexes = 0;
+    p2_reflex_depth = 0;
     p2_merge_skip_start = -1;
     p2_merge_skip_end = -1;
     p2_nlines = 0;

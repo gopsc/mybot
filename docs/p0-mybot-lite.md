@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -18,6 +18,7 @@
 14. **`@Merge` 片段别名/变量与设备集校验**
 15. **`@Reflex` / `@Trigger`**
 16. **named `@Reflex(name)`**
+17. **反射递归/深度防线**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -75,7 +76,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-888380    0 146248
+888764    0 146284
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -99,7 +100,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-264988     0  95836
+265356     0  95872
 ```
 
 此时：
@@ -195,6 +196,7 @@ sdcard/
     p13.sql
     p14.sql
     p15.sql
+    p16.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -219,6 +221,7 @@ sdcard/
     p13.mt
     p14.mt
     p15.mt
+    p16.mt
     parts/inc_p5.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -508,6 +511,7 @@ p12             -> /robots/p12.sql + /scripts/p12.mt（@Merge 主动作对齐）
 p13             -> /robots/p13.sql + /scripts/p13.mt（@Merge 别名/变量）
 p14             -> /robots/p14.sql + /scripts/p14.mt（@Reflex/@Trigger）
 p15             -> /robots/p15.sql + /scripts/p15.mt（named @Reflex）
+p16             -> /robots/p16.sql + /scripts/p16.mt（reflex 递归防线）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -1335,7 +1339,7 @@ headless：
 
 ```text
 text    data   bss
-264988     0  95836
+265356     0  95872
 ```
 
 代价：
@@ -1388,7 +1392,7 @@ P2: p14 call ok
 当前限制：
 
 - 只支持普通 `@Reflex`，命名 `@Reflex(name)` 会明确报 unsupported
-- 没有反射递归防线
+- P16 起有反射递归防线
 - 触发器参数只支持简单 `k=v`
 - `@Reflex` 只能出现在顶层
 - `@Trigger` 目前只做同步调用
@@ -1436,10 +1440,55 @@ P2: p15.call result=OK
 
 限制：
 
-- 没有反射递归/深度防线
-- 嵌套反射调用可能无限递归
+- P16 起有反射递归/深度防线
 - `@Reflex(name)` 只能出现在顶层
 - 反射参数只支持简单标量文本
+
+## P16：反射递归防线
+
+P16-A 给 named `@Reflex` 和 `@Trigger` 加上递归/深度防线：
+
+- 同一个反射在调用栈里再次出现 → 拒绝
+- 总深度超过 8 → 拒绝
+- 拒绝时输出诊断，不执行反射体，不会栈溢出
+
+测试：
+
+```mt
+@Reflex(loop)
+p5.value;
+$(v);
+loop.v;
+@
+
+@Action
+loop.v;
+   1;
+@
+```
+
+`loop` 反射执行一次 `p5.value`，然后尝试递归调用 `loop`；第二次进入被拦截。
+
+测试 profile：
+
+```text
+p16
+```
+
+预期关键输出：
+
+```text
+P2: named @Reflex loop parsed
+P2: named reflex loop
+P5Check: call value=1 name=nil item=nil angle=nil
+P2: reflex recursion blocked: loop
+```
+
+当前限制：
+
+- 深度限制是固定的 8
+- 只拦截同一个反射对象；不同反射的互相调用由深度上限兜底
+- 被拦截后当前反射继续正常返回，不会作为 ERR 中止整个脚本
 
 ## 运行现象
 
