@@ -309,6 +309,9 @@ static wchar_t cmd_buf[ROBOT_CMD_ARG];
 static int cmd_top = 0;
 static int cmd_x = 0;
 static int cmd_mode = 0;
+static wchar_t cmd_history[8][ROBOT_CMD_ARG];
+static int cmd_hist_count = 0;
+static int cmd_hist_pos = 0;
 
 static void clear_cmd_line(void) {
     rectangle(0, JIPT_H, ONE_LINE_BITS - 1, JIPT_H + CHAR_HEIGHT - 1, 1, 1);
@@ -338,6 +341,80 @@ static void cmd_backspace(void) {
         JIPT_H + CHAR_HEIGHT - 1, 1, 1);
 }
 
+static void cmd_draw_prompt(void) {
+    clear_cmd_line();
+    wchar_t slash[] = {L'/', L'\0'};
+    printvgaat(slash, 0, JIPT_H);
+    cmd_x = CHAR_WIDTH_EN;
+    cmd_top = 0;
+    cmd_buf[0] = L'\0';
+}
+
+static void cmd_show_history(int index) {
+    cmd_draw_prompt();
+    if (index < 0 || index >= cmd_hist_count) {
+        return;
+    }
+    for (int i = 0; i < (int)ROBOT_CMD_ARG && cmd_history[index][i] != L'\0'; ++i) {
+        cmd_put(cmd_history[index][i]);
+    }
+}
+
+static void cmd_save_history(void) {
+    if (cmd_top <= 0) {
+        return;
+    }
+    if (cmd_hist_count > 0) {
+        int last = cmd_hist_count - 1;
+        int same = 1;
+        for (int i = 0; i <= cmd_top; ++i) {
+            if (cmd_history[last][i] != cmd_buf[i]) {
+                same = 0;
+                break;
+            }
+        }
+        if (same) {
+            cmd_hist_pos = cmd_hist_count;
+            return;
+        }
+    }
+    if (cmd_hist_count == 8) {
+        for (int i = 1; i < 8; ++i) {
+            for (int j = 0; j < (int)ROBOT_CMD_ARG; ++j) {
+                cmd_history[i - 1][j] = cmd_history[i][j];
+            }
+        }
+        --cmd_hist_count;
+    }
+    int n = cmd_top < (int)ROBOT_CMD_ARG - 1 ? cmd_top : (int)ROBOT_CMD_ARG - 1;
+    for (int i = 0; i < n; ++i) {
+        cmd_history[cmd_hist_count][i] = cmd_buf[i];
+    }
+    cmd_history[cmd_hist_count][n] = L'\0';
+    ++cmd_hist_count;
+    cmd_hist_pos = cmd_hist_count;
+}
+
+static void cmd_history_prev(void) {
+    if (cmd_hist_count == 0 || cmd_hist_pos <= 0) {
+        return;
+    }
+    --cmd_hist_pos;
+    cmd_show_history(cmd_hist_pos);
+}
+
+static void cmd_history_next(void) {
+    if (cmd_hist_pos >= cmd_hist_count) {
+        return;
+    }
+    ++cmd_hist_pos;
+    if (cmd_hist_pos >= cmd_hist_count) {
+        cmd_draw_prompt();
+    } else {
+        cmd_show_history(cmd_hist_pos);
+    }
+}
+
 static void cmd_dispatch(void) {
     char text[ROBOT_CMD_ARG];
     int n = 0;
@@ -345,8 +422,10 @@ static void cmd_dispatch(void) {
         text[n++] = (char)cmd_buf[i];
     }
     text[n] = '\0';
+    cmd_save_history();
     clear_cmd_line();
     cmd_mode = 0;
+    cmd_hist_pos = cmd_hist_count;
     printtovga(L"\n");
 
     char *p = text;
@@ -385,6 +464,7 @@ static void cmd_dispatch(void) {
         printtovga(L"[list]\n");
     } else if (strcmp(cmd, "help") == 0) {
         printtovga(L"run [sql] [script] / stop / status / profile / mem / list\n");
+        printtovga(L"history: up/down\n");
     } else if (cmd[0] != '\0') {
         printtovga(L"unknown command\n");
     }
@@ -394,7 +474,11 @@ static void cmd_dispatch(void) {
 static void handle_key(uint16_t k) {
     /* P0 临时停止键：Tab（输入法缓冲区为空时）。P1 换成 :stop 命令行。 */
     if (cmd_mode) {
-        if (k == L'\r') {
+        if (k == 0x11) {
+            cmd_history_prev();
+        } else if (k == 0x12) {
+            cmd_history_next();
+        } else if (k == L'\r') {
             cmd_dispatch();
         } else if (k == L'\b') {
             cmd_backspace();
@@ -406,6 +490,7 @@ static void handle_key(uint16_t k) {
 
     if (k == L'/' && jipt_top == 0) {
         cmd_mode = 1;
+        cmd_hist_pos = cmd_hist_count;
         clear_cmd_line();
         cmd_put(L'/');
         cmd_top = 0;   /* 斜杠只是提示符，不进入命令文本 */

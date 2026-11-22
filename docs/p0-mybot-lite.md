@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19/P20 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19/P20/P21 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -23,6 +23,7 @@
 19. **控制台 `/list` / `/help`**
 20. **两层 `@Include`**
 21. **SQL 与动作脚本分离选择**
+22. **命令历史（↑/↓）**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -80,7 +81,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-891396    0 152468
+893068    0 153500
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -757,6 +758,7 @@ core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
 /mem          core1 栈高水位和上次 Lua 堆
 /list         列出 /robots/*.sql
 /help         显示命令摘要
+↑ / ↓         命令历史（最近 8 条）
 ```
 
 `/run` 的完整流程：
@@ -1690,6 +1692,47 @@ P5Check: call value=3 name=pico-2 item=nil angle=nil
 - `ROBOT_CMD_RUN.arg = "<sql> <script>"`
 - core1 按第一个空格切分
 - 空脚本回退到 SQL 同名脚本
+
+## P21：命令历史
+
+P21-A 给控制台命令模式加上历史：
+
+- 刚才执行过的命令自动进入历史
+- `↑` 回看更早的命令
+- `↓` 回到更新的命令，越过最新一条时清空输入
+- 最多保留 8 条
+- 连续重复的命令只保留一条
+- 历史只在命令模式内生效，普通拼音输入不受影响
+
+实现：
+
+- 键盘映射里把 `HID_KEY_ARROW_UP/DOWN` 映射成 `0x11/0x12` 事件
+- 历史缓冲区保存去掉 `/` 提示符后的命令文本
+- 回看时重画 `/` 提示符并逐字符重放
+- 回到最新条目后恢复空白命令输入
+
+测试：
+
+```text
+/run p17
+/list
+↑
+↑
+↓
+```
+
+预期：
+
+- 第一次 `↑` 显示 `/list`
+- 第二次 `↑` 显示 `/run p17`
+- `↓` 回到 `/list`
+- 再 `↓` 清空当前输入
+
+当前限制：
+
+- 只在 RAM 中保存，重启后丢失
+- 只支持上/下，不支持搜索
+- 回看时当前未提交的半截输入会被覆盖
 
 ## 运行现象
 

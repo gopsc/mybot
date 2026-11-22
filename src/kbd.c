@@ -107,6 +107,9 @@ static const uint8_t hid_to_mac[256] = {
         [HID_KEY_EQUAL] = '=',
 	[HID_KEY_MINUS] = '-',
         [HID_KEY_SLASH] = '/',
+        /* 控制台命令历史：这两个值只作为方向键事件使用。 */
+        [HID_KEY_ARROW_UP] = 0x11,
+        [HID_KEY_ARROW_DOWN] = 0x12,
         //[HID_KEY_A] = 255, // Hack for MKC_A,
         //[HID_KEY_ESCAPE] = MKC_Escape,
         //[HID_KEY_MINUS] = MKC_Minus,
