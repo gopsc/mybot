@@ -6,8 +6,8 @@
 
 /* P0 机器人运行时边界：
  *
- *   core0：VGA / console / USB HID，只通过队列与 core1 交互
- *   core1：Lua + 后续的 SQL/MT 解析与 I2C/SPI/UART 驱动
+ *   core0：UART console / 日志，只通过队列与 core1 交互
+ *   core1：Lua + SQL/MT 解析与 I2C/SPI/UART 驱动
  *
  * 这一阶段先把"UI 不被 core1 阻塞"这条实时性前提钉住；Lua 只加载一段
  * 内嵌脚本，验证单状态机、build/call/destroy 和内存水位。
@@ -26,7 +26,7 @@ void robot_start(void);
 /* core1 入口：由 multicore_launch_core1_with_stack() 调用。 */
 void robot_core1(void);
 
-/* core0 每轮主循环调用：把 core1 日志排空并显示到 VGA。 */
+/* core0 每轮主循环调用：把 core1 日志排空并写到 UART。 */
 void robot_poll_ui(void);
 
 /* 预留的协作式停止接口。当前 P0 用它打断心跳睡眠。 */

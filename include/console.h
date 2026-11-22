@@ -1,16 +1,13 @@
 #ifndef CONSOLE_H
 #define CONSOLE_H
 
-#define SIZE_ONE_PAGE 6
-#define SIZE_OUTPUT_BUFFER 2048
-void printvgaat(wchar_t *wstr, int start_x, int start_y);
-void printtovga(wchar_t *wstr);
-void print_cursor();
-void clear_cursor();
-void init_console();
-void loop_console();
-void console_poll();
-void welcome();
-void kbdinfo();
+/* Headless console：UART0 上的一行式命令控制台。
+ * 不再包含 VGA/键盘/鼠标/输入法。 */
+void console_init(void);
+void console_poll(void);
 
-#endif //CONSOLE_H
+/* 日志输出前擦掉当前输入行，输出后重画。 */
+void console_erase_line(void);
+void console_redraw(void);
+
+#endif /* CONSOLE_H */

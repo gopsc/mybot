@@ -5,7 +5,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <wchar.h>
 #include <ctype.h>
 
 #include "pico/stdlib.h"
@@ -742,7 +741,7 @@ static int robot_lua_uart_flush(lua_State *L) {
 
 
 /* P1-C：Timer.lua 只需要阻塞毫秒。分片睡眠让 stop 请求在 50ms 内可见，
- * 同时因为 core1 独占机器人运行时，core0 的 VGA/USB 不受影响。 */
+ * 同时因为 core1 独占机器人运行时，core0 的 UART 控制台和日志不受影响。 */
 static int robot_lua_milli_sleep(lua_State *L) {
     lua_Number n = luaL_checknumber(L, 1);
     if (n < 0) {
@@ -3673,7 +3672,7 @@ static void robot_lua_smoke(void) {
             robot_log("P1-B: /modules/Echo.lua unavailable; single-env check only");
         }
 
-        /* P1-C：真实 Timer.lua + 最小 HAL.lua，验证 milli_sleep 与 VGA 实时性。 */
+        /* P1-C：真实 Timer.lua + 最小 HAL.lua，验证 milli_sleep。 */
         timer_env = robot_create_env_from_path(L, "/modules/Timer.lua", "Timer.lua");
         if (timer_env == LUA_NOREF) {
             robot_log("P1-C: /modules/Timer.lua unavailable; sleep check skipped");
@@ -3752,25 +3751,21 @@ void robot_log(const char *fmt, ...) {
 
 void robot_poll_ui(void) {
     robot_log_msg_t msg;
-#if USE_VGA
-    wchar_t line[ROBOT_LOG_LINE + 2];
-#endif
-    /* 每轮最多排空 8 条，避免 core0 被 VGA 绘制拖住。 */
+    bool printed = false;
+    /* 每轮最多排空 8 条，避免日志输出长期占住 core0。 */
     for (int n = 0; n < 8; ++n) {
         if (!queue_try_remove(&robot_log_queue, &msg)) {
             break;
         }
-        /* 串口始终输出：没有 VGA 时这是唯一可见的诊断通道。 */
-        printf("[robot] %s\n", msg.text);
-#if USE_VGA
-        size_t i = 0;
-        for (; i < ROBOT_LOG_LINE && msg.text[i] != '\0'; ++i) {
-            line[i] = (wchar_t)(unsigned char)msg.text[i];
+        if (!printed) {
+            console_erase_line();
         }
-        line[i++] = L'\n';
-        line[i] = L'\0';
-        printtovga(line);
-#endif
+        printf("[robot] %s\r\n", msg.text);
+        printed = true;
+    }
+    if (printed) {
+        fflush(stdout);
+        console_redraw();
     }
 }
 

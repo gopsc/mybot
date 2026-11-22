@@ -1,8 +1,12 @@
-# P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
+# mybot-lite headless：双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19/P20/P21/P22/P23 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 RP2040。**P24 起固件是纯 headless**：
+VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部移除；
+诊断与控制统一走 **UART0 串口控制台**。
 
-1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
+已经验证/实现的能力：
+
+1. **core1 阻塞不会影响 core0 的 UART 控制台和日志**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
 3. **Lua 驱动从 SD 加载，每个驱动有独立 env**
 4. **运行期解析 `.sql` / `.mt`，支持 `$ref` / `@Alias` / `@Vars`**
@@ -13,7 +17,7 @@
 9. **算术表达式、括号条件和字符串拼接**
 10. **简化版 `@Merge` 相位时间线**
 11. **trigger 前置调用**
-12. **静态内存收敛（约 166KB → 138KB）**
+12. **静态内存收敛（P11 约 166KB → 138KB）**
 13. **`@Merge` 主脚本动作对齐**
 14. **`@Merge` 片段别名/变量与设备集校验**
 15. **`@Reflex` / `@Trigger`**
@@ -23,36 +27,63 @@
 19. **控制台 `/list` / `/help`**
 20. **两层 `@Include`**
 21. **SQL 与动作脚本分离选择**
-22. **命令历史（↑/↓）**
+22. **命令历史（串口 ANSI ↑/↓）**
 23. **条件解析 v2（分组/一元 !/短路）**
 24. **统一表达式引擎（条件与 `$(...)` 共用）**
+25. **P24：移除 VGA / PIO 视频 / USB HID 键鼠，改为 headless 串口控制台**
 
-还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
+还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
-## 改动
+## 当前硬件形态
+
+```text
+RP2040
+  UART0 GP0/GP1   115200 8N1   控制台 + 日志（唯一人机接口）
+  SPI0  GP2-5      5MHz        SD 卡（FAT）
+  I2C0  GP6/GP7                PCA9685 / ADS1015 等
+  UART1 GP8/GP9                串口设备
+  SPI1  GP10-13               AD9833 等
+  GP25                        板载 LED，500ms 翻转
+```
+
+- 不再输出 VGA，不再分配 38.4KB framebuffer。
+- 不再枚举 USB HID/CDC；USB 口只用于供电和 BOOTSEL/UF2 烧录。
+- 没有物理键盘/鼠标、没有拼音输入法、没有屏幕光标。
+- 串口终端里的上/下方向键仍可用于命令历史（ANSI CSI）。
+
+## 当前改动
 
 - `src/main.c`
-  - VGA、DMA IRQ、console、tryC、USB 全部留在 core0。
+  - core0 只做 LED、UART 控制台、日志泵。
+  - 移除 `video_init()`、`init_tryc()`、`init_console()`、`tusb_init()`、`tuh_task()`、`hid_app_task()`。
   - core1 只运行 `robot_core1()`。
-  - core0 主循环增加 `console_poll()` / `robot_poll_ui()`。
 - `src/console.c`
-  - `loop_console()` 的循环体拆成 `console_poll()`，core0 不再被 console 死循环独占。
-  - 输入法候选刷新拆成 `update_ime()`。
-  - P0 临时停止键：拼音缓冲区为空时按 **Tab**，发送停止请求。
+  - 重写为 UART0 行式控制台；没有 `wchar_t`、framebuffer、IME。
+  - 命令前导 `/` 可写可不写；回车执行；退格编辑；Ctrl-C 发送停止。
+  - 历史命令保存在 RAM，方向键通过 ANSI `ESC [ A/B` 回看。
+  - core1 日志打印后自动重画当前输入行。
 - `src/robot.c` / `include/robot.h`
   - core1 16KB BSS 栈 + `multicore_launch_core1_with_stack()`。
-  - 日志队列（core1 → core0），不跨核调用 `printtovga`。
+  - 日志队列（core1 → core0），core0 统一写 UART。
   - Lua 5.1 单状态机；可选从 SD 读取 `/robot.lua`，失败则回退内嵌 smoke 脚本。
-  - P0 心跳：每 1s 输出一条日志，睡眠按 50ms 分片，便于观察停止延迟。
+- `CMakeLists.txt`
+  - 只编译 `main.c` / `console.c` / `robot.c`（以及可选的 SD 配置）。
+  - 移除 TinyUSB host、PIO、DMA 视频、字体/图形/IME/tryC 源文件。
+  - `PICO_CORE1_STACK_SIZE=0`（core1 栈改到 BSS），`PICO_STACK_SIZE=0x1000`（core0 4KB）。
+  - `pico_enable_stdio_uart(firmware 1)`；`pico_enable_stdio_usb(firmware 0)`。
+- 已删除的显示/交互组件：
+  - `src/video.c`、`src/pio_video.pio`、`include/video.h`
+  - `src/kbd.c`、`include/kbd.h`、`include/keymap.h`
+  - `src/hid.c`、`include/tusb_config.h`
+  - `src/graph/`、`include/graph.h`
+  - `src/chsf*.c`、`src/chsf_trans/`、`src/cncc.c`、IME 头文件
+  - `src/interpreter/`、`include/try.h`
 - `third_party/lua/`
   - vendored Lua 5.1.5（MIT），不编译 `lua.c` / `luac.c` / `io` / `os` / `linit`。
   - `os.getenv`、`os.time`、`os.clock`、`print` 由 `robot.c` 提供最小实现。
 - `third_party/fatfs/`
   - vendored no-OS-FatFS-SD-SPI-RPi-Pico 的 `FatFs_SPI`（Apache-2.0）。
-  - 默认 SD 引脚仍是 GP2/3/4/5，5MHz。
-- `CMakeLists.txt`
-  - `lua51` 静态库、`pico_util`。
-  - `PICO_CORE1_STACK_SIZE=0`（core1 栈改到 BSS），`PICO_STACK_SIZE=0x1000`（core0 4KB）。
+  - 默认 SD 引脚 GP2/3/4/5，5MHz。
 
 ## 构建
 
@@ -60,17 +91,9 @@
 cd /home/qing/pico-vga
 cmake -S . -B build -G Ninja \
   -DPICO_SDK_PATH=/home/qing/pico/pico-sdk \
-  -DUSE_SD=ON
-cmake --build build -j4
-```
-
-没有安装 picotool 时，可以先关闭 UF2 生成来构建 ELF：
-
-```sh
-cmake -S . -B build -G Ninja \
-  -DPICO_SDK_PATH=/home/qing/pico/pico-sdk \
   -DUSE_SD=ON \
   -DPICO_NO_PICOTOOL=1
+cmake --build build -j4
 ```
 
 如果本机有 picotool，可以直接生成 UF2：
@@ -83,42 +106,52 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-894804    0 153500
+254944    0  99888
 ```
 
-BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
+BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
+VGA framebuffer（38.4KB）已不存在。仍然没有使用 malloc 分配核心运行时结构。
 
-## 无 VGA / 串口输出（可选）
+## UART 控制台
 
-> 默认 `USE_VGA=ON`，VGA 和 framebuffer console 正常保留；下面只是没有显示器时的可选构建，不影响 VGA 版本。
-
-P0 可以完全关掉 VGA、framebuffer console 和对应的 38.4KB framebuffer：
-
-```sh
-cmake -S . -B build-headless -G Ninja \
-  -DPICO_SDK_PATH=/home/qing/pico/pico-sdk \
-  -DUSE_SD=ON \
-  -DUSE_VGA=OFF \
-  -DPICO_NO_PICOTOOL=1
-cmake --build build-headless -j4
-```
-
-本机关闭 VGA 后的尺寸：
+默认使用 Pico 的 UART0：
 
 ```text
-text    data   bss
-269364     0 102056
+TX GP0
+RX GP1
+115200 8N1
 ```
 
-此时：
+上电后串口输出类似：
 
-- 不初始化 video/PIO/DMA，不分配 framebuffer。
-- `robot_poll_ui()` 仍把 core1 日志通过 `printf("[robot] ...")` 输出到 **UART0（GP0/1）**。
-- Lua 脚本里的 `print("...")` 会经日志队列走到同一个串口输出。
-- 适合没有 VGA 显示器时验证 Lua、SD 和后续 I2C/SPI/UART。
+```text
+[console] mybot-lite headless (UART0)
+[console] type /help for commands
+[robot] core1: robot runtime started
+[robot] SD: mounted 0:
+...
+[robot] core1: status idle
+>
+```
 
-串口参数沿用 `pico_enable_stdio_uart(firmware 1)` 的默认值（通常 115200 8N1）。  
-注意 Pico 的 USB 口当前用于 TinyUSB host（键盘/鼠标），不要把 UART0 和 USB-CDC 混在一起期待同一路输出。
+命令按行输入，`/` 可写可不写：
+
+```text
+/run p4       运行 /robots/p4.sql + /scripts/p4.mt
+/run p5 p8    用 /robots/p5.sql + /scripts/p8.mt
+/run          重新读 /profile.txt 并运行
+/stop         停止当前运行
+/status       查看 core1 状态
+/profile      显示 /profile.txt
+/mem          core1 栈高水位和上次 Lua 堆
+/list         列出 /robots/*.sql
+/help         显示命令摘要
+↑ / ↓         命令历史（ANSI，最近 8 条）
+Ctrl-C        发送停止请求
+```
+
+日志行统一带 `[robot]` 前缀；Lua 的 `print("...")` 也会经日志队列变成 `[robot] Lua: ...`。
+如果输入过程中有日志到达，控制台会重画 `> ` 和当前半截命令。
 
 ### Lua 脚本输出示例
 
@@ -156,8 +189,6 @@ end
 [robot] Lua smoke OK, heap=...KB
 [robot] core1: stack high-water ... / 16384 bytes
 ```
-
-> P0 的 `call` 目前是直接用空表调用，所以 `data.delay` 为 0；P1 接入 Action 执行器后才会传真实参数。
 
 ## P1-A/P1-B：从 SD 加载真实 Relay 驱动 + 每设备 env
 
@@ -270,7 +301,7 @@ env.loadfile= 带 env 上值的闭包
 `build/call/destroy` 不会互相覆盖。
 
 C 侧随后调用 `build` / `call` / `destroy`，其中 `call` 会传入
-`test=200, note=hello`。P1 跑通后 VGA/串口应出现：
+`test=200, note=hello`。P1 跑通后串口应出现：
 
 ```text
 [robot] core1: robot runtime started
@@ -293,7 +324,7 @@ P1-C 增加了最小 `HAL.lua` + 真实 `Timer.lua`：
 - `Timer.lua` 从 SD 加载；
 - `HAL.lua` 提供最小 Pico 后端；
 - `milli_sleep(200)` 在 core1 分片睡眠；
-- VGA/USB 在 core0 继续响应；
+- UART 控制台在 core0 继续响应；
 - Timer 返回 `slept=200`。
 
 这证明：
@@ -302,7 +333,7 @@ P1-C 增加了最小 `HAL.lua` + 真实 `Timer.lua`：
 - `drv_common.lua` / `print_table.lua` 的 LuaJIT 5.1 语法兼容；
 - `dofile` 已改走 FatFS，而不是 newlib `fopen`；
 - 每设备 env 隔离生效，两个驱动可以同时存在；
-- Lua 的 `print()` 能回到 core0 显示到 VGA。
+- Lua 的 `print()` 能回到 core0 输出到 UART。
 
 P2 已把运行期 SQL/MT 解析接进来，执行真实 `.sql` / `.mt`。
 
@@ -381,7 +412,7 @@ rc0.A  rc0.n  t0.delay;
 @
 ```
 
-预期 VGA：
+预期串口：
 
 ```text
 P2: using /robots/p2b.sql
@@ -469,7 +500,7 @@ p3.scan;
 
 P2 运行器现在按 `p3.sql` → `p2b.sql` → `relay-test.sql` 的顺序选择。
 
-预期 VGA：
+预期串口：
 
 ```text
 P2: using /robots/p3.sql
@@ -546,7 +577,7 @@ p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 pca9685_fake
 ```
 
-会走 `/dev/i2c-fake`，真实 `PCA9685.lua` 仍会执行寄存器写序列，但由假总线返回成功。VGA 应出现：
+会走 `/dev/i2c-fake`，真实 `PCA9685.lua` 仍会执行寄存器写序列，但由假总线返回成功。串口应出现：
 
 ```text
 P2: profile=pca9685_fake
@@ -727,7 +758,7 @@ p4
 2. `@while(count<3)` 调 `cnt.reading` 三次，每次捕获 `count=reading`
 3. `@if(count>0)` 再调一次 `cnt.flag`
 
-预期 VGA：
+预期串口：
 
 ```text
 P2: profile=p4
@@ -754,7 +785,7 @@ P2: cnt.call result=OK
 
 ## P4-B：命令系统与热重载
 
-core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
+core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 
 ```text
 /run p4       运行 /robots/p4.sql + /scripts/p4.mt
@@ -766,7 +797,8 @@ core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
 /mem          core1 栈高水位和上次 Lua 堆
 /list         列出 /robots/*.sql
 /help         显示命令摘要
-↑ / ↓         命令历史（最近 8 条）
+↑ / ↓         命令历史（ANSI，最近 8 条）
+Ctrl-C        发送停止请求
 ```
 
 `/run` 的完整流程：
@@ -782,7 +814,7 @@ core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
 
 所以改完 SD 上的 `.sql`/`.mt` 后，不需要重新烧固件，输入 `/run` 即可热重载。
 
-键盘没有下划线，提供几个简称：
+保留几个 profile 简称：
 
 ```text
 /run pca       -> pca9685
@@ -793,18 +825,18 @@ core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
 /run relay     -> relay-test
 ```
 
-命令反馈会回到 VGA/串口日志，例如：
+命令反馈会通过 UART 日志返回，例如：
 
 ```text
-core1: run profile p4
+[robot] core1: run sql=p4 script=(same)
 ...
-core1: run finished, idle
-core1: status idle
-core1: /profile.txt = p4
-core1: mem stack=.../16384 heap_last=...KB busy=0 stop=0
-core1: profile p4.sql
-core1: profile p9.sql
-core1: 2 profile(s)
+[robot] core1: run finished, idle
+[robot] core1: status idle
+[robot] core1: /profile.txt = p4
+[robot] core1: mem stack=.../16384 heap_last=...KB busy=0 stop=0
+[robot] core1: profile p4.sql
+[robot] core1: profile p9.sql
+[robot] core1: 2 profile(s)
 ```
 
 `/stop` 立即置 stop 标志；`@while`、`milli_sleep` 和动作派发行会在各自的检查点看到它。长时间阻塞在器件驱动内部的 I2C/SPI/UART 调用只能等超时。
@@ -867,7 +899,7 @@ p5.value  p5.name  p5.item;
 p5
 ```
 
-预期 VGA：
+预期串口：
 
 ```text
 P2: profile=p5
@@ -1026,7 +1058,7 @@ $(cfg.value+1)       = 8
 p7
 ```
 
-预期 VGA：
+预期串口：
 
 ```text
 P2: profile=p7
@@ -1084,7 +1116,7 @@ $(count + 1)               = 3
 p8
 ```
 
-预期 VGA：
+预期串口：
 
 ```text
 P2: profile=p8
@@ -1589,22 +1621,23 @@ P18-A 增加两个控制台命令：
 `/list` 由 core1 通过 FatFS 扫描 `/robots`，最多显示 16 个：
 
 ```text
-core1: profile p4.sql
-core1: profile p9.sql
-core1: profile p17.sql
-core1: 3 profile(s)
+[robot] core1: profile p4.sql
+[robot] core1: profile p9.sql
+[robot] core1: profile p17.sql
+[robot] core1: 3 profile(s)
 ```
 
-`/help` 直接在 core0 显示：
+`/help` 直接在 core0 通过 UART 显示：
 
 ```text
-run [sql] [script] / stop / status / profile / mem / list
+run [sql] [script] | stop | status | profile | mem | list | help
+history: terminal up/down (ANSI)
 ```
 
 当前命令集：
 
 ```text
-/run [profile]
+/run [sql] [script]
 /stop
 /status
 /profile
@@ -1612,6 +1645,8 @@ run [sql] [script] / stop / status / profile / mem / list
 /list
 /help
 ```
+
+命令按行输入，`/` 可写可不写；Ctrl-C 也可以发送停止请求。
 
 ## P19：嵌套 @Include
 
@@ -1703,21 +1738,22 @@ P5Check: call value=3 name=pico-2 item=nil angle=nil
 
 ## P21：命令历史
 
-P21-A 给控制台命令模式加上历史：
+P21-A 给串口控制台加上历史：
 
 - 刚才执行过的命令自动进入历史
 - `↑` 回看更早的命令
 - `↓` 回到更新的命令，越过最新一条时清空输入
 - 最多保留 8 条
 - 连续重复的命令只保留一条
-- 历史只在命令模式内生效，普通拼音输入不受影响
+- 历史只在串口控制台内生效，不影响机器人脚本
 
 实现：
 
-- 键盘映射里把 `HID_KEY_ARROW_UP/DOWN` 映射成 `0x11/0x12` 事件
-- 历史缓冲区保存去掉 `/` 提示符后的命令文本
-- 回看时重画 `/` 提示符并逐字符重放
+- UART 接收 `ESC [ A` / `ESC [ B`（终端方向键）并转成历史操作
+- 历史缓冲区保存去掉行首可选 `/` 后的整行命令（含参数）
+- 回看时用 ANSI `\r\x1b[2K` 清行并重画 `> ` 提示符
 - 回到最新条目后恢复空白命令输入
+- 其他 CSI 序列整段丢弃，不会混入命令文本
 
 测试：
 
@@ -1731,9 +1767,9 @@ P21-A 给控制台命令模式加上历史：
 
 预期：
 
-- 第一次 `↑` 显示 `/list`
-- 第二次 `↑` 显示 `/run p17`
-- `↓` 回到 `/list`
+- 第一次 `↑` 显示 `> /list`
+- 第二次 `↑` 显示 `> /run p17`
+- `↓` 回到 `> /list`
 - 再 `↓` 清空当前输入
 
 当前限制：
@@ -1883,25 +1919,83 @@ P2: p23.call result=OK
 - 布尔值仍只服务条件语境
 - 数值是 double，`%` 先截断成 `long long`
 
-## 运行现象
+## P24：移除 VGA / 键鼠，改为 headless
 
-如果 `USE_VGA=ON`，上电后 VGA 应出现类似；如果 `USE_VGA=OFF`，同样的内容会出现在 UART0 串口（每行带 `[robot]` 前缀）。
+P24-A 是一次结构性裁剪，不再保留 VGA 版本：
+
+- 删除 VGA/PIO/DMA 视频输出和 38.4KB framebuffer
+- 删除 USB HID host：键盘、鼠标、HID 报告解析
+- 删除 VGA console、framebuffer 光标、中文输入法、字体/绘图代码
+- 删除 tryC 交互解释器（原控制台 shell）
+- 删除 TinyUSB host 链接和 `tusb_config.h`
+- 删除 `USE_VGA` / `USE_VGA_RES` / `VIDEO_PIN` 构建选项
+
+替代接口：
 
 ```text
-core1: robot runtime started
-SD: loaded /robot.lua (... bytes)     # 或 SD: /robot.lua not found
-Lua 5.1 state ready, heap=...KB
-Lua: Lua smoke script loaded
-Lua smoke OK, heap=...KB
-core1: heartbeat (idle)
-core1: heartbeat (idle)
-...
+UART0 GP0 TX / GP1 RX
+115200 8N1
 ```
 
-- 没有 SD 卡或没有 `/robot.lua` 时，会使用内嵌 smoke 脚本，仍能完成验证。
-- 拼音输入缓冲区为空时按 **Tab**，VGA 显示 `[robot stop]`，core1 输出
-  `core1: stop requested, runtime idle`。
-- core1 心跳期间，键盘输入、VGA 刷屏、输入法都应由 core0 正常处理。
+上电后直接进入行式命令控制台：
+
+```text
+/run p22
+/run p23
+/list
+/status
+Ctrl-C
+```
+
+行为变化：
+
+- 命令不再需要先按 `/` 进入命令模式；每行都是命令，前导 `/` 可选
+- 没有 VGA 屏幕，日志和命令反馈都在同一个 UART
+- 没有物理键盘/鼠标；串口终端的方向键通过 ANSI CSI 提供历史
+- 日志到达时会重画 `> ` 和当前输入，避免半截命令被覆盖
+- `Ctrl-C` 直接发送停止请求，替代原来的 Tab 停止键
+
+尺寸变化（`-DUSE_SD=ON`）：
+
+```text
+                  text     data      bss
+VGA 版本        894804        0   153500
+headless 版本   254944        0    99888
+```
+
+减少的主要来源：
+
+- VGA framebuffer：约 38.4KB BSS
+- 字体/图形/IME/tryC/键鼠代码：约 640KB flash
+- 命令历史从 `wchar_t` 改为 `char`：约 0.75KB BSS
+
+限制：
+
+- 没有屏幕，必须接 UART0 才能看到日志和输入命令
+- USB 口不再提供 CDC，不能当作串口终端使用
+- 串口输入是行式编辑，不支持左右移动光标或行内编辑
+- 命令历史依赖终端发送 ANSI 方向键；纯文本终端只能重输命令
+- 控制台与机器人日志共用 UART，运行期日志较多时输入可能被重画打断
+
+## 运行现象
+
+上电后所有输出都在 UART0（GP0/GP1，115200 8N1），没有 VGA 输出：
+
+```text
+[console] mybot-lite headless (UART0)
+[console] type /help for commands
+[robot] core1: robot runtime started
+[robot] SD: mounted 0:
+[robot] P2: using /robots/p3.sql
+...
+[robot] core1: status idle
+>
+```
+
+- 没有 SD 卡或没有 `/robot.lua` 时，会尝试 SD 结构脚本，再回退内嵌 smoke 脚本。
+- 输入 `/stop` 或按 **Ctrl-C**，core1 会在 `@while`、`milli_sleep` 和动作派发检查点退出。
+- core1 运行期间，core0 仍会继续轮询 UART、输出日志、响应 `Ctrl-C`。
+- 当前固件不初始化 USB CDC/HID；USB 口只用于供电和 BOOTSEL/UF2 烧录。
 
 ## SD 目录建议
 

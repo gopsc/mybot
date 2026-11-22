@@ -6,7 +6,7 @@ end
 
 local HAL = {
     backend = "pico",
-    backend_name = "pico-vga minimal HAL",
+    backend_name = "pico headless minimal HAL",
     platform = { name = "pico" },
     i2c_addr = {},
     uart_baud = {},

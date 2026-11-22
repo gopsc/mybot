@@ -1,379 +1,111 @@
-# bb2-pico
-大家好，我们这个项目fork了github上的一个pico-umac项目。
+# mybot-lite headless（RP2040）
 
-我们注释掉了他的所有的界面逻辑，准备自行开发一个使用宽字符的文字终端
+这是从 [pico-umac](https://github.com/evansm7/pico-umac) 分支演化出的
+mybot-lite 固件。**当前版本已移除 VGA 显示、USB HID 键盘/鼠标和中文输入法**，
+只保留 UART 串口控制台与机器人运行时。
 
-下面是他的readme原文。
+原始 pico-umac 代码版权归 Matt Evans，MIT 许可；后续修改归 qing。
 
+## 当前形态
 
-# Pico Micro Mac (pico-umac)
-
-v0.21 20 December 2024
-
-
-This project embeds the [umac Mac 128K
-emulator](https://github.com/evansm7/umac) project into a Raspberry Pi
-Pico microcontroller.  At long last, the worst Macintosh in a cheap,
-portable form factor!
-
-It has features, many features, the best features:
-
-   * Outputs VGA 640x480@60Hz, monochrome, using three resistors
-   * USB HID keyboard and mouse
-   * Read-only disc image in flash (your creations are ephemeral, like life itself)
-   * Or, if you have a hard time letting go, support for rewritable
-     disc storage on an SPI-attached SD card
-   * Mac 128K by default, or you can make use of more of the Pico's
-     memory and run as a _Mac 208K_
-   * Since you now have more memory, you can splash out on more
-     screen real-estate, and use 640x480 resolution!
-
-Great features.  It even doesn't hang at random!  (Anymore.)
-
-The _Mac 208K_ was, of course, never a real machine.  But, _umac_
-supports odd-sized memories, and more memory runs more things.  A
-surprising amount of software runs on the 128K config, but if you need
-to run _MacPaint_ specifically then you'll need to build both SD
-storage in addition to the _Mac 208K_ config.
-
-So anyway, you can build this project yourself for less than the cost
-of a beer!  You'll need at least a RPi Pico board, a VGA monitor (or
-VGA-HDMI adapter), a USB mouse (and maybe a USB keyboard/hub), plus a
-couple of cheap components.
-
-# Build
-
-## Prerequisites/essentials
-
-   * git submodules
-      - Clone the repo with `--recursive`, or `git submodule update --init --recursive`
-   * Install/set up the [Pico/RP2040 SDK](https://github.com/raspberrypi/pico-sdk)
-
-## Build umac
-
-Install and build `umac` first.  It'll give you a preview of the fun
-to come, plus is required to generate a patched ROM image.
-
-If you want to use a non-default memory size (i.e. >128K) you will
-need to build `umac` with a matching `MEMSIZE` build parameter, for
-example:
-
-```
-cd external/umac
-make MEMSIZE=208
+```text
+RP2040
+  UART0 GP0/GP1   115200 8N1   控制台 + 日志
+  SPI0  GP2-5      5MHz        SD 卡（FAT）
+  I2C0  GP6/GP7                PCA9685 / ADS1015
+  UART1 GP8/GP9                串口设备
+  SPI1  GP10-13               AD9833
+  GP25                        板载 LED
 ```
 
-This is because `umac` is used to patch the ROM, and when using
-unsupported sizes between 128K and 512K the RAM size can't be probed
-automatically, so the size needs to be embedded.
+- 没有 VGA、PIO 视频、DMA framebuffer。
+- 没有物理键盘/鼠标、USB HID、USB CDC；USB 口只用于供电和 BOOTSEL/UF2 烧录。
+- core0：UART 控制台、日志、LED。
+- core1：Lua 5.1、运行期 SQL/MT 解析、I2C/SPI/UART 驱动。
 
-This is also the case for altering the video resolution, because the ROM
-must be patched for this.  Build `umac` with `DISP_WIDTH=640 DISP_HEIGHT=480`
-when you intend to use the `USE_VGA_RES` option.  For example:
+## 构建
 
-```
-cd external/umac
-make MEMSIZE=208 DISP_WIDTH=640 DISP_HEIGHT=480
-```
+需要 Pico SDK 和 ARM 工具链：
 
-## Build pico-umac
-
-Do the initial Pico SDK `cmake` setup into an out-of-tree build dir,
-providing config options if required.
-
-From the top-level `pico-umac` directory:
-
-```
-mkdir build
-(cd build ; PICO_SDK_PATH=/path/to/sdk cmake .. <options>)
+```sh
+cd /home/qing/pico-vga
+cmake -S . -B build -G Ninja \
+  -DPICO_SDK_PATH=/home/qing/pico/pico-sdk \
+  -DUSE_SD=ON \
+  -DPICO_NO_PICOTOOL=1
+cmake --build build -j4
 ```
 
-Options are required if you want SD support, more than the default 128K of memory,
-higher resolution, to change pin configs, etc.:
+有 picotool 时生成 UF2：
 
-   * `-DUSE_SD=true`: Include SD card support.  The GPIOs default to
-     `spi0` running at 5MHz, and GPIOs 2,3,4,5 for
-     `SCK`/`TX`/`RX`/`CS` respectively.  These can be overridden for
-     your board/setup:
-      - `-DSD_TX=<gpio pin>`
-      - `-DSD_RX=<gpio pin>`
-      - `-DSD_SCK=<gpio pin>`
-      - `-DSD_CS=<gpio pin>`
-      - `-DSD_MHZ=<integer speed in MHz>`
-   * `-DMEMSIZE=<size in KB>`: The maximum practical size is about
-     208KB, but values between 128 and 208 should work on a RP2040.
-     Note that although apps and Mac OS seem to gracefully detect free
-     memory, these products never existed and some apps might behave
-     strangely.
-      - With the `Mac Plus` ROM, a _Mac 128K_ doesn't quite have
-        enough memory to run _MacPaint_.  So, 192 or 208 (and a
-        writeable boot volume on SD) will allow _MacPaint_ to run.
-      - **NOTE**: When this option is used, the ROM image must be
-          built with an `umac` build with a corresponding `MEMSIZE`
-   * `-DUSE_VGA_RES=1`: Use 640x480 screen resolution instead of the
-     native 512x342.  This uses an additional 16KB of RAM, so this
-     option makes a _Mac 128K_ configuration virtually unusable.
-     It is recommended only to use this when configuring >208K
-     using the option above.
-   * `-DVIDEO_PIN=<GPIO pin>`: Move the video output pins; defaults
-     to the pinout shown below.
-
-Tip: `cmake` caches these variables, so if you see weird behaviour
-having built previously and then changed an option, delete the `build`
-directory and start again.
-
-## ROM image
-
-The flow is to use `umac` built on your workstation (e.g. Linux,
-but WSL may work too) to prepare a patched ROM image.
-
-`umac` is passed the 4D1F8172 MacPlusv3 ROM, and `-W` to write the
-post-patching binary out:
-
-```
-./external/umac/main -r '4D1F8172 - MacPlus v3.ROM' -W rom.bin
+```sh
+picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 ```
 
-Note: Again, remember that if you are using the `-DMEMSIZE` option to
-increase the `pico-umac` memory, or the `-DUSE_VGA_RES` option to
-increase the `pico-umac` screen resolution, you will need to create
-this ROM image with a `umac` built with the corresponding
-`MEMSIZE`/`DISP_WIDTH`/`DISP_HEIGHT` options, as above.
+本机尺寸（`-DUSE_SD=ON`）：
 
-## Disc image
-
-If you don't build SD support, an internal read-only disc image is
-stored in flash.  If you do build SD support, you have the option to
-still include an image in flash, and this is used as a fallback if
-SD boot fails.
-
-Grab a Macintosh system disc from somewhere.  A 400K or 800K floppy
-image works just fine, up to System 3.2 (the last version to support
-Mac128Ks).  I've used images from
-<https://winworldpc.com/product/mac-os-0-6/system-3x> but also check
-the various forums and MacintoshRepository.  See the `umac` README for
-info on formats (it needs to be raw data without header).
-
-The image size can be whatever you have space for in flash (typically
-about 1.3MB is free there), or on the SD card.  (I don't know what the
-HFS limits are.  But if you make a 50MB disc you're unlikely to fill
-it with software that actually works on the _Mac 128K_ :) )
-
-If using an SD card, use a FAT-formatted card and copy your disc image
-into _one_ of the following files in the root of the card:
-
-   * `umac0.img`:  A normal read/write disc image
-   * `umac0ro.img`:  A read-only disc image
-
-## Putting it together, and building
-
-Given the `rom.bin` prepared above and a `disc.bin` destinated for
-flash, you can now generate includes from them and perform the build:
-
-```
-mkdir incbin
-xxd -i < rom.bin > incbin/umac-rom.h
-
-# When using an internal disc image:
-xxd -i < disc.bin > incbin/umac-disc.h
-# OR, if using SD and if you do _not_ want an internal image:
-echo > incbin/umac-disc.h
-
-make -C build
+```text
+text    data     bss
+254944     0   99888
 ```
 
-You'll get a `build/firmware.uf2` out the other end.  Flash this to
-your Pico: e.g. plug it in with button held/drag/drop.  (When
-iterating/testing during development, unplugging the OTG cable each
-time is a pain – I ended up moving to SWD probe programming.)
+## SD 卡
 
-The LED should flash at about 2Hz once powered up.
+把 `sdcard/` 下的内容拷到 FAT 卡根目录：
 
-# Hardware contruction
+```text
+/profile.txt
+/robot.lua
+/modules/
+/robots/
+/scripts/
+```
 
-It's a simple circuit in terms of having few components: just the
-Pico, with three series resistors and a VGA connection, and DC power.
-However, if you're not comfortable soldering then don't choose this as
-your first project: I don't want you to zap your mouse, keyboard,
-monitor, SD cards...
+`/profile.txt` 只写 profile 名，例如：
 
-Disclaimer: This is a hardware project with zero warranty.  All due
-care has been taken in design/docs, but if you choose to build it then
-I disclaim any responsibility for your hardware or personal safety.
+```text
+p23
+```
 
-With that out of the way...
+没有可用 profile 时会依次尝试内置 fallback。
 
-## Theory of operation
+## 串口控制台
 
-Three 3.3V GPIO pins are driven by PIO to give VSYNC, HSYNC, and video
-out signals.
+接 UART0（GP0 TX、GP1 RX），115200 8N1。上电后：
 
-The syncs are in many similar projects driven directly from GPIO, but
-here I suggest a 66Ω series resistor on each in order to keep the
-voltages at the VGA end (presumably into 75Ω termination?) in the
-correct range.
+```text
+[console] mybot-lite headless (UART0)
+[console] type /help for commands
+[robot] core1: robot runtime started
+>
+```
 
-For the video output, one GPIO drives R,G,B channels for mono/white
-output.  A 100Ω resistor gives roughly 0.7V (max intensity) into 3*75Ω
-signals.
+命令按行输入，`/` 可写可不写：
 
-That's it... power in, USB adapter.
+```text
+/run p23     运行 /robots/p23.sql + /scripts/p23.mt
+/run p5 p8   用 /robots/p5.sql + /scripts/p8.mt
+/run         重新读 /profile.txt
+/stop        停止当前运行
+/status      查看 core1 状态
+/profile     显示 /profile.txt
+/mem         core1 栈高水位和 Lua 堆
+/list        列出 /robots/*.sql
+/help        命令摘要
+↑ / ↓        命令历史（ANSI）
+Ctrl-C       发送停止请求
+```
 
-## Pinout and circuit
+日志行统一带 `[robot]` 前缀。运行期有日志到达时，控制台会重画当前输入行。
 
-Parts needed:
+## 脚本
 
-   * Pico/RP2040 board
-   * USB OTG micro-B to A adapter
-   * USB keyboard, mouse (and hub, if not integrated)
-   * 5V DC supply (600mA+), and maybe a DC jack
-   * 100Ω resistor
-   * 2x 66Ω resistors
-   * VGA DB15 connector, or janky chopped VGA cable
-   * (optional) SD card breakout, SD card
+结构脚本是 `.sql`，运行期解析 `CREATE TABLE` / `INSERT INTO`，不依赖 SQLite。
+动作脚本是 `.mt`，支持 `@Action`、`@if`、`@while`、`@Struct`、`@Vars`、
+`@Alias`、`@Include`、`@Merge`、`@Reflex`、`@Trigger` 等当前子集。
 
-If you want to get fancy with an SD card, you will need some kind of
-SD card SPI breakout adapter.  (There are a lot of these around, but
-many seem to have a buffer/level-converter for 5V operation.  Find one
-without, or modify your adapter for a 3.3V supply.  Doing so, and
-finding an SD card that works well with SPI is out of scope of this
-doc.)
+完整阶段说明见 [docs/p0-mybot-lite.md](docs/p0-mybot-lite.md)。
 
-Pins are given for a RPi Pico board, but this will work on any RP2040
-board with 2MB+ flash as long as all required GPIOs are pinned out:
+## 许可
 
-| GPIO/pin     | Pico pin     | Usage          |
-| ------------ | ------------ | -------------- |
-|   GP0        | 1            | UART0 TX       |
-|   GP1        | 2            | UART0 RX       |
-|   GP18       | 24           | Video output % |
-|   GP19       | 25           | VSYNC          |
-|   GP21       | 27           | HSYNC          |
-|   Gnd        | 23, 28       | Video ground   |
-|   VBUS (5V)  | 40           | +5V supply     |
-|   Gnd        | 38           | Supply ground  |
-
-%: The video pins default here, but can be moved by building with the
-   `-DVIDEO_PIN` option.  This sets the position of the Video pin,
-   which is immediately followed by VSYNC, then a gap, then HSYNC.
-   For example, `-DVIDEO_PIN=20` configures the Video pin at 20,
-   VSYNC at 21, HSYNC at 23.
-
-Method:
-
-   * Wire 5V supply to VBUS/Gnd
-   * Video output --> 100Ω --> VGA RGB (pins 1,2,3) all connected together
-   * HSYNC --> 66Ω --> VGA pin 13
-   * VSYNC --> 66Ω --> VGA pin 14
-   * Video ground --> VGA grounds (pins 5-8, 10)
-
-If you don't have exactly 100Ω, using slightly more is OK but display
-will be dimmer.  If you don't have 66Ω for the syncs, connecting them
-directly is "probably OK", but YMMV.
-
-If you are including an SD card, the default pinout is as follows
-(this can be changed at build time, above):
-
-| GPIO/pin     | Pico pin     | Usage          |
-| ------------ | ------------ | -------------- |
-|   GP2        | 4            | SPI0 SCK       |
-|   GP3        | 5            | SPI0 TX (MOSI) |
-|   GP4        | 6            | SPI0 RX (MISO) |
-|   GP5        | 7            | SPI0 /CS       |
-
-(The SD card needs a good ground, e.g. Pico pin 8 nearby, and 3.3V
-supply from Pico pin 36.)
-
-If your SD breakout board is "raw", i.e. has no buffer or series
-resistors on-board, you may find adding a 66Ω resistor in series on
-all of the four signal lines will help.  Supply decoupling caps will
-also be important (e.g. 1uF+0.1uF) to keep the SD card happy.  _Keep
-SD card wiring short._ The default SPI clock (5MHz) is
-conservative/slow, but I suggest verifying the circuit/SD card works
-before increasing it.
-
-Test your connections: the key part is not getting over 0.7V into your
-VGA connector's signals, or shorting SD card pins.
-
-Connect USB mouse, and keyboard if you like, and power up.
-
-# Software
-
-Both CPU cores are used, and are overclocked (blush) to 250MHz so that
-Missile Command is enjoyable to play.
-
-The `umac` emulator and video output runs on core 1, and core 0 deals
-with USB HID input.  Video DMA is initialised pointing to the
-framebuffer in the Mac's RAM.
-
-Other than that, it's just a main loop in `main.c` shuffling things
-into `umac`.
-
-Quite a lot of optimisation has been done in `umac` and `Musashi` to
-get performance up on Cortex-M0+ and the RP2040, like careful location
-of certain routines in RAM, ensuring inlining/constants can be
-foldeed, etc.  It's 5x faster than it was at the beginning.
-
-The top-level project might be a useful framework for other emulators,
-or other projects that need USB HID input and a framebuffer (e.g. a
-VT220 emulator!).
-
-The USB HID code is largely stolen from the TinyUSB example, but shows
-how in practice you might capture keypresses/deal with mouse events.
-
-## Video
-
-The video system is pretty good and IMHO worth stealing for other
-projects: It uses one PIO state machine and 3 DMA channels to provide
-a rock-solid bitmapped 1BPP 640x480 video output.  The Mac 512x342
-framebuffer is centred inside this by using horizontal blanking
-regions (programmed into the line scan-out) and vertical blanking
-areas from a dummy "always black" mini-framebuffer.
-
-It supports (at build time) flexible resolutions/timings.  The one
-caveat (or advantage?) is that it uses an HSYNC IRQ routine to
-recalculate the next DMA buffer pointer; doing this at scan-time costs
-about 1% of the CPU time (on core 1).  However, it could be used to
-generate video on-the-fly from characters/tiles without a true
-framebuffer.
-
-I'm considering improvements to the video system:
-
-   * Supporting multiple BPP/colour output
-   * Implement the rest of `DE`/display valid strobe support, making
-     driving LCDs possible.
-   * Using a video DMA address list and another DMA channel to reduce
-     the IRQ frequency (CPU overhead) to per-frame, at the cost of a
-     couple of KB of RAM.
-
-
-# Licence
-
-`hid.c` and `tusb_config.h` are based on code from the TinyUSB
-project, which is Copyright (c) 2019, 2021 Ha Thach (tinyusb.org) and
-released under the MIT licence.  `sd_hw_config.c` is based on code
-from the no-OS-FatFS-SD-SPI-RPi-Pico project, which is Copyright (c)
-2021 Carl John Kugler III.
-
-The remainder of the code is released under the MIT licence:
-
- Copyright (c) 2024 Matt Evans:
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in all
- copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- SOFTWARE.
-
+本项目沿用上游 MIT 许可；原始 pico-umac 版权归 Matt Evans。

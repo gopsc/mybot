@@ -27,11 +27,7 @@
 #ifndef HW_H
 #define HW_H
 
-#define GPIO_LED_PIN    PICO_DEFAULT_LED_PIN
-
-#define GPIO_VID_DATA   GPIO_VID_BASE
-#define GPIO_VID_VS     (GPIO_VID_DATA + 1)
-#define GPIO_VID_CLK    (GPIO_VID_VS + 1)
-#define GPIO_VID_HS     (GPIO_VID_CLK + 1)
+/* 只剩板载 LED；VGA 视频引脚已随 headless 版本移除。 */
+#define GPIO_LED_PIN PICO_DEFAULT_LED_PIN
 
 #endif
