@@ -13,6 +13,8 @@
 #include "pico/time.h"
 #include "pico/util/queue.h"
 #include "hardware/i2c.h"
+#include "hardware/spi.h"
+#include "hardware/uart.h"
 
 #include "console.h"
 #include "lua.h"
@@ -392,6 +394,289 @@ static int robot_lua_i2c_transfer(lua_State *L) {
     return 1;
 }
 
+/* P3-C：真实 SPI HAL（SPI1，SCK GP10 / MOSI GP11 / MISO GP12 / CS GP13）。 */
+#define P3_SPI_FAKE_FD 2
+#define P3_SPI_MAX_BYTES 64
+
+typedef struct {
+    bool open;
+    bool fake;
+    spi_inst_t *inst;
+    uint16_t delay_us;
+} p3_spi_t;
+
+static p3_spi_t p3_spi[3];
+
+static int robot_lua_spi_open(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    if (p3_i2c_fake_path(path)) {
+        p3_spi[P3_SPI_FAKE_FD].open = true;
+        p3_spi[P3_SPI_FAKE_FD].fake = true;
+        p3_spi[P3_SPI_FAKE_FD].inst = NULL;
+        lua_pushinteger(L, P3_SPI_FAKE_FD);
+        return 1;
+    }
+    if (strstr(path, "spidev1") == NULL && strstr(path, "spi1") == NULL) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    p3_spi_t *slot = &p3_spi[1];
+    if (!slot->open) {
+        slot->inst = spi1;
+        slot->delay_us = 0;
+        spi_init(slot->inst, 1000 * 1000);
+        gpio_set_function(10, GPIO_FUNC_SPI);   /* SCK */
+        gpio_set_function(11, GPIO_FUNC_SPI);   /* MOSI */
+        gpio_set_function(12, GPIO_FUNC_SPI);   /* MISO */
+        gpio_init(13);
+        gpio_set_dir(13, GPIO_OUT);
+        gpio_put(13, 1);
+        slot->open = true;
+        slot->fake = false;
+        robot_log("SPI: opened SPI1 (SCK GP10, MOSI GP11, MISO GP12, CS GP13)");
+    }
+    lua_pushinteger(L, 1);
+    return 1;
+}
+
+static int robot_lua_spi_close(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    if (fd >= 0 && fd < 3 && p3_spi[fd].open) {
+        if (!p3_spi[fd].fake && p3_spi[fd].inst != NULL) {
+            spi_deinit(p3_spi[fd].inst);
+            gpio_put(13, 1);
+        }
+        p3_spi[fd].open = false;
+        p3_spi[fd].fake = false;
+        p3_spi[fd].inst = NULL;
+    }
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int robot_lua_spi_setup(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    int mode = (int)luaL_checkinteger(L, 2);
+    int bits = (int)luaL_checkinteger(L, 3);
+    int speed = (int)luaL_checkinteger(L, 4);
+    int delay = (int)luaL_optinteger(L, 5, 0);
+    if (fd < 0 || fd >= 3 || !p3_spi[fd].open ||
+        mode < 0 || mode > 3 || bits < 7 || bits > 16 || speed <= 0) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    p3_spi[fd].delay_us = delay > 0 ? (uint16_t)delay : 0;
+    if (!p3_spi[fd].fake) {
+        spi_cpol_t cpol = (mode & 2) ? SPI_CPOL_1 : SPI_CPOL_0;
+        spi_cpha_t cpha = (mode & 1) ? SPI_CPHA_1 : SPI_CPHA_0;
+        spi_set_format(p3_spi[fd].inst, (uint)bits, cpol, cpha, SPI_MSB_FIRST);
+        spi_set_baudrate(p3_spi[fd].inst, (uint)speed);
+    }
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int robot_lua_spi_xfer(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    int read_len = (int)luaL_optinteger(L, 3, 0);
+    int delay = (int)luaL_optinteger(L, 4, -1);
+    int write_len = (int)lua_objlen(L, 2);
+
+    if (fd < 0 || fd >= 3 || !p3_spi[fd].open ||
+        write_len < 0 || write_len > P3_SPI_MAX_BYTES ||
+        read_len < 0 || read_len > P3_SPI_MAX_BYTES) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "invalid spi arguments");
+        return 2;
+    }
+
+    uint8_t tx[P3_SPI_MAX_BYTES];
+    uint8_t rx[P3_SPI_MAX_BYTES];
+    for (int i = 0; i < write_len; ++i) {
+        lua_rawgeti(L, 2, i + 1);
+        int v = (int)lua_tointeger(L, -1);
+        lua_pop(L, 1);
+        if (v < 0 || v > 255) {
+            lua_pushnil(L);
+            lua_pushliteral(L, "spi byte out of range");
+            return 2;
+        }
+        tx[i] = (uint8_t)v;
+    }
+
+    if (p3_spi[fd].fake) {
+        lua_createtable(L, read_len, 0);
+        for (int i = 0; i < read_len; ++i) {
+            lua_pushinteger(L, 0);
+            lua_rawseti(L, -2, i + 1);
+        }
+        return 1;
+    }
+
+    spi_inst_t *inst = p3_spi[fd].inst;
+    gpio_put(13, 0);
+    if (write_len > 0 && read_len == write_len) {
+        spi_write_read_blocking(inst, tx, rx, (size_t)write_len);
+    } else {
+        if (write_len > 0) {
+            spi_write_blocking(inst, tx, (size_t)write_len);
+        }
+        if (read_len > 0) {
+            spi_read_blocking(inst, 0xFF, rx, (size_t)read_len);
+        }
+    }
+    gpio_put(13, 1);
+    uint32_t wait = delay >= 0 ? (uint32_t)delay : p3_spi[fd].delay_us;
+    if (wait > 0) {
+        sleep_us(wait);
+    }
+
+    lua_createtable(L, read_len, 0);
+    for (int i = 0; i < read_len; ++i) {
+        lua_pushinteger(L, rx[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+    return 1;
+}
+
+/* P3-C：真实 UART HAL（UART1，TX GP8 / RX GP9）。 */
+#define P3_UART_FAKE_FD 2
+#define P3_UART_MAX_BYTES 512
+
+typedef struct {
+    bool open;
+    bool fake;
+    uart_inst_t *inst;
+} p3_uart_t;
+
+static p3_uart_t p3_uart[3];
+
+static int robot_lua_uart_open(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    int baud = (int)luaL_checkinteger(L, 2);
+    if (p3_i2c_fake_path(path)) {
+        p3_uart[P3_UART_FAKE_FD].open = true;
+        p3_uart[P3_UART_FAKE_FD].fake = true;
+        p3_uart[P3_UART_FAKE_FD].inst = NULL;
+        lua_pushinteger(L, P3_UART_FAKE_FD);
+        return 1;
+    }
+    if ((strstr(path, "ttyS1") == NULL && strstr(path, "ttyAMA1") == NULL &&
+         strstr(path, "uart1") == NULL) || baud <= 0) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    p3_uart_t *slot = &p3_uart[1];
+    if (!slot->open) {
+        slot->inst = uart1;
+        uart_init(slot->inst, (uint)baud);
+        gpio_set_function(8, GPIO_FUNC_UART);
+        gpio_set_function(9, GPIO_FUNC_UART);
+        uart_set_format(slot->inst, 8, 1, UART_PARITY_NONE);
+        uart_set_fifo_enabled(slot->inst, true);
+        slot->open = true;
+        slot->fake = false;
+        robot_log("UART: opened UART1 (TX GP8, RX GP9) @ %d", baud);
+    }
+    lua_pushinteger(L, 1);
+    return 1;
+}
+
+static int robot_lua_uart_close(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    if (fd >= 0 && fd < 3 && p3_uart[fd].open) {
+        if (!p3_uart[fd].fake && p3_uart[fd].inst != NULL) {
+            uart_deinit(p3_uart[fd].inst);
+        }
+        p3_uart[fd].open = false;
+        p3_uart[fd].fake = false;
+        p3_uart[fd].inst = NULL;
+    }
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static int robot_lua_uart_write(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    int n = (int)lua_objlen(L, 2);
+    if (fd < 0 || fd >= 3 || !p3_uart[fd].open || n <= 0 || n > P3_UART_MAX_BYTES) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    uint8_t buf[P3_UART_MAX_BYTES];
+    for (int i = 0; i < n; ++i) {
+        lua_rawgeti(L, 2, i + 1);
+        int v = (int)lua_tointeger(L, -1);
+        lua_pop(L, 1);
+        if (v < 0 || v > 255) {
+            lua_pushinteger(L, -1);
+            return 1;
+        }
+        buf[i] = (uint8_t)v;
+    }
+    if (p3_uart[fd].fake) {
+        lua_pushinteger(L, n);
+        return 1;
+    }
+    uart_write_blocking(p3_uart[fd].inst, buf, (size_t)n);
+    lua_pushinteger(L, n);
+    return 1;
+}
+
+static int robot_lua_uart_read(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    int n = (int)luaL_checkinteger(L, 2);
+    int timeout_ms = (int)luaL_optinteger(L, 3, 0);
+    if (fd < 0 || fd >= 3 || !p3_uart[fd].open || n <= 0 || n > P3_UART_MAX_BYTES) {
+        lua_pushnil(L);
+        return 1;
+    }
+    if (p3_uart[fd].fake) {
+        lua_createtable(L, n, 0);
+        for (int i = 0; i < n; ++i) {
+            lua_pushinteger(L, 0);
+            lua_rawseti(L, -2, i + 1);
+        }
+        return 1;
+    }
+    uint8_t buf[P3_UART_MAX_BYTES];
+    int got = 0;
+    absolute_time_t deadline = make_timeout_time_ms(timeout_ms > 0 ? timeout_ms : 0);
+    while (got < n) {
+        while (got < n && uart_is_readable(p3_uart[fd].inst)) {
+            buf[got++] = (uint8_t)uart_getc(p3_uart[fd].inst);
+        }
+        if (got >= n || (timeout_ms <= 0) || time_reached(deadline)) {
+            break;
+        }
+        sleep_us(100);
+    }
+    if (got == 0) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_createtable(L, got, 0);
+    for (int i = 0; i < got; ++i) {
+        lua_pushinteger(L, buf[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+    return 1;
+}
+
+static int robot_lua_uart_flush(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    if (fd >= 0 && fd < 3 && p3_uart[fd].open && !p3_uart[fd].fake) {
+        while (uart_is_readable(p3_uart[fd].inst)) {
+            (void)uart_getc(p3_uart[fd].inst);
+        }
+    }
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+
 /* P1-C：Timer.lua 只需要阻塞毫秒。分片睡眠让 stop 请求在 50ms 内可见，
  * 同时因为 core1 独占机器人运行时，core0 的 VGA/USB 不受影响。 */
 static int robot_lua_milli_sleep(lua_State *L) {
@@ -425,6 +710,15 @@ static void robot_openlibs(lua_State *L) {
     lua_register(L, "__i2c_transfer", robot_lua_i2c_transfer);
     lua_register(L, "__i2c_probe", robot_lua_i2c_probe);
     lua_register(L, "__i2c_scan", robot_lua_i2c_scan);
+    lua_register(L, "__spi_open", robot_lua_spi_open);
+    lua_register(L, "__spi_close", robot_lua_spi_close);
+    lua_register(L, "__spi_setup", robot_lua_spi_setup);
+    lua_register(L, "__spi_xfer", robot_lua_spi_xfer);
+    lua_register(L, "__uart_open", robot_lua_uart_open);
+    lua_register(L, "__uart_close", robot_lua_uart_close);
+    lua_register(L, "__uart_write", robot_lua_uart_write);
+    lua_register(L, "__uart_read", robot_lua_uart_read);
+    lua_register(L, "__uart_flush", robot_lua_uart_flush);
 
     lua_newtable(L);
     lua_pushcfunction(L, robot_os_getenv); lua_setfield(L, -2, "getenv");

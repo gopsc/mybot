@@ -207,6 +207,8 @@ pico_set_double_implementation(firmware default)
     hardware_pio
     hardware_sync
     hardware_i2c
+    hardware_spi
+    hardware_uart
     lua51
     m
     ${EXTRA_SD_LIB}

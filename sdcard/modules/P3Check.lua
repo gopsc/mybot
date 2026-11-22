@@ -1,3 +1,6 @@
+local mpath = (__mpath or dofile((os.getenv("BOT4CJ_MODULE_PATH") or "./modules"):match("[^:]+") .. "/lib/mpath.lua"))
+dofile(mpath.resolve("lib/HAL.lua"))
+
 -- P3 I2C 自检驱动：验证真实总线 open + scan，不依赖具体器件。
 function build(data)
     print("P3Check: build fd=" .. tostring(data.fd))

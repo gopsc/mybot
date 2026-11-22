@@ -1,14 +1,14 @@
-# P0：mybot-lite 双核、Lua、脚本解析与 I2C HAL
+# P0：mybot-lite 双核、Lua、脚本解析与 I2C/SPI/UART HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3-B 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3-C 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
 3. **Lua 驱动从 SD 加载，每个驱动有独立 env**
 4. **运行期解析 `.sql` / `.mt`，支持 `$ref` / `@Alias` / `@Vars`**
-5. **真实 I2C HAL（Pico hardware_i2c）与 PCA9685/ADS1015 驱动接入**
+5. **真实 I2C/SPI/UART HAL，以及 PCA9685/ADS1015/AD9833 驱动接入**
 
-还没有实现：SPI/UART HAL、`@if/@while`、`@Struct`、动态 SQL、命令系统。那些属于 P3 后续/P4。
+还没有实现：`@if/@while`、`@Struct`、动态 SQL、命令系统。那些属于 P4。
 
 ## 改动
 
@@ -64,7 +64,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-860684    0 128804
+864012    0 128864
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -88,7 +88,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-238820     0  78536
+242148     0  78596
 ```
 
 此时：
@@ -156,6 +156,10 @@ sdcard/
     P3Check.lua
     PCA9685.lua
     ADS1015.lua
+    SPI.lua
+    UART.lua
+    AD9833.lua
+    UartCheck.lua
     bitcompat.lua
     lib/
       HAL.lua
@@ -168,12 +172,18 @@ sdcard/
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
+    spi_fake.sql
+    spi.sql
+    uart_fake.sql
+    uart.sql
   scripts/
     relay-test.mt
     p2b.mt
     p3.mt
     pca9685.mt
     ads1015.mt
+    spi.mt
+    uart.mt
   profile.txt
 ```
 
@@ -438,6 +448,10 @@ p3              -> /robots/p3.sql + /scripts/p3.mt
 pca9685_fake    -> /robots/pca9685_fake.sql + /scripts/pca9685.mt
 pca9685         -> /robots/pca9685.sql + /scripts/pca9685.mt（真实 PCA9685，0x40）
 ads1015         -> /robots/ads1015.sql + /scripts/ads1015.mt（真实 ADS1015，0x48）
+spi_fake        -> /robots/spi_fake.sql + /scripts/spi.mt
+spi             -> /robots/spi.sql + /scripts/spi.mt（真实 AD9833）
+uart_fake       -> /robots/uart_fake.sql + /scripts/uart.mt
+uart            -> /robots/uart.sql + /scripts/uart.mt（真实 UART1）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -502,6 +516,91 @@ ads1015
 ADS1015 地址默认 `0x48`。`build` 会写配置并读回比对，因此**必须接真实器件**；没有器件时会在 build 阶段报 `ERR`，不会伪装成功。
 
 > SPI/UART HAL 仍未实现；P3-B 目前只覆盖 I2C 器件。
+
+## P3-C：SPI / UART HAL
+
+### SPI1
+
+| 信号 | 引脚 |
+|---|---|
+| SCK | GP10 |
+| MOSI | GP11 |
+| MISO | GP12 |
+| CS | GP13 |
+
+路径：
+
+```text
+/dev/spidev1.0 -> SPI1
+/dev/spidev-fake -> fake fd=2
+```
+
+Lua 接口沿用 mybot 驱动：
+
+```text
+spi_open / spi_close / spi_setup
+spi_write / spi_write3 / spi_write_multi
+spi_read / spi_read_multi / spi_xfer_full
+```
+
+`AD9833.lua` 使用 SPI 模式 2、8 位、1MHz，通过 `/profile.txt` 选择：
+
+```text
+spi_fake    -> /dev/spidev-fake，无硬件冒烟
+spi         -> /dev/spidev1.0，真实 AD9833
+```
+
+`/scripts/spi.mt`：
+
+```mt
+@Action
+sig0.freq;
+     2000;
+@
+```
+
+### UART1
+
+| 信号 | 引脚 |
+|---|---|
+| TX | GP8 |
+| RX | GP9 |
+
+路径：
+
+```text
+/dev/ttyS1 或 /dev/ttyAMA1 -> UART1
+/dev/tty-fake -> fake fd=2
+```
+
+Lua 接口：
+
+```text
+uart_open / uart_close / uart_write / uart_read / uart_flush
+```
+
+profile：
+
+```text
+uart_fake   -> /dev/tty-fake，无硬件冒烟
+uart        -> /dev/ttyS1，真实串口
+```
+
+`UartCheck` 会写 `0x41 0x42`，然后最多读 4 字节。fake 模式预期：
+
+```text
+UartCheck: build fd=2 baud=115200
+UartCheck: write=2 read=4 [00,00,00,00]
+```
+
+真实 UART 需要外部回环或目标设备；否则 read 超时返回空，不会伪装成收到数据。
+
+### 当前 P3-C 限制
+
+- SPI 目前只映射 SPI1；SPI0 被 SD 卡占用。
+- CS 固定 GP13，单设备。
+- UART 固定 8N1，无流控。
+- SPI/UART 的真实器件验证仍需要上板。
 
 ## 运行现象
 

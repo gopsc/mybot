@@ -129,12 +129,93 @@ function i2c_scan(fd)
     return __i2c_scan(tonumber(fd))
 end
 
-function HAL.spi_open(path) return -1 end
-function HAL.spi_close(fd) return -1 end
-function HAL.uart_open(path, baud) return -1 end
-function HAL.uart_close(fd) return -1 end
-function HAL.uart_write(fd, data) return -1 end
-function HAL.uart_read(fd, n, timeout_ms) return nil end
+function HAL.spi_open(path) return __spi_open(path) end
+function HAL.spi_close(fd) return __spi_close(fd) end
+function HAL.spi_setup(fd, mode, bits, speed, delay)
+    return __spi_setup(tonumber(fd), tonumber(mode), tonumber(bits),
+        tonumber(speed), tonumber(delay) or 0)
+end
+function spi_open(path) return HAL.spi_open(path) end
+function spi_close(fd) return HAL.spi_close(fd) end
+function spi_setup(fd, mode, bits, speed, delay)
+    return HAL.spi_setup(fd, mode, bits, speed, delay)
+end
+
+local function spi_byte(v)
+    v = tonumber(v)
+    if v == nil or v < 0 or v > 255 then return nil end
+    return math.floor(v)
+end
+
+local function spi_xfer(fd, tx, read_len, delay)
+    return __spi_xfer(tonumber(fd), tx, read_len or 0, delay)
+end
+
+function spi_write(fd, val, delay_us)
+    val = spi_byte(val)
+    if val == nil then return -1 end
+    local out = spi_xfer(fd, {val}, 0, delay_us)
+    return type(out) == "table" and 0 or -1
+end
+
+function spi_read(fd, delay_us)
+    local out = spi_xfer(fd, {}, 1, delay_us)
+    if type(out) ~= "table" or #out ~= 1 then return -1 end
+    return out[1]
+end
+
+function spi_write3(fd, b0, b1, b2, delay_us)
+    b0, b1, b2 = spi_byte(b0), spi_byte(b1), spi_byte(b2)
+    if b0 == nil or b1 == nil or b2 == nil then return -1 end
+    local out = spi_xfer(fd, {b0, b1, b2}, 0, delay_us)
+    return type(out) == "table" and 0 or -1
+end
+
+function spi_write_multi(fd, data, delay_us)
+    if type(data) ~= "table" or #data == 0 then return -1 end
+    local tx = {}
+    for i = 1, #data do
+        local b = spi_byte(data[i])
+        if b == nil then return -1 end
+        tx[i] = b
+    end
+    local out = spi_xfer(fd, tx, 0, delay_us)
+    return type(out) == "table" and 0 or -1
+end
+
+function spi_read_multi(fd, n, delay_us)
+    n = tonumber(n)
+    if n == nil or n < 1 or n > 6 then return -1 end
+    local out = spi_xfer(fd, {}, math.floor(n), delay_us)
+    if type(out) ~= "table" or #out ~= math.floor(n) then return -1 end
+    local v = 0
+    for i = 1, #out do v = v * 256 + out[i] end
+    return v
+end
+
+function spi_xfer_full(fd, data, delay_us)
+    if type(data) ~= "table" or #data == 0 then return nil end
+    local tx = {}
+    for i = 1, #data do
+        local b = spi_byte(data[i])
+        if b == nil then return nil end
+        tx[i] = b
+    end
+    local out = spi_xfer(fd, tx, #tx, delay_us)
+    if type(out) ~= "table" or #out ~= #tx then return nil end
+    return out
+end
+
+function HAL.uart_open(path, baud) return __uart_open(path, tonumber(baud)) end
+function HAL.uart_close(fd) return __uart_close(fd) end
+function HAL.uart_write(fd, data) return __uart_write(fd, data) end
+function HAL.uart_read(fd, n, timeout_ms) return __uart_read(fd, n, timeout_ms or 0) end
+function HAL.uart_flush(fd) return __uart_flush(fd) end
+function uart_open(path, baud) return HAL.uart_open(path, baud) end
+function uart_close(fd) return HAL.uart_close(fd) end
+function uart_write(fd, data) return HAL.uart_write(fd, data) end
+function uart_read(fd, n, timeout_ms) return HAL.uart_read(fd, n, timeout_ms) end
+function uart_flush(fd) return HAL.uart_flush(fd) end
 
 _G.__BOT4CJ_HAL = HAL
 return HAL
