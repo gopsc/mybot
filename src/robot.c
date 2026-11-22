@@ -20,11 +20,9 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
-#if USE_SD
 #include "ff.h"
 #include "f_util.h"
 #include "hw_config.h"
-#endif
 
 typedef struct {
     char text[ROBOT_LOG_LINE];
@@ -804,7 +802,6 @@ static void robot_openlibs(lua_State *L) {
  * （例如 /modules/Relay.lua）。buffer 是 core1 独占的静态区：Lua 编译完
  * chunk 后不再引用源码文本，因此嵌套 dofile 复用同一块 buffer 是安全的。
  */
-#if USE_SD
 static int load_file_to_stack(lua_State *L, const char *path) {
     FIL fp;
     FRESULT fr = f_open(&fp, path, FA_READ);
@@ -831,12 +828,6 @@ static int load_file_to_stack(lua_State *L, const char *path) {
 
     return luaL_loadbuffer(L, lua_file_buf, read, path);
 }
-#else
-static int load_file_to_stack(lua_State *L, const char *path) {
-    lua_pushfstring(L, "cannot load %s: SD support disabled", path);
-    return -1;
-}
-#endif
 
 static int robot_lua_loadfile(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
@@ -1537,7 +1528,6 @@ static void p2_parse_sql(void) {
 }
 
 static size_t p2_read_file(const char *path, char *buf, size_t cap) {
-#if USE_SD
     FIL fp;
     FRESULT fr = f_open(&fp, path, FA_READ);
     if (fr != FR_OK) {
@@ -1559,13 +1549,6 @@ static size_t p2_read_file(const char *path, char *buf, size_t cap) {
     }
     buf[read] = '\0';
     return read;
-#else
-    (void)path;
-    (void)buf;
-    (void)cap;
-    robot_log("P2: SD support disabled");
-    return 0;
-#endif
 }
 
 static bool p2_lua_call(lua_State *L, int env_ref, const char *label,
@@ -3840,7 +3823,6 @@ static bool robot_p2_run(lua_State *L) {
 }
 
 static void robot_lua_smoke(void) {
-#if USE_SD
     sd_card_t *pSD = sd_get_by_num(0);
     if (pSD == NULL) {
         robot_log("SD: no card slot configured");
@@ -3852,7 +3834,6 @@ static void robot_lua_smoke(void) {
             robot_log("SD: mounted %s", pSD->pcName);
         }
     }
-#endif
 
     lua_State *L = luaL_newstate();
     if (L == NULL) {
@@ -4094,7 +4075,6 @@ void robot_core1(void) {
                 robot_busy ? 1 : 0, robot_stop ? 1 : 0);
             break;
         case ROBOT_CMD_LIST: {
-#if USE_SD
             DIR dir;
             FILINFO fno;
             FRESULT fr = f_opendir(&dir, "/robots");
@@ -4111,9 +4091,6 @@ void robot_core1(void) {
             }
             f_closedir(&dir);
             robot_log("core1: %d profile(s)", shown);
-#else
-            robot_log("core1: SD support disabled");
-#endif
             break;
         }
         default:

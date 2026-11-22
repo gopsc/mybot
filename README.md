@@ -31,7 +31,6 @@ RP2040
 cd /home/qing/pico-vga
 cmake -S . -B build -G Ninja \
   -DPICO_SDK_PATH=/home/qing/pico/pico-sdk \
-  -DUSE_SD=ON \
   -DPICO_NO_PICOTOOL=1
 cmake --build build -j4
 ```
@@ -42,16 +41,16 @@ cmake --build build -j4
 picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 ```
 
-本机尺寸（`-DUSE_SD=ON`）：
+本机尺寸（SD 固定开启）：
 
 ```text
 text    data     bss
 257624     0   99888
 ```
 
-## SD 卡
+## SD 卡（必需）
 
-把 `sdcard/` 下的内容拷到 FAT 卡根目录：
+SD 支持是固定功能，没有无 SD 构建。把 `sdcard/` 下的内容拷到 FAT 卡根目录：
 
 ```text
 /profile.txt

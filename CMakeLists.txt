@@ -26,7 +26,6 @@
 
 cmake_minimum_required(VERSION 3.13)
 
-option(USE_SD "Build in SD support" OFF)
 set(SD_TX 3 CACHE STRING "SD SPI TX pin")
 set(SD_RX 4 CACHE STRING "SD SPI RX pin")
 set(SD_SCK 2 CACHE STRING "SD SPI SCK pin")
@@ -39,15 +38,13 @@ pico_sdk_init()
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3")
 
-if (USE_SD)
-  add_compile_definitions(USE_SD=1)
-  set(FF_DISABLE_RTC ${PICO_RP2350})
-  add_subdirectory(third_party/fatfs/FatFs_SPI build)
-  set(EXTRA_SD_SRC src/sd_hw_config.c)
-  set(EXTRA_SD_LIB FatFs_SPI)
-  add_compile_definitions(
-    SD_TX=${SD_TX} SD_RX=${SD_RX} SD_SCK=${SD_SCK} SD_CS=${SD_CS} SD_MHZ=${SD_MHZ})
-endif()
+# SD 是固定功能，不再提供无 SD 构建。
+set(FF_DISABLE_RTC ${PICO_RP2350})
+add_subdirectory(third_party/fatfs/FatFs_SPI build)
+set(EXTRA_SD_SRC src/sd_hw_config.c)
+set(EXTRA_SD_LIB FatFs_SPI)
+add_compile_definitions(
+  SD_TX=${SD_TX} SD_RX=${SD_RX} SD_SCK=${SD_SCK} SD_CS=${SD_CS} SD_MHZ=${SD_MHZ})
 
 # ---------------------------------------------------------------------------
 # Lua 5.1.5（vendored）：驱动运行时。

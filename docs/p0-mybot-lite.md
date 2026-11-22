@@ -32,6 +32,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 24. **统一表达式引擎（条件与 `$(...)` 共用）**
 25. **P24：移除 VGA / PIO 视频 / USB HID 键鼠，改为 headless 串口控制台**
 26. **P25：`@SQL` 运行期热插拔（INSERT / DELETE）**
+27. **P26：取消无 SD 构建，SD 固定启用**
 
 还没有实现：完整 `@Merge` 语义、完整动态 SQL（UPDATE/DROP/事务回滚）、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -50,6 +51,7 @@ RP2040
 - 不再输出 VGA，不再分配 38.4KB framebuffer。
 - 不再枚举 USB HID/CDC；USB 口只用于供电和 BOOTSEL/UF2 烧录。
 - 没有物理键盘/鼠标、没有拼音输入法、没有屏幕光标。
+- SD 卡是固定功能，不提供无 SD 构建。
 - 串口终端里的上/下方向键仍可用于命令历史（ANSI CSI）。
 
 ## 当前改动
@@ -92,7 +94,6 @@ RP2040
 cd /home/qing/pico-vga
 cmake -S . -B build -G Ninja \
   -DPICO_SDK_PATH=/home/qing/pico/pico-sdk \
-  -DUSE_SD=ON \
   -DPICO_NO_PICOTOOL=1
 cmake --build build -j4
 ```
@@ -103,7 +104,7 @@ cmake --build build -j4
 picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 ```
 
-本机已构建出的尺寸（`-DUSE_SD=ON`）：
+本机已构建出的尺寸（SD 固定开启）：
 
 ```text
 text   data   bss
@@ -1960,7 +1961,7 @@ Ctrl-C
 - 日志到达时会重画 `> ` 和当前输入，避免半截命令被覆盖
 - `Ctrl-C` 直接发送停止请求，替代原来的 Tab 停止键
 
-尺寸变化（`-DUSE_SD=ON`）：
+尺寸变化（SD 固定开启）：
 
 ```text
                   text     data      bss
@@ -2062,6 +2063,46 @@ P2: cold.destroy result=OK
 - `@SQL` 是 Pico 侧扩展；mybot 原版热 SQL 由宿主 `apply_sql` 调用
 - 不是常驻热 SQL：只在动作脚本执行期间生效，脚本结束后设备仍统一销毁
 
+## P26：取消无 SD 构建
+
+P26-A 把 SD 从可选构建项改成固定功能：
+
+- 删除 `USE_SD` CMake option
+- 删除所有 `#if USE_SD` 分支和 “SD support disabled” 回退
+- `loadfile` / `dofile` 始终走 FatFS
+- `.sql` / `.mt` / `profile.txt` 始终从 SD 读取
+- `/list` 始终扫描 `/robots`
+- 构建命令不再需要 `-DUSE_SD=ON`
+
+当前只有一种固件：
+
+```text
+text    data     bss
+257624     0   99888
+```
+
+构建：
+
+```sh
+cmake -S . -B build -G Ninja \
+  -DPICO_SDK_PATH=/home/qing/pico/pico-sdk \
+  -DPICO_NO_PICOTOOL=1
+cmake --build build -j4
+```
+
+行为：
+
+- SD 卡没插或挂载失败时，日志会输出 `SD: mount failed (...)`
+- 没有 `/robot.lua` 时仍会回退内嵌 smoke 脚本，用于确认 Lua 运行时存活
+- 没有结构 SQL 时无法运行 profile，这是预期行为
+- 不再维护两份固件尺寸/两套分支
+
+限制：
+
+- 没有 SD 卡就不能运行真实机器人脚本
+- FatFs/SPI SD 驱动始终链接，flash/BSS 不再有无 SD 版本的小体积优势
+- SD 引脚仍是 GP2-5，5MHz，可在 CMake cache 中改
+
 ## 运行现象
 
 上电后所有输出都在 UART0（GP0/GP1，115200 8N1），没有 VGA 输出：
@@ -2077,7 +2118,7 @@ P2: cold.destroy result=OK
 >
 ```
 
-- 没有 SD 卡或没有 `/robot.lua` 时，会尝试 SD 结构脚本，再回退内嵌 smoke 脚本。
+- SD 卡没插或挂载失败时，core1 会输出 `SD: mount failed`；没有 `/robot.lua` 时会回退内嵌 smoke 脚本，但没有结构 SQL 时无法运行 profile。
 - 输入 `/stop` 或按 **Ctrl-C**，core1 会在 `@while`、`milli_sleep` 和动作派发检查点退出。
 - core1 运行期间，core0 仍会继续轮询 UART、输出日志、响应 `Ctrl-C`。
 - 当前固件不初始化 USB CDC/HID；USB 口只用于供电和 BOOTSEL/UF2 烧录。
