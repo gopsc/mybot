@@ -9,6 +9,7 @@ void print_cursor();
 void clear_cursor();
 void init_console();
 void loop_console();
+void console_poll();
 void welcome();
 void kbdinfo();
 

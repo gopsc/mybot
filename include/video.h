@@ -40,8 +40,8 @@
 #define FB_LEN_BITS (ONE_LINE_BITS * ONE_COL)
 #define CHAR_HEIGHT 14 /* 字模高 */
 #define CHAR_WIDTH_CN CHAR_HEIGHT /* 汉字字模宽是英文的两倍 */
-#define CHAR_WIDTH_EN (int)(CHAR_WIDTH_CN * 0.5) /* 字模宽 */
-#define ONE_LINE_CHAR_EN   (int)(ONE_LINE_BITS / CHAR_WIDTH_EN)/* 每行几个字 */
+#define CHAR_WIDTH_EN (CHAR_WIDTH_CN / 2) /* 字模宽（整数常量表达式） */
+#define ONE_LINE_CHAR_EN   (ONE_LINE_BITS / CHAR_WIDTH_EN)/* 每行几个字 */
 #define ONE_COL_CHAR   (int) (ONE_COL / CHAR_HEIGHT)/* 每列几个字 */
 #define IPT_PLACE_H     (ONE_COL - IPT_H)
 #define PY_LELECT_H (IPT_PLACE_H + 1 * CHAR_HEIGHT)

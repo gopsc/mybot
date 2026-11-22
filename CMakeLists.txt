@@ -109,7 +109,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -DPICO -DMUSASHI_CNF=\\\"../include/m68k
 if (USE_SD)
    add_compile_definitions(USE_SD=1)
    set(FF_DISABLE_RTC ${PICO_RP2350})  # RP2350 doesn't have RTC, so disable it
-   add_subdirectory(external/no-OS-FatFS-SD-SPI-RPi-Pico/FatFs_SPI build)
+   add_subdirectory(third_party/fatfs/FatFs_SPI build)
    set(EXTRA_SD_SRC src/sd_hw_config.c)
    set(EXTRA_SD_LIB FatFs_SPI)
    add_compile_definitions(SD_TX=${SD_TX} SD_RX=${SD_RX} SD_SCK=${SD_SCK} SD_CS=${SD_CS} SD_MHZ=${SD_MHZ})
@@ -124,7 +124,41 @@ else()
    add_compile_definitions(DISP_WIDTH=512)
    add_compile_definitions(DISP_HEIGHT=342)
 endif()
+
+# P0 允许完全关掉 VGA/console，只通过串口观察 Lua 与机器人日志。
+# 关闭后不初始化 video/PIO/DMA，不分配 framebuffer；适合没有显示器时验证
+# Lua 驱动和后续的 I2C/SPI/UART。
+option(USE_VGA "Build VGA output and framebuffer console" ON)
+if (USE_VGA)
+   add_compile_definitions(USE_VGA=1)
+else()
+   add_compile_definitions(USE_VGA=0)
+endif()
 add_compile_definitions(GPIO_VID_BASE=${VIDEO_PIN})
+
+# ---------------------------------------------------------------------------
+# Lua 5.1.5（vendored）：P0 的驱动运行时。
+# LuaJIT 在 Cortex-M0+ 上不可用；Lua 5.1 保留 getfenv/setfenv，最接近现有
+# modules/*.lua 的 LuaJIT 5.1 语法。只编译核心与标准库，lua.c/luac.c 是宿主
+# 解释器入口，不参与固件。
+# ---------------------------------------------------------------------------
+set(LUA_SRC_DIR ${CMAKE_CURRENT_LIST_DIR}/third_party/lua/src)
+file(GLOB LUA_SOURCES ${LUA_SRC_DIR}/*.c)
+list(REMOVE_ITEM LUA_SOURCES
+  ${LUA_SRC_DIR}/lua.c
+  ${LUA_SRC_DIR}/luac.c
+  ${LUA_SRC_DIR}/print.c
+  # 裸机没有 POSIX 文件/进程系统调用；io/os 库会把 newlib 的
+  # _link/_unlink 等未实现符号拖进链接。P0 只开 base/table/string/math/
+  # debug/package，os.getenv/os.time 由 robot.c 提供最小实现。
+  ${LUA_SRC_DIR}/liolib.c
+  ${LUA_SRC_DIR}/loslib.c
+  ${LUA_SRC_DIR}/linit.c
+  )
+add_library(lua51 STATIC ${LUA_SOURCES})
+target_include_directories(lua51 PUBLIC ${LUA_SRC_DIR})
+# Lua 源码是 C89 风格，不必继承 C++ 的告警策略；避免第三方源码噪声。
+target_compile_options(lua51 PRIVATE -Wno-unused-parameter -Wno-sign-compare)
 
 if (TARGET tinyusb_device)
   add_executable(firmware
@@ -136,6 +170,7 @@ if (TARGET tinyusb_device)
     src/hid.c
     src/cncc.c
     src/console.c
+    src/robot.c
     src/graph/basic.c
     #src/graph/bezier.c
     src/mathh/lagrange.c
@@ -165,13 +200,23 @@ pico_set_double_implementation(firmware default)
     pico_multicore
     pico_float
     pico_double
+    pico_util
     tinyusb_host
     tinyusb_board
     hardware_dma
     hardware_pio
     hardware_sync
+    lua51
     m
     ${EXTRA_SD_LIB}
+    )
+
+  # Lua/P0 的 C 调用链比旧控制台深；core0 栈放在 SCRATCH_Y（4KB）。
+  # core1 栈不能继续放在 SCRATCH_X：16KB 会溢出，改由 robot.c 在 BSS 里
+  # 提供 16KB 栈并调用 multicore_launch_core1_with_stack()。
+  target_compile_definitions(firmware PRIVATE
+    PICO_CORE1_STACK_SIZE=0
+    PICO_STACK_SIZE=0x1000
     )
 
   target_include_directories(firmware PRIVATE

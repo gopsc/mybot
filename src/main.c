@@ -54,6 +54,7 @@
 #include "graph.h"
 #include "cncc.h"
 #include "console.h"
+#include "robot.h"
 #include "try.h"
 
 #include "bsp/rp2040/board.h"
@@ -84,7 +85,9 @@ extern int	cursor_button;
  * 用于传输视频的内存空间，单位是8位，即每个变量8个像素
  *
  */
+#if USE_VGA
 static uint8_t video_ram[ONE_COL * ONE_LINE];
+#endif
 ////////////////////////////////////////////////////////////////////////////////
 
 /* 初始化gpio */
@@ -284,43 +287,11 @@ static int      disc_do_write(void *ctx, uint8_t *data, unsigned int offset, uns
  *
  * 核1主函数
  *
- * 视频、中断处理、DMA设置
- *
- * TF卡读取
+ * P0 起 core1 只运行机器人运行时（Lua/后续 SQL、MT、I2C/SPI/UART）。
+ * VGA、DMA/IRQ、控制台和 USB 全部留在 core0，core1 阻塞时 UI 仍然响应。
  *
  */
-static void core1_main()
-{
-        /* 硬盘描述符！  */
-        //disc_descr_t discs[DISC_NUM_DRIVES] = {0};
-
-        /* 硬盘初始化！ */
-        //disc_setup(discs);
-
-        /* Video runs on core 1, i.e. IRQs/DMA are unaffected by
-         * core 0's USB activity.
-         *
-         * IRQs：中断请求
-         * 视频跑在核1，中断请求和DMA不受核0的usb活动影响
-         *
-         * 初始化视频，应该在本项目里。这里可能
-         * 有DMA和中断请求相关的配置
-         *
-         * 这个函数会以单缓冲区设置DMA，只需要在这里魔改即可
-         */
-        video_init((uint32_t *)video_ram);
-        
-	init_tryc();
-        init_console();
-
-	welcome();
-        kbdinfo();
-	printtovga(L"\n");
-	print_cursor();
-	loop_console();
-}
-
-/* 项目主函数入口， 初始化io、核1主函数  */
+/* 项目主函数入口，初始化 IO、显示/控制台与双核运行时 */
 int     main()
 {
         /* 设置时钟频率，第二个实参
@@ -336,15 +307,30 @@ int     main()
         /* (这是一个用户自定义的初始化函数) */
         io_init();
 
-        /*  启动核1  */
-        multicore_launch_core1(core1_main);
+        /* core0 负责 VGA / console / USB；video_init 安装的 DMA IRQ 也绑在
+         * core0，core1 不再触碰 framebuffer。 */
+#if USE_VGA
+        video_init((uint32_t *)video_ram);
+        init_tryc();
+        init_console();
+
+        welcome();
+        kbdinfo();
+        printtovga(L"\n");
+        print_cursor();
+#endif
+
+        robot_init();
+
+        /* 启动 core1 机器人运行时。队列必须先于 multicore_launch_core1 初始化。 */
+        robot_start();
 
         /* TinyUSB 库提供的初始化函数，用于配置树莓派 Pico 的 
          * USB 功能（如 USB 串口、HID 设备、MSC 存储设备等） */
         tusb_init();
 
         /* This happens on core 0:
-	 * 这些发生在核0： 维护usb与led  */
+	 * 这些发生在核0： 维护usb、led、VGA 与键盘输入  */
 	while (true) {
 
                 /* TinyUSB 库中用于 USB 主机模式（USB Host） 的核心任务处理函数。与
@@ -358,6 +344,11 @@ int     main()
                 /*  用户自定义函数，周期性处理led  */
                 poll_led_etc();
 
+                /* 控制台从“死循环”改为每轮轮询；core1 日志经队列回到 core0 显示。 */
+#if USE_VGA
+                console_poll();
+#endif
+                robot_poll_ui();
 	}
 
 	return 0;
