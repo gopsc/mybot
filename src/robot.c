@@ -1258,6 +1258,8 @@ static p2_struct_t *p2_find_struct(const char *name) {
     return NULL;
 }
 
+static bool p2_eval_numeric(const char *s, double *out);
+
 static bool p2_lookup_value(const char *name, char *out, size_t cap) {
     const char *var = p2_find_var(name);
     if (var != NULL) {
@@ -1276,8 +1278,24 @@ static bool p2_lookup_value(const char *name, char *out, size_t cap) {
     if (st == NULL) {
         return false;
     }
+    char indexed[P2_MAX_NAME];
+    const char *field_ptr = field;
+    const char *lb = strchr(field, '[');
+    if (lb != NULL) {
+        const char *rb = strchr(lb + 1, ']');
+        if (rb != NULL) {
+            char expr[P2_MAX_VALUE];
+            p2_copy_trim(expr, sizeof(expr), lb + 1, rb);
+            double idx = 0;
+            if (p2_eval_numeric(expr, &idx)) {
+                snprintf(indexed, sizeof(indexed), "%.*s[%d]",
+                    (int)(lb - field), field, (int)idx);
+                field_ptr = indexed;
+            }
+        }
+    }
     for (int i = 0; i < st->nfields; ++i) {
-        if (strcmp(st->fields[i].key, field) == 0) {
+        if (strcmp(st->fields[i].key, field_ptr) == 0) {
             p2_copy_trim(out, cap, st->fields[i].value, NULL);
             return true;
         }

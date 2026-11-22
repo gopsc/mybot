@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -19,6 +19,7 @@
 15. **`@Reflex` / `@Trigger`**
 16. **named `@Reflex(name)`**
 17. **反射递归/深度防线**
+18. **动态数组下标**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -76,7 +77,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-888764    0 146284
+888964    0 146284
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -100,7 +101,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-265356     0  95872
+265564     0  95872
 ```
 
 此时：
@@ -197,6 +198,7 @@ sdcard/
     p14.sql
     p15.sql
     p16.sql
+    p17.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -222,6 +224,7 @@ sdcard/
     p14.mt
     p15.mt
     p16.mt
+    p17.mt
     parts/inc_p5.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -512,6 +515,7 @@ p13             -> /robots/p13.sql + /scripts/p13.mt（@Merge 别名/变量）
 p14             -> /robots/p14.sql + /scripts/p14.mt（@Reflex/@Trigger）
 p15             -> /robots/p15.sql + /scripts/p15.mt（named @Reflex）
 p16             -> /robots/p16.sql + /scripts/p16.mt（reflex 递归防线）
+p17             -> /robots/p17.sql + /scripts/p17.mt（动态数组下标）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -1339,7 +1343,7 @@ headless：
 
 ```text
 text    data   bss
-265356     0  95872
+265564     0  95872
 ```
 
 代价：
@@ -1489,6 +1493,65 @@ P2: reflex recursion blocked: loop
 - 深度限制是固定的 8
 - 只拦截同一个反射对象；不同反射的互相调用由深度上限兜底
 - 被拦截后当前反射继续正常返回，不会作为 ERR 中止整个脚本
+
+## P17：动态数组下标
+
+P17-A 支持 `@Struct` 数组用表达式下标：
+
+```mt
+@Struct(cfg)
+{ "items": [10, 20, 30] }
+@
+
+@Vars
+name  value;
+ idx  1;
+@
+
+@Action
+p5.value  p5.item;
+ $(cfg.items[idx]) $(cfg.items[idx+1]);
+@
+
+@if(cfg.items[idx] > 10)
+p5.ok;
+   1;
+@
+```
+
+结果：
+
+```text
+cfg.items[idx]   = 20
+cfg.items[idx+1] = 30
+cfg.items[idx] > 10 = true
+```
+
+实现方式：
+
+- 查找字段 `items[expr]`
+- 用表达式解析器求 `expr`
+- 拼成 `items[1]` 再到 struct 字段里查
+
+测试 profile：
+
+```text
+p17
+```
+
+预期关键输出：
+
+```text
+P5Check: call value=20 name=nil item=30 angle=nil
+P2: p17.call result=OK
+P2: p17 call ok
+```
+
+限制：
+
+- 下标必须是数值表达式
+- 越界会落到 unresolved/空值，不会自动扩展数组
+- 只支持一维数组
 
 ## 运行现象
 
