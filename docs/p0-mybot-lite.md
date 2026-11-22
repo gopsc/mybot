@@ -67,6 +67,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 59. **P58：`?` 返回表打印格**
 60. **P60：`?` 嵌套表 JSON 展开**
 61. **P61：`/version` 与 `/uptime` 诊断**
+62. **P62：`@Merge` 32 行预算**
 60. **P59：`/set` / `/get` 运行时变量**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
@@ -144,7 +145,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-285448    0 140404
+285496    0 140408
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -325,6 +326,7 @@ sdcard/
     p58.sql
     p59.sql
     p60.sql
+    p62.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -379,6 +381,7 @@ sdcard/
     p58.mt
     p59.mt
     p60.mt
+    p62.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -390,6 +393,17 @@ sdcard/
     parts/merge_41_a.mt
     parts/merge_41_b.mt
     parts/merge_49_leg.mt
+    parts/merge_50_once.once.mt
+    parts/merge_52_child.mt
+    parts/merge_52_parent.mt
+    parts/merge_53_child.once.mt
+    parts/merge_53_parent.mt
+    parts/merge_57_once.once.mt
+    parts/merge_62_1.mt
+    parts/merge_62_2.mt
+    parts/merge_62_3.mt
+    parts/merge_62_4.mt
+    parts/merge_62_5.mt
     parts/level1.mt
     parts/level2.mt
     parts/inc_chain1.mt
@@ -715,6 +729,7 @@ p57             -> /robots/p57.sql + /scripts/p57.mt（路径规范化）
 p58             -> /robots/p58.sql + /scripts/p58.mt（? 打印格）
 p59             -> /robots/p59.sql + /scripts/p59.mt（/set /get）
 p60             -> /robots/p60.sql + /scripts/p60.mt（嵌套 JSON 打印）
+p62             -> /robots/p62.sql + /scripts/p62.mt（@Merge 行预算负例）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2275,7 +2290,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-285448     0  140404
+285496     0  140408
 ```
 
 构建：
@@ -3361,7 +3376,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-285448     0  140404
+285496     0  140408
 ```
 
 限制：
@@ -4288,6 +4303,40 @@ uptime 123.456s
 - 工作区未提交改动不会标记 dirty
 - 编译日期/时间不保证可重现
 - 没有固件版本号/协议版本
+- 尚未上板实测
+
+## P62：@Merge 32 行预算
+
+P62-A 给一次 `@Merge` 展开加总行预算：
+
+- 顶层片段、嵌套片段、主脚本对齐动作的 rows 全部计入
+- 总预算 32 行
+- 超预算时中止整次归并，不执行 timeline
+- 日志显示剩余预算和本次需要的行数
+- 空片段/纯标量片段计 0 行
+
+负例 profile：
+
+```text
+p62
+```
+
+5 个片段，每个 7 行，共 35 行：
+
+```text
+P2: @Merge ... rows=7   x4
+P2: @Merge row budget exceeded (4 left, need 7)
+P2: @Merge aborted
+```
+
+不会出现 `@Merge timeline`，也不会调用设备。
+
+限制：
+
+- 预算是按 source rows 累加，不等同于 mybot 的完整展开树计数
+- 达到上限即整次归并中止
+- 预算只在单次 `@Merge` 内有效
+- 片段文件字节数仍受现有读缓冲限制
 - 尚未上板实测
 
 ## 运行现象

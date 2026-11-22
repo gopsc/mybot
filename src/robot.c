@@ -162,6 +162,7 @@ static int p2_merge_skip_end = -1;
 static int p2_merge_alias_base;
 static int p2_merge_var_base;
 static bool p2_merge_failed;
+static int p2_merge_row_budget;
 static char p2_merge_paths[16][128];
 static int p2_merge_npaths;
 #define P2_MAX_REFLEXES 4
@@ -3420,6 +3421,20 @@ static void p2_merge_emit(lua_State *L) {
     robot_log("P2: @Merge timeline %d beat(s)", beats);
 }
 
+static bool p2_merge_charge_rows(int rows) {
+    if (rows < 0) {
+        rows = 0;
+    }
+    if (rows > p2_merge_row_budget) {
+        robot_log("P2: @Merge row budget exceeded (%d left, need %d)",
+            p2_merge_row_budget, rows);
+        p2_merge_failed = true;
+        return false;
+    }
+    p2_merge_row_budget -= rows;
+    return true;
+}
+
 static int p2_merge_register_path(const char *path) {
     for (int i = 0; i < p2_merge_npaths; ++i) {
         if (strcmp(p2_merge_paths[i], path) == 0) {
@@ -3523,6 +3538,9 @@ static void p2_merge_load_nested(const char *path, int base_phase, int depth) {
             p2_merge_failed = true;
             return;
         }
+        if (!p2_merge_charge_rows(p2_merge_srcs[slot].nrows)) {
+            return;
+        }
         ++p2_merge_nsrc;
         robot_log("P2: @Merge nested %s phase=%d rows=%d", nested,
             base_phase + phase, p2_merge_srcs[slot].nrows);
@@ -3537,6 +3555,7 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
     p2_merge_var_base = p2_nvars;
     p2_merge_failed = false;
     p2_merge_npaths = 0;
+    p2_merge_row_budget = 32;
     bool header = false;
     int last_phase = 0;
     char top_paths[P2_MERGE_FILES][128];
@@ -3590,6 +3609,9 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
         }
         if (p2_load_merge_file(path, phase,
                 &p2_merge_srcs[p2_merge_nsrc])) {
+            if (!p2_merge_charge_rows(p2_merge_srcs[p2_merge_nsrc].nrows)) {
+                break;
+            }
             robot_log("P2: @Merge %s phase=%d rows=%d", path, phase,
                 p2_merge_srcs[p2_merge_nsrc].nrows);
             ++p2_merge_nsrc;
@@ -3606,7 +3628,7 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
         p2_merge_load_nested(top_paths[n], top_phases[n], 0);
     }
     if (p2_merge_failed) {
-        robot_log("P2: @Merge aborted by fragment duplicate");
+        robot_log("P2: @Merge aborted");
         p2_merge_skip_start = -1;
         p2_merge_skip_end = -1;
         return;
@@ -3621,6 +3643,9 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
             if (p2_merge_nsrc < P2_MERGE_FILES &&
                 p2_parse_action_src(i + 1, close,
                     &p2_merge_srcs[p2_merge_nsrc])) {
+                if (!p2_merge_charge_rows(p2_merge_srcs[p2_merge_nsrc].nrows)) {
+                    break;
+                }
                 robot_log("P2: @Merge main action rows=%d",
                     p2_merge_srcs[p2_merge_nsrc].nrows);
                 ++p2_merge_nsrc;
@@ -3629,6 +3654,12 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
             }
             break;
         }
+    }
+    if (p2_merge_failed) {
+        robot_log("P2: @Merge aborted");
+        p2_merge_skip_start = -1;
+        p2_merge_skip_end = -1;
+        return;
     }
     if (p2_merge_nsrc == 0) {
         return;
