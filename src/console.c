@@ -14,7 +14,12 @@
 #include <string.h>
 
 #include "pico/stdlib.h"
+#include "pico/time.h"
 #include "hardware/watchdog.h"
+
+#ifndef FW_GIT_COMMIT
+#define FW_GIT_COMMIT "unknown"
+#endif
 
 #define CONSOLE_HISTORY_MAX 8
 
@@ -271,7 +276,8 @@ static void console_dispatch(void) {
         console_line("loop <name> <period_ms> | loop stop | stop | status | profile | mem | list");
         console_line("reload | use <profile> | autostart <action> <period_ms> | autostart off");
         console_line("devices | device <name> | i2cscan [0|1] | uarttest [baud] | spitest [speed]");
-        console_line("set <name> <value> | get <name> | vars | structs | unload | reboot | help");
+        console_line("set <name> <value> | get <name> | vars | structs | unload | reboot");
+        console_line("version | uptime | help");
         console_line("history: terminal up/down (ANSI)");
     } else {
         console_line("unknown command");

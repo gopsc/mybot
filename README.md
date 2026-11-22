@@ -111,6 +111,8 @@ p23
 /spitest [speed]  SPI1 回环测试
 /set name value  设置 active 变量
 /get name    读取 active 变量/别名
+/version     显示固件 git/build 信息
+/uptime      显示运行时长
 /vars        列出 active 变量/别名
 /structs     列出 active @Struct 字段
 /unload      销毁 active 设备并关闭 Lua

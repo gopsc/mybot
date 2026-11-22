@@ -65,6 +65,16 @@ add_library(lua51 STATIC ${LUA_SOURCES})
 target_include_directories(lua51 PUBLIC ${LUA_SRC_DIR})
 target_compile_options(lua51 PRIVATE -Wno-unused-parameter -Wno-sign-compare)
 
+execute_process(
+  COMMAND git rev-parse --short HEAD
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+  OUTPUT_VARIABLE FW_GIT_COMMIT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET)
+if (NOT FW_GIT_COMMIT)
+  set(FW_GIT_COMMIT "unknown")
+endif()
+
 add_executable(firmware
   src/main.c
   src/console.c
@@ -95,6 +105,7 @@ target_link_libraries(firmware
 target_compile_definitions(firmware PRIVATE
   PICO_CORE1_STACK_SIZE=0
   PICO_STACK_SIZE=0x1000
+  FW_GIT_COMMIT="${FW_GIT_COMMIT}"
   )
 
 target_include_directories(firmware PRIVATE

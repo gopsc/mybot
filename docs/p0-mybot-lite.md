@@ -66,6 +66,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 58. **P57：include/merge 路径规范化与安全校验**
 59. **P58：`?` 返回表打印格**
 60. **P60：`?` 嵌套表 JSON 展开**
+61. **P61：`/version` 与 `/uptime` 诊断**
 60. **P59：`/set` / `/get` 运行时变量**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
@@ -143,7 +144,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-285424    0 140404
+285448    0 140404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -201,6 +202,8 @@ RX GP1
 /spitest [speed]  SPI1 回环测试
 /set name value  设置 active 变量
 /get name     读取 active 变量/别名
+/version      显示固件 git/build 信息
+/uptime       显示运行时长
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -963,6 +966,8 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /spitest [speed]  SPI1 回环测试
 /set name value  设置 active 变量
 /get name     读取 active 变量/别名
+/version      显示固件 git/build 信息
+/uptime       显示运行时长
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
 /unload       销毁 active 设备并关闭 Lua
@@ -1804,7 +1809,8 @@ run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_m
 loop <name> <period_ms> | loop stop | reload | stop | status | profile | mem | list
 use <profile> | autostart <action> <period_ms> | autostart off | autostart
 devices | device <name> | i2cscan [0|1] | uarttest [baud] | spitest [speed]
-set <name> <value> | get <name> | vars | structs | unload | reboot | help
+set <name> <value> | get <name> | version | uptime
+vars | structs | unload | reboot | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1835,6 +1841,8 @@ history: terminal up/down (ANSI)
 /spitest [speed]
 /set <name> <value>
 /get <name>
+/version
+/uptime
 /vars
 /structs
 /unload
@@ -2267,7 +2275,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-285424     0  140404
+285448     0  140404
 ```
 
 构建：
@@ -3353,7 +3361,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-285424     0  140404
+285448     0  140404
 ```
 
 限制：
@@ -4244,6 +4252,42 @@ P2: [?] nest.reading {"flag":true,"data":{"temp":21,"name":"x","arr":[1,2]},"res
 - 函数/userdata 等类型输出 `"<unsupported>"`
 - 表循环引用没有专门检测，深度上限兜底
 - 键顺序不保证
+- 尚未上板实测
+
+## P61：/version 与 /uptime 诊断
+
+P61-A 增加两个 core0 诊断命令：
+
+```text
+/version
+/uptime
+```
+
+`/version`：
+
+- 构建时通过 CMake 嵌入 `git rev-parse --short HEAD`
+- 输出编译时 `__DATE__` / `__TIME__`
+- 示例：
+
+```text
+mybot-lite headless git=abc1234 built=Nov 23 2026 01:50:00
+```
+
+`/uptime`：
+
+- 使用 `to_ms_since_boot(get_absolute_time())`
+- 输出秒和毫秒：
+
+```text
+uptime 123.456s
+```
+
+限制：
+
+- git 哈希是 CMake configure 时的 HEAD，不随后续源码变化自动更新
+- 工作区未提交改动不会标记 dirty
+- 编译日期/时间不保证可重现
+- 没有固件版本号/协议版本
 - 尚未上板实测
 
 ## 运行现象
