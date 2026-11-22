@@ -42,6 +42,7 @@ typedef enum {
     ROBOT_CMD_DEVICES,
     ROBOT_CMD_VARS,
     ROBOT_CMD_STRUCTS,
+    ROBOT_CMD_LOOP,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -173,6 +174,11 @@ static bool p2_active;
 static char p2_active_sql[64];
 static char p2_active_mt[64];
 static bool p2_hot_error;
+static bool p2_loop_active;
+static char p2_loop_path[64];
+static int p2_loop_period_ms;
+static int p2_loop_iterations;
+static absolute_time_t p2_loop_next;
 
 /* core1 栈放在普通 BSS，而不是 SDK 默认的 SCRATCH_X（只有 4KB）。
  * multicore_launch_core1_with_stack 会把 SP 设到数组末尾。 */
@@ -4075,7 +4081,20 @@ static bool p2_hot_apply_transaction(lua_State *L, char *sql) {
     return false;
 }
 
+static void p2_stop_loop(const char *reason) {
+    if (!p2_loop_active) {
+        return;
+    }
+    p2_loop_active = false;
+    robot_log("core1: loop stopped after %d iteration(s)%s%s", p2_loop_iterations,
+        reason != NULL ? ": " : "", reason != NULL ? reason : "");
+    p2_loop_path[0] = '\0';
+    p2_loop_period_ms = 0;
+    p2_loop_iterations = 0;
+}
+
 static void robot_runtime_close(void) {
+    p2_stop_loop(NULL);
     if (p2_active_L != NULL) {
         p2_destroy_devices(p2_active_L);
         lua_close(p2_active_L);
@@ -4405,6 +4424,10 @@ void robot_send_structs(void) {
     robot_send_cmd(ROBOT_CMD_STRUCTS, NULL);
 }
 
+void robot_send_loop(const char *arg) {
+    robot_send_cmd(ROBOT_CMD_LOOP, arg);
+}
+
 static bool p2_parse_uint_arg(const char **pp, int *out) {
     const char *p = *pp;
     while (*p != '\0' && isspace((unsigned char)*p)) {
@@ -4437,13 +4460,38 @@ void robot_core1(void) {
 
     while (true) {
         robot_cmd_msg_t cmd;
-        if (!queue_try_remove(&robot_cmd_queue, &cmd)) {
-            sleep_ms(20);
+        if (queue_try_remove(&robot_cmd_queue, &cmd)) {
+            /* 命令优先于周期动作。 */
+        } else {
+            if (p2_loop_active && robot_stop) {
+                p2_stop_loop("stop flag");
+            }
+            if (p2_loop_active && time_reached(p2_loop_next)) {
+                robot_busy = true;
+                size_t n = p2_read_file(p2_loop_path, p2_mt_buf,
+                    sizeof(p2_mt_buf));
+                if (n == 0) {
+                    p2_stop_loop("read failed");
+                } else {
+                    p2_run_mt(p2_active_L);
+                    ++p2_loop_iterations;
+                    last_lua_heap_kb = lua_heap_kb(p2_active_L);
+                    if (robot_stop) {
+                        p2_stop_loop("stop flag");
+                    } else {
+                        p2_loop_next = make_timeout_time_ms(p2_loop_period_ms);
+                    }
+                }
+                robot_busy = false;
+                continue;
+            }
+            sleep_ms(10);
             continue;
         }
         switch (cmd.type) {
         case ROBOT_CMD_RUN:
             robot_stop = false;
+            p2_stop_loop("run");
             p2_script_override[0] = '\0';
             if (cmd.arg[0] != '\0') {
                 char *sp = strchr(cmd.arg, ' ');
@@ -4473,6 +4521,7 @@ void robot_core1(void) {
             break;
         case ROBOT_CMD_STOP:
             robot_stop = true;
+            p2_stop_loop("stop requested");
             robot_log("core1: stop requested");
             break;
         case ROBOT_CMD_STATUS:
@@ -4482,6 +4531,10 @@ void robot_core1(void) {
                 p2_active ? 1 : 0, p2_ndevices,
                 p2_active_sql[0] != '\0' ? p2_active_sql : "-",
                 p2_active_mt[0] != '\0' ? p2_active_mt : "-");
+            if (p2_loop_active) {
+                robot_log("core1: loop %s period=%dms iter=%d", p2_loop_path,
+                    p2_loop_period_ms, p2_loop_iterations);
+            }
             break;
         case ROBOT_CMD_PROFILE: {
             char profile[32];
@@ -4694,7 +4747,72 @@ void robot_core1(void) {
                 }
             }
             break;
+        case ROBOT_CMD_LOOP: {
+            if (cmd.arg[0] == '\0') {
+                robot_log("core1: /loop usage: /loop <name> <period_ms> | /loop stop");
+                break;
+            }
+            if (strcmp(cmd.arg, "stop") == 0) {
+                p2_stop_loop("command");
+                break;
+            }
+            if (!p2_active || p2_active_L == NULL) {
+                robot_log("core1: /loop needs an active profile; use /run first");
+                break;
+            }
+            char name[P2_MAX_NAME];
+            int ni = 0;
+            bool name_ok = true;
+            char *ap = cmd.arg;
+            while (*ap != '\0' && isspace((unsigned char)*ap)) {
+                ++ap;
+            }
+            while (*ap != '\0' && !isspace((unsigned char)*ap)) {
+                if (ni >= (int)sizeof(name) - 1) {
+                    name_ok = false;
+                    break;
+                }
+                name[ni++] = *ap++;
+            }
+            name[ni] = '\0';
+            int period_ms = 0;
+            const char *cp = ap;
+            if (*cp == '\0' || !p2_parse_uint_arg(&cp, &period_ms)) {
+                period_ms = -1;
+            }
+            while (*cp != '\0' && isspace((unsigned char)*cp)) {
+                ++cp;
+            }
+            bool valid = name_ok && name[0] != '\0';
+            for (int q = 0; name[q] != '\0'; ++q) {
+                if (!isalnum((unsigned char)name[q]) && name[q] != '_' &&
+                    name[q] != '-') {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid || period_ms < 50 || period_ms > 60000 || *cp != '\0') {
+                robot_log("core1: /loop usage: /loop <name> <period_ms> | /loop stop");
+                break;
+            }
+            char path[64];
+            snprintf(path, sizeof(path), "/scripts/%s.mt", name);
+            size_t n = p2_read_file(path, p2_mt_buf, sizeof(p2_mt_buf));
+            if (n == 0) {
+                break;
+            }
+            snprintf(p2_active_mt, sizeof(p2_active_mt), "%s", path);
+            snprintf(p2_loop_path, sizeof(p2_loop_path), "%s", path);
+            p2_loop_period_ms = period_ms;
+            p2_loop_iterations = 0;
+            p2_loop_active = true;
+            p2_loop_next = get_absolute_time();
+            robot_stop = false;
+            robot_log("core1: loop start %s period=%dms", path, period_ms);
+            break;
+        }
         case ROBOT_CMD_UNLOAD:
+            p2_stop_loop("unload");
             robot_runtime_close();
             robot_log("core1: unloaded, idle");
             break;

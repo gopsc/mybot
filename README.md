@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-269056     0  106404
+269880     0  106484
 ```
 
 ## SD 卡（必需）
@@ -95,6 +95,8 @@ p23
 /action name 在 active 结构上重播 /scripts/name.mt
 /action      重播最近一次动作脚本
 /repeat name [count] [delay_ms]  批量重播
+/loop name period_ms  周期执行动作脚本
+/loop stop            停止周期循环
 /devices     列出 active 设备
 /vars        列出 active 变量/别名
 /structs     列出 active @Struct 字段

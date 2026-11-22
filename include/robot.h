@@ -13,7 +13,7 @@
  * 内嵌脚本，验证单状态机、build/call/destroy 和内存水位。
  */
 
-#define ROBOT_LOG_LINE 96
+#define ROBOT_LOG_LINE 128
 #define ROBOT_LOG_QUEUE_DEPTH 64
 #define ROBOT_CMD_QUEUE_DEPTH 8
 #define ROBOT_CMD_ARG 32
@@ -47,6 +47,7 @@ void robot_send_repeat(const char *arg);
 void robot_send_devices(void);
 void robot_send_vars(void);
 void robot_send_structs(void);
+void robot_send_loop(const char *arg);
 
 /* 供 core1 内部/后续驱动使用：非阻塞写入日志队列。 */
 void robot_log(const char *fmt, ...);

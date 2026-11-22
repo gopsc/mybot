@@ -41,6 +41,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 33. **P32：`/sql` 事务回滚**
 34. **P33：`@SQL` 块事务回滚**
 35. **P34：设备列 `@Alias` 解析**
+36. **P35：`/loop` 周期动作循环**
 
 还没有实现：完整 `@Merge` 语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -117,7 +118,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-269056    0 106404
+269880    0 106484
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -160,6 +161,8 @@ RX GP1
 /action name  在 active 结构上重播 /scripts/name.mt
 /action       重播最近一次动作脚本
 /repeat name [count] [delay_ms]  批量重播
+/loop name period_ms             周期执行动作脚本
+/loop stop                       停止周期循环
 /devices      列出 active 设备
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
@@ -840,6 +843,8 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /action name  在 active 结构上重播 /scripts/name.mt
 /action       重播最近一次动作脚本
 /repeat name [count] [delay_ms]  批量重播
+/loop name period_ms             周期执行动作脚本
+/loop stop                       停止周期循环
 /devices      列出 active 设备
 /vars         列出 active 变量/别名
 /structs      列出 active @Struct 字段
@@ -1679,7 +1684,8 @@ P18-A 增加两个控制台命令：
 
 ```text
 run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]
-stop | status | profile | mem | list | devices | vars | structs | unload | help
+loop <name> <period_ms> | loop stop | stop | status | profile | mem | list
+devices | vars | structs | unload | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1695,6 +1701,8 @@ history: terminal up/down (ANSI)
 /sql <name>
 /action [name]
 /repeat <name> [count] [delay_ms]
+/loop <name> <period_ms>
+/loop stop
 /devices
 /vars
 /structs
@@ -2128,7 +2136,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-269056     0  106404
+269880     0  106484
 ```
 
 构建：
@@ -2463,7 +2471,7 @@ core1: struct cfg.name=pico-x
 - `/vars` 同时列出 `@Vars` 和 `@Alias`
 - `/structs` 先列字段数，再逐字段列出
 - 没有 active 状态时显示 no active devices / no active vars/aliases / no active structs
-- 日志队列深度从 16 提升到 64，避免一次性列出 struct 字段时丢日志
+- 日志队列深度从 16 提升到 64、单行从 96 提升到 128 字节，避免一次性列出 struct 字段时丢日志
 
 限制：
 
@@ -2650,6 +2658,61 @@ P2: base.call result=OK
 - `@Alias` 必须在动作块之前定义
 - 设备别名和参数别名共用同一张名字表；同名时优先按 active 设备判断
 - 还没有 `include-once` / 子块内 `@Merge` 的完整语义
+
+## P35：/loop 周期动作循环
+
+P35-A 增加常驻周期动作：
+
+```text
+/loop <name> <period_ms>
+/loop stop
+```
+
+示例：
+
+```text
+/run p28
+/loop p29 200
+/status
+/loop stop
+/unload
+```
+
+行为：
+
+- `/loop` 先验证 `/scripts/<name>.mt` 存在，然后启动周期调度
+- 周期范围 50ms ~ 60000ms
+- 每个周期重新读 SD 文件并执行一次动作脚本
+- 执行在 core1 命令循环内完成，动作结束后等待到下一个周期
+- 命令优先：周期之间仍会处理 `/sql`、`/status`、`/action`、`/stop` 等命令
+- `Ctrl-C` 或 `/stop` 会停止循环
+- `/run`、`/unload` 会隐式停止循环
+- 新 `/loop` 会替换当前循环
+- `/status` 会额外输出一行 `core1: loop ... period=... iter=...`
+- `/repeat` 执行期间循环暂停，结束后继续
+
+预期关键日志：
+
+```text
+core1: loop start /scripts/p29.mt period=200ms
+P5Check: call value=5 name=base item=nil angle=nil
+P2: base.call result=OK
+P5Check: call value=5 name=base item=nil angle=nil
+P2: base.call result=OK
+core1: status idle active=1 devices=1 sql=/robots/p28.sql action=/scripts/p29.mt
+core1: loop /scripts/p29.mt period=200ms iter=2
+core1: loop stopped after 2 iteration(s): command
+```
+
+限制：
+
+- 不是硬实时，周期从上一轮动作完成后计算
+- 周期动作会阻塞 core1 的命令处理，直到当前动作脚本执行完
+- 单次动作脚本执行时间超过周期时，下一轮会顺延
+- 日志量会随周期频率增加
+- 只维护一个周期循环
+- `/loop` 需要 active profile
+- 回滚/事务只作用于 `/sql`，周期动作本身没有事务
 
 ## 运行现象
 

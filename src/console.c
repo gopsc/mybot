@@ -228,9 +228,13 @@ static void console_dispatch(void) {
     } else if (strcmp(cmd, "structs") == 0) {
         robot_send_structs();
         console_line("[structs]");
+    } else if (strcmp(cmd, "loop") == 0) {
+        robot_send_loop(arg[0] != '\0' ? arg : NULL);
+        console_line("[loop]");
     } else if (strcmp(cmd, "help") == 0) {
         console_line("run [sql] [script] | sql <name> | action [name] | repeat <name> [count] [delay_ms]");
-        console_line("stop | status | profile | mem | list | devices | vars | structs | unload | help");
+        console_line("loop <name> <period_ms> | loop stop | stop | status | profile | mem | list");
+        console_line("devices | vars | structs | unload | help");
         console_line("history: terminal up/down (ANSI)");
     } else {
         console_line("unknown command");
