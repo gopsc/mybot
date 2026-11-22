@@ -160,6 +160,7 @@ static int p2_reflex_depth;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
 static char p2_expanded_buf[P2_MT_MAX * 2];
+static char p2_inc_tmp[P2_MT_MAX];
 static char *p2_lines[P2_MAX_LINES];
 static int p2_nlines;
 
@@ -3241,18 +3242,27 @@ static void p2_include_path(const char *row, char *out, size_t cap) {
 }
 
 /* @Include 是顶层内容拷贝：在解析前把被包含文件的文本拼到当前位置。
- * 只支持一层；包含文件里的 @Include 不再递归展开。 */
-static bool p2_expand_includes(const char *src) {
-    (void)src;
-    size_t out = 0;
-    p2_expanded_buf[0] = '\0';
+ * 支持两层：顶层 -> 包含文件 -> 二级包含（二级内容不再继续递归）。 */
+static size_t p2_expand_out;
+static int p2_include_files;
+
+static bool p2_expand_append(const char *text, size_t n) {
+    if (p2_expand_out + n + 2 >= sizeof(p2_expanded_buf)) {
+        robot_log("P2: expanded MT too large");
+        return false;
+    }
+    memcpy(p2_expanded_buf + p2_expand_out, text, n);
+    p2_expand_out += n;
+    p2_expanded_buf[p2_expand_out++] = '\n';
+    p2_expanded_buf[p2_expand_out] = '\0';
+    return true;
+}
+
+static bool p2_expand_level(char *src, int depth) {
     char *save = NULL;
-    /* p2_mt_buf 是原始输入；tokenize 后不再需要原文本。 */
-    char *line = strtok_r(p2_mt_buf, "\n", &save);
+    char *line = strtok_r(src, "\n", &save);
     bool in_include = false;
     bool expect_header = false;
-    int included = 0;
-
     while (line != NULL) {
         char *t = p2_trim(line);
         if (in_include) {
@@ -3268,18 +3278,21 @@ static bool p2_expand_includes(const char *src) {
             }
             char path[128];
             p2_include_path(t, path, sizeof(path));
-            size_t n = p2_read_file(path, p2_sql_buf,
-                sizeof(p2_sql_buf));
-            if (n > 0) {
-                if (out + n + 2 < sizeof(p2_expanded_buf)) {
-                    memcpy(p2_expanded_buf + out, p2_sql_buf, n);
-                    out += n;
-                    p2_expanded_buf[out++] = '\n';
-                    p2_expanded_buf[out] = '\0';
-                    ++included;
-                } else {
-                    robot_log("P2: @Include output too large");
-                    return false;
+            if (depth == 0) {
+                size_t n = p2_read_file(path, p2_sql_buf, sizeof(p2_sql_buf));
+                if (n > 0) {
+                    ++p2_include_files;
+                    if (!p2_expand_level(p2_sql_buf, depth + 1)) {
+                        return false;
+                    }
+                }
+            } else {
+                size_t n = p2_read_file(path, p2_inc_tmp, sizeof(p2_inc_tmp));
+                if (n > 0) {
+                    ++p2_include_files;
+                    if (!p2_expand_append(p2_inc_tmp, n)) {
+                        return false;
+                    }
                 }
             }
             line = strtok_r(NULL, "\n", &save);
@@ -3291,19 +3304,24 @@ static bool p2_expand_includes(const char *src) {
             line = strtok_r(NULL, "\n", &save);
             continue;
         }
-        size_t n = strlen(t);
-        if (out + n + 2 >= sizeof(p2_expanded_buf)) {
-            robot_log("P2: expanded MT too large");
+        if (!p2_expand_append(t, strlen(t))) {
             return false;
         }
-        memcpy(p2_expanded_buf + out, t, n);
-        out += n;
-        p2_expanded_buf[out++] = '\n';
-        p2_expanded_buf[out] = '\0';
         line = strtok_r(NULL, "\n", &save);
     }
-    if (included > 0) {
-        robot_log("P2: @Include merged %d file(s)", included);
+    return true;
+}
+
+static bool p2_expand_includes(const char *src) {
+    (void)src;
+    p2_expand_out = 0;
+    p2_include_files = 0;
+    p2_expanded_buf[0] = '\0';
+    if (!p2_expand_level(p2_mt_buf, 0)) {
+        return false;
+    }
+    if (p2_include_files > 0) {
+        robot_log("P2: @Include merged %d file(s)", p2_include_files);
     }
     return true;
 }

@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -21,6 +21,7 @@
 17. **反射递归/深度防线**
 18. **动态数组下标**
 19. **控制台 `/list` / `/help`**
+20. **两层 `@Include`**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -78,7 +79,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-891188    0 146284
+891268    0 152436
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -102,7 +103,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-267428     0  95872
+267508     0 102024
 ```
 
 此时：
@@ -200,6 +201,7 @@ sdcard/
     p15.sql
     p16.sql
     p17.sql
+    p19.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -226,10 +228,13 @@ sdcard/
     p15.mt
     p16.mt
     p17.mt
+    p19.mt
     parts/inc_p5.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
     parts/merge_alias.mt
+    parts/level1.mt
+    parts/level2.mt
     pca9685.mt
     ads1015.mt
     spi.mt
@@ -517,6 +522,7 @@ p14             -> /robots/p14.sql + /scripts/p14.mt（@Reflex/@Trigger）
 p15             -> /robots/p15.sql + /scripts/p15.mt（named @Reflex）
 p16             -> /robots/p16.sql + /scripts/p16.mt（reflex 递归防线）
 p17             -> /robots/p17.sql + /scripts/p17.mt（动态数组下标）
+p19             -> /robots/p19.sql + /scripts/p19.mt（嵌套 @Include）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -936,7 +942,7 @@ p5.value;
 - 路径相对 `/scripts/`，也接受 `/scripts/...` 绝对路径
 - 支持多个文件
 - 支持 `@Struct` / `@Action` / `@if` / `@while` 等既有语法
-- 只展开一层；被包含文件里的 `@Include` 不会继续递归
+- 支持两层：顶层 -> 一级包含 -> 二级包含；二级内容不再继续递归
 
 `@Merge` 目前不支持，会明确输出：
 
@@ -1349,7 +1355,7 @@ headless：
 
 ```text
 text    data   bss
-267428     0  95872
+267508     0 102024
 ```
 
 代价：
@@ -1593,6 +1599,59 @@ run [profile] / stop / status / profile / mem / list
 /mem
 /list
 /help
+```
+
+## P19：嵌套 @Include
+
+P19-A 把 `@Include` 扩展到两层：
+
+```mt
+# p19.mt
+@Struct(cfg)
+{ "value": 7 }
+@
+
+@Include
+path;
+  parts/level1.mt;
+@
+```
+
+```mt
+# parts/level1.mt
+@Include
+path;
+  parts/level2.mt;
+@
+```
+
+```mt
+# parts/level2.mt
+@Action
+p5.value;
+ $(cfg.value);
+@
+```
+
+行为：
+
+- 顶层 `@Include` 读取一级文件
+- 一级文件里的 `@Include` 读取二级文件
+- 二级文件内容直接拼入，不再继续递归
+- 结果与手写展开后的脚本一致
+
+测试 profile：
+
+```text
+p19
+```
+
+预期关键输出：
+
+```text
+P2: @Include merged 2 file(s)
+P5Check: call value=7 name=nil item=nil angle=nil
+P2: p19.call result=OK
 ```
 
 ## 运行现象
