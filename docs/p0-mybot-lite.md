@@ -33,8 +33,9 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 25. **P24：移除 VGA / PIO 视频 / USB HID 键鼠，改为 headless 串口控制台**
 26. **P25：`@SQL` 运行期热插拔（INSERT / DELETE）**
 27. **P26：取消无 SD 构建，SD 固定启用**
+28. **P27：`@SQL` UPDATE / DROP TABLE**
 
-还没有实现：完整 `@Merge` 语义、完整动态 SQL（UPDATE/DROP/事务回滚）、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
+还没有实现：完整 `@Merge` 语义、热 SQL 事务回滚、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
 ## 当前硬件形态
 
@@ -108,7 +109,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-257624    0  99888
+262880    0  99888
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -242,6 +243,7 @@ sdcard/
     p22.sql
     p23.sql
     p25.sql
+    p27.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -272,6 +274,7 @@ sdcard/
     p22.mt
     p23.mt
     p25.mt
+    p27.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -568,7 +571,8 @@ p17             -> /robots/p17.sql + /scripts/p17.mt（动态数组下标）
 p19             -> /robots/p19.sql + /scripts/p19.mt（嵌套 @Include）
 p22             -> /robots/p22.sql + /scripts/p22.mt（条件解析 v2）
 p23             -> /robots/p23.sql + /scripts/p23.mt（统一表达式引擎）
-p25             -> /robots/p25.sql + /scripts/p25.mt（@SQL 热插拔）
+p25             -> /robots/p25.sql + /scripts/p25.mt（@SQL 热插拔 INSERT/DELETE）
+p27             -> /robots/p27.sql + /scripts/p27.mt（@SQL UPDATE/DROP）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2044,7 +2048,7 @@ P2: hot.build result=OK
 P5Check: call value=2 name=hot item=nil angle=nil
 P2: hot.call result=OK
 P25: @SQL block ... bytes
-P25: hot delete hot driver=P5Check
+P25: hot remove hot driver=P5Check
 Lua: P5Check: destroy
 P2: hot.destroy result=OK
 P25: DELETE P5Check name=hot -> 1 removed, 0 blocked
@@ -2078,7 +2082,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-257624     0   99888
+262880     0   99888
 ```
 
 构建：
@@ -2102,6 +2106,74 @@ cmake --build build -j4
 - 没有 SD 卡就不能运行真实机器人脚本
 - FatFs/SPI SD 驱动始终链接，flash/BSS 不再有无 SD 版本的小体积优势
 - SD 引脚仍是 GP2-5，5MHz，可在 CMake cache 中改
+
+## P27：@SQL UPDATE / DROP TABLE
+
+P27-A 扩展 `@SQL` 的带电变更语句：
+
+```mt
+@SQL
+UPDATE P5Check SET value='77' WHERE name='hot';
+@
+
+@SQL
+DROP TABLE P5Check;
+@
+```
+
+`UPDATE` 语义：
+
+- 解析 `SET 列=值 [, ...]` 和可选 `WHERE name='x'`
+- 命中行按“断电摘除 + 重新装配”处理
+- `name` 可以改；新名字不能和存活设备重名
+- 改 `controller` / `trigger` 列后会重新计算设备拓扑
+- 仍被引用的设备拒绝 UPDATE
+- 新设备 build 失败时旧设备已经被摘除，日志会如实报告
+
+`DROP TABLE` 语义：
+
+- 删除该表所有设备行
+- 不接受 `WHERE`
+- 仍被引用的行会阻止删除并记入 `blocked`
+
+测试 profile：
+
+```text
+p27
+```
+
+预期关键日志：
+
+```text
+P2: device hot driver=P5Check controller=- triggers=0
+P5Check: build value=1 name=hot item=nil angle=nil
+P2: hot.build result=OK
+P5Check: call value=1 name=hot item=nil angle=nil
+P2: hot.call result=OK
+P27: update hot driver=P5Check -> hot
+P25: hot remove hot driver=P5Check
+Lua: P5Check: destroy
+P2: hot.destroy result=OK
+P5Check: build value=77 name=hot item=nil angle=nil
+P2: hot.build result=OK
+P27: UPDATE P5Check name=hot -> 1 updated, 0 blocked, 0 failed
+P5Check: call value=2 name=hot item=nil angle=nil
+P2: hot.call result=OK
+P25: hot remove hot driver=P5Check
+Lua: P5Check: destroy
+P2: hot.destroy result=OK
+P27: DROP TABLE P5Check -> 1 removed, 0 blocked
+P2: unknown device hot
+```
+
+限制：
+
+- `UPDATE ... WHERE` 只支持 `name = '...'`
+- 不支持 `UPDATE` 与同批次其它行级语句的独占检查
+- `SET` 值只能是简单文本；不支持表达式求值
+- 没有事务回滚；UPDATE 的新件 build 失败时旧件不会恢复
+- `DROP TABLE` 只摘设备行，没有单独的“表壳/列定义”需要维护
+- SQL 值里的 `)` 仍会截断 `VALUES (...)`
 
 ## 运行现象
 

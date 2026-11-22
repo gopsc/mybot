@@ -3297,7 +3297,7 @@ static void p2_hot_remove_device(lua_State *L, int index) {
         return;
     }
     p2_device_t *d = &p2_devices[index];
-    robot_log("P25: hot delete %s driver=%s", d->name, d->driver);
+    robot_log("P25: hot remove %s driver=%s", d->name, d->driver);
     if (d->env_ref != LUA_NOREF) {
         p2_call_result_t res;
         (void)p2_lua_call(L, d->env_ref, d->name, "destroy", d->meta,
@@ -3345,6 +3345,79 @@ static bool p2_hot_referenced(const char *name) {
     return false;
 }
 
+static bool p2_hot_where_name(char *where, char *out, size_t cap,
+        bool *has_name) {
+    *has_name = false;
+    if (where == NULL) {
+        return true;
+    }
+    char *q = where + strlen("WHERE");
+    while (*q != '\0' && isspace((unsigned char)*q)) {
+        ++q;
+    }
+    char *eq = strchr(q, '=');
+    if (eq == NULL) {
+        robot_log("P27: WHERE unsupported (missing =)");
+        return false;
+    }
+    char col[P2_MAX_NAME];
+    p2_copy_trim(col, sizeof(col), q, eq);
+    if (strcmp(col, "name") != 0) {
+        robot_log("P27: WHERE only supports name, got %s", col);
+        return false;
+    }
+    char val[P2_MAX_VALUE];
+    p2_copy_trim(val, sizeof(val), eq + 1, NULL);
+    p2_unquote(val);
+    p2_trim(val);
+    p2_copy_trim(out, cap, val, NULL);
+    *has_name = true;
+    return true;
+}
+
+static void p2_hot_set_meta(p2_device_t *d, const char *key,
+        const char *value) {
+    for (int i = 0; i < d->nmeta; ++i) {
+        if (strcmp(d->meta[i].key, key) == 0) {
+            p2_copy_trim(d->meta[i].value, sizeof(d->meta[i].value), value,
+                NULL);
+            return;
+        }
+    }
+    if (d->nmeta < P2_MAX_FIELDS) {
+        p2_copy_trim(d->meta[d->nmeta].key, sizeof(d->meta[d->nmeta].key),
+            key, NULL);
+        p2_copy_trim(d->meta[d->nmeta].value, sizeof(d->meta[d->nmeta].value),
+            value, NULL);
+        ++d->nmeta;
+    }
+}
+
+/* 从 meta 重算 name / controller / trigger，更新后保持与 INSERT 一致。 */
+static void p2_hot_refresh_flow(p2_device_t *d) {
+    d->name[0] = '\0';
+    d->controller[0] = '\0';
+    d->ntriggers = 0;
+    for (int i = 0; i < d->nmeta; ++i) {
+        const char *key = d->meta[i].key;
+        const char *value = d->meta[i].value;
+        if (strcmp(key, "name") == 0) {
+            p2_copy_trim(d->name, sizeof(d->name), value, NULL);
+        } else if (p2_flow_column(key, "controller")) {
+            if (d->controller[0] == '\0') {
+                p2_copy_trim(d->controller, sizeof(d->controller), value, NULL);
+            }
+        } else if (p2_flow_column(key, "trigger")) {
+            if (d->ntriggers < P2_MAX_TRIGGERS && value[0] != '-' &&
+                value[0] != '$') {
+                p2_copy_trim(d->triggers[d->ntriggers],
+                    sizeof(d->triggers[d->ntriggers]), value, NULL);
+                ++d->ntriggers;
+            }
+        }
+    }
+}
+
 static void p2_hot_apply_delete(lua_State *L, char *stmt) {
     char *p = stmt + strlen("DELETE FROM");
     while (*p != '\0' && isspace((unsigned char)*p)) {
@@ -3361,28 +3434,8 @@ static void p2_hot_apply_delete(lua_State *L, char *stmt) {
 
     bool has_name = false;
     char want_name[P2_MAX_NAME];
-    if (where != NULL) {
-        char *q = where + strlen("WHERE");
-        while (*q != '\0' && isspace((unsigned char)*q)) {
-            ++q;
-        }
-        char *eq = strchr(q, '=');
-        if (eq == NULL) {
-            robot_log("P25: DELETE WHERE unsupported (missing =)");
-            return;
-        }
-        char col[P2_MAX_NAME];
-        p2_copy_trim(col, sizeof(col), q, eq);
-        if (strcmp(col, "name") != 0) {
-            robot_log("P25: DELETE WHERE only supports name, got %s", col);
-            return;
-        }
-        char val[P2_MAX_VALUE];
-        p2_copy_trim(val, sizeof(val), eq + 1, NULL);
-        p2_unquote(val);
-        p2_trim(val);
-        p2_copy_trim(want_name, sizeof(want_name), val, NULL);
-        has_name = true;
+    if (!p2_hot_where_name(where, want_name, sizeof(want_name), &has_name)) {
+        return;
     }
 
     int removed = 0;
@@ -3410,19 +3463,198 @@ static void p2_hot_apply_delete(lua_State *L, char *stmt) {
     }
 }
 
+static void p2_hot_apply_update(lua_State *L, char *stmt) {
+    char *p = stmt + strlen("UPDATE");
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    char *table_start = p;
+    while (*p != '\0' && !isspace((unsigned char)*p)) {
+        ++p;
+    }
+    char table[P2_MAX_NAME];
+    p2_copy_trim(table, sizeof(table), table_start, p);
+    if (table[0] == '\0') {
+        robot_log("P27: UPDATE missing table");
+        return;
+    }
+    char *set = (char *)p2_strcasestr(p, "SET");
+    if (set == NULL) {
+        robot_log("P27: UPDATE missing SET");
+        return;
+    }
+    char *q = set + strlen("SET");
+    while (*q != '\0' && isspace((unsigned char)*q)) {
+        ++q;
+    }
+    char *where = (char *)p2_strcasestr(q, "WHERE");
+    char *assign_end = where != NULL ? where : q + strlen(q);
+    char assignbuf[512];
+    p2_copy_trim(assignbuf, sizeof(assignbuf), q, assign_end);
+    char *items[P2_MAX_FIELDS];
+    int ni = p2_split_commas(assignbuf, items, P2_MAX_FIELDS);
+    if (ni <= 0) {
+        robot_log("P27: UPDATE missing assignments");
+        return;
+    }
+
+    char keys[P2_MAX_FIELDS][P2_MAX_NAME];
+    char vals[P2_MAX_FIELDS][P2_MAX_VALUE];
+    int nassign = 0;
+    for (int i = 0; i < ni; ++i) {
+        char *eq = strchr(items[i], '=');
+        if (eq == NULL || eq == items[i]) {
+            robot_log("P27: UPDATE malformed assignment: %s", items[i]);
+            return;
+        }
+        p2_copy_trim(keys[nassign], sizeof(keys[nassign]), items[i], eq);
+        p2_copy_trim(vals[nassign], sizeof(vals[nassign]), eq + 1, NULL);
+        p2_unquote(vals[nassign]);
+        p2_trim(vals[nassign]);
+        if (keys[nassign][0] == '\0' || vals[nassign][0] == '\0') {
+            robot_log("P27: UPDATE empty assignment");
+            return;
+        }
+        ++nassign;
+    }
+
+    bool has_name = false;
+    char want_name[P2_MAX_NAME];
+    if (!p2_hot_where_name(where, want_name, sizeof(want_name), &has_name)) {
+        return;
+    }
+
+    int updated = 0;
+    int blocked = 0;
+    int failed = 0;
+    for (int i = p2_ndevices - 1; i >= 0; --i) {
+        p2_device_t *d = &p2_devices[i];
+        if (strcmp(d->driver, table) != 0) {
+            continue;
+        }
+        if (has_name && strcmp(d->name, want_name) != 0) {
+            continue;
+        }
+        if (p2_hot_referenced(d->name)) {
+            robot_log("P27: UPDATE %s refused: still referenced", d->name);
+            ++blocked;
+            continue;
+        }
+        char old_name[P2_MAX_NAME];
+        p2_copy_trim(old_name, sizeof(old_name), d->name, NULL);
+        p2_device_t newd = *d;
+        newd.env_ref = LUA_NOREF;
+        for (int a = 0; a < nassign; ++a) {
+            p2_hot_set_meta(&newd, keys[a], vals[a]);
+        }
+        p2_hot_refresh_flow(&newd);
+        if (newd.name[0] == '\0') {
+            robot_log("P27: UPDATE %s would have empty name", old_name);
+            ++blocked;
+            continue;
+        }
+        bool duplicate = false;
+        for (int j = 0; j < p2_ndevices; ++j) {
+            if (j != i && strcmp(p2_devices[j].name, newd.name) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            robot_log("P27: UPDATE %s -> %s duplicates a device", old_name,
+                newd.name);
+            ++blocked;
+            continue;
+        }
+        robot_log("P27: update %s driver=%s -> %s", old_name, d->driver,
+            newd.name);
+        p2_hot_remove_device(L, i);
+        p2_devices[p2_ndevices++] = newd;
+        p2_device_t *nd = &p2_devices[p2_ndevices - 1];
+        if (p2_build_one(L, nd)) {
+            ++updated;
+        } else {
+            robot_log("P27: update %s build failed; old device already removed",
+                old_name);
+            p2_hot_remove_device(L, p2_ndevices - 1);
+            ++failed;
+        }
+    }
+    robot_log("P27: UPDATE %s%s%s -> %d updated, %d blocked, %d failed", table,
+        has_name ? " name=" : "", has_name ? want_name : "", updated, blocked,
+        failed);
+    if (updated == 0 && blocked == 0 && failed == 0) {
+        robot_log("P27: UPDATE %s matched no row", table);
+    }
+}
+
+static void p2_hot_apply_drop(lua_State *L, char *stmt) {
+    char *p = stmt + strlen("DROP TABLE");
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    char table[P2_MAX_NAME];
+    p2_copy_trim(table, sizeof(table), p, NULL);
+    if (table[0] == '\0') {
+        robot_log("P27: DROP missing table");
+        return;
+    }
+    if (p2_strcasestr(table, "WHERE") != NULL) {
+        robot_log("P27: DROP TABLE does not take WHERE");
+        return;
+    }
+    int removed = 0;
+    int blocked = 0;
+    for (int i = p2_ndevices - 1; i >= 0; --i) {
+        p2_device_t *d = &p2_devices[i];
+        if (strcmp(d->driver, table) != 0) {
+            continue;
+        }
+        if (p2_hot_referenced(d->name)) {
+            robot_log("P27: DROP %s refused: still referenced", d->name);
+            ++blocked;
+            continue;
+        }
+        p2_hot_remove_device(L, i);
+        ++removed;
+    }
+    robot_log("P27: DROP TABLE %s -> %d removed, %d blocked", table, removed,
+        blocked);
+    if (removed == 0 && blocked == 0) {
+        robot_log("P27: DROP TABLE %s matched no row", table);
+    }
+}
+
 static void p2_hot_apply_sql(lua_State *L, char *sql) {
     p2_strip_comments(sql);
     char *cur = sql;
     while (*cur != '\0') {
         char *ins = (char *)p2_strcasestr(cur, "INSERT INTO");
         char *del = (char *)p2_strcasestr(cur, "DELETE FROM");
-        if (ins == NULL && del == NULL) {
+        char *upd = (char *)p2_strcasestr(cur, "UPDATE");
+        char *drop = (char *)p2_strcasestr(cur, "DROP TABLE");
+        char *best = NULL;
+        int type = 0;
+#define P2_HOT_PICK(ptr, t) \
+        do { \
+            if ((ptr) != NULL && (best == NULL || (ptr) < best)) { \
+                best = (ptr); \
+                type = (t); \
+            } \
+        } while (0)
+        P2_HOT_PICK(ins, 1);
+        P2_HOT_PICK(del, 2);
+        P2_HOT_PICK(upd, 3);
+        P2_HOT_PICK(drop, 4);
+#undef P2_HOT_PICK
+        if (best == NULL) {
             break;
         }
-        if (ins != NULL && (del == NULL || ins < del)) {
+
+        if (type == 1) {
             int before = p2_ndevices;
             char *next = NULL;
-            if (!p2_parse_insert_stmt(ins, &next)) {
+            if (!p2_parse_insert_stmt(best, &next)) {
                 robot_log("P25: malformed INSERT in @SQL");
                 break;
             }
@@ -3442,20 +3674,33 @@ static void p2_hot_apply_sql(lua_State *L, char *sql) {
                     p2_hot_remove_device(L, i);
                 }
             }
+            continue;
+        }
+
+        char *end = strchr(best, ';');
+        char saved = 0;
+        if (end != NULL) {
+            saved = *end;
+            *end = '\0';
+        }
+        switch (type) {
+        case 2:
+            p2_hot_apply_delete(L, best);
+            break;
+        case 3:
+            p2_hot_apply_update(L, best);
+            break;
+        case 4:
+            p2_hot_apply_drop(L, best);
+            break;
+        default:
+            break;
+        }
+        if (end != NULL) {
+            *end = saved;
+            cur = end + 1;
         } else {
-            char *end = strchr(del, ';');
-            char saved = 0;
-            if (end != NULL) {
-                saved = *end;
-                *end = '\0';
-            }
-            p2_hot_apply_delete(L, del);
-            if (end != NULL) {
-                *end = saved;
-                cur = end + 1;
-            } else {
-                cur = del + strlen(del);
-            }
+            cur = best + strlen(best);
         }
     }
 }
