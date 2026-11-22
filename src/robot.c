@@ -51,6 +51,7 @@ static volatile bool robot_stop;
 static volatile bool robot_busy;
 static int last_lua_heap_kb;
 static char p2_profile_override[ROBOT_CMD_ARG];
+static char p2_script_override[ROBOT_CMD_ARG];
 static char lua_file_buf[24 * 1024];
 
 /* ---- P2：结构 SQL / MT 的最小运行期解析 --------------------------------
@@ -3369,18 +3370,20 @@ static bool robot_p2_run(lua_State *L) {
     size_t n = 0;
 
     if (p2_profile_override[0] != '\0') {
+        const char *script = p2_script_override[0] != '\0'
+            ? p2_script_override : p2_profile_override;
         snprintf(profile_sql, sizeof(profile_sql), "/robots/%s.sql",
             p2_profile_override);
-        snprintf(profile_mt, sizeof(profile_mt), "/scripts/%s.mt",
-            p2_profile_override);
+        snprintf(profile_mt, sizeof(profile_mt), "/scripts/%s.mt", script);
         n = p2_read_file(profile_sql, p2_sql_buf, sizeof(p2_sql_buf));
         if (n > 0) {
             sql_path = profile_sql;
             mt_path = profile_mt;
-            robot_log("P2: command profile=%s", p2_profile_override);
+            robot_log("P2: command sql=%s script=%s", p2_profile_override,
+                script);
         } else {
-            robot_log("P2: command profile %s has no SQL; falling back",
-                p2_profile_override);
+            robot_log("P2: command SQL %s unavailable; falling back",
+                profile_sql);
         }
     }
 
@@ -3657,10 +3660,21 @@ void robot_core1(void) {
         switch (cmd.type) {
         case ROBOT_CMD_RUN:
             robot_stop = false;
+            p2_script_override[0] = '\0';
             if (cmd.arg[0] != '\0') {
+                char *sp = strchr(cmd.arg, ' ');
+                if (sp != NULL) {
+                    *sp++ = '\0';
+                    while (*sp == ' ' || *sp == '\t') {
+                        ++sp;
+                    }
+                    snprintf(p2_script_override, sizeof(p2_script_override),
+                        "%s", sp);
+                }
                 snprintf(p2_profile_override, sizeof(p2_profile_override), "%s",
                     cmd.arg);
-                robot_log("core1: run profile %s", cmd.arg);
+                robot_log("core1: run sql=%s script=%s", p2_profile_override,
+                    p2_script_override[0] != '\0' ? p2_script_override : "(same)");
             } else {
                 p2_profile_override[0] = '\0';
                 robot_log("core1: run profile from /profile.txt");
@@ -3669,6 +3683,7 @@ void robot_core1(void) {
             robot_lua_smoke();
             robot_busy = false;
             p2_profile_override[0] = '\0';
+            p2_script_override[0] = '\0';
             robot_log("core1: run finished, idle");
             break;
         case ROBOT_CMD_STOP:

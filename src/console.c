@@ -384,7 +384,7 @@ static void cmd_dispatch(void) {
         robot_send_list();
         printtovga(L"[list]\n");
     } else if (strcmp(cmd, "help") == 0) {
-        printtovga(L"run [profile] / stop / status / profile / mem / list\n");
+        printtovga(L"run [sql] [script] / stop / status / profile / mem / list\n");
     } else if (cmd[0] != '\0') {
         printtovga(L"unknown command\n");
     }

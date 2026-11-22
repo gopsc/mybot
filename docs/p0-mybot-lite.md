@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19/P20 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -22,6 +22,7 @@
 18. **动态数组下标**
 19. **控制台 `/list` / `/help`**
 20. **两层 `@Include`**
+21. **SQL 与动作脚本分离选择**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -79,7 +80,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-891268    0 152436
+891396    0 152468
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -103,7 +104,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-267508     0 102024
+267628     0 102056
 ```
 
 此时：
@@ -748,6 +749,7 @@ core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
 
 ```text
 /run p4       运行 /robots/p4.sql + /scripts/p4.mt
+/run p5 p8    用 /robots/p5.sql + /scripts/p8.mt
 /run          重新读 /profile.txt 并运行
 /stop         停止当前运行
 /status       查看 core1 状态
@@ -1355,7 +1357,7 @@ headless：
 
 ```text
 text    data   bss
-267508     0 102024
+267628     0 102056
 ```
 
 代价：
@@ -1586,7 +1588,7 @@ core1: 3 profile(s)
 `/help` 直接在 core0 显示：
 
 ```text
-run [profile] / stop / status / profile / mem / list
+run [sql] [script] / stop / status / profile / mem / list
 ```
 
 当前命令集：
@@ -1653,6 +1655,41 @@ P2: @Include merged 2 file(s)
 P5Check: call value=7 name=nil item=nil angle=nil
 P2: p19.call result=OK
 ```
+
+## P20：SQL 与动作脚本分离选择
+
+P20-A 允许 `/run` 同时指定结构 SQL 和动作脚本：
+
+```text
+/run p5 p8
+```
+
+表示：
+
+```text
+结构: /robots/p5.sql
+动作: /scripts/p8.mt
+```
+
+用途：
+
+- 同一个动作脚本可以复用不同结构
+- 同一个结构可以跑不同动作脚本
+- 不需要复制 profile 文件
+
+示例 `p5.sql + p8.mt`：
+
+```text
+P5Check: call value=3 name=pico-2 item=nil angle=nil
+```
+
+`/run p5` 仍然表示 SQL 和动作都用 `p5`。
+
+协议：
+
+- `ROBOT_CMD_RUN.arg = "<sql> <script>"`
+- core1 按第一个空格切分
+- 空脚本回退到 SQL 同名脚本
 
 ## 运行现象
 
