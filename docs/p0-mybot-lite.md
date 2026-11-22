@@ -50,6 +50,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 42. **P41：`@Reflex` / `@Merge` 的 `-` 继承**
 43. **P42：动作行缺列按 `-` 补齐**
 44. **P43：全 fake HAL 回归 profile + `/device` 详情**
+45. **P44：设备容量 8 → 16**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -126,7 +127,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-276032    0 110544
+274968    0 121616
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -285,6 +286,7 @@ sdcard/
     p41.sql
     p42.sql
     p43.sql
+    p44.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -325,6 +327,7 @@ sdcard/
     p41.mt
     p42.mt
     p43.mt
+    p44.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -643,6 +646,7 @@ p40             -> /robots/p40.sql + /scripts/p40.mt（@Action 行内 - 继承�
 p41             -> /robots/p41.sql + /scripts/p41.mt（Reflex/Merge - 继承）
 p42             -> /robots/p42.sql + /scripts/p42.mt（缺列按 - 补齐）
 p43             -> /robots/p43.sql + /scripts/p43.mt（全 fake HAL 回归）
+p44             -> /robots/p44.sql + /scripts/p44.mt（12 设备容量）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2185,7 +2189,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-276032     0  110544
+274968     0  121616
 ```
 
 构建：
@@ -3232,6 +3236,55 @@ core1: device pca-0 meta channel=0
 - 8 个设备已达到当前 `P2_MAX_DEVICES` 上限
 - ADS1015/PCA9685 共用同一个 fake I2C fd
 - 真实硬件仍需逐器件回归
+
+## P44：设备容量 8 → 16
+
+P44-A 把 `P2_MAX_DEVICES` 从 8 提到 16：
+
+- 支持最多 16 个 active 设备
+- `p2_devices` 和热 SQL 快照都随之扩大
+- BSS 增加约 11KB
+- `P2_MAX_COLS` 仍是 16
+- `P2_MAX_FIELDS` 仍是 10
+
+测试 profile：
+
+```text
+p44
+```
+
+包含 12 个 P5Check 设备 `d00..d11`，单行动作 12 列：
+
+```mt
+@Action
+d00.value  d01.value  ...  d11.value;
+  0          1               11;
+@
+```
+
+预期 12 次调用：
+
+```text
+P5Check: call value=0 name=d00 item=nil angle=nil
+P5Check: call value=1 name=d01 item=nil angle=nil
+...
+P5Check: call value=11 name=d11 item=nil angle=nil
+```
+
+尺寸：
+
+```text
+text    data     bss
+274968     0  121616
+```
+
+限制：
+
+- 16 个设备是当前硬上限；超过会拒绝 INSERT
+- 热 SQL 快照同时保存 16 个设备，BSS 翻倍成本明显
+- `P2_MAX_COLS` 仍为 16，设备数不能超过动作列上限
+- RP2040 剩余 RAM 仍要留给 Lua heap，继续扩容需评估
+- 尚未上板实测 12 设备脚本
 
 ## 运行现象
 

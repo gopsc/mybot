@@ -1,0 +1,13 @@
+CREATE TABLE P5Check (name String, value String);
+INSERT INTO P5Check (name, value) VALUES ('d00', '0');
+INSERT INTO P5Check (name, value) VALUES ('d01', '0');
+INSERT INTO P5Check (name, value) VALUES ('d02', '0');
+INSERT INTO P5Check (name, value) VALUES ('d03', '0');
+INSERT INTO P5Check (name, value) VALUES ('d04', '0');
+INSERT INTO P5Check (name, value) VALUES ('d05', '0');
+INSERT INTO P5Check (name, value) VALUES ('d06', '0');
+INSERT INTO P5Check (name, value) VALUES ('d07', '0');
+INSERT INTO P5Check (name, value) VALUES ('d08', '0');
+INSERT INTO P5Check (name, value) VALUES ('d09', '0');
+INSERT INTO P5Check (name, value) VALUES ('d10', '0');
+INSERT INTO P5Check (name, value) VALUES ('d11', '0');

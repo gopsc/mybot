@@ -72,7 +72,7 @@ static char lua_file_buf[24 * 1024];
  */
 #define P2_MAX_TABLES 6
 #define P2_MAX_COLS 16
-#define P2_MAX_DEVICES 8
+#define P2_MAX_DEVICES 16
 #define P2_MAX_FIELDS 10
 #define P2_MAX_TRIGGERS 2
 #define P2_MAX_ALIASES 8
