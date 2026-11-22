@@ -1998,192 +1998,6 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
     }
 }
 
-static void p2_expr_skip(const char **pp) {
-    while (isspace((unsigned char)**pp)) {
-        ++*pp;
-    }
-}
-
-static bool p2_expr_expression(const char **pp, double *out);
-
-static bool p2_expr_factor(const char **pp, double *out) {
-    const char *p = *pp;
-    p2_expr_skip(&p);
-    if (*p == '+') {
-        *pp = p + 1;
-        return p2_expr_factor(pp, out);
-    }
-    if (*p == '-') {
-        *pp = p + 1;
-        if (!p2_expr_factor(pp, out)) {
-            return false;
-        }
-        *out = -*out;
-        return true;
-    }
-    if (*p == '(') {
-        *pp = p + 1;
-        if (!p2_expr_expression(pp, out)) {
-            return false;
-        }
-        p2_expr_skip(pp);
-        if (**pp != ')') {
-            return false;
-        }
-        ++*pp;
-        return true;
-    }
-    if (isdigit((unsigned char)*p) || *p == '.') {
-        char *end = NULL;
-        double v = strtod(p, &end);
-        if (end == p) {
-            return false;
-        }
-        *out = v;
-        *pp = end;
-        return true;
-    }
-    if (isalpha((unsigned char)*p) || *p == '_') {
-        const char *start = p;
-        while (isalnum((unsigned char)*p) || *p == '_' || *p == '.' ||
-               *p == '[' || *p == ']') {
-            ++p;
-        }
-        char name[P2_MAX_NAME];
-        p2_copy_trim(name, sizeof(name), start, p);
-        char value[P2_MAX_VALUE];
-        if (!p2_lookup_value(name, value, sizeof(value))) {
-            return false;
-        }
-        char *end = NULL;
-        double v = strtod(value, &end);
-        while (end != NULL && isspace((unsigned char)*end)) {
-            ++end;
-        }
-        if (end == value || end == NULL || *end != '\0') {
-            return false;
-        }
-        *out = v;
-        *pp = p;
-        return true;
-    }
-    return false;
-}
-
-static bool p2_expr_term(const char **pp, double *out) {
-    if (!p2_expr_factor(pp, out)) {
-        return false;
-    }
-    for (;;) {
-        p2_expr_skip(pp);
-        char op = **pp;
-        if (op != '*' && op != '/' && op != '%') {
-            return true;
-        }
-        ++*pp;
-        double rhs = 0;
-        if (!p2_expr_factor(pp, &rhs)) {
-            return false;
-        }
-        if ((op == '/' || op == '%') && rhs == 0.0) {
-            return false;
-        }
-        if (op == '*') {
-            *out *= rhs;
-        } else if (op == '/') {
-            *out /= rhs;
-        } else {
-            *out = (double)((long long)*out % (long long)rhs);
-        }
-    }
-}
-
-static bool p2_expr_expression(const char **pp, double *out) {
-    if (!p2_expr_term(pp, out)) {
-        return false;
-    }
-    for (;;) {
-        p2_expr_skip(pp);
-        char op = **pp;
-        if (op != '+' && op != '-') {
-            return true;
-        }
-        ++*pp;
-        double rhs = 0;
-        if (!p2_expr_term(pp, &rhs)) {
-            return false;
-        }
-        *out = (op == '+') ? (*out + rhs) : (*out - rhs);
-    }
-}
-
-static bool p2_eval_numeric(const char *s, double *out) {
-    const char *p = s;
-    if (!p2_expr_expression(&p, out)) {
-        return false;
-    }
-    p2_expr_skip(&p);
-    return *p == '\0';
-}
-
-static bool p2_eval_text(const char *s, char *out, size_t cap) {
-    char buf[P2_MAX_VALUE * 2];
-    p2_copy_trim(buf, sizeof(buf), s, NULL);
-    if (buf[0] == '\0') {
-        return false;
-    }
-    size_t blen = strlen(buf);
-    if (blen >= 2 && (buf[0] == '\'' || buf[0] == '"') &&
-        buf[blen - 1] == buf[0]) {
-        p2_unquote(buf);
-        p2_copy_trim(out, cap, buf, NULL);
-        return true;
-    }
-    if (blen >= 2 && buf[0] == '(' && buf[blen - 1] == ')') {
-        buf[blen - 1] = '\0';
-        return p2_eval_text(buf + 1, out, cap);
-    }
-    double num = 0;
-    if (p2_eval_numeric(buf, &num)) {
-        snprintf(out, cap, "%g", num);
-        return true;
-    }
-    char lookup[P2_MAX_VALUE];
-    if (p2_lookup_value(buf, lookup, sizeof(lookup))) {
-        p2_copy_trim(out, cap, lookup, NULL);
-        return true;
-    }
-
-    char quote = '\0';
-    int depth = 0;
-    for (char *p = buf; *p != '\0'; ++p) {
-        if (quote != '\0') {
-            if (*p == quote) {
-                quote = '\0';
-            }
-            continue;
-        }
-        if (*p == '\'' || *p == '"') {
-            quote = *p;
-        } else if (*p == '(') {
-            ++depth;
-        } else if (*p == ')') {
-            if (depth > 0) --depth;
-        } else if (*p == '+' && depth == 0) {
-            *p = '\0';
-            char left[P2_MAX_VALUE];
-            char right[P2_MAX_VALUE];
-            if (!p2_eval_text(buf, left, sizeof(left)) ||
-                !p2_eval_text(p + 1, right, sizeof(right))) {
-                return false;
-            }
-            snprintf(out, cap, "%s%s", left, right);
-            return true;
-        }
-    }
-    return false;
-}
-
 /* ---- P22：条件/表达式值解析 ---------------------------------------------
  * 递归下降，优先级同 C：一元 ! + - > * / % > + - > 比较 > && > ||。
  * 值分数值/文本/布尔；+ 在两数值上是加法，否则按文本拼接。
@@ -2623,6 +2437,36 @@ static bool p2_eval_condition(const char *expr) {
         return false;
     }
     return p2_val_truthy(&v);
+}
+
+/* P23：$(...) 的数值/文本求值也走同一套值解析器。
+ * 布尔值只允许出现在 @if/@while 条件里，不允许回流到动作格。 */
+static bool p2_eval_numeric(const char *s, double *out) {
+    const char *p = s;
+    p2_val_t v;
+    if (!p2_val_parse_or(&p, &v, true)) {
+        return false;
+    }
+    p2_val_skip(&p);
+    if (*p != '\0' || v.type != P2_VAL_NUM) {
+        return false;
+    }
+    *out = v.num;
+    return true;
+}
+
+static bool p2_eval_text(const char *s, char *out, size_t cap) {
+    const char *p = s;
+    p2_val_t v;
+    if (!p2_val_parse_or(&p, &v, true)) {
+        return false;
+    }
+    p2_val_skip(&p);
+    if (*p != '\0' || v.type == P2_VAL_BOOL) {
+        return false;
+    }
+    p2_val_as_text(&v, out, cap);
+    return true;
 }
 
 static bool p2_block_cond(const char *line, const char *keyword, char *out,

@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19/P20/P21/P22 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18/P19/P20/P21/P22/P23 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -25,6 +25,7 @@
 21. **SQL 与动作脚本分离选择**
 22. **命令历史（↑/↓）**
 23. **条件解析 v2（分组/一元 !/短路）**
+24. **统一表达式引擎（条件与 `$(...)` 共用）**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -82,7 +83,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-896044    0 153500
+894804    0 153500
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -106,7 +107,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-270604     0 102056
+269364     0 102056
 ```
 
 此时：
@@ -206,6 +207,7 @@ sdcard/
     p17.sql
     p19.sql
     p22.sql
+    p23.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -234,6 +236,7 @@ sdcard/
     p17.mt
     p19.mt
     p22.mt
+    p23.mt
     parts/inc_p5.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -529,6 +532,7 @@ p16             -> /robots/p16.sql + /scripts/p16.mt（reflex 递归防线）
 p17             -> /robots/p17.sql + /scripts/p17.mt（动态数组下标）
 p19             -> /robots/p19.sql + /scripts/p19.mt（嵌套 @Include）
 p22             -> /robots/p22.sql + /scripts/p22.mt（条件解析 v2）
+p23             -> /robots/p23.sql + /scripts/p23.mt（统一表达式引擎）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -1363,7 +1367,7 @@ headless：
 
 ```text
 text    data   bss
-270604     0 102056
+269364     0 102056
 ```
 
 代价：
@@ -1813,6 +1817,61 @@ P2: p22.call result=OK
 - 没有函数调用、成员函数、类型系统
 - `@if` / `@while` 条件里的空格仍依赖本实现，不保证与 mybot 块头词法完全一致
 - 布尔值只在条件语境使用，`$(...)` 文本/数值路径仍不接受布尔
+
+## P23：统一表达式引擎
+
+P23-A 把 `$(...)` 的数值/文本求值也切到 P22 的值解析器，删除旧的
+`p2_expr_*` 双份实现：
+
+- 条件与数据格共用同一套词法/优先级/括号/字符串规则
+- `$(...)` 支持括号、一元正负、字符串拼接
+- 数组下标表达式在数值语境也能直接求值：`cfg.items[idx+1] > 25`
+- 布尔结果只允许出现在 `@if` / `@while`，`$(...)` 遇到布尔会拒值
+- 旧解析器删除后 flash 减少约 1.2KB
+
+示例：
+
+```mt
+@Action
+p5.value              p5.item               p5.name          p5.angle;
+ $(cfg.items[idx+1]+1) $((cfg.items[idx]+5)*2) $(cfg.name+"-x") $(-3+5);
+@
+
+@if(cfg.items[idx+1] > 25 && (cfg.items[idx]*2 == 40) && !(1==2))
+p5.ok;
+  99;
+@
+```
+
+结果：
+
+```text
+value = 31
+item  = 50
+name  = pico-x
+angle = 2
+```
+
+测试 profile：
+
+```text
+p23
+```
+
+预期关键输出：
+
+```text
+P5Check: call value=31 name=pico-x item=50 angle=2
+P5Check: call value=99 name=nil item=nil angle=nil
+P2: p23.call result=OK
+```
+
+限制：
+
+- 文本值缓冲仍是 32 字节，拼接结果超过 31 字节会截断
+- 没有函数调用、数组字面量、成员方法
+- 布尔值仍只服务条件语境
+- 数值是 double，`%` 先截断成 `long long`
 
 ## 运行现象
 
