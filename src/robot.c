@@ -37,6 +37,7 @@ typedef enum {
     ROBOT_CMD_STATUS,
     ROBOT_CMD_PROFILE,
     ROBOT_CMD_MEM,
+    ROBOT_CMD_LIST,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -3616,6 +3617,10 @@ void robot_send_mem(void) {
     robot_send_cmd(ROBOT_CMD_MEM, NULL);
 }
 
+void robot_send_list(void) {
+    robot_send_cmd(ROBOT_CMD_LIST, NULL);
+}
+
 void robot_core1(void) {
     robot_log("core1: robot runtime started");
     robot_busy = true;
@@ -3672,6 +3677,29 @@ void robot_core1(void) {
                 (unsigned)robot_stack_used(), last_lua_heap_kb,
                 robot_busy ? 1 : 0, robot_stop ? 1 : 0);
             break;
+        case ROBOT_CMD_LIST: {
+#if USE_SD
+            DIR dir;
+            FILINFO fno;
+            FRESULT fr = f_opendir(&dir, "/robots");
+            if (fr != FR_OK) {
+                robot_log("core1: /robots unavailable (%s)", FRESULT_str(fr));
+                break;
+            }
+            int shown = 0;
+            while (f_readdir(&dir, &fno) == FR_OK && fno.fname[0] != '\0') {
+                if (strstr(fno.fname, ".sql") != NULL && shown < 16) {
+                    robot_log("core1: profile %s", fno.fname);
+                    ++shown;
+                }
+            }
+            f_closedir(&dir);
+            robot_log("core1: %d profile(s)", shown);
+#else
+            robot_log("core1: SD support disabled");
+#endif
+            break;
+        }
         default:
             break;
         }

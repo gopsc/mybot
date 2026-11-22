@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8/P9/P10/P11/P12/P13/P14/P15/P16/P17/P18 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -20,6 +20,7 @@
 16. **named `@Reflex(name)`**
 17. **反射递归/深度防线**
 18. **动态数组下标**
+19. **控制台 `/list` / `/help`**
 
 还没有实现：完整 `@Merge` 语义、动态 SQL、完整 mybot 表达式 AST、trigger 返回值嵌套合并。那些属于后续阶段。
 
@@ -77,7 +78,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-888964    0 146284
+891188    0 146284
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -101,7 +102,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-265564     0  95872
+267428     0  95872
 ```
 
 此时：
@@ -746,6 +747,8 @@ core0 控制台新增 `/` 命令模式。拼音缓冲区为空时按 `/`：
 /status       查看 core1 状态
 /profile      显示 /profile.txt
 /mem          core1 栈高水位和上次 Lua 堆
+/list         列出 /robots/*.sql
+/help         显示命令摘要
 ```
 
 `/run` 的完整流程：
@@ -781,6 +784,9 @@ core1: run finished, idle
 core1: status idle
 core1: /profile.txt = p4
 core1: mem stack=.../16384 heap_last=...KB busy=0 stop=0
+core1: profile p4.sql
+core1: profile p9.sql
+core1: 2 profile(s)
 ```
 
 `/stop` 立即置 stop 标志；`@while`、`milli_sleep` 和动作派发行会在各自的检查点看到它。长时间阻塞在器件驱动内部的 I2C/SPI/UART 调用只能等超时。
@@ -1343,7 +1349,7 @@ headless：
 
 ```text
 text    data   bss
-265564     0  95872
+267428     0  95872
 ```
 
 代价：
@@ -1552,6 +1558,42 @@ P2: p17 call ok
 - 下标必须是数值表达式
 - 越界会落到 unresolved/空值，不会自动扩展数组
 - 只支持一维数组
+
+## P18：命令 UX
+
+P18-A 增加两个控制台命令：
+
+```text
+/list    列出 /robots/*.sql
+/help    显示命令摘要
+```
+
+`/list` 由 core1 通过 FatFS 扫描 `/robots`，最多显示 16 个：
+
+```text
+core1: profile p4.sql
+core1: profile p9.sql
+core1: profile p17.sql
+core1: 3 profile(s)
+```
+
+`/help` 直接在 core0 显示：
+
+```text
+run [profile] / stop / status / profile / mem / list
+```
+
+当前命令集：
+
+```text
+/run [profile]
+/stop
+/status
+/profile
+/mem
+/list
+/help
+```
 
 ## 运行现象
 
