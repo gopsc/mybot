@@ -1573,6 +1573,7 @@ static void p2_add_meta_fields(const p2_device_t *d, p2_field_t *fields, int *n)
 }
 
 static bool p2_eval_numeric(const char *s, double *out);
+static bool p2_eval_text(const char *s, char *out, size_t cap);
 
 static const char *p2_expand_value(const char *value, char *buf, size_t cap) {
     const char *name = NULL;
@@ -1598,10 +1599,10 @@ static const char *p2_expand_value(const char *value, char *buf, size_t cap) {
         snprintf(buf, cap, "%g", num);
         return buf;
     }
-    if (!p2_lookup_value(key, buf, cap)) {
-        return value;
+    if (p2_eval_text(key, buf, cap)) {
+        return buf;
     }
-    return buf;
+    return value;
 }
 
 static bool p2_is_bus_driver(const char *driver) {
@@ -1955,16 +1956,82 @@ static bool p2_eval_numeric(const char *s, double *out) {
     return *p == '\0';
 }
 
+static bool p2_eval_text(const char *s, char *out, size_t cap) {
+    char buf[P2_MAX_VALUE * 2];
+    p2_copy_trim(buf, sizeof(buf), s, NULL);
+    if (buf[0] == '\0') {
+        return false;
+    }
+    size_t blen = strlen(buf);
+    if (blen >= 2 && (buf[0] == '\'' || buf[0] == '"') &&
+        buf[blen - 1] == buf[0]) {
+        p2_unquote(buf);
+        p2_copy_trim(out, cap, buf, NULL);
+        return true;
+    }
+    if (blen >= 2 && buf[0] == '(' && buf[blen - 1] == ')') {
+        buf[blen - 1] = '\0';
+        return p2_eval_text(buf + 1, out, cap);
+    }
+    double num = 0;
+    if (p2_eval_numeric(buf, &num)) {
+        snprintf(out, cap, "%g", num);
+        return true;
+    }
+    char lookup[P2_MAX_VALUE];
+    if (p2_lookup_value(buf, lookup, sizeof(lookup))) {
+        p2_copy_trim(out, cap, lookup, NULL);
+        return true;
+    }
+
+    char quote = '\0';
+    int depth = 0;
+    for (char *p = buf; *p != '\0'; ++p) {
+        if (quote != '\0') {
+            if (*p == quote) {
+                quote = '\0';
+            }
+            continue;
+        }
+        if (*p == '\'' || *p == '"') {
+            quote = *p;
+        } else if (*p == '(') {
+            ++depth;
+        } else if (*p == ')') {
+            if (depth > 0) --depth;
+        } else if (*p == '+' && depth == 0) {
+            *p = '\0';
+            char left[P2_MAX_VALUE];
+            char right[P2_MAX_VALUE];
+            if (!p2_eval_text(buf, left, sizeof(left)) ||
+                !p2_eval_text(p + 1, right, sizeof(right))) {
+                return false;
+            }
+            snprintf(out, cap, "%s%s", left, right);
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool p2_operand_value(const char *s, double *num, char *text,
         size_t cap, bool *isnum) {
     p2_copy_trim(text, cap, s, NULL);
-    if (text[0] == '\'' || text[0] == '"') {
+    size_t tlen = strlen(text);
+    if (tlen >= 2 && (text[0] == '\'' || text[0] == '"') &&
+        text[tlen - 1] == text[0]) {
         p2_unquote(text);
         *isnum = false;
         return true;
     }
     if (p2_eval_numeric(s, num)) {
         *isnum = true;
+        return true;
+    }
+    char textval[P2_MAX_VALUE];
+    if (p2_eval_text(s, textval, sizeof(textval))) {
+        p2_copy_trim(text, cap, textval, NULL);
+        *isnum = false;
         return true;
     }
     char lookup[P2_MAX_VALUE];

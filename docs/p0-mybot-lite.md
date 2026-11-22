@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6/P7/P8 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -10,7 +10,7 @@
 6. **`@if` / `@while` 控制流、动作捕获、命令系统与热重载**
 7. **`@Struct` JSON 对象/数组与字段选择**
 8. **顶层 `@Include` 脚本片段**
-9. **算术表达式与括号条件**
+9. **算术表达式、括号条件和字符串拼接**
 
 还没有实现：@Merge、动态 SQL、完整 mybot 表达式 AST（字符串拼接等）。那些属于后续阶段。
 
@@ -68,7 +68,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-875972    0 156376
+876780    0 156376
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -92,7 +92,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-252684     0 105964
+253492     0 105964
 ```
 
 此时：
@@ -181,6 +181,7 @@ sdcard/
     p5c.sql
     p6.sql
     p7.sql
+    p8.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -198,6 +199,7 @@ sdcard/
     p5c.mt
     p6.mt
     p7.mt
+    p8.mt
     parts/inc_p5.mt
     pca9685.mt
     ads1015.mt
@@ -477,6 +479,7 @@ p5b             -> /robots/p5b.sql + /scripts/p5b.mt（嵌套对象/数组）
 p5c             -> /robots/p5c.sql + /scripts/p5c.mt（@Struct 字段捕获）
 p6              -> /robots/p6.sql + /scripts/p6.mt（@Include）
 p7              -> /robots/p7.sql + /scripts/p7.mt（算术表达式）
+p8              -> /robots/p8.sql + /scripts/p8.mt（字符串拼接）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -979,6 +982,62 @@ P2: p7 call ok
 - 字符串拼接 `+` 尚未实现
 - 表达式仍是精简 AST，不是完整 mybot 表达式
 - 逻辑运算符对括号内的 `&&`/`||` 支持有限
+
+## P8：字符串拼接
+
+P8-A 在 `$(...)` 和条件里支持 `+` 字符串拼接：
+
+```mt
+@Struct(cfg)
+{ "value": 7, "name": "pico" }
+@
+
+@Vars
+name  value;
+ count  2;
+@
+
+@Action
+p5.name  p5.value;
+ $(cfg.name + "-" + count) $(count + 1);
+@
+
+@if((cfg.name + "-x") == "pico-x")
+p5.ok;
+   1;
+@
+```
+
+结果：
+
+```text
+$(cfg.name + "-" + count) = pico-2
+$(count + 1)               = 3
+(cfg.name + "-x") == "pico-x" = true
+```
+
+测试 profile：
+
+```text
+p8
+```
+
+预期 VGA：
+
+```text
+P2: profile=p8
+P2: @Struct cfg.name = pico
+P2: @Vars count = 2
+P5Check: call value=3 name=pico-2 item=nil
+...
+P5Check: call value=nil name=nil item=nil
+```
+
+当前限制：
+
+- 字符串拼接只支持 `+`
+- 字符串比较仍是精确文本比较
+- 完整 mybot 表达式 AST 仍未实现
 
 ## 运行现象
 
