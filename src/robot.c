@@ -146,6 +146,7 @@ static int p2_merge_skip_end = -1;
 #define P2_REFLEX_COLS 6
 typedef struct {
     char name[P2_MAX_NAME];
+    int named;
     int ncols;
     char headers[P2_REFLEX_COLS][P2_MAX_NAME];
     int nrows;
@@ -1800,6 +1801,53 @@ static void p2_apply_captures(const p2_device_t *d, char **vals, int nvals,
     }
 }
 
+static p2_reflex_t *p2_find_named_reflex(const char *name);
+static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row);
+static void p2_remove_var(const char *name);
+
+static void p2_exec_named_reflex(lua_State *L, p2_reflex_t *rf,
+        const char *device, char **vals, int nvals) {
+    char saved_name[8][P2_MAX_NAME];
+    char saved_value[8][P2_MAX_VALUE];
+    bool existed[8];
+    int nsaved = 0;
+    for (int j = 0; j < P2_MAX_COLS && nsaved < 8; ++j) {
+        if (p2_action_cols[j].device[0] == '\0') {
+            break;
+        }
+        if (strcmp(p2_action_cols[j].device, device) != 0 || j >= nvals) {
+            continue;
+        }
+        char key[P2_MAX_NAME];
+        p2_copy_trim(key, sizeof(key), p2_action_cols[j].param, NULL);
+        const char *old = p2_find_var(key);
+        p2_copy_trim(saved_name[nsaved], sizeof(saved_name[nsaved]), key, NULL);
+        existed[nsaved] = old != NULL;
+        if (old != NULL) {
+            p2_copy_trim(saved_value[nsaved], sizeof(saved_value[nsaved]),
+                old, NULL);
+        }
+        ++nsaved;
+        p2_set_var(key, vals[j]);
+    }
+
+    p2_action_col_t outer[P2_MAX_COLS];
+    memcpy(outer, p2_action_cols, sizeof(outer));
+    robot_log("P2: named reflex %s", rf->name);
+    for (int row = 0; row < rf->nrows; ++row) {
+        p2_exec_reflex_row(L, rf, row);
+    }
+    memcpy(p2_action_cols, outer, sizeof(outer));
+
+    for (int i = nsaved - 1; i >= 0; --i) {
+        if (existed[i]) {
+            p2_set_var(saved_name[i], saved_value[i]);
+        } else {
+            p2_remove_var(saved_name[i]);
+        }
+    }
+}
+
 static void p2_execute_row(lua_State *L, char **vals, int nvals) {
     for (int i = 0; i < P2_MAX_COLS; ++i) {
         if (p2_action_cols[i].device[0] == '\0') {
@@ -1816,6 +1864,13 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
             continue;
         }
         p2_device_t *d = p2_find_device(p2_action_cols[i].device);
+        if (d == NULL) {
+            p2_reflex_t *rf = p2_find_named_reflex(p2_action_cols[i].device);
+            if (rf != NULL) {
+                p2_exec_named_reflex(L, rf, p2_action_cols[i].device, vals, nvals);
+                continue;
+            }
+        }
         if (d == NULL || d->env_ref == LUA_NOREF) {
             robot_log("P2: unknown device %s", p2_action_cols[i].device);
             continue;
@@ -2838,6 +2893,65 @@ static void p2_parse_reflex_block(int start, int end) {
     robot_log("P2: @Reflex parsed");
 }
 
+static p2_reflex_t *p2_find_named_reflex(const char *name) {
+    for (int i = 0; i < p2_nreflexes; ++i) {
+        if (p2_reflexes[i].named && strcmp(p2_reflexes[i].name, name) == 0) {
+            return &p2_reflexes[i];
+        }
+    }
+    return NULL;
+}
+
+static void p2_parse_named_reflex(int start, int end) {
+    char *line = p2_trim(p2_lines[start]);
+    const char *lp = strchr(line, '(');
+    const char *rp = strrchr(line, ')');
+    if (lp == NULL || rp == NULL || rp <= lp) {
+        robot_log("P2: named @Reflex malformed");
+        return;
+    }
+    char name[P2_MAX_NAME];
+    p2_copy_trim(name, sizeof(name), lp + 1, rp);
+    if (p2_find_reflex(name) != NULL) {
+        robot_log("P2: duplicate @Reflex %s", name);
+        return;
+    }
+    if (p2_nreflexes >= P2_MAX_REFLEXES || start + 1 >= end) {
+        return;
+    }
+    char hb[256];
+    p2_copy_trim(hb, sizeof(hb), p2_lines[start + 1], NULL);
+    char *cells[P2_REFLEX_COLS];
+    int n = p2_split_ws(hb, cells, P2_REFLEX_COLS);
+    if (n <= 0) {
+        return;
+    }
+    char *headers[P2_REFLEX_COLS];
+    for (int i = 0; i < n; ++i) {
+        headers[i] = cells[i];
+    }
+    for (int i = start + 2; i < end; ++i) {
+        char rb[256];
+        p2_copy_trim(rb, sizeof(rb), p2_lines[i], NULL);
+        if (rb[0] == '\0') {
+            continue;
+        }
+        char *vals[P2_REFLEX_COLS];
+        int nv = p2_split_ws(rb, vals, P2_REFLEX_COLS);
+        if (nv <= 0) {
+            continue;
+        }
+        if (!p2_add_reflex_row(name, headers, n, vals, nv)) {
+            return;
+        }
+    }
+    p2_reflex_t *r = p2_find_reflex(name);
+    if (r != NULL) {
+        r->named = 1;
+    }
+    robot_log("P2: named @Reflex %s parsed", name);
+}
+
 static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row) {
     int total = 0;
     char *vals[P2_MAX_COLS];
@@ -2975,7 +3089,7 @@ static void p2_exec_lines(lua_State *L, int start, int end) {
         if (strncmp(line, "@Reflex", 7) == 0) {
             int close = p2_find_matching(i, end);
             if (line[7] == '(') {
-                robot_log("P2: named @Reflex unsupported");
+                p2_parse_named_reflex(i, close);
             } else {
                 p2_parse_reflex_block(i, close);
             }
