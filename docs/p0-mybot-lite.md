@@ -38,8 +38,9 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 30. **P29：`/action` 在 active 结构上重播动作脚本**
 31. **P30：`/repeat` 批量重播动作脚本**
 32. **P31：active 状态诊断 `/devices` / `/vars` / `/structs`**
+33. **P32：`/sql` 事务回滚**
 
-还没有实现：完整 `@Merge` 语义、热 SQL 事务回滚、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
+还没有实现：完整 `@Merge` 语义、`@SQL` 块事务回滚、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
 ## 当前硬件形态
 
@@ -114,7 +115,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-268024    0 100020
+268832    0 106404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -304,6 +305,7 @@ sdcard/
   sql/
     p28_add.sql
     p28_del.sql
+    p32_bad.sql
   profile.txt
 ```
 
@@ -2118,7 +2120,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-268024     0  100020
+268832     0  106404
 ```
 
 构建：
@@ -2207,7 +2209,7 @@ P2: unknown device hot
 - `UPDATE ... WHERE` 只支持 `name = '...'`
 - 不支持 `UPDATE` 与同批次其它行级语句的独占检查
 - `SET` 值只能是简单文本；不支持表达式求值
-- 没有事务回滚；UPDATE 的新件 build 失败时旧件不会恢复
+- `@SQL` 块内没有事务回滚；UART `/sql` 命令有 P32 事务回滚
 - `DROP TABLE` 只摘设备行，没有单独的“表壳/列定义”需要维护
 - SQL 值里的 `)` 仍会截断 `VALUES (...)`
 
@@ -2222,6 +2224,7 @@ P28-A 改变 `/run` 的生命周期：
 - `/status` 显示 `active=1 devices=N sql=/robots/xxx.sql`
 - `/mem` 读取当前 active Lua state 的实时堆大小
 - `/sql <name>` 读取 `/sql/<name>.sql`，对 active 结构执行 P25/P27 的热 SQL
+- `/sql` 是事务式应用：任一语句失败会回滚到执行前的设备/变量快照
 
 示例：
 
@@ -2399,7 +2402,7 @@ core1: status idle active=1 devices=1 sql=/robots/p28.sql action=/scripts/p29.mt
 - 没有后台循环；`/repeat` 是同步执行，结束才回到命令循环
 - `/stop` 命令在 `/repeat` 期间不会被 core1 处理；需要 `Ctrl-C`
 - 脚本里的 `@SQL` 每轮都会执行，可能重复 INSERT / 重复 UPDATE
-- 没有事务回滚
+- `/repeat` 本身没有事务；`@SQL` 失败可能留下部分变更
 
 ## P31：active 状态诊断
 
@@ -2460,6 +2463,72 @@ core1: struct cfg.name=pico-x
 - 设备 meta 的全部字段没有展开；当前只显示名称、驱动、controller、trigger 数
 - 大量 struct 字段会占用较长的 UART 输出时间
 - 不能通过命令修改这些状态，只能通过 `/sql` / `/action` / `/run`
+
+## P32：/sql 事务回滚
+
+P32-A 给 `/sql` 命令加上事务式应用：
+
+```text
+/sql <name>
+```
+
+执行流程：
+
+1. 快照当前 `p2_devices`、`@Vars`、`@Alias`
+2. 把 `/sql/<name>.sql` 交给 P25/P27 引擎执行
+3. 任一错误（语法、无命中行、引用阻止、build 失败）都将 `p2_hot_error` 置位
+4. 失败时销毁当前设备，恢复快照，重新 build 全部设备
+5. 成功则直接提交
+
+失败示例：
+
+```sql
+INSERT INTO P5Check (name, value) VALUES ('hot', '42');
+DELETE FROM P5Check WHERE name='missing';
+```
+
+第二条 DELETE 0 行命中，触发回滚：
+
+```text
+core1: apply /sql/p32_bad.sql
+P2: device hot driver=P5Check controller=- triggers=0
+P25: hot insert hot driver=P5Check
+P5Check: build value=42 name=hot item=nil angle=nil
+P2: hot.build result=OK
+P25: DELETE P5Check name=missing -> 0 removed, 0 blocked
+P25: DELETE P5Check matched no row
+P32: rollback start
+Lua: P5Check: destroy
+P2: hot.destroy result=OK
+Lua: P5Check: destroy
+P2: base.destroy result=OK
+P5Check: build value=1 name=base item=nil angle=nil
+P2: base.build result=OK
+P32: rollback done, devices=1
+core1: /sql p32_bad rolled back, devices=1 heap=...KB
+```
+
+测试：
+
+```text
+/run p28
+/sql p32_bad
+/devices
+```
+
+预期 `/devices` 只剩：
+
+```text
+core1: dev[0] base driver=P5Check controller=- triggers=0 env=yes
+```
+
+限制：
+
+- 回滚是“重建快照”，不是保留原 Lua 驱动内部状态；所有设备会重新 destroy/build
+- 物理器件会在回滚过程中断电/重新初始化
+- `@SQL` 块在动作脚本内仍是非事务的；只有 UART `/sql` 命令走事务
+- 如果回滚重建本身失败，状态可能不完整，日志会显示 build 失败
+- 快照保存在 BSS（约 6KB），只支持当前设备/变量/别名，不包含驱动内部状态
 
 ## 运行现象
 

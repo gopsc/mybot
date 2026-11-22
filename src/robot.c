@@ -172,6 +172,7 @@ static lua_State *p2_active_L;
 static bool p2_active;
 static char p2_active_sql[64];
 static char p2_active_mt[64];
+static bool p2_hot_error;
 
 /* core1 栈放在普通 BSS，而不是 SDK 默认的 SCRATCH_X（只有 4KB）。
  * multicore_launch_core1_with_stack 会把 SP 设到数组末尾。 */
@@ -1518,6 +1519,7 @@ static bool p2_parse_insert_stmt(char *cur, char **next) {
     } else {
         robot_log("P2: INSERT %s column/value count mismatch (%d/%d)",
             table, nc, nv);
+        p2_hot_error = true;
     }
     *next = vrp + 1;
     return true;
@@ -3369,12 +3371,14 @@ static bool p2_hot_where_name(char *where, char *out, size_t cap,
     char *eq = strchr(q, '=');
     if (eq == NULL) {
         robot_log("P27: WHERE unsupported (missing =)");
+        p2_hot_error = true;
         return false;
     }
     char col[P2_MAX_NAME];
     p2_copy_trim(col, sizeof(col), q, eq);
     if (strcmp(col, "name") != 0) {
         robot_log("P27: WHERE only supports name, got %s", col);
+        p2_hot_error = true;
         return false;
     }
     char val[P2_MAX_VALUE];
@@ -3440,6 +3444,7 @@ static void p2_hot_apply_delete(lua_State *L, char *stmt) {
     p2_copy_trim(table, sizeof(table), p, table_end);
     if (table[0] == '\0') {
         robot_log("P25: DELETE missing table");
+        p2_hot_error = true;
         return;
     }
 
@@ -3471,6 +3476,10 @@ static void p2_hot_apply_delete(lua_State *L, char *stmt) {
         has_name ? " name=" : "", has_name ? want_name : "", removed, blocked);
     if (removed == 0 && blocked == 0) {
         robot_log("P25: DELETE %s matched no row", table);
+        p2_hot_error = true;
+    }
+    if (blocked > 0) {
+        p2_hot_error = true;
     }
 }
 
@@ -3487,11 +3496,13 @@ static void p2_hot_apply_update(lua_State *L, char *stmt) {
     p2_copy_trim(table, sizeof(table), table_start, p);
     if (table[0] == '\0') {
         robot_log("P27: UPDATE missing table");
+        p2_hot_error = true;
         return;
     }
     char *set = (char *)p2_strcasestr(p, "SET");
     if (set == NULL) {
         robot_log("P27: UPDATE missing SET");
+        p2_hot_error = true;
         return;
     }
     char *q = set + strlen("SET");
@@ -3506,6 +3517,7 @@ static void p2_hot_apply_update(lua_State *L, char *stmt) {
     int ni = p2_split_commas(assignbuf, items, P2_MAX_FIELDS);
     if (ni <= 0) {
         robot_log("P27: UPDATE missing assignments");
+        p2_hot_error = true;
         return;
     }
 
@@ -3516,6 +3528,7 @@ static void p2_hot_apply_update(lua_State *L, char *stmt) {
         char *eq = strchr(items[i], '=');
         if (eq == NULL || eq == items[i]) {
             robot_log("P27: UPDATE malformed assignment: %s", items[i]);
+            p2_hot_error = true;
             return;
         }
         p2_copy_trim(keys[nassign], sizeof(keys[nassign]), items[i], eq);
@@ -3524,6 +3537,7 @@ static void p2_hot_apply_update(lua_State *L, char *stmt) {
         p2_trim(vals[nassign]);
         if (keys[nassign][0] == '\0' || vals[nassign][0] == '\0') {
             robot_log("P27: UPDATE empty assignment");
+            p2_hot_error = true;
             return;
         }
         ++nassign;
@@ -3596,6 +3610,10 @@ static void p2_hot_apply_update(lua_State *L, char *stmt) {
         failed);
     if (updated == 0 && blocked == 0 && failed == 0) {
         robot_log("P27: UPDATE %s matched no row", table);
+        p2_hot_error = true;
+    }
+    if (blocked > 0 || failed > 0) {
+        p2_hot_error = true;
     }
 }
 
@@ -3608,10 +3626,12 @@ static void p2_hot_apply_drop(lua_State *L, char *stmt) {
     p2_copy_trim(table, sizeof(table), p, NULL);
     if (table[0] == '\0') {
         robot_log("P27: DROP missing table");
+        p2_hot_error = true;
         return;
     }
     if (p2_strcasestr(table, "WHERE") != NULL) {
         robot_log("P27: DROP TABLE does not take WHERE");
+        p2_hot_error = true;
         return;
     }
     int removed = 0;
@@ -3633,10 +3653,15 @@ static void p2_hot_apply_drop(lua_State *L, char *stmt) {
         blocked);
     if (removed == 0 && blocked == 0) {
         robot_log("P27: DROP TABLE %s matched no row", table);
+        p2_hot_error = true;
+    }
+    if (blocked > 0) {
+        p2_hot_error = true;
     }
 }
 
-static void p2_hot_apply_sql(lua_State *L, char *sql) {
+static bool p2_hot_apply_sql(lua_State *L, char *sql) {
+    p2_hot_error = false;
     p2_strip_comments(sql);
     char *cur = sql;
     while (*cur != '\0') {
@@ -3667,6 +3692,7 @@ static void p2_hot_apply_sql(lua_State *L, char *sql) {
             char *next = NULL;
             if (!p2_parse_insert_stmt(best, &next)) {
                 robot_log("P25: malformed INSERT in @SQL");
+                p2_hot_error = true;
                 break;
             }
             cur = next;
@@ -3682,6 +3708,7 @@ static void p2_hot_apply_sql(lua_State *L, char *sql) {
                 } else {
                     robot_log("P25: hot insert %s build failed; rollback",
                         d->name);
+                    p2_hot_error = true;
                     p2_hot_remove_device(L, i);
                 }
             }
@@ -3714,6 +3741,7 @@ static void p2_hot_apply_sql(lua_State *L, char *sql) {
             cur = best + strlen(best);
         }
     }
+    return !p2_hot_error;
 }
 
 static void p2_exec_sql_block(lua_State *L, int start, int end) {
@@ -3736,7 +3764,9 @@ static void p2_exec_sql_block(lua_State *L, int start, int end) {
         return;
     }
     robot_log("P25: @SQL block %u bytes", (unsigned)off);
-    p2_hot_apply_sql(L, p2_sql_buf);
+    if (!p2_hot_apply_sql(L, p2_sql_buf)) {
+        robot_log("P25: @SQL completed with errors");
+    }
 }
 
 static void p2_exec_lines(lua_State *L, int start, int end) {
@@ -3985,6 +4015,52 @@ static void p2_destroy_devices(lua_State *L) {
             d->env_ref = LUA_NOREF;
         }
     }
+}
+
+typedef struct {
+    p2_device_t devices[P2_MAX_DEVICES];
+    int ndevices;
+    p2_var_t vars[P2_MAX_VARS];
+    int nvars;
+    p2_alias_t aliases[P2_MAX_ALIASES];
+    int naliases;
+} p2_hot_snapshot_t;
+
+static p2_hot_snapshot_t p2_hot_saved;
+
+static void p2_hot_snapshot(void) {
+    memcpy(p2_hot_saved.devices, p2_devices, sizeof(p2_devices));
+    p2_hot_saved.ndevices = p2_ndevices;
+    memcpy(p2_hot_saved.vars, p2_vars, sizeof(p2_vars));
+    p2_hot_saved.nvars = p2_nvars;
+    memcpy(p2_hot_saved.aliases, p2_aliases, sizeof(p2_aliases));
+    p2_hot_saved.naliases = p2_naliases;
+}
+
+static void p2_hot_restore(void) {
+    memcpy(p2_devices, p2_hot_saved.devices, sizeof(p2_devices));
+    p2_ndevices = p2_hot_saved.ndevices;
+    for (int i = 0; i < p2_ndevices; ++i) {
+        p2_devices[i].env_ref = LUA_NOREF;
+    }
+    memcpy(p2_vars, p2_hot_saved.vars, sizeof(p2_vars));
+    p2_nvars = p2_hot_saved.nvars;
+    memcpy(p2_aliases, p2_hot_saved.aliases, sizeof(p2_aliases));
+    p2_naliases = p2_hot_saved.naliases;
+}
+
+static bool p2_hot_apply_transaction(lua_State *L, char *sql) {
+    p2_hot_snapshot();
+    if (p2_hot_apply_sql(L, sql)) {
+        return true;
+    }
+    robot_log("P32: rollback start");
+    p2_destroy_devices(L);
+    p2_hot_restore();
+    p2_hot_error = false;
+    p2_build_devices(L);
+    robot_log("P32: rollback done, devices=%d", p2_ndevices);
+    return false;
 }
 
 static void robot_runtime_close(void) {
@@ -4440,10 +4516,10 @@ void robot_core1(void) {
                 break;
             }
             robot_log("core1: apply %s", path);
-            p2_hot_apply_sql(p2_active_L, p2_sql_buf);
+            bool ok = p2_hot_apply_transaction(p2_active_L, p2_sql_buf);
             last_lua_heap_kb = lua_heap_kb(p2_active_L);
-            robot_log("core1: active sql=%s devices=%d heap=%dKB",
-                p2_active_sql, p2_ndevices, last_lua_heap_kb);
+            robot_log("core1: /sql %s %s, devices=%d heap=%dKB", cmd.arg,
+                ok ? "applied" : "rolled back", p2_ndevices, last_lua_heap_kb);
             break;
         }
         case ROBOT_CMD_ACTION: {
