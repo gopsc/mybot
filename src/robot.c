@@ -170,7 +170,10 @@ static int p2_reflex_depth;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
 static char p2_expanded_buf[P2_MT_MAX * 2];
-static char p2_inc_tmp[P2_MT_MAX];
+#define P2_INCLUDE_MAX_DEPTH 4
+static char p2_inc_bufs[P2_INCLUDE_MAX_DEPTH - 1][P2_MT_MAX];
+static char p2_include_stack[P2_INCLUDE_MAX_DEPTH][128];
+static int p2_include_depth;
 static char *p2_lines[P2_MAX_LINES];
 static int p2_nlines;
 static lua_State *p2_active_L;
@@ -4160,21 +4163,29 @@ static bool p2_expand_level(char *src, int depth) {
             }
             char path[128];
             p2_include_path(t, path, sizeof(path));
-            if (depth == 0) {
-                size_t n = p2_read_file(path, p2_sql_buf, sizeof(p2_sql_buf));
-                if (n > 0) {
-                    ++p2_include_files;
-                    if (!p2_expand_level(p2_sql_buf, depth + 1)) {
-                        return false;
-                    }
+            if (depth >= P2_INCLUDE_MAX_DEPTH) {
+                robot_log("P2: @Include depth limit at %s", path);
+                return false;
+            }
+            for (int d = 0; d < p2_include_depth; ++d) {
+                if (strcmp(p2_include_stack[d], path) == 0) {
+                    robot_log("P2: @Include cycle: %s", path);
+                    return false;
                 }
-            } else {
-                size_t n = p2_read_file(path, p2_inc_tmp, sizeof(p2_inc_tmp));
-                if (n > 0) {
-                    ++p2_include_files;
-                    if (!p2_expand_append(p2_inc_tmp, n)) {
-                        return false;
-                    }
+            }
+            char *ibuf = depth == 0 ? p2_sql_buf : p2_inc_bufs[depth - 1];
+            size_t icap = depth == 0 ? sizeof(p2_sql_buf)
+                                     : sizeof(p2_inc_bufs[0]);
+            size_t n = p2_read_file(path, ibuf, icap);
+            if (n > 0) {
+                ++p2_include_files;
+                snprintf(p2_include_stack[p2_include_depth],
+                    sizeof(p2_include_stack[0]), "%s", path);
+                ++p2_include_depth;
+                bool ok = p2_expand_level(ibuf, depth + 1);
+                --p2_include_depth;
+                if (!ok) {
+                    return false;
                 }
             }
             line = strtok_r(NULL, "\n", &save);
@@ -4198,6 +4209,7 @@ static bool p2_expand_includes(const char *src) {
     (void)src;
     p2_expand_out = 0;
     p2_include_files = 0;
+    p2_include_depth = 0;
     p2_expanded_buf[0] = '\0';
     if (!p2_expand_level(p2_mt_buf, 0)) {
         return false;

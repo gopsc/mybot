@@ -53,6 +53,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 45. **P44：设备容量 8 → 16**
 46. **P45：列头设备位/参数位表达式**
 47. **P46：`@Action` 列头表达式按行重算**
+48. **P47：递归 `@Include` 与循环检测**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -129,7 +130,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-275632    0 121616
+275760    0 134420
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -292,6 +293,7 @@ sdcard/
     p44.sql
     p45.sql
     p46.sql
+    p47.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -335,6 +337,7 @@ sdcard/
     p44.mt
     p45.mt
     p46.mt
+    p47.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -347,6 +350,10 @@ sdcard/
     parts/merge_41_b.mt
     parts/level1.mt
     parts/level2.mt
+    parts/inc_chain1.mt
+    parts/inc_chain2.mt
+    parts/inc_chain3.mt
+    parts/inc_chain4.mt
     pca9685.mt
     ads1015.mt
     spi.mt
@@ -656,6 +663,7 @@ p43             -> /robots/p43.sql + /scripts/p43.mt（全 fake HAL 回归）
 p44             -> /robots/p44.sql + /scripts/p44.mt（12 设备容量）
 p45             -> /robots/p45.sql + /scripts/p45.mt（列头表达式）
 p46             -> /robots/p46.sql + /scripts/p46.mt（列头按行重算）
+p47             -> /robots/p47.sql + /scripts/p47.mt（递归 @Include）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -1094,7 +1102,7 @@ p6.value;
 - 路径相对 `/scripts/`，也接受 `/scripts/...` 绝对路径
 - 支持多个文件
 - 支持 `@Struct` / `@Action` / `@if` / `@while` 等既有语法
-- 支持两层：顶层 -> 一级包含 -> 二级包含；二级内容不再继续递归
+- P19 支持两层；P47 起递归深度提升到 4 层并带循环检测
 
 `@Merge` 目前不支持，会明确输出：
 
@@ -2198,7 +2206,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-275632     0  121616
+275760     0  134420
 ```
 
 构建：
@@ -3284,7 +3292,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-275632     0  121616
+275760     0  134420
 ```
 
 限制：
@@ -3407,6 +3415,55 @@ P5Check: call value=nil name=p46 item=7 angle=nil
 - 列数诊断仍按初始表头
 - 表达式求值失败仍回退原文本
 - 结果受 `P2_MAX_NAME` 长度限制
+
+## P47：递归 @Include 与循环检测
+
+P47-A 把 `@Include` 从固定两层改成递归展开：
+
+- 最多展开 4 层被包含文件（顶层 + 4 个 include 层级）
+- 使用独立层级缓冲区，避免覆盖上层文本
+- 记录当前 include 路径栈，检测 A → B → A 循环
+- 超深或循环时记录诊断并中止展开
+- `@Include` 仍然是文本拷贝，不是 `@Merge`
+
+测试 profile：
+
+```text
+p47
+```
+
+链路：
+
+```text
+p47.mt
+  -> parts/inc_chain1.mt
+    -> parts/inc_chain2.mt
+      -> parts/inc_chain3.mt
+        -> parts/inc_chain4.mt
+          @Action p47.value = 47
+```
+
+预期：
+
+```text
+P2: @Include merged 4 file(s)
+P5Check: call value=47 name=p47 item=nil angle=nil
+P2: p47.call result=OK
+```
+
+主机侧测试：
+
+- 4 层链路展开成功，`p47.value` 出现在最终文本
+- `cycle_a -> cycle_b -> cycle_a` 被拒绝
+
+限制：
+
+- 每层都有固定文本缓冲（增加约 12.8KB BSS）
+- 只检测 include 路径栈内的循环，顶层文件不在栈内
+- 超过 4 层被包含文件会拒绝
+- `@Include` 仍只做文本拷贝，不做相位归并
+- 被包含文件里的路径仍按 `/scripts/` 解析
+- 尚未上板实测
 
 ## 运行现象
 
