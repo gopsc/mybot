@@ -34,6 +34,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 26. **P25：`@SQL` 运行期热插拔（INSERT / DELETE）**
 27. **P26：取消无 SD 构建，SD 固定启用**
 28. **P27：`@SQL` UPDATE / DROP TABLE**
+29. **P28：常驻 Lua 状态 + UART `/sql` 热补丁**
 
 还没有实现：完整 `@Merge` 语义、热 SQL 事务回滚、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -67,6 +68,7 @@ RP2040
   - 历史命令保存在 RAM，方向键通过 ANSI `ESC [ A/B` 回看。
   - core1 日志打印后自动重画当前输入行。
 - `src/robot.c` / `include/robot.h`
+  - P28 起 `/run` 后保持 active Lua state 和设备，支持串口 `/sql` 热补丁。
   - core1 16KB BSS 栈 + `multicore_launch_core1_with_stack()`。
   - 日志队列（core1 → core0），core0 统一写 UART。
   - Lua 5.1 单状态机；可选从 SD 读取 `/robot.lua`，失败则回退内嵌 smoke 脚本。
@@ -109,7 +111,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-262880    0  99888
+264928    0  99956
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -133,7 +135,7 @@ RX GP1
 [robot] core1: robot runtime started
 [robot] SD: mounted 0:
 ...
-[robot] core1: status idle
+[robot] core1: status idle active=1 devices=2 sql=/robots/p3.sql
 >
 ```
 
@@ -148,6 +150,8 @@ RX GP1
 /profile      显示 /profile.txt
 /mem          core1 栈高水位和上次 Lua 堆
 /list         列出 /robots/*.sql
+/sql name     对当前 active 结构应用 /sql/name.sql
+/unload       销毁 active 设备并关闭 Lua
 /help         显示命令摘要
 ↑ / ↓         命令历史（ANSI，最近 8 条）
 Ctrl-C        发送停止请求
@@ -244,6 +248,7 @@ sdcard/
     p23.sql
     p25.sql
     p27.sql
+    p28.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -275,6 +280,7 @@ sdcard/
     p23.mt
     p25.mt
     p27.mt
+    p28.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -285,6 +291,9 @@ sdcard/
     ads1015.mt
     spi.mt
     uart.mt
+  sql/
+    p28_add.sql
+    p28_del.sql
   profile.txt
 ```
 
@@ -573,6 +582,7 @@ p22             -> /robots/p22.sql + /scripts/p22.mt（条件解析 v2）
 p23             -> /robots/p23.sql + /scripts/p23.mt（统一表达式引擎）
 p25             -> /robots/p25.sql + /scripts/p25.mt（@SQL 热插拔 INSERT/DELETE）
 p27             -> /robots/p27.sql + /scripts/p27.mt（@SQL UPDATE/DROP）
+p28             -> /robots/p28.sql + /scripts/p28.mt（常驻状态 + /sql）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -805,6 +815,8 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /profile      显示 /profile.txt
 /mem          core1 栈高水位和上次 Lua 堆
 /list         列出 /robots/*.sql
+/sql name     对当前 active 结构应用 /sql/name.sql
+/unload       销毁 active 设备并关闭 Lua
 /help         显示命令摘要
 ↑ / ↓         命令历史（ANSI，最近 8 条）
 Ctrl-C        发送停止请求
@@ -818,7 +830,7 @@ Ctrl-C        发送停止请求
   → 重新读 profile / SQL / MT
   → 重新创建 Lua state 和每个设备 env
   → 执行脚本
-  → 返回 idle，等待下一条命令
+  → 返回 active idle（设备保持，等待 /sql 或下一条命令）
 ```
 
 所以改完 SD 上的 `.sql`/`.mt` 后，不需要重新烧固件，输入 `/run` 即可热重载。
@@ -839,8 +851,8 @@ Ctrl-C        发送停止请求
 ```text
 [robot] core1: run sql=p4 script=(same)
 ...
-[robot] core1: run finished, idle
-[robot] core1: status idle
+[robot] core1: run finished, profile active
+[robot] core1: status idle active=1 devices=1 sql=/robots/p4.sql
 [robot] core1: /profile.txt = p4
 [robot] core1: mem stack=.../16384 heap_last=...KB busy=0 stop=0
 [robot] core1: profile p4.sql
@@ -1639,7 +1651,7 @@ P18-A 增加两个控制台命令：
 `/help` 直接在 core0 通过 UART 显示：
 
 ```text
-run [sql] [script] | stop | status | profile | mem | list | help
+run [sql] [script] | stop | status | profile | mem | list | sql <name> | unload | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1652,6 +1664,8 @@ history: terminal up/down (ANSI)
 /profile
 /mem
 /list
+/sql <name>
+/unload
 /help
 ```
 
@@ -2054,18 +2068,17 @@ P2: hot.destroy result=OK
 P25: DELETE P5Check name=hot -> 1 removed, 0 blocked
 P5Check: call value=3 name=cold item=nil angle=nil
 P2: cold.call result=OK
-Lua: P5Check: destroy
-P2: cold.destroy result=OK
+P2: profile active, devices=1 heap=...KB
 ```
 
 限制：
 
-- 只支持 `INSERT INTO` / `DELETE FROM`；没有 `UPDATE` / `DROP` / 事务
+- P25 只覆盖 `INSERT INTO` / `DELETE FROM`；`UPDATE` / `DROP` 见 P27
 - `DELETE ... WHERE` 只支持 `name = '...'`，不支持 `AND` / `OR`
 - 已解析的总线 `$ref` 会变成 fd/path 文本，删除总线时无法自动识别所有依赖；不要热删仍被使用的 I2C/SPI/UART 总线
 - SQL 值里的 `)` 仍会截断 `VALUES (...)`，这是现有最简解析器的限制
 - `@SQL` 是 Pico 侧扩展；mybot 原版热 SQL 由宿主 `apply_sql` 调用
-- 不是常驻热 SQL：只在动作脚本执行期间生效，脚本结束后设备仍统一销毁
+- P28 起脚本结束后设备保持 active，可用 `/sql` 继续热补丁，直到 `/run` 或 `/unload`
 
 ## P26：取消无 SD 构建
 
@@ -2078,11 +2091,11 @@ P26-A 把 SD 从可选构建项改成固定功能：
 - `/list` 始终扫描 `/robots`
 - 构建命令不再需要 `-DUSE_SD=ON`
 
-当前只有一种固件：
+当前只有一种固件（P28 后尺寸）：
 
 ```text
 text    data     bss
-262880     0   99888
+264928     0   99956
 ```
 
 构建：
@@ -2175,6 +2188,87 @@ P2: unknown device hot
 - `DROP TABLE` 只摘设备行，没有单独的“表壳/列定义”需要维护
 - SQL 值里的 `)` 仍会截断 `VALUES (...)`
 
+## P28：常驻 Lua 状态 + UART /sql
+
+P28-A 改变 `/run` 的生命周期：
+
+- 脚本执行完后不再立即 `destroy` 设备，也不再 `lua_close`
+- core1 保持 active 状态，设备、Lua env、变量和 `@Struct` 都留在内存
+- `/run` 会先销毁旧 active 状态，再加载新 profile
+- `/unload` 显式销毁设备并关闭 Lua
+- `/status` 显示 `active=1 devices=N sql=/robots/xxx.sql`
+- `/mem` 读取当前 active Lua state 的实时堆大小
+- `/sql <name>` 读取 `/sql/<name>.sql`，对 active 结构执行 P25/P27 的热 SQL
+
+示例：
+
+```text
+/run p28
+/sql p28_add
+/status
+/sql p28_del
+/unload
+```
+
+`/run p28` 后：
+
+```text
+P2: using /robots/p28.sql
+P2: device base driver=P5Check controller=- triggers=0
+P5Check: build value=1 name=base item=nil angle=nil
+P2: base.build result=OK
+P5Check: call value=1 name=base item=nil angle=nil
+P2: base.call result=OK
+P2: profile active, devices=1 heap=...KB
+```
+
+`/sql p28_add`：
+
+```text
+core1: apply /sql/p28_add.sql
+P2: device hot driver=P5Check controller=- triggers=0
+P25: hot insert hot driver=P5Check
+P5Check: build value=42 name=hot item=nil angle=nil
+P2: hot.build result=OK
+core1: active sql=/robots/p28.sql devices=2 heap=...KB
+```
+
+`/sql p28_del`：
+
+```text
+core1: apply /sql/p28_del.sql
+P25: hot remove hot driver=P5Check
+Lua: P5Check: destroy
+P2: hot.destroy result=OK
+P25: DELETE P5Check name=hot -> 1 removed, 0 blocked
+core1: active sql=/robots/p28.sql devices=1 heap=...KB
+```
+
+`/unload`：
+
+```text
+Lua: P5Check: destroy
+P2: base.destroy result=OK
+core1: unloaded, idle
+```
+
+SD 布局新增：
+
+```text
+/sql/
+  p28_add.sql
+  p28_del.sql
+```
+
+限制：
+
+- 同时只有一个 active profile
+- active 状态只保留设备结构；脚本结束后没有后台动作循环
+- `/sql` 只做结构热变更，不会重新播放动作脚本
+- 热 SQL 没有事务回滚；失败时可能留下部分变更
+- 保持 Lua state 会持续占用堆，可用 `/mem` 观察
+- `/run` 会隐式 `/unload`，旧设备会先全部 destroy
+
 ## 运行现象
 
 上电后所有输出都在 UART0（GP0/GP1，115200 8N1），没有 VGA 输出：
@@ -2186,7 +2280,7 @@ P2: unknown device hot
 [robot] SD: mounted 0:
 [robot] P2: using /robots/p3.sql
 ...
-[robot] core1: status idle
+[robot] core1: status idle active=1 devices=2 sql=/robots/p3.sql
 >
 ```
 
@@ -2204,6 +2298,7 @@ FAT 卡根目录放：
 /modules/       # P1 起使用
 /robots/        # P1 起使用
 /scripts/       # P1 起使用
+/sql/           # P28 起使用：/sql <name> 读取 /sql/<name>.sql
 ```
 
 P0 的 `/robot.lua` 只需要定义：

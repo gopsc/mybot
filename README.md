@@ -45,7 +45,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text    data     bss
-262880     0   99888
+264928     0   99956
 ```
 
 ## SD 卡（必需）
@@ -58,6 +58,7 @@ SD 支持是固定功能，没有无 SD 构建。把 `sdcard/` 下的内容拷�
 /modules/
 /robots/
 /scripts/
+/sql/
 ```
 
 `/profile.txt` 只写 profile 名，例如：
@@ -90,6 +91,8 @@ p23
 /profile     显示 /profile.txt
 /mem         core1 栈高水位和 Lua 堆
 /list        列出 /robots/*.sql
+/sql name    对 active 结构应用 /sql/name.sql
+/unload      销毁 active 设备并关闭 Lua
 /help        命令摘要
 ↑ / ↓        命令历史（ANSI）
 Ctrl-C       发送停止请求
@@ -103,7 +106,9 @@ Ctrl-C       发送停止请求
 动作脚本是 `.mt`，支持 `@Action`、`@if`、`@while`、`@Struct`、`@Vars`、
 `@Alias`、`@Include`、`@Merge`、`@Reflex`、`@Trigger` 等当前子集。
 
-完整阶段说明见 [docs/p0-mybot-lite.md](docs/p0-mybot-lite.md)。
+`/run` 执行完后设备保持 active；用 `/sql <name>` 应用 `/sql/<name>.sql` 热补丁，
+用 `/unload` 销毁设备并关闭 Lua。完整阶段说明见
+[docs/p0-mybot-lite.md](docs/p0-mybot-lite.md)。
 
 ## 许可
 

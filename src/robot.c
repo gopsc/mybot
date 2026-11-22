@@ -35,6 +35,8 @@ typedef enum {
     ROBOT_CMD_PROFILE,
     ROBOT_CMD_MEM,
     ROBOT_CMD_LIST,
+    ROBOT_CMD_SQL,
+    ROBOT_CMD_UNLOAD,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -161,6 +163,9 @@ static char p2_expanded_buf[P2_MT_MAX * 2];
 static char p2_inc_tmp[P2_MT_MAX];
 static char *p2_lines[P2_MAX_LINES];
 static int p2_nlines;
+static lua_State *p2_active_L;
+static bool p2_active;
+static char p2_active_sql[64];
 
 /* core1 栈放在普通 BSS，而不是 SDK 默认的 SCRATCH_X（只有 4KB）。
  * multicore_launch_core1_with_stack 会把 SP 设到数组末尾。 */
@@ -3976,6 +3981,19 @@ static void p2_destroy_devices(lua_State *L) {
     }
 }
 
+static void robot_runtime_close(void) {
+    if (p2_active_L != NULL) {
+        p2_destroy_devices(p2_active_L);
+        lua_close(p2_active_L);
+        p2_active_L = NULL;
+    }
+    p2_active = false;
+    p2_active_sql[0] = '\0';
+    p2_ndevices = 0;
+    p2_nvars = 0;
+    p2_naliases = 0;
+}
+
 static bool robot_p2_run(lua_State *L) {
     static char profile_sql[64];
     static char profile_mt[64];
@@ -4049,6 +4067,7 @@ static bool robot_p2_run(lua_State *L) {
         }
     }
     robot_log("P2: using %s", sql_path);
+    snprintf(p2_active_sql, sizeof(p2_active_sql), "%s", sql_path);
     p2_parse_sql();
     robot_log("P2: parsed %d device(s)", p2_ndevices);
     if (p2_ndevices == 0) {
@@ -4063,11 +4082,11 @@ static bool robot_p2_run(lua_State *L) {
         robot_log("P2: no @Action block found");
     }
 
-    p2_destroy_devices(L);
     return true;
 }
 
 static void robot_lua_smoke(void) {
+    robot_runtime_close();
     sd_card_t *pSD = sd_get_by_num(0);
     if (pSD == NULL) {
         robot_log("SD: no card slot configured");
@@ -4116,7 +4135,12 @@ static void robot_lua_smoke(void) {
             robot_log("P1-C: /modules/Timer.lua unavailable; sleep check skipped");
         }
     } else {
-        robot_log("P2: script run completed");
+        p2_active_L = L;
+        p2_active = true;
+        last_lua_heap_kb = lua_heap_kb(L);
+        robot_log("P2: profile active, devices=%d heap=%dKB", p2_ndevices,
+            last_lua_heap_kb);
+        return;
     }
 
     if (!p2_ran) {
@@ -4162,6 +4186,11 @@ static void robot_lua_smoke(void) {
         }
     }
     lua_close(L);
+    p2_active = false;
+    p2_active_sql[0] = '\0';
+    p2_ndevices = 0;
+    p2_nvars = 0;
+    p2_naliases = 0;
 }
 
 void robot_init(void) {
@@ -4251,6 +4280,14 @@ void robot_send_list(void) {
     robot_send_cmd(ROBOT_CMD_LIST, NULL);
 }
 
+void robot_send_sql(const char *name) {
+    robot_send_cmd(ROBOT_CMD_SQL, name);
+}
+
+void robot_send_unload(void) {
+    robot_send_cmd(ROBOT_CMD_UNLOAD, NULL);
+}
+
 void robot_core1(void) {
     robot_log("core1: robot runtime started");
     robot_busy = true;
@@ -4293,16 +4330,19 @@ void robot_core1(void) {
             robot_busy = false;
             p2_profile_override[0] = '\0';
             p2_script_override[0] = '\0';
-            robot_log("core1: run finished, idle");
+            robot_log("core1: run finished, %s", p2_active
+                ? "profile active" : "idle");
             break;
         case ROBOT_CMD_STOP:
             robot_stop = true;
             robot_log("core1: stop requested");
             break;
         case ROBOT_CMD_STATUS:
-            robot_log("core1: status %s", robot_busy
-                ? (robot_stop ? "stopping" : "running")
-                : (robot_stop ? "stopped" : "idle"));
+            robot_log("core1: status %s active=%d devices=%d sql=%s",
+                robot_busy ? (robot_stop ? "stopping" : "running")
+                           : (robot_stop ? "stopped" : "idle"),
+                p2_active ? 1 : 0, p2_ndevices,
+                p2_active_sql[0] != '\0' ? p2_active_sql : "-");
             break;
         case ROBOT_CMD_PROFILE: {
             char profile[32];
@@ -4315,9 +4355,49 @@ void robot_core1(void) {
             break;
         }
         case ROBOT_CMD_MEM:
+            if (p2_active_L != NULL) {
+                last_lua_heap_kb = lua_heap_kb(p2_active_L);
+            }
             robot_log("core1: mem stack=%u/16384 heap_last=%dKB busy=%d stop=%d",
                 (unsigned)robot_stack_used(), last_lua_heap_kb,
                 robot_busy ? 1 : 0, robot_stop ? 1 : 0);
+            break;
+        case ROBOT_CMD_SQL: {
+            if (!p2_active || p2_active_L == NULL) {
+                robot_log("core1: /sql needs an active profile; use /run first");
+                break;
+            }
+            if (cmd.arg[0] == '\0') {
+                robot_log("core1: /sql usage: /sql <patch-name>");
+                break;
+            }
+            bool valid = true;
+            for (const char *q = cmd.arg; *q != '\0'; ++q) {
+                if (!isalnum((unsigned char)*q) && *q != '_' && *q != '-') {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid) {
+                robot_log("core1: invalid /sql name");
+                break;
+            }
+            char path[64];
+            snprintf(path, sizeof(path), "/sql/%s.sql", cmd.arg);
+            size_t n = p2_read_file(path, p2_sql_buf, sizeof(p2_sql_buf));
+            if (n == 0) {
+                break;
+            }
+            robot_log("core1: apply %s", path);
+            p2_hot_apply_sql(p2_active_L, p2_sql_buf);
+            last_lua_heap_kb = lua_heap_kb(p2_active_L);
+            robot_log("core1: active sql=%s devices=%d heap=%dKB",
+                p2_active_sql, p2_ndevices, last_lua_heap_kb);
+            break;
+        }
+        case ROBOT_CMD_UNLOAD:
+            robot_runtime_close();
+            robot_log("core1: unloaded, idle");
             break;
         case ROBOT_CMD_LIST: {
             DIR dir;
