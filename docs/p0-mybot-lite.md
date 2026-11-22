@@ -1,13 +1,14 @@
-# P0：mybot-lite 双核与 Lua 冒烟
+# P0：mybot-lite 双核、Lua、脚本解析与 I2C HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2-A 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
 3. **Lua 驱动从 SD 加载，每个驱动有独立 env**
-4. **运行期解析 `relay-test.sql` / `relay-test.mt`，跑通 Relay → Timer 的 controller 转发**
+4. **运行期解析 `.sql` / `.mt`，支持 `$ref` / `@Alias` / `@Vars`**
+5. **真实 I2C HAL（Pico hardware_i2c）与总线扫描**
 
-还没有实现：I2C/SPI/UART HAL、`@if/@while`、`@Alias/@Vars/@Struct`、`$ref`、动态 SQL、命令系统。那些属于 P3/P4。
+还没有实现：SPI/UART HAL、`@if/@while`、`@Struct`、动态 SQL、命令系统。那些属于 P3 后续/P4。
 
 ## 改动
 
@@ -63,7 +64,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-857508    0 128652
+860988    0 128676
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -87,7 +88,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-235636     0  78384
+239124     0  78408
 ```
 
 此时：
@@ -152,6 +153,7 @@ sdcard/
     Timer.lua
     I2C.lua
     RefCheck.lua
+    P3Check.lua
     lib/
       HAL.lua
       drv_common.lua
@@ -159,9 +161,11 @@ sdcard/
   robots/
     relay-test.sql
     p2b.sql
+    p3.sql
   scripts/
     relay-test.mt
     p2b.mt
+    p3.mt
 ```
 
 `robot.lua` 只做一件事：
@@ -338,6 +342,83 @@ Lua smoke OK, heap=...KB
 
 `/robots/relay-test.sql` + `/scripts/relay-test.mt` 仍可运行；输出见
 `P2: relay0.call result=- delay=200`、`P2: controller timer-0 result=OK slept=200`。
+
+## P3：真实 I2C HAL
+
+P3 把 P2-B 的假 I2C 换成 Pico `hardware_i2c`：
+
+| 路径 | 总线 | 引脚 |
+|---|---|---|
+| `/dev/i2c-0` | i2c0 | SDA GP6 / SCL GP7 |
+| `/dev/i2c-1` | i2c1 | SDA GP14 / SCL GP15 |
+| `/dev/i2c-fake` 或 `*virt*` | fake fd=2 | 无硬件，用于 P2-B 回归 |
+
+外部需要 4.7k 上拉到 3.3V；内部 pull-up 只作辅助。当前速率 100kHz，单次事务超时 50ms。
+
+Lua 侧保留 mybot 驱动使用的接口：
+
+```text
+i2c_open / i2c_close / i2c_set_addr
+i2c_write_reg / i2c_read_reg
+i2c_write_multi / i2c_read_multi / i2c_read_multi_bytes / i2c_read
+i2c_probe / i2c_scan
+```
+
+### P3 自检脚本
+
+`sdcard/robots/p3.sql`：
+
+```sql
+CREATE TABLE I2C (name String, path String);
+INSERT INTO I2C (name, path) VALUES ('i2c-0', '/dev/i2c-0');
+
+CREATE TABLE P3Check (name String, I2C String);
+INSERT INTO P3Check (name, I2C) VALUES ('p3', '$i2c-0');
+```
+
+`sdcard/scripts/p3.mt`：
+
+```mt
+@Action
+p3.scan;
+   1;
+@
+```
+
+P2 运行器现在按 `p3.sql` → `p2b.sql` → `relay-test.sql` 的顺序选择。
+
+预期 VGA：
+
+```text
+P2: using /robots/p3.sql
+P2: device i2c-0 driver=I2C controller=-
+P2: device p3 driver=P3Check controller=-
+P2: parsed 2 device(s)
+I2C: opened /dev/i2c-0 (SDA GP6, SCL GP7)
+P2: i2c-0.build result=OK
+P2: i2c-0.call result=OK
+P2: $i2c-0 -> 1 field(s)
+P3Check: build fd=0
+P2: p3.build result=OK
+P2: @Action columns=1
+P3Check: scan fd=0 found=0 []
+P2: p3.call result=OK
+P2: p3 call ok
+P3Check: destroy fd=0
+P2: p3.destroy result=OK
+P2: i2c-0.destroy result=OK
+P2: script run completed
+```
+
+如果总线上有 PCA9685（默认 0x40），会变成：
+
+```text
+P3Check: scan fd=0 found=1 [0x40]
+```
+
+没有外设时 `found=0` 是正常结果，说明总线打开和 probe 都完成了。
+
+> P3 目前只实现 I2C；SPI/UART 仍是 P3 后续步骤。真实 I2C 事务失败会返回 `-1`/`nil`，不会伪装成成功。
 
 ## 运行现象
 

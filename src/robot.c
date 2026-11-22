@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
 #include <ctype.h>
@@ -11,6 +12,7 @@
 #include "pico/multicore.h"
 #include "pico/time.h"
 #include "pico/util/queue.h"
+#include "hardware/i2c.h"
 
 #include "console.h"
 #include "lua.h"
@@ -199,6 +201,197 @@ static int robot_os_noop(lua_State *L) {
     return 2;
 }
 
+/* P3：真实 I2C HAL（RP2040 hardware_i2c） --------------------------------
+ * 路径约定：
+ *   /dev/i2c-0 -> i2c0，SDA GP6 / SCL GP7
+ *   /dev/i2c-1 -> i2c1，SDA GP14 / SCL GP15
+ *   /dev/i2c-fake 或 *virt* -> fd=2 的假总线（P2-B 回归仍可跑）
+ * 外部需要 4.7k 上拉到 3.3V；内部 pull-up 只作辅助。
+ */
+#define P3_I2C_FAKE_FD 2
+#define P3_I2C_MAX_BYTES 64
+
+typedef struct {
+    bool open;
+    bool fake;
+    i2c_inst_t *inst;
+} p3_i2c_t;
+
+static p3_i2c_t p3_i2c[3];
+
+static bool p3_i2c_fake_path(const char *path) {
+    return strstr(path, "fake") != NULL || strstr(path, "virt") != NULL;
+}
+
+static int p3_i2c_bus_from_path(const char *path) {
+    const char *p = strstr(path, "i2c-");
+    if (p != NULL) {
+        int bus = atoi(p + 4);
+        if (bus == 0 || bus == 1) {
+            return bus;
+        }
+    }
+    if (strstr(path, "i2c0") != NULL) {
+        return 0;
+    }
+    if (strstr(path, "i2c1") != NULL) {
+        return 1;
+    }
+    return -1;
+}
+
+static int robot_lua_i2c_open(lua_State *L) {
+    const char *path = luaL_checkstring(L, 1);
+    if (p3_i2c_fake_path(path)) {
+        p3_i2c[P3_I2C_FAKE_FD].open = true;
+        p3_i2c[P3_I2C_FAKE_FD].fake = true;
+        p3_i2c[P3_I2C_FAKE_FD].inst = NULL;
+        lua_pushinteger(L, P3_I2C_FAKE_FD);
+        return 1;
+    }
+
+    int bus = p3_i2c_bus_from_path(path);
+    if (bus < 0) {
+        lua_pushinteger(L, -1);
+        return 1;
+    }
+    p3_i2c_t *slot = &p3_i2c[bus];
+    if (slot->open) {
+        lua_pushinteger(L, bus);
+        return 1;
+    }
+
+    static const uint8_t sda_pin[2] = {6, 14};
+    static const uint8_t scl_pin[2] = {7, 15};
+    slot->inst = bus == 0 ? i2c0 : i2c1;
+    i2c_init(slot->inst, 100 * 1000);
+    gpio_set_function(sda_pin[bus], GPIO_FUNC_I2C);
+    gpio_set_function(scl_pin[bus], GPIO_FUNC_I2C);
+    gpio_pull_up(sda_pin[bus]);
+    gpio_pull_up(scl_pin[bus]);
+    slot->open = true;
+    slot->fake = false;
+    robot_log("I2C: opened %s (SDA GP%d, SCL GP%d)", path,
+        sda_pin[bus], scl_pin[bus]);
+    lua_pushinteger(L, bus);
+    return 1;
+}
+
+static int robot_lua_i2c_close(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    if (fd >= 0 && fd < 3 && p3_i2c[fd].open) {
+        if (!p3_i2c[fd].fake && p3_i2c[fd].inst != NULL) {
+            i2c_deinit(p3_i2c[fd].inst);
+        }
+        p3_i2c[fd].open = false;
+        p3_i2c[fd].fake = false;
+        p3_i2c[fd].inst = NULL;
+    }
+    lua_pushinteger(L, 0);
+    return 1;
+}
+
+static bool p3_i2c_probe_addr(int fd, int addr) {
+    if (fd < 0 || fd >= 3 || !p3_i2c[fd].open) {
+        return false;
+    }
+    if (p3_i2c[fd].fake) {
+        return addr == 0x40;
+    }
+    uint8_t byte = 0;
+    return i2c_read_timeout_us(p3_i2c[fd].inst, (uint8_t)addr, &byte, 1,
+        false, 2000) == 1;
+}
+
+static int robot_lua_i2c_probe(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    int addr = (int)luaL_checkinteger(L, 2);
+    lua_pushboolean(L, p3_i2c_probe_addr(fd, addr));
+    return 1;
+}
+
+static int robot_lua_i2c_scan(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    lua_newtable(L);
+    int n = 1;
+    for (int addr = 0x08; addr <= 0x77; ++addr) {
+        if (p3_i2c_probe_addr(fd, addr)) {
+            lua_pushinteger(L, addr);
+            lua_rawseti(L, -2, n++);
+        }
+    }
+    return 1;
+}
+
+static int robot_lua_i2c_transfer(lua_State *L) {
+    int fd = (int)luaL_checkinteger(L, 1);
+    int addr = (int)luaL_checkinteger(L, 2);
+    luaL_checktype(L, 3, LUA_TTABLE);
+    int read_len = (int)luaL_optinteger(L, 4, 0);
+    int write_len = (int)lua_objlen(L, 3);
+
+    if (fd < 0 || fd >= 3 || !p3_i2c[fd].open ||
+        addr < 0 || addr > 0x7F ||
+        write_len < 0 || write_len > P3_I2C_MAX_BYTES ||
+        read_len < 0 || read_len > P3_I2C_MAX_BYTES) {
+        lua_pushnil(L);
+        lua_pushliteral(L, "invalid i2c arguments");
+        return 2;
+    }
+
+    uint8_t wbuf[P3_I2C_MAX_BYTES];
+    uint8_t rbuf[P3_I2C_MAX_BYTES];
+    for (int i = 0; i < write_len; ++i) {
+        lua_rawgeti(L, 3, i + 1);
+        int v = (int)lua_tointeger(L, -1);
+        lua_pop(L, 1);
+        if (v < 0 || v > 255) {
+            lua_pushnil(L);
+            lua_pushliteral(L, "i2c byte out of range");
+            return 2;
+        }
+        wbuf[i] = (uint8_t)v;
+    }
+
+    if (p3_i2c[fd].fake) {
+        lua_createtable(L, read_len, 0);
+        for (int i = 0; i < read_len; ++i) {
+            lua_pushinteger(L, 0);
+            lua_rawseti(L, -2, i + 1);
+        }
+        return 1;
+    }
+
+    i2c_inst_t *inst = p3_i2c[fd].inst;
+    if (write_len > 0) {
+        int rc = i2c_write_timeout_us(inst, (uint8_t)addr, wbuf, (size_t)write_len,
+            read_len > 0, 50000);
+        if (rc != write_len) {
+            robot_log("I2C: write failed fd=%d addr=0x%02X rc=%d", fd, addr, rc);
+            lua_pushnil(L);
+            lua_pushliteral(L, "i2c write failed");
+            return 2;
+        }
+    }
+    if (read_len > 0) {
+        int rc = i2c_read_timeout_us(inst, (uint8_t)addr, rbuf, (size_t)read_len,
+            false, 50000);
+        if (rc != read_len) {
+            robot_log("I2C: read failed fd=%d addr=0x%02X rc=%d", fd, addr, rc);
+            lua_pushnil(L);
+            lua_pushliteral(L, "i2c read failed");
+            return 2;
+        }
+    }
+
+    lua_createtable(L, read_len, 0);
+    for (int i = 0; i < read_len; ++i) {
+        lua_pushinteger(L, rbuf[i]);
+        lua_rawseti(L, -2, i + 1);
+    }
+    return 1;
+}
+
 /* P1-C：Timer.lua 只需要阻塞毫秒。分片睡眠让 stop 请求在 50ms 内可见，
  * 同时因为 core1 独占机器人运行时，core0 的 VGA/USB 不受影响。 */
 static int robot_lua_milli_sleep(lua_State *L) {
@@ -227,6 +420,11 @@ static void robot_openlibs(lua_State *L) {
 
     lua_register(L, "print", robot_lua_print);
     lua_register(L, "milli_sleep", robot_lua_milli_sleep);
+    lua_register(L, "__i2c_open", robot_lua_i2c_open);
+    lua_register(L, "__i2c_close", robot_lua_i2c_close);
+    lua_register(L, "__i2c_transfer", robot_lua_i2c_transfer);
+    lua_register(L, "__i2c_probe", robot_lua_i2c_probe);
+    lua_register(L, "__i2c_scan", robot_lua_i2c_scan);
 
     lua_newtable(L);
     lua_pushcfunction(L, robot_os_getenv); lua_setfield(L, -2, "getenv");
@@ -1286,9 +1484,14 @@ static void p2_destroy_devices(lua_State *L) {
 }
 
 static bool robot_p2_run(lua_State *L) {
-    const char *sql_path = "/robots/p2b.sql";
-    const char *mt_path = "/scripts/p2b.mt";
+    const char *sql_path = "/robots/p3.sql";
+    const char *mt_path = "/scripts/p3.mt";
     size_t n = p2_read_file(sql_path, p2_sql_buf, sizeof(p2_sql_buf));
+    if (n == 0) {
+        sql_path = "/robots/p2b.sql";
+        mt_path = "/scripts/p2b.mt";
+        n = p2_read_file(sql_path, p2_sql_buf, sizeof(p2_sql_buf));
+    }
     if (n == 0) {
         sql_path = "/robots/relay-test.sql";
         mt_path = "/scripts/relay-test.mt";
