@@ -38,6 +38,7 @@ typedef enum {
     ROBOT_CMD_SQL,
     ROBOT_CMD_UNLOAD,
     ROBOT_CMD_ACTION,
+    ROBOT_CMD_REPEAT,
 } robot_cmd_type_t;
 
 typedef struct {
@@ -4297,6 +4298,31 @@ void robot_send_action(const char *name) {
     robot_send_cmd(ROBOT_CMD_ACTION, name);
 }
 
+void robot_send_repeat(const char *arg) {
+    robot_send_cmd(ROBOT_CMD_REPEAT, arg);
+}
+
+static bool p2_parse_uint_arg(const char **pp, int *out) {
+    const char *p = *pp;
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!isdigit((unsigned char)*p)) {
+        return false;
+    }
+    int v = 0;
+    while (isdigit((unsigned char)*p)) {
+        v = v * 10 + (*p - '0');
+        if (v > 1000000) {
+            return false;
+        }
+        ++p;
+    }
+    *out = v;
+    *pp = p;
+    return true;
+}
+
 void robot_core1(void) {
     robot_log("core1: robot runtime started");
     robot_busy = true;
@@ -4442,6 +4468,84 @@ void robot_core1(void) {
             last_lua_heap_kb = lua_heap_kb(p2_active_L);
             robot_log("core1: action finished, devices=%d heap=%dKB",
                 p2_ndevices, last_lua_heap_kb);
+            break;
+        }
+        case ROBOT_CMD_REPEAT: {
+            if (!p2_active || p2_active_L == NULL) {
+                robot_log("core1: /repeat needs an active profile; use /run first");
+                break;
+            }
+            char name[P2_MAX_NAME];
+            int ni = 0;
+            bool name_ok = true;
+            char *ap = cmd.arg;
+            while (*ap != '\0' && isspace((unsigned char)*ap)) {
+                ++ap;
+            }
+            while (*ap != '\0' && !isspace((unsigned char)*ap)) {
+                if (ni >= (int)sizeof(name) - 1) {
+                    name_ok = false;
+                    break;
+                }
+                name[ni++] = *ap++;
+            }
+            name[ni] = '\0';
+            int count = 1;
+            int delay_ms = 0;
+            const char *cp = ap;
+            if (*cp != '\0') {
+                if (!p2_parse_uint_arg(&cp, &count)) {
+                    count = -1;
+                }
+                if (count >= 0 && *cp != '\0') {
+                    if (!p2_parse_uint_arg(&cp, &delay_ms)) {
+                        delay_ms = -1;
+                    }
+                }
+            }
+            while (*cp != '\0' && isspace((unsigned char)*cp)) {
+                ++cp;
+            }
+            bool valid = name_ok && name[0] != '\0';
+            for (int q = 0; name[q] != '\0'; ++q) {
+                if (!isalnum((unsigned char)name[q]) && name[q] != '_' &&
+                    name[q] != '-') {
+                    valid = false;
+                    break;
+                }
+            }
+            if (!valid || count < 1 || count > 1000 || delay_ms < 0 ||
+                delay_ms > 60000 || *cp != '\0') {
+                robot_log("core1: /repeat usage: /repeat <name> [count] [delay_ms]");
+                break;
+            }
+            char path[64];
+            snprintf(path, sizeof(path), "/scripts/%s.mt", name);
+            robot_stop = false;
+            robot_busy = true;
+            robot_log("core1: repeat %s x%d delay=%dms", path, count, delay_ms);
+            int done = 0;
+            for (int i = 0; i < count && !robot_stop; ++i) {
+                size_t n = p2_read_file(path, p2_mt_buf, sizeof(p2_mt_buf));
+                if (n == 0) {
+                    break;
+                }
+                snprintf(p2_active_mt, sizeof(p2_active_mt), "%s", path);
+                p2_run_mt(p2_active_L);
+                ++done;
+                if (i + 1 < count && delay_ms > 0) {
+                    int left = delay_ms;
+                    while (left > 0 && !robot_stop) {
+                        int step = left > 20 ? 20 : left;
+                        sleep_ms((uint32_t)step);
+                        left -= step;
+                    }
+                }
+            }
+            robot_busy = false;
+            last_lua_heap_kb = lua_heap_kb(p2_active_L);
+            robot_log("core1: repeat finished %d/%d, devices=%d heap=%dKB",
+                done, count, p2_ndevices, last_lua_heap_kb);
             break;
         }
         case ROBOT_CMD_UNLOAD:

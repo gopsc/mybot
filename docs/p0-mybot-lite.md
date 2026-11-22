@@ -36,6 +36,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 28. **P27：`@SQL` UPDATE / DROP TABLE**
 29. **P28：常驻 Lua 状态 + UART `/sql` 热补丁**
 30. **P29：`/action` 在 active 结构上重播动作脚本**
+31. **P30：`/repeat` 批量重播动作脚本**
 
 还没有实现：完整 `@Merge` 语义、热 SQL 事务回滚、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -112,7 +113,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-265696    0 100020
+266752    0 100020
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -154,6 +155,7 @@ RX GP1
 /sql name     对当前 active 结构应用 /sql/name.sql
 /action name  在 active 结构上重播 /scripts/name.mt
 /action       重播最近一次动作脚本
+/repeat name [count] [delay_ms]  批量重播
 /unload       销毁 active 设备并关闭 Lua
 /help         显示命令摘要
 ↑ / ↓         命令历史（ANSI，最近 8 条）
@@ -823,6 +825,7 @@ core0 的 UART0 控制台提供行式命令；`/` 可写可不写：
 /sql name     对当前 active 结构应用 /sql/name.sql
 /action name  在 active 结构上重播 /scripts/name.mt
 /action       重播最近一次动作脚本
+/repeat name [count] [delay_ms]  批量重播
 /unload       销毁 active 设备并关闭 Lua
 /help         显示命令摘要
 ↑ / ↓         命令历史（ANSI，最近 8 条）
@@ -1658,7 +1661,7 @@ P18-A 增加两个控制台命令：
 `/help` 直接在 core0 通过 UART 显示：
 
 ```text
-run [sql] [script] | stop | status | profile | mem | list | sql <name> | action [name] | unload | help
+run [sql] [script] | stop | status | profile | mem | list | sql <name> | action [name] | repeat <name> [count] [delay_ms] | unload | help
 history: terminal up/down (ANSI)
 ```
 
@@ -1673,6 +1676,7 @@ history: terminal up/down (ANSI)
 /list
 /sql <name>
 /action [name]
+/repeat <name> [count] [delay_ms]
 /unload
 /help
 ```
@@ -2103,7 +2107,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-265696     0  100020
+266752     0  100020
 ```
 
 构建：
@@ -2324,9 +2328,67 @@ core1: status idle active=1 devices=1 sql=/robots/p28.sql action=/scripts/p29.mt
 
 - 动作脚本不能新增持久设备，除非使用 `@SQL`
 - 动作脚本结束后没有后台循环
-- 每次 `/action` 只执行一遍脚本
+- 单次 `/action` 只执行一遍；需要批量重播用 `/repeat`
 - 没有事务回滚
 - `/action` 依赖 active 状态；先 `/run`
+
+## P30：/repeat 批量重播
+
+P30-A 增加：
+
+```text
+/repeat <name> [count] [delay_ms]
+```
+
+示例：
+
+```text
+/run p28
+/repeat p29 3 100
+/status
+/unload
+```
+
+行为：
+
+- 从 `/scripts/<name>.mt` 读取动作脚本
+- 默认 `count=1`、`delay_ms=0`
+- `count` 上限 1000，`delay_ms` 上限 60000
+- 每轮重新读 SD 文件，迭代之间可修改脚本
+- 迭代之间的延迟按 20ms 分片，`Ctrl-C` 可以及时停止
+- 每轮都复用当前 active 设备，不重建结构
+- 执行后把 `/scripts/<name>.mt` 设为当前动作脚本，`/action` 可继续重播
+- `/repeat` 执行期间 core1 忙，`/stop` 命令要等它结束；`Ctrl-C` 不受影响（走 core0 停止标志）
+
+测试：
+
+```text
+/run p28
+/repeat p29 3 100
+/status
+/unload
+```
+
+预期关键日志：
+
+```text
+core1: repeat /scripts/p29.mt x3 delay=100ms
+P5Check: call value=5 name=base item=nil angle=nil
+P2: base.call result=OK
+P5Check: call value=5 name=base item=nil angle=nil
+P2: base.call result=OK
+P5Check: call value=5 name=base item=nil angle=nil
+P2: base.call result=OK
+core1: repeat finished 3/3, devices=1 heap=...KB
+core1: status idle active=1 devices=1 sql=/robots/p28.sql action=/scripts/p29.mt
+```
+
+限制：
+
+- 没有后台循环；`/repeat` 是同步执行，结束才回到命令循环
+- `/stop` 命令在 `/repeat` 期间不会被 core1 处理；需要 `Ctrl-C`
+- 脚本里的 `@SQL` 每轮都会执行，可能重复 INSERT / 重复 UPDATE
+- 没有事务回滚
 
 ## 运行现象
 
