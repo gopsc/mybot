@@ -85,6 +85,7 @@ static char lua_file_buf[24 * 1024];
 #define P2_MAX_LINES 96
 #define P2_MAX_NAME 24
 #define P2_MAX_VALUE 32
+#define P2_JSON_MAX 192
 #define P2_SQL_MAX (12 * 1024)
 #define P2_MT_MAX (6 * 1024)
 
@@ -126,6 +127,7 @@ typedef struct {
     int slept;
     p2_field_t fields[P2_MAX_FIELDS];
     int nfields;
+    char json[P2_JSON_MAX];
 } p2_call_result_t;
 
 static p2_device_t p2_devices[P2_MAX_DEVICES];
@@ -1642,6 +1644,133 @@ static size_t p2_read_file(const char *path, char *buf, size_t cap) {
     return read;
 }
 
+static void p2_json_append(char *out, size_t cap, size_t *off,
+        const char *text) {
+    while (*text != '\0' && *off + 1 < cap) {
+        out[(*off)++] = *text++;
+    }
+    out[*off] = '\0';
+}
+
+static void p2_json_escape(char *out, size_t cap, size_t *off,
+        const char *text) {
+    p2_json_append(out, cap, off, "\"");
+    for (const unsigned char *p = (const unsigned char *)text;
+            *p != '\0'; ++p) {
+        char tmp[8];
+        if (*p == '"') {
+            p2_json_append(out, cap, off, "\\\"");
+        } else if (*p == '\\') {
+            p2_json_append(out, cap, off, "\\\\");
+        } else if (*p == '\n') {
+            p2_json_append(out, cap, off, "\\n");
+        } else if (*p == '\r') {
+            p2_json_append(out, cap, off, "\\r");
+        } else if (*p == '\t') {
+            p2_json_append(out, cap, off, "\\t");
+        } else if (*p < 0x20) {
+            snprintf(tmp, sizeof(tmp), "\\u%04X", *p);
+            p2_json_append(out, cap, off, tmp);
+        } else {
+            tmp[0] = (char)*p;
+            tmp[1] = '\0';
+            p2_json_append(out, cap, off, tmp);
+        }
+    }
+    p2_json_append(out, cap, off, "\"");
+}
+
+static void p2_json_value(lua_State *L, int idx, char *out, size_t cap,
+        size_t *off, int depth);
+
+static void p2_json_table(lua_State *L, int absidx, char *out, size_t cap,
+        size_t *off, int depth) {
+    int len = (int)lua_objlen(L, absidx);
+    int count = 0;
+    bool array = len > 0;
+    lua_pushnil(L);
+    while (lua_next(L, absidx) != 0) {
+        if (lua_type(L, -2) != LUA_TNUMBER) {
+            array = false;
+        } else {
+            lua_Number key = lua_tonumber(L, -2);
+            if (key < 1.0 || key != (lua_Number)(int)key) {
+                array = false;
+            }
+        }
+        ++count;
+        lua_pop(L, 1);
+    }
+    if (array && count == len) {
+        p2_json_append(out, cap, off, "[");
+        for (int i = 1; i <= len; ++i) {
+            if (i > 1) {
+                p2_json_append(out, cap, off, ",");
+            }
+            lua_rawgeti(L, absidx, i);
+            p2_json_value(L, lua_gettop(L), out, cap, off, depth + 1);
+            lua_pop(L, 1);
+        }
+        p2_json_append(out, cap, off, "]");
+        return;
+    }
+    p2_json_append(out, cap, off, "{");
+    bool first = true;
+    lua_pushnil(L);
+    while (lua_next(L, absidx) != 0) {
+        if (!first) {
+            p2_json_append(out, cap, off, ",");
+        }
+        first = false;
+        char keybuf[32];
+        if (lua_type(L, -2) == LUA_TSTRING) {
+            p2_json_escape(out, cap, off, lua_tostring(L, -2));
+        } else if (lua_type(L, -2) == LUA_TNUMBER) {
+            snprintf(keybuf, sizeof(keybuf), "%g", (double)lua_tonumber(L, -2));
+            p2_json_escape(out, cap, off, keybuf);
+        } else {
+            p2_json_escape(out, cap, off, "<key>");
+        }
+        p2_json_append(out, cap, off, ":");
+        p2_json_value(L, lua_gettop(L), out, cap, off, depth + 1);
+        lua_pop(L, 1);
+    }
+    p2_json_append(out, cap, off, "}");
+}
+
+static void p2_json_value(lua_State *L, int idx, char *out, size_t cap,
+        size_t *off, int depth) {
+    int absidx = idx > 0 ? idx : lua_gettop(L) + idx + 1;
+    if (depth > 3) {
+        p2_json_append(out, cap, off, "\"...\"");
+        return;
+    }
+    switch (lua_type(L, absidx)) {
+    case LUA_TNIL:
+        p2_json_append(out, cap, off, "null");
+        break;
+    case LUA_TBOOLEAN:
+        p2_json_append(out, cap, off,
+            lua_toboolean(L, absidx) ? "true" : "false");
+        break;
+    case LUA_TNUMBER: {
+        char num[32];
+        snprintf(num, sizeof(num), "%.15g", (double)lua_tonumber(L, absidx));
+        p2_json_append(out, cap, off, num);
+        break;
+    }
+    case LUA_TSTRING:
+        p2_json_escape(out, cap, off, lua_tostring(L, absidx));
+        break;
+    case LUA_TTABLE:
+        p2_json_table(L, absidx, out, cap, off, depth);
+        break;
+    default:
+        p2_json_append(out, cap, off, "\"<unsupported>\"");
+        break;
+    }
+}
+
 static bool p2_lua_call(lua_State *L, int env_ref, const char *label,
         const char *func, const p2_field_t *fields, int nfields,
         p2_call_result_t *out) {
@@ -1704,6 +1833,9 @@ static bool p2_lua_call(lua_State *L, int env_ref, const char *label,
             }
             lua_pop(L, 1);
         }
+        size_t joff = 0;
+        out->json[0] = '\0';
+        p2_json_value(L, lua_gettop(L), out->json, sizeof(out->json), &joff, 0);
     } else {
         out->ok = false;
     }
@@ -2011,6 +2143,10 @@ static void p2_exec_named_reflex(lua_State *L, p2_reflex_t *rf,
 
 static void p2_log_print_result(const p2_device_t *d, const char *param,
         const p2_call_result_t *res) {
+    if (res->json[0] != '\0') {
+        robot_log("P2: [?] %s.%s %s", d->name, param, res->json);
+        return;
+    }
     char extra[ROBOT_LOG_LINE];
     size_t off = 0;
     extra[0] = '\0';

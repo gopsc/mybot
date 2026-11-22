@@ -65,6 +65,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 57. **P56：`/spitest` SPI 回环自检**
 58. **P57：include/merge 路径规范化与安全校验**
 59. **P58：`?` 返回表打印格**
+60. **P60：`?` 嵌套表 JSON 展开**
 60. **P59：`/set` / `/get` 运行时变量**
 
 还没有实现：完整 `@Merge` 预算/嵌套控制块语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
@@ -142,7 +143,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-283016    0 140404
+285424    0 140404
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -270,6 +271,7 @@ sdcard/
     UartCheck.lua
     Switch.lua
     Counter.lua
+    NestedCheck.lua
     P5Check.lua
     bitcompat.lua
     lib/
@@ -319,6 +321,7 @@ sdcard/
     p57.sql
     p58.sql
     p59.sql
+    p60.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -372,6 +375,7 @@ sdcard/
     p57_bad.mt
     p58.mt
     p59.mt
+    p60.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -707,6 +711,7 @@ p53             -> /robots/p53.sql + /scripts/p53.mt（跨层 include-once）
 p57             -> /robots/p57.sql + /scripts/p57.mt（路径规范化）
 p58             -> /robots/p58.sql + /scripts/p58.mt（? 打印格）
 p59             -> /robots/p59.sql + /scripts/p59.mt（/set /get）
+p60             -> /robots/p60.sql + /scripts/p60.mt（嵌套 JSON 打印）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2262,7 +2267,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-283016     0  140404
+285424     0  140404
 ```
 
 构建：
@@ -2597,7 +2602,7 @@ core1: struct cfg.name=pico-x
 - `/vars` 同时列出 `@Vars` 和 `@Alias`
 - `/structs` 先列字段数，再逐字段列出
 - 没有 active 状态时显示 no active devices / no active vars/aliases / no active structs
-- 日志队列深度从 16 提升到 64、单行从 96 提升到 128 字节，避免一次性列出 struct 字段时丢日志
+- 日志队列深度从 16 提升到 64、单行从 96 提升到 224 字节，避免一次性列出 struct 字段时丢日志
 
 限制：
 
@@ -3348,7 +3353,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-283016     0  140404
+285424     0  140404
 ```
 
 限制：
@@ -4076,12 +4081,12 @@ P58-A 支持动作数据格的 `?` 标记：
 - call 成功后打印一行结果摘要：
 
 ```text
-P2: [?] cnt.reading result=OK reading=1
+P2: [?] cnt.reading {"result":"OK","reading":1}
 ```
 
 - `-` 会继承上一行的 `?`，继续打印
 - 同一设备一行多个 `?` 只打印一次
-- 打印内容包含 `result` 和返回表里的标量字段
+- 打印内容包含 `result` 和返回表 JSON（P60 起含嵌套）
 - `@Action`、`@Reflex`、`@Merge` 共用同一派发路径
 
 测试 profile：
@@ -4105,18 +4110,18 @@ cnt.reading;
 ```text
 Counter: reading=1
 P2: cnt call ok
-P2: [?] cnt.reading result=OK reading=1
+P2: [?] cnt.reading {"result":"OK","reading":1}
 Counter: reading=2
 P2: cnt call ok
-P2: [?] cnt.reading result=OK reading=2
+P2: [?] cnt.reading {"result":"OK","reading":2}
 ```
 
 限制：
 
-- 只打印标量返回字段，不展开嵌套表/数组
+- P60 起嵌套表/数组会展开为 JSON（深度 3）
 - 每设备每行最多一行摘要
 - 输出走机器人日志队列和 UART
-- 单行缓冲 128 字节，字段过多会截断
+- JSON 缓冲 192 字节，日志单行 224 字节，字段过多会截断
 - `?` 是保留标记，要传字面文本需用 `$("?")`
 - 尚未上板实测
 
@@ -4182,6 +4187,63 @@ core1: get gain=42
 - 同名 `@Alias` 不会被 `/set` 修改
 - 变量查找仍是首个定义优先
 - 没有变量删除命令
+- 尚未上板实测
+
+## P60：? 嵌套表 JSON 展开
+
+P60-A 把 `?` 打印从标量字段扩展到嵌套表 JSON：
+
+- 返回表序列化为 JSON
+- 支持对象、数组、字符串、数字、布尔
+- 嵌套深度最多 3 层，超过输出 `"..."`
+- 字符串做引号/反斜杠/控制字符转义
+- JSON 缓冲 192 字节
+- 日志单行上限提升到 224 字节
+
+测试模块 `NestedCheck.lua` 返回：
+
+```lua
+{
+  result = "OK",
+  data = { temp = 21, name = "x", arr = {1, 2} },
+  flag = true,
+  n = 3.5,
+}
+```
+
+测试 profile：
+
+```text
+p60
+```
+
+脚本：
+
+```mt
+@Action
+nest.reading;
+  ?;
+@
+```
+
+预期类似：
+
+```text
+NestedCheck: call
+P2: nest call ok
+P2: [?] nest.reading {"flag":true,"data":{"temp":21,"name":"x","arr":[1,2]},"result":"OK","n":3.5}
+```
+
+对象键顺序不保证固定。
+
+限制：
+
+- JSON 仅用于 `?` 打印，不改变驱动参数/返回值
+- 深度上限 3
+- 输出缓冲 192 字节，超出截断
+- 函数/userdata 等类型输出 `"<unsupported>"`
+- 表循环引用没有专门检测，深度上限兜底
+- 键顺序不保证
 - 尚未上板实测
 
 ## 运行现象

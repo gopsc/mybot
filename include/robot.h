@@ -13,7 +13,7 @@
  * 内嵌脚本，验证单状态机、build/call/destroy 和内存水位。
  */
 
-#define ROBOT_LOG_LINE 128
+#define ROBOT_LOG_LINE 224
 #define ROBOT_LOG_QUEUE_DEPTH 64
 #define ROBOT_CMD_QUEUE_DEPTH 8
 #define ROBOT_CMD_ARG 32
