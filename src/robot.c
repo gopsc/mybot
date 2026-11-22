@@ -42,6 +42,8 @@ static char lua_file_buf[32 * 1024];
 #define P2_MAX_COLS 10
 #define P2_MAX_DEVICES 8
 #define P2_MAX_FIELDS 10
+#define P2_MAX_ALIASES 8
+#define P2_MAX_VARS 8
 #define P2_MAX_NAME 24
 #define P2_MAX_VALUE 32
 #define P2_SQL_MAX (12 * 1024)
@@ -51,6 +53,16 @@ typedef struct {
     char key[P2_MAX_NAME];
     char value[P2_MAX_VALUE];
 } p2_field_t;
+
+typedef struct {
+    char name[P2_MAX_NAME];
+    char value[P2_MAX_VALUE];
+} p2_var_t;
+
+typedef struct {
+    char name[P2_MAX_NAME];
+    char target[P2_MAX_NAME];
+} p2_alias_t;
 
 typedef struct {
     char name[P2_MAX_NAME];
@@ -71,11 +83,17 @@ typedef struct {
     char result[16];
     int delay;
     int slept;
+    p2_field_t fields[P2_MAX_FIELDS];
+    int nfields;
 } p2_call_result_t;
 
 static p2_device_t p2_devices[P2_MAX_DEVICES];
 static int p2_ndevices;
 static p2_action_col_t p2_action_cols[P2_MAX_COLS];
+static p2_var_t p2_vars[P2_MAX_VARS];
+static int p2_nvars;
+static p2_alias_t p2_aliases[P2_MAX_ALIASES];
+static int p2_naliases;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
 
@@ -646,6 +664,9 @@ static void p2_unquote(char *s) {
     }
 }
 
+static bool p2_add_field(p2_field_t *fields, int *count, const char *key,
+        const char *value);
+
 static p2_device_t *p2_find_device(const char *name) {
     for (int i = 0; i < p2_ndevices; ++i) {
         if (strcmp(p2_devices[i].name, name) == 0) {
@@ -653,6 +674,56 @@ static p2_device_t *p2_find_device(const char *name) {
         }
     }
     return NULL;
+}
+
+static const char *p2_find_var(const char *name) {
+    for (int i = 0; i < p2_nvars; ++i) {
+        if (strcmp(p2_vars[i].name, name) == 0) {
+            return p2_vars[i].value;
+        }
+    }
+    return NULL;
+}
+
+static void p2_add_var(const char *name, const char *value) {
+    if (p2_nvars >= P2_MAX_VARS) {
+        return;
+    }
+    p2_copy_trim(p2_vars[p2_nvars].name, sizeof(p2_vars[p2_nvars].name), name, NULL);
+    p2_copy_trim(p2_vars[p2_nvars].value, sizeof(p2_vars[p2_nvars].value), value, NULL);
+    p2_unquote(p2_vars[p2_nvars].name);
+    p2_unquote(p2_vars[p2_nvars].value);
+    ++p2_nvars;
+}
+
+static const char *p2_find_alias(const char *name) {
+    for (int i = p2_naliases - 1; i >= 0; --i) {
+        if (strcmp(p2_aliases[i].name, name) == 0) {
+            return p2_aliases[i].target;
+        }
+    }
+    return NULL;
+}
+
+static void p2_add_alias(const char *name, const char *target) {
+    if (p2_naliases >= P2_MAX_ALIASES) {
+        return;
+    }
+    p2_copy_trim(p2_aliases[p2_naliases].name, sizeof(p2_aliases[p2_naliases].name), name, NULL);
+    p2_copy_trim(p2_aliases[p2_naliases].target, sizeof(p2_aliases[p2_naliases].target), target, NULL);
+    p2_unquote(p2_aliases[p2_naliases].name);
+    p2_unquote(p2_aliases[p2_naliases].target);
+    ++p2_naliases;
+}
+
+static void p2_set_meta(p2_device_t *d, const char *key, const char *value) {
+    for (int i = 0; i < d->nmeta; ++i) {
+        if (strcmp(d->meta[i].key, key) == 0) {
+            p2_copy_trim(d->meta[i].value, sizeof(d->meta[i].value), value, NULL);
+            return;
+        }
+    }
+    p2_add_field(d->meta, &d->nmeta, key, value);
 }
 
 static bool p2_add_field(p2_field_t *fields, int *count, const char *key,
@@ -667,6 +738,39 @@ static bool p2_add_field(p2_field_t *fields, int *count, const char *key,
 }
 
 static void p2_add_device(const char *driver, char **cols, char **vals, int n) {
+    if (strcmp(driver, "Vars") == 0) {
+        const char *name = NULL;
+        const char *value = NULL;
+        for (int i = 0; i < n; ++i) {
+            if (strcmp(cols[i], "name") == 0) {
+                name = vals[i];
+            } else if (strcmp(cols[i], "value") == 0) {
+                value = vals[i];
+            }
+        }
+        if (name != NULL && value != NULL) {
+            p2_add_var(name, value);
+        }
+        return;
+    }
+    if (strcmp(driver, "Alias") == 0) {
+        const char *name = NULL;
+        const char *alias = NULL;
+        for (int i = 0; i < n; ++i) {
+            if (strcmp(cols[i], "name") == 0) {
+                name = vals[i];
+            } else if (strcmp(cols[i], "alias") == 0) {
+                alias = vals[i];
+            }
+        }
+        if (name != NULL && alias != NULL) {
+            p2_add_alias(name, alias);
+        }
+        return;
+    }
+    if (strcmp(driver, "Action") == 0 || strcmp(driver, "Daemon") == 0) {
+        return;
+    }
     if (p2_ndevices >= P2_MAX_DEVICES) {
         robot_log("P2: too many devices (max %d)", P2_MAX_DEVICES);
         return;
@@ -699,6 +803,8 @@ static void p2_add_device(const char *driver, char **cols, char **vals, int n) {
 
 static void p2_parse_sql(void) {
     p2_ndevices = 0;
+    p2_nvars = 0;
+    p2_naliases = 0;
     p2_strip_comments(p2_sql_buf);
     char *cur = p2_sql_buf;
     while ((cur = (char *)p2_strcasestr(cur, "INSERT INTO")) != NULL) {
@@ -829,6 +935,19 @@ static bool p2_lua_call(lua_State *L, int env_ref, const char *label,
             out->slept = (int)lua_tointeger(L, -1);
         }
         lua_pop(L, 1);
+
+        /* 保留结果表里的标量字段，供 $ref 合并 fd/path/baud/delay 等。 */
+        lua_pushnil(L);
+        while (lua_next(L, -2) != 0) {
+            if (lua_type(L, -2) == LUA_TSTRING) {
+                const char *key = lua_tostring(L, -2);
+                const char *value = lua_tostring(L, -1);
+                if (key != NULL && value != NULL && strcmp(key, "result") != 0) {
+                    p2_add_field(out->fields, &out->nfields, key, value);
+                }
+            }
+            lua_pop(L, 1);
+        }
     } else {
         out->ok = false;
     }
@@ -853,6 +972,127 @@ static void p2_add_meta_fields(const p2_device_t *d, p2_field_t *fields, int *n)
             fields[(*n)++] = d->meta[i];
         }
     }
+}
+
+static const char *p2_expand_value(const char *value, char *buf, size_t cap) {
+    const char *name = NULL;
+    size_t len = 0;
+    if (value[0] == '$' && value[1] == '(') {
+        const char *end = strchr(value + 2, ')');
+        if (end != NULL) {
+            name = value + 2;
+            len = (size_t)(end - name);
+        }
+    } else if (value[0] == '$' && value[1] != '\0') {
+        name = value + 1;
+        len = strlen(name);
+    }
+    if (name == NULL || len == 0 || len >= P2_MAX_NAME) {
+        return value;
+    }
+    char key[P2_MAX_NAME];
+    memcpy(key, name, len);
+    key[len] = '\0';
+    const char *var = p2_find_var(key);
+    if (var == NULL) {
+        return value;
+    }
+    p2_copy_trim(buf, cap, var, NULL);
+    return buf;
+}
+
+static bool p2_is_bus_driver(const char *driver) {
+    return strcmp(driver, "I2C") == 0 ||
+           strcmp(driver, "SPI") == 0 ||
+           strcmp(driver, "UART") == 0;
+}
+
+static bool p2_has_refs(const p2_device_t *d) {
+    for (int i = 0; i < d->nmeta; ++i) {
+        if (d->meta[i].value[0] == '$' && d->meta[i].value[1] != '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* 把 $name 解析成：
+ *   - Vars 表里的数值文本；或
+ *   - 另一个设备的 call() 返回值字段（I2C -> fd，SPI -> fd/delay，
+ *     UART -> fd/baud/path）。
+ * 只做一层，与 mybot 的引用装配语义一致。
+ */
+static void p2_resolve_refs_for(lua_State *L, p2_device_t *d) {
+    int n = d->nmeta;
+    for (int i = 0; i < n; ++i) {
+        const char *value = d->meta[i].value;
+        if (value[0] != '$' || value[1] == '\0') {
+            continue;
+        }
+        const char *name = value + 1;
+        const char *var = p2_find_var(name);
+        if (var != NULL) {
+            p2_set_meta(d, d->meta[i].key, var);
+            robot_log("P2: $%s -> %s", name, var);
+            continue;
+        }
+        p2_device_t *src = p2_find_device(name);
+        if (src == NULL || src == d || src->env_ref == LUA_NOREF) {
+            robot_log("P2: unresolved reference $%s", name);
+            continue;
+        }
+        p2_call_result_t res;
+        if (!p2_lua_call(L, src->env_ref, src->name, "call", src->meta,
+                src->nmeta, &res)) {
+            robot_log("P2: reference $%s call failed", name);
+            continue;
+        }
+        for (int k = 0; k < res.nfields; ++k) {
+            p2_set_meta(d, res.fields[k].key, res.fields[k].value);
+        }
+        robot_log("P2: $%s -> %d field(s)", name, res.nfields);
+    }
+}
+
+static bool p2_build_one(lua_State *L, p2_device_t *d) {
+    p2_resolve_refs_for(L, d);
+    char path[64];
+    snprintf(path, sizeof(path), "/modules/%s.lua", d->driver);
+    int env = robot_create_env_from_path(L, path, d->driver);
+    if (env == LUA_NOREF) {
+        robot_log("P2: cannot load driver %s", path);
+        return false;
+    }
+    d->env_ref = env;
+    p2_call_result_t res;
+    if (!p2_lua_call(L, env, d->name, "build", d->meta, d->nmeta, &res)) {
+        robot_log("P2: build %s failed", d->name);
+        return false;
+    }
+    return true;
+}
+
+static bool p2_build_devices(lua_State *L) {
+    bool built[P2_MAX_DEVICES] = {false};
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int i = 0; i < p2_ndevices; ++i) {
+            if (built[i]) {
+                continue;
+            }
+            p2_device_t *d = &p2_devices[i];
+            bool bus = p2_is_bus_driver(d->driver);
+            bool refs = p2_has_refs(d);
+            if (pass == 0 && refs && !bus) {
+                continue;   /* 先建总线/无引用设备，再解析 $ref */
+            }
+            if (p2_build_one(L, d)) {
+                built[i] = true;
+            } else {
+                built[i] = true;   /* 失败也标记，避免第二遍重复 */
+            }
+        }
+    }
+    return true;
 }
 
 static void p2_execute_row(lua_State *L, char **vals, int nvals) {
@@ -884,7 +1124,10 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
                 break;
             }
             if (strcmp(p2_action_cols[j].device, d->name) == 0 && j < nvals) {
-                p2_add_field(fields, &nf, p2_action_cols[j].param, vals[j]);
+                char value_buf[P2_MAX_VALUE];
+                const char *value = p2_expand_value(vals[j], value_buf,
+                    sizeof(value_buf));
+                p2_add_field(fields, &nf, p2_action_cols[j].param, value);
             }
         }
 
@@ -893,7 +1136,13 @@ static void p2_execute_row(lua_State *L, char **vals, int nvals) {
             robot_log("P2: %s call failed", d->name);
             continue;
         }
-        robot_log("P2: %s delay=%d", d->name, res.delay);
+        if (res.delay != 0) {
+            robot_log("P2: %s delay=%d", d->name, res.delay);
+        } else if (res.slept != 0) {
+            robot_log("P2: %s slept=%d", d->name, res.slept);
+        } else {
+            robot_log("P2: %s call ok", d->name);
+        }
 
         if (d->controller[0] != '\0') {
             p2_device_t *ctl = p2_find_device(d->controller);
@@ -924,7 +1173,11 @@ static bool p2_run_mt(lua_State *L) {
     char *save = NULL;
     char *line = strtok_r(p2_mt_buf, "\n", &save);
     bool in_action = false;
+    bool in_alias = false;
+    bool in_vars = false;
     int ncols = 0;
+    int alias_header = 0;
+    int vars_header = 0;
     memset(p2_action_cols, 0, sizeof(p2_action_cols));
 
     while (line != NULL) {
@@ -933,13 +1186,55 @@ static bool p2_run_mt(lua_State *L) {
             line = strtok_r(NULL, "\n", &save);
             continue;
         }
+
+        if (in_alias) {
+            if (line[0] == '@') {
+                in_alias = false;
+            } else if (alias_header == 0) {
+                alias_header = 1;   /* name alias; */
+            } else {
+                char *cells[4];
+                int n = p2_split_ws(line, cells, 4);
+                if (n >= 2) {
+                    p2_add_alias(cells[0], cells[1]);
+                    robot_log("P2: @Alias %s -> %s", cells[0], cells[1]);
+                }
+            }
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+
+        if (in_vars) {
+            if (line[0] == '@') {
+                in_vars = false;
+            } else if (vars_header == 0) {
+                vars_header = 1;    /* name value; */
+            } else {
+                char *cells[4];
+                int n = p2_split_ws(line, cells, 4);
+                if (n >= 2) {
+                    p2_add_var(cells[0], cells[1]);
+                    robot_log("P2: @Vars %s = %s", cells[0], cells[1]);
+                }
+            }
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+
         if (!in_action) {
-            if (strncmp(line, "@Action", 7) == 0) {
+            if (strncmp(line, "@Alias", 6) == 0) {
+                in_alias = true;
+                alias_header = 0;
+            } else if (strncmp(line, "@Vars", 5) == 0) {
+                in_vars = true;
+                vars_header = 0;
+            } else if (strncmp(line, "@Action", 7) == 0) {
                 in_action = true;
             }
             line = strtok_r(NULL, "\n", &save);
             continue;
         }
+
         if (line[0] == '@') {
             break;
         }
@@ -955,8 +1250,13 @@ static bool p2_run_mt(lua_State *L) {
                 *dot = '\0';
                 p2_copy_trim(p2_action_cols[ncols].device,
                     sizeof(p2_action_cols[ncols].device), cells[i], NULL);
+                const char *param = dot + 1;
+                const char *alias = p2_find_alias(param);
+                if (alias != NULL) {
+                    param = alias;
+                }
                 p2_copy_trim(p2_action_cols[ncols].param,
-                    sizeof(p2_action_cols[ncols].param), dot + 1, NULL);
+                    sizeof(p2_action_cols[ncols].param), param, NULL);
                 ++ncols;
             }
             robot_log("P2: @Action columns=%d", ncols);
@@ -972,27 +1272,8 @@ static bool p2_run_mt(lua_State *L) {
     return ncols > 0;
 }
 
-static bool p2_build_devices(lua_State *L) {
-    for (int i = 0; i < p2_ndevices; ++i) {
-        p2_device_t *d = &p2_devices[i];
-        char path[64];
-        snprintf(path, sizeof(path), "/modules/%s.lua", d->driver);
-        int env = robot_create_env_from_path(L, path, d->driver);
-        if (env == LUA_NOREF) {
-            robot_log("P2: cannot load driver %s", path);
-            continue;
-        }
-        d->env_ref = env;
-        p2_call_result_t res;
-        if (!p2_lua_call(L, env, d->name, "build", d->meta, d->nmeta, &res)) {
-            robot_log("P2: build %s failed", d->name);
-        }
-    }
-    return true;
-}
-
 static void p2_destroy_devices(lua_State *L) {
-    for (int i = 0; i < p2_ndevices; ++i) {
+    for (int i = p2_ndevices - 1; i >= 0; --i) {
         p2_device_t *d = &p2_devices[i];
         if (d->env_ref != LUA_NOREF) {
             p2_call_result_t res;
@@ -1005,12 +1286,19 @@ static void p2_destroy_devices(lua_State *L) {
 }
 
 static bool robot_p2_run(lua_State *L) {
-    size_t n = p2_read_file("/robots/relay-test.sql", p2_sql_buf,
-        sizeof(p2_sql_buf));
+    const char *sql_path = "/robots/p2b.sql";
+    const char *mt_path = "/scripts/p2b.mt";
+    size_t n = p2_read_file(sql_path, p2_sql_buf, sizeof(p2_sql_buf));
     if (n == 0) {
-        robot_log("P2: /robots/relay-test.sql unavailable; skip script run");
-        return false;
+        sql_path = "/robots/relay-test.sql";
+        mt_path = "/scripts/relay-test.mt";
+        n = p2_read_file(sql_path, p2_sql_buf, sizeof(p2_sql_buf));
+        if (n == 0) {
+            robot_log("P2: no structure script on SD; skip script run");
+            return false;
+        }
     }
+    robot_log("P2: using %s", sql_path);
     p2_parse_sql();
     robot_log("P2: parsed %d device(s)", p2_ndevices);
     if (p2_ndevices == 0) {
@@ -1018,9 +1306,9 @@ static bool robot_p2_run(lua_State *L) {
     }
     p2_build_devices(L);
 
-    n = p2_read_file("/scripts/relay-test.mt", p2_mt_buf, sizeof(p2_mt_buf));
+    n = p2_read_file(mt_path, p2_mt_buf, sizeof(p2_mt_buf));
     if (n == 0) {
-        robot_log("P2: /scripts/relay-test.mt unavailable");
+        robot_log("P2: %s unavailable", mt_path);
     } else if (!p2_run_mt(L)) {
         robot_log("P2: no @Action block found");
     }
@@ -1080,7 +1368,7 @@ static void robot_lua_smoke(void) {
             robot_log("P1-C: /modules/Timer.lua unavailable; sleep check skipped");
         }
     } else {
-        robot_log("P2: relay-test script run completed");
+        robot_log("P2: script run completed");
     }
 
     if (!p2_ran) {

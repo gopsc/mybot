@@ -31,9 +31,20 @@ function HAL.sys.close(fd)
     return 0
 end
 
-function HAL.i2c_open(path) return -1 end
-function HAL.i2c_close(fd) return -1 end
-function HAL.i2c_set_addr(fd, addr) return false end
+-- P2-B 假 I2C 总线：路径含 fake/virt 时返回句柄 1，便于验证 $ref。
+-- 真实 I2C 会在 P3 HAL 中替换这一层。
+local function fake_i2c_path(path)
+    return type(path) == "string" and (path:find("fake") ~= nil or path:find("virt") ~= nil)
+end
+function HAL.i2c_open(path)
+    if fake_i2c_path(path) then return 1 end
+    return -1
+end
+function HAL.i2c_close(fd) return 0 end
+function HAL.i2c_set_addr(fd, addr) return true end
+function i2c_open(path) return HAL.i2c_open(path) end
+function i2c_close(fd) return HAL.i2c_close(fd) end
+function i2c_set_addr(fd, addr) return HAL.i2c_set_addr(fd, addr) end
 function HAL.spi_open(path) return -1 end
 function HAL.spi_close(fd) return -1 end
 function HAL.uart_open(path, baud) return -1 end

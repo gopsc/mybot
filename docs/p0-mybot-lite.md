@@ -63,7 +63,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-851972    0 127812
+857508    0 128652
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -87,7 +87,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-230108     0  77544
+235636     0  78384
 ```
 
 此时：
@@ -150,14 +150,18 @@ sdcard/
     Relay.lua
     Echo.lua
     Timer.lua
+    I2C.lua
+    RefCheck.lua
     lib/
       HAL.lua
       drv_common.lua
       print_table.lua
   robots/
     relay-test.sql
+    p2b.sql
   scripts/
     relay-test.mt
+    p2b.mt
 ```
 
 `robot.lua` 只做一件事：
@@ -214,65 +218,126 @@ P1-C 增加了最小 `HAL.lua` + 真实 `Timer.lua`：
 - 每设备 env 隔离生效，两个驱动可以同时存在；
 - Lua 的 `print()` 能回到 core0 显示到 VGA。
 
-P2-A 已把运行期 SQL/MT 解析接进来，执行真实 `.sql` / `.mt`。
+P2 已把运行期 SQL/MT 解析接进来，执行真实 `.sql` / `.mt`。
 
-## P2-A：运行期解析 relay-test.sql / relay-test.mt
+## P2-A/P2-B：运行期解析与 `$ref` / `@Alias` / `@Vars`
 
-P2 不再依赖 P1 的硬编码三个 env。只要 SD 上存在：
+P2 不再依赖 P1 的硬编码三个 env。启动时优先尝试：
+
+```text
+/robots/p2b.sql
+/scripts/p2b.mt
+```
+
+不存在时回退到：
 
 ```text
 /robots/relay-test.sql
 /scripts/relay-test.mt
 ```
 
-启动时会自动走 P2，并跳过 P1 的 demo env，避免同一份 `drv_common.lua` 被加载多次。
-
-P2-A 当前使用一个嵌入式精简解析器（不是把 mybot 的 SQLite / C++ 解析器整体搬过来），
-只覆盖下面的子集；后续 P2-B 再决定是否移植完整的 `sqlparse` / `matrix`。
+P2 当前使用一个嵌入式精简解析器（不是把 mybot 的 SQLite / C++ 解析器整体搬过来），
+覆盖下面的子集：
 
 - `INSERT INTO table (col, ...) VALUES (...);`
 - `/* ... */`、`--`、`#` 注释
 - `@Action` 叶子块、列头 `device.param`、数据行
 - 同设备多参数合并成一次 `call`
 - 结构行的 `controller` 列转发
-- `name` / `note` 等字符串元数据
+- 结构 `Vars` 表与 `$var` 元数据替换
+- 结构 `Alias` 表与动作脚本内联 `@Alias`
+- 动作脚本内联 `@Vars` 与 `$(name)` 值替换
+- `$ref`：I2C/SPI/UART 总线行 -> 设备行的 fd/path/baud 字段合并
 
 暂不支持：
 
 - `@if` / `@while`
-- `@Alias` / `@Vars` / `@Struct`
-- `$ref` 引用列
+- `@Struct`
 - 动态 SQL（DELETE/DROP/UPDATE）
 - `@Include` / `@Merge`
+- `@Daemon`
 
-预期 VGA 输出：
+### P2-B 示例：fake I2C + `$ref` + alias + var
+
+`/robots/p2b.sql`：
+
+```sql
+CREATE TABLE I2C (name String, path String);
+INSERT INTO I2C (name, path) VALUES ('i2c-v', '/dev/i2c-fake');
+
+CREATE TABLE Vars (name String, value Number);
+INSERT INTO Vars (name, value) VALUES ('spd', 200);
+
+CREATE TABLE RefCheck (name String, I2C String, address String, note String);
+INSERT INTO RefCheck (name, I2C, address, note)
+  VALUES ('rc0', '$i2c-v', '0x40', '$spd');
+
+CREATE TABLE Timer (name String);
+INSERT INTO Timer (name) VALUES ('t0');
+```
+
+`/scripts/p2b.mt`：
+
+```mt
+@Alias
+name  alias;
+   A  angle;
+@
+
+@Vars
+name  value;
+   n  300;
+@
+
+@Action
+rc0.A  rc0.n  t0.delay;
+   45  $(n)      50;
+@
+```
+
+预期 VGA：
 
 ```text
-P2: device timer-0 driver=Timer controller=-
-P2: device relay0 driver=Relay controller=timer-0
-P2: parsed 2 device(s)
-P2: timer-0.build result=OK
-P2: relay0.build result=OK
-P2: @Action columns=1
-Lua: Relay: test=200 note=hello-relay -> delay=200
-P2: relay0.call result=- delay=200
-P2: relay0 delay=200
-P2: timer-0.call result=OK slept=200
-P2: controller timer-0 result=OK slept=200
-P2: timer-0.destroy result=OK
-P2: relay0.destroy result=OK
-P2: relay-test script run completed
+P2: using /robots/p2b.sql
+P2: device i2c-v driver=I2C controller=-
+P2: device rc0 driver=RefCheck controller=-
+P2: device t0 driver=Timer controller=-
+P2: parsed 3 device(s)
+P2: i2c-v.build result=OK
+P2: t0.build result=OK
+P2: i2c-v.call result=OK
+P2: $spd -> 200
+P2: $i2c-v -> 1 field(s)
+RefCheck: build fd=1 address=0x40 note=200
+P2: rc0.build result=OK
+P2: @Alias A -> angle
+P2: @Vars n = 300
+P2: @Action columns=3
+RefCheck: call fd=1 angle=45 n=300
+P2: rc0.call result=OK
+P2: rc0 call ok
+P2: t0.call result=OK slept=50
+P2: t0 slept=50
+P2: t0.destroy result=OK
+RefCheck: destroy fd=1
+P2: rc0.destroy result=OK
+P2: i2c-v.destroy result=OK
+P2: script run completed
 Lua smoke OK, heap=...KB
 ```
 
-这已经跑通 mybot 的真实链路：
+这证明：
 
-```text
-Relay.call({test=200}) -> {delay=200}
-    -> controller Timer.call({delay=200})
-    -> milli_sleep(200)
-    -> {result=OK, slept=200}
-```
+- `$i2c-v` 从 I2C 总线变量的 `call()` 结果里拿到了 `fd=1`；
+- `$spd` 从结构 `Vars` 表替换成 `200`；
+- 动作脚本 `@Alias A -> angle` 生效；
+- 动作脚本 `@Vars n=300` 和 `$(n)` 生效；
+- 同一行里的 RefCheck 和 Timer 都按各自 env 执行。
+
+### P2-A Relay 示例
+
+`/robots/relay-test.sql` + `/scripts/relay-test.mt` 仍可运行；输出见
+`P2: relay0.call result=- delay=200`、`P2: controller timer-0 result=OK slept=200`。
 
 ## 运行现象
 
