@@ -1276,10 +1276,17 @@ static p2_struct_t *p2_find_struct(const char *name) {
 
 static bool p2_eval_numeric(const char *s, double *out);
 
+static const char *p2_find_alias(const char *name);
+
 static bool p2_lookup_value(const char *name, char *out, size_t cap) {
     const char *var = p2_find_var(name);
     if (var != NULL) {
         p2_copy_trim(out, cap, var, NULL);
+        return true;
+    }
+    const char *alias = p2_find_alias(name);
+    if (alias != NULL) {
+        p2_copy_trim(out, cap, alias, NULL);
         return true;
     }
     const char *dot = strchr(name, '.');
@@ -2578,6 +2585,70 @@ static void p2_parse_directive(int start, int end, bool vars) {
     }
 }
 
+static char *p2_find_header_dot(char *s) {
+    int depth = 0;
+    char quote = '\0';
+    for (char *p = s; *p != '\0'; ++p) {
+        if (quote != '\0') {
+            if (*p == '\\' && p[1] != '\0') {
+                ++p;
+            } else if (*p == quote) {
+                quote = '\0';
+            }
+            continue;
+        }
+        if (*p == '\'' || *p == '"') {
+            quote = *p;
+        } else if (*p == '(') {
+            ++depth;
+        } else if (*p == ')') {
+            if (depth > 0) {
+                --depth;
+            }
+        } else if (*p == '.' && depth == 0) {
+            return p;
+        }
+    }
+    return NULL;
+}
+
+static bool p2_header_expr_inner(const char *raw, char *expr, size_t cap) {
+    size_t n = strlen(raw);
+    if (n < 4 || raw[0] != '$' || raw[1] != '(' || raw[n - 1] != ')') {
+        return false;
+    }
+    p2_copy_trim(expr, cap, raw + 2, raw + n - 1);
+    return expr[0] != '\0';
+}
+
+static const char *p2_eval_header_device(const char *raw, char *buf, size_t cap) {
+    char expr[P2_MAX_VALUE];
+    if (p2_header_expr_inner(raw, expr, sizeof(expr))) {
+        char val[P2_MAX_NAME];
+        if (p2_eval_text(expr, val, sizeof(val))) {
+            p2_copy_trim(buf, cap, val, NULL);
+            return p2_resolve_device_alias(buf);
+        }
+        robot_log("P2: device header expression failed: %s", raw);
+    }
+    return p2_resolve_device_alias(raw);
+}
+
+static const char *p2_eval_header_param(const char *raw, char *buf, size_t cap) {
+    char expr[P2_MAX_VALUE];
+    if (p2_header_expr_inner(raw, expr, sizeof(expr))) {
+        char val[P2_MAX_NAME];
+        if (p2_eval_text(expr, val, sizeof(val))) {
+            p2_copy_trim(buf, cap, val, NULL);
+            return buf;
+        }
+        robot_log("P2: param header expression failed: %s", raw);
+        return raw;
+    }
+    const char *alias = p2_find_alias(raw);
+    return alias != NULL ? alias : raw;
+}
+
 static void p2_exec_action(lua_State *L, int start, int end) {
     if (start >= end) {
         return;
@@ -2590,19 +2661,19 @@ static void p2_exec_action(lua_State *L, int start, int end) {
     memset(p2_action_cols, 0, sizeof(p2_action_cols));
     int ncols = 0;
     for (int i = 0; i < n; ++i) {
-        char *dot = strchr(cells[i], '.');
+        char *dot = p2_find_header_dot(cells[i]);
         if (dot == NULL) {
             continue;
         }
         *dot = '\0';
-        const char *device_name = p2_resolve_device_alias(cells[i]);
+        char dev_buf[P2_MAX_NAME];
+        char param_buf[P2_MAX_NAME];
+        const char *device_name = p2_eval_header_device(cells[i], dev_buf,
+            sizeof(dev_buf));
         p2_copy_trim(p2_action_cols[ncols].device,
             sizeof(p2_action_cols[ncols].device), device_name, NULL);
-        const char *param = dot + 1;
-        const char *alias = p2_find_alias(param);
-        if (alias != NULL) {
-            param = alias;
-        }
+        const char *param = p2_eval_header_param(dot + 1, param_buf,
+            sizeof(param_buf));
         p2_copy_trim(p2_action_cols[ncols].param,
             sizeof(p2_action_cols[ncols].param), param, NULL);
         ++ncols;
@@ -3032,19 +3103,19 @@ static void p2_merge_emit(lua_State *L) {
             for (int c = 0; c < src->ncols && total < P2_MAX_COLS; ++c) {
                 char header[P2_MAX_NAME];
                 p2_copy_trim(header, sizeof(header), src->headers[c], NULL);
-                char *dot = strchr(header, '.');
+                char *dot = p2_find_header_dot(header);
                 if (dot == NULL) {
                     continue;
                 }
                 *dot = '\0';
-                const char *device_name = p2_resolve_device_alias(header);
+                char dev_buf[P2_MAX_NAME];
+                char param_buf[P2_MAX_NAME];
+                const char *device_name = p2_eval_header_device(header, dev_buf,
+                    sizeof(dev_buf));
                 p2_copy_trim(p2_action_cols[total].device,
                     sizeof(p2_action_cols[total].device), device_name, NULL);
-                const char *param = dot + 1;
-                const char *alias = p2_find_alias(param);
-                if (alias != NULL) {
-                    param = alias;
-                }
+                const char *param = p2_eval_header_param(dot + 1, param_buf,
+                    sizeof(param_buf));
                 p2_copy_trim(p2_action_cols[total].param,
                     sizeof(p2_action_cols[total].param), param, NULL);
                 const char *cell = src->rows[row][c];
@@ -3323,19 +3394,19 @@ static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row,
     for (int c = 0; c < r->ncols && total < P2_MAX_COLS; ++c) {
         char header[P2_MAX_NAME];
         p2_copy_trim(header, sizeof(header), r->headers[c], NULL);
-        char *dot = strchr(header, '.');
+        char *dot = p2_find_header_dot(header);
         if (dot == NULL) {
             continue;
         }
         *dot = '\0';
-        const char *device_name = p2_resolve_device_alias(header);
+        char dev_buf[P2_MAX_NAME];
+        char param_buf[P2_MAX_NAME];
+        const char *device_name = p2_eval_header_device(header, dev_buf,
+            sizeof(dev_buf));
         p2_copy_trim(p2_action_cols[total].device,
             sizeof(p2_action_cols[total].device), device_name, NULL);
-        const char *param = dot + 1;
-        const char *alias = p2_find_alias(param);
-        if (alias != NULL) {
-            param = alias;
-        }
+        const char *param = p2_eval_header_param(dot + 1, param_buf,
+            sizeof(param_buf));
         p2_copy_trim(p2_action_cols[total].param,
             sizeof(p2_action_cols[total].param), param, NULL);
         vals[total] = r->rows[row][c];

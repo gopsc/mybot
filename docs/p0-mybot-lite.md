@@ -51,6 +51,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 43. **P42：动作行缺列按 `-` 补齐**
 44. **P43：全 fake HAL 回归 profile + `/device` 详情**
 45. **P44：设备容量 8 → 16**
+46. **P45：列头设备位/参数位表达式**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -127,7 +128,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-274968    0 121616
+275544    0 121616
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -287,6 +288,7 @@ sdcard/
     p42.sql
     p43.sql
     p44.sql
+    p45.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -328,6 +330,7 @@ sdcard/
     p42.mt
     p43.mt
     p44.mt
+    p45.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -647,6 +650,7 @@ p41             -> /robots/p41.sql + /scripts/p41.mt（Reflex/Merge - 继承）
 p42             -> /robots/p42.sql + /scripts/p42.mt（缺列按 - 补齐）
 p43             -> /robots/p43.sql + /scripts/p43.mt（全 fake HAL 回归）
 p44             -> /robots/p44.sql + /scripts/p44.mt（12 设备容量）
+p45             -> /robots/p45.sql + /scripts/p45.mt（列头表达式）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2189,7 +2193,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-274968     0  121616
+275544     0  121616
 ```
 
 构建：
@@ -3275,7 +3279,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-274968     0  121616
+275544     0  121616
 ```
 
 限制：
@@ -3285,6 +3289,56 @@ text    data     bss
 - `P2_MAX_COLS` 仍为 16，设备数不能超过动作列上限
 - RP2040 剩余 RAM 仍要留给 Lua heap，继续扩容需评估
 - 尚未上板实测 12 设备脚本
+
+## P45：列头设备位/参数位表达式
+
+P45-A 支持动作列头两个位置写 `$(...)`：
+
+```mt
+@Alias
+name alias;
+  pref p45;
+@
+
+@Vars
+name value;
+  n 7;
+@
+
+@Action
+$(pref).value  p45.$("it"+"em");
+  $(n)           9;
+@
+```
+
+行为：
+
+- 设备位 `$(pref)` 求值得到 `p45`，再走一层设备别名解析
+- 参数位 `$(...)` 求值得到参数名，不再做参数别名解析
+- `p2_lookup_value` 现在也能读取 `@Alias` 文本，因此表达式里可引用别名
+- 列头切分点会跳过括号/引号内的 `.`，支持 `$(cfg.name).value` 和 `p45.$(cfg.name)`
+- `@Action`、`@Reflex`、`@Merge` 三处列头统一使用同一解析器
+
+测试 profile：
+
+```text
+p45
+```
+
+预期：
+
+```text
+P5Check: call value=7 name=p45 item=9 angle=nil
+P2: p45.call result=OK
+```
+
+限制：
+
+- 列头表达式在动作块进入时求值一次，不随行内捕获变化重算
+- 只支持整个设备位或参数位是 `$(...)`；不支持 `pre-$(x)` 这种混合拼接
+- 设备表达式结果只再解析一层别名
+- 求值失败会记录诊断并回退到原文本，最终可能报 unknown device/param
+- 表达式结果受 `P2_MAX_NAME` 长度限制
 
 ## 运行现象
 
