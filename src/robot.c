@@ -124,6 +124,9 @@ static p2_struct_t p2_structs[P2_MAX_STRUCTS];
 static int p2_nstructs;
 static char p2_sql_buf[P2_SQL_MAX];
 static char p2_mt_buf[P2_MT_MAX];
+static char p2_expanded_buf[P2_MT_MAX * 2];
+static char p2_include_work[P2_MT_MAX];
+static char p2_include_file[P2_MT_MAX];
 static char *p2_lines[P2_MAX_LINES];
 static int p2_nlines;
 
@@ -2232,6 +2235,12 @@ static void p2_exec_lines(lua_State *L, int start, int end) {
             continue;
         }
 
+        if (strncmp(line, "@Merge", 6) == 0) {
+            int close = p2_find_matching(i, end);
+            robot_log("P2: @Merge unsupported; use @Include");
+            i = close + 1;
+            continue;
+        }
         if (strncmp(line, "@Struct(", 8) == 0) {
             int close = p2_find_matching(i, end);
             p2_exec_struct(i, close);
@@ -2302,12 +2311,99 @@ static void p2_exec_lines(lua_State *L, int start, int end) {
     }
 }
 
+static void p2_include_path(const char *row, char *out, size_t cap) {
+    char tmp[128];
+    p2_copy_trim(tmp, sizeof(tmp), row, NULL);
+    size_t n = strlen(tmp);
+    if (n > 0 && tmp[n - 1] == ';') {
+        tmp[--n] = '\0';
+    }
+    p2_trim(tmp);
+    if (tmp[0] == '/') {
+        snprintf(out, cap, "%s", tmp);
+    } else if (strncmp(tmp, "scripts/", 8) == 0) {
+        snprintf(out, cap, "/%s", tmp);
+    } else {
+        snprintf(out, cap, "/scripts/%s", tmp);
+    }
+}
+
+/* @Include 是顶层内容拷贝：在解析前把被包含文件的文本拼到当前位置。
+ * 只支持一层；包含文件里的 @Include 不再递归展开。 */
+static bool p2_expand_includes(const char *src) {
+    memcpy(p2_include_work, src, strlen(src) + 1);
+    size_t out = 0;
+    p2_expanded_buf[0] = '\0';
+    char *save = NULL;
+    char *line = strtok_r(p2_include_work, "\n", &save);
+    bool in_include = false;
+    bool expect_header = false;
+    int included = 0;
+
+    while (line != NULL) {
+        char *t = p2_trim(line);
+        if (in_include) {
+            if (*t == '@') {
+                in_include = false;
+                line = strtok_r(NULL, "\n", &save);
+                continue;
+            }
+            if (expect_header) {
+                expect_header = false;
+                line = strtok_r(NULL, "\n", &save);
+                continue;
+            }
+            char path[128];
+            p2_include_path(t, path, sizeof(path));
+            size_t n = p2_read_file(path, p2_include_file,
+                sizeof(p2_include_file));
+            if (n > 0) {
+                if (out + n + 2 < sizeof(p2_expanded_buf)) {
+                    memcpy(p2_expanded_buf + out, p2_include_file, n);
+                    out += n;
+                    p2_expanded_buf[out++] = '\n';
+                    p2_expanded_buf[out] = '\0';
+                    ++included;
+                } else {
+                    robot_log("P2: @Include output too large");
+                    return false;
+                }
+            }
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        if (strncmp(t, "@Include", 8) == 0) {
+            in_include = true;
+            expect_header = true;
+            line = strtok_r(NULL, "\n", &save);
+            continue;
+        }
+        size_t n = strlen(t);
+        if (out + n + 2 >= sizeof(p2_expanded_buf)) {
+            robot_log("P2: expanded MT too large");
+            return false;
+        }
+        memcpy(p2_expanded_buf + out, t, n);
+        out += n;
+        p2_expanded_buf[out++] = '\n';
+        p2_expanded_buf[out] = '\0';
+        line = strtok_r(NULL, "\n", &save);
+    }
+    if (included > 0) {
+        robot_log("P2: @Include merged %d file(s)", included);
+    }
+    return true;
+}
+
 static bool p2_run_mt(lua_State *L) {
-    p2_strip_comments(p2_mt_buf);
+    if (!p2_expand_includes(p2_mt_buf)) {
+        return false;
+    }
+    p2_strip_comments(p2_expanded_buf);
     p2_nstructs = 0;
     p2_nlines = 0;
     char *save = NULL;
-    char *line = strtok_r(p2_mt_buf, "\n", &save);
+    char *line = strtok_r(p2_expanded_buf, "\n", &save);
     while (line != NULL && p2_nlines < P2_MAX_LINES) {
         p2_lines[p2_nlines++] = line;
         line = strtok_r(NULL, "\n", &save);

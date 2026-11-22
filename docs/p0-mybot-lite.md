@@ -1,6 +1,6 @@
 # P0：mybot-lite 双核、Lua、脚本解析与硬件 HAL
 
-本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5 阶段，验证：
+本分支（`mybot-lite-p0`）从 mybot 迁移到 pico-vga 的 P0/P1/P2/P3/P4/P5/P6 阶段，验证：
 
 1. **core1 阻塞不会影响 core0 的 VGA / 键盘 / 控制台**
 2. **Lua 5.1 能在 RP2040 上启动、加载脚本、执行 `build/call/destroy`，并给出内存水位**
@@ -9,8 +9,9 @@
 5. **真实 I2C/SPI/UART HAL，以及 PCA9685/ADS1015/AD9833 驱动接入**
 6. **`@if` / `@while` 控制流、动作捕获、命令系统与热重载**
 7. **`@Struct` JSON 对象/数组与字段选择**
+8. **顶层 `@Include` 脚本片段**
 
-还没有实现：动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
+还没有实现：@Merge、动态 SQL、完整 mybot 表达式 AST。那些属于后续阶段。
 
 ## 改动
 
@@ -66,7 +67,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-873924    0 131800
+874884    0 156376
 ```
 
 BSS 中包含 16KB core1 栈、38.4KB VGA framebuffer、32KB Lua 源码加载缓冲和其他静态缓冲。
@@ -90,7 +91,7 @@ cmake --build build-headless -j4
 
 ```text
 text    data   bss
-250628     0  81388
+251588     0 105964
 ```
 
 此时：
@@ -177,6 +178,7 @@ sdcard/
     p5.sql
     p5b.sql
     p5c.sql
+    p6.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -192,6 +194,8 @@ sdcard/
     p5.mt
     p5b.mt
     p5c.mt
+    p6.mt
+    parts/inc_p5.mt
     pca9685.mt
     ads1015.mt
     spi.mt
@@ -468,6 +472,7 @@ p4              -> /robots/p4.sql + /scripts/p4.mt（@if/@while 控制流）
 p5              -> /robots/p5.sql + /scripts/p5.mt（平坦 @Struct）
 p5b             -> /robots/p5b.sql + /scripts/p5b.mt（嵌套对象/数组）
 p5c             -> /robots/p5c.sql + /scripts/p5c.mt（@Struct 字段捕获）
+p6              -> /robots/p6.sql + /scripts/p6.mt（@Include）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -848,6 +853,60 @@ p5.value;
 ```text
 P2: capture cfg.value=1
 P5Check: call value=1 name=nil item=nil
+```
+
+## P6：@Include 脚本片段
+
+P6-A 支持顶层 `@Include`：
+
+```mt
+@Struct(cfg)
+{ "value": 9 }
+@
+
+@Include
+path;
+  parts/inc_p5.mt;
+@
+```
+
+`/scripts/parts/inc_p5.mt`：
+
+```mt
+@Action
+p5.value;
+ $(cfg.value);
+@
+```
+
+行为：
+
+- 在解析前把被包含文件的内容拼到 `@Include` 位置
+- 路径相对 `/scripts/`，也接受 `/scripts/...` 绝对路径
+- 支持多个文件
+- 支持 `@Struct` / `@Action` / `@if` / `@while` 等既有语法
+- 只展开一层；被包含文件里的 `@Include` 不会继续递归
+
+`@Merge` 目前不支持，会明确输出：
+
+```text
+P2: @Merge unsupported; use @Include
+```
+
+测试 profile：
+
+```text
+p6
+```
+
+预期关键输出：
+
+```text
+P2: profile=p6
+P2: @Include merged 1 file(s)
+P2: @Struct cfg.value = 9
+P2: device p6 driver=P5Check controller=-
+P5Check: call value=9 name=nil item=nil
 ```
 
 ## 运行现象
