@@ -55,6 +55,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 47. **P46：`@Action` 列头表达式按行重算**
 48. **P47：递归 `@Include` 与循环检测**
 49. **P48：顶层 MT 纳入 include 循环检测**
+50. **P49：`@Merge` 主从别名/变量覆盖**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -131,7 +132,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-275800    0 134932
+276504    0 134940
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -295,6 +296,7 @@ sdcard/
     p45.sql
     p46.sql
     p47.sql
+    p49.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -340,6 +342,7 @@ sdcard/
     p46.mt
     p47.mt
     p48_self.mt
+    p49.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -350,6 +353,7 @@ sdcard/
     parts/merge_39_d.mt
     parts/merge_41_a.mt
     parts/merge_41_b.mt
+    parts/merge_49_leg.mt
     parts/level1.mt
     parts/level2.mt
     parts/inc_chain1.mt
@@ -667,6 +671,7 @@ p45             -> /robots/p45.sql + /scripts/p45.mt（列头表达式）
 p46             -> /robots/p46.sql + /scripts/p46.mt（列头按行重算）
 p47             -> /robots/p47.sql + /scripts/p47.mt（递归 @Include）
 p48_self        -> /scripts/p48_self.mt（顶层自包含负例）
+p49             -> /robots/p49.sql + /scripts/p49.mt（@Merge 主从覆盖）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2209,7 +2214,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-275800     0  134932
+276504     0  134940
 ```
 
 构建：
@@ -3295,7 +3300,7 @@ P5Check: call value=11 name=d11 item=nil angle=nil
 
 ```text
 text    data     bss
-275800     0  134932
+276504     0  134940
 ```
 
 限制：
@@ -3514,6 +3519,68 @@ core1: action finished, devices=1 heap=...KB
 - include 栈容量 8、递归深度 4；超限拒绝
 - `/action` 失败后 active 结构保持不变
 - `@Include` 仍是文本拷贝
+- 尚未上板实测
+
+## P49：@Merge 主从别名/变量覆盖
+
+P49-A 修正 `@Merge` 片段与主脚本的标量优先级：
+
+- 主脚本在 `@Merge` 执行前已有的 `@Alias` / `@Vars` 优先
+- 片段里的同名定义被跳过，并记录 `keeps main binding/value`
+- 两个片段之间定义同名的新别名/变量会中止整次 `@Merge`
+- 仍保持 `@Merge` 设备集不相交检查
+
+测试 profile：
+
+```text
+p49
+```
+
+主脚本：
+
+```mt
+@Alias
+name alias;
+  leg a;
+@
+
+@Merge
+path phase;
+  parts/merge_49_leg.mt 0;
+@
+```
+
+片段：
+
+```mt
+@Alias
+name alias;
+  leg b;
+@
+
+@Action
+leg.value;
+  49;
+@
+```
+
+预期：
+
+```text
+P2: @Merge alias leg keeps main binding
+P2: @Merge ... rows=1
+P5Check: call value=49 name=a item=nil angle=nil
+P2: a.call result=OK
+```
+
+不会调用设备 `b`。
+
+限制：
+
+- 主脚本定义必须已在 `@Merge` 执行前注册
+- 片段之间重复的新别名/变量会整次中止
+- 结构层已有同名定义也按主绑定处理
+- 变量查找仍是首个定义优先，主脚本后置 `@Vars` 的行为不在本阶段保证
 - 尚未上板实测
 
 ## 运行现象

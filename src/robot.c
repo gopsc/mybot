@@ -152,6 +152,9 @@ static p2_merge_src_t p2_merge_srcs[P2_MERGE_FILES];
 static int p2_merge_nsrc;
 static int p2_merge_skip_start = -1;
 static int p2_merge_skip_end = -1;
+static int p2_merge_alias_base;
+static int p2_merge_var_base;
+static bool p2_merge_failed;
 #define P2_MAX_REFLEXES 4
 #define P2_REFLEX_ROWS 8
 #define P2_REFLEX_COLS 6
@@ -2966,10 +2969,51 @@ static bool p2_load_merge_file(const char *path, int phase, p2_merge_src_t *src)
                 char *cells[4];
                 int n = p2_split_ws(t, cells, 4);
                 if (n >= 2) {
+                    char name[P2_MAX_NAME];
+                    p2_copy_trim(name, sizeof(name), cells[0], NULL);
+                    p2_unquote(name);
                     if (state == IN_ALIAS) {
-                        p2_add_alias(cells[0], cells[1]);
+                        int found = -1;
+                        for (int a = 0; a < p2_naliases; ++a) {
+                            if (strcmp(p2_aliases[a].name, name) == 0) {
+                                found = a;
+                                break;
+                            }
+                        }
+                        if (found >= 0) {
+                            if (found < p2_merge_alias_base) {
+                                robot_log("P2: @Merge alias %s keeps main binding",
+                                    name);
+                            } else {
+                                robot_log("P2: @Merge duplicate alias %s in fragments",
+                                    name);
+                                p2_merge_failed = true;
+                                return false;
+                            }
+                        } else {
+                            p2_add_alias(cells[0], cells[1]);
+                        }
                     } else {
-                        p2_add_var(cells[0], cells[1]);
+                        int found = -1;
+                        for (int v = 0; v < p2_nvars; ++v) {
+                            if (strcmp(p2_vars[v].name, name) == 0) {
+                                found = v;
+                                break;
+                            }
+                        }
+                        if (found >= 0) {
+                            if (found < p2_merge_var_base) {
+                                robot_log("P2: @Merge var %s keeps main value",
+                                    name);
+                            } else {
+                                robot_log("P2: @Merge duplicate var %s in fragments",
+                                    name);
+                                p2_merge_failed = true;
+                                return false;
+                            }
+                        } else {
+                            p2_add_var(cells[0], cells[1]);
+                        }
                     }
                 }
             }
@@ -3162,6 +3206,9 @@ static void p2_merge_emit(lua_State *L) {
 
 static void p2_merge_exec(lua_State *L, int start, int end) {
     p2_merge_nsrc = 0;
+    p2_merge_alias_base = p2_naliases;
+    p2_merge_var_base = p2_nvars;
+    p2_merge_failed = false;
     bool header = false;
     int last_phase = 0;
     for (int i = start + 1; i < end; ++i) {
@@ -3205,6 +3252,12 @@ static void p2_merge_exec(lua_State *L, int start, int end) {
         } else {
             robot_log("P2: @Merge cannot load %s", path);
         }
+    }
+    if (p2_merge_failed) {
+        robot_log("P2: @Merge aborted by fragment duplicate");
+        p2_merge_skip_start = -1;
+        p2_merge_skip_end = -1;
+        return;
     }
     /* 主脚本 @Merge 后面的第一张 @Action 与片段对齐。 */
     p2_merge_skip_start = -1;
