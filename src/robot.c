@@ -1867,7 +1867,8 @@ static void p2_apply_captures(const p2_device_t *d, char **vals, int nvals,
 }
 
 static p2_reflex_t *p2_find_named_reflex(const char *name);
-static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row);
+static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row,
+        char prev[][P2_MAX_VALUE], bool *has_prev);
 static void p2_remove_var(const char *name);
 
 static bool p2_reflex_enter(p2_reflex_t *r) {
@@ -1924,8 +1925,10 @@ static void p2_exec_named_reflex(lua_State *L, p2_reflex_t *rf,
         return;
     }
     robot_log("P2: named reflex %s", rf->name);
+    char prev[P2_MAX_COLS][P2_MAX_VALUE];
+    bool has_prev[P2_MAX_COLS] = {false};
     for (int row = 0; row < rf->nrows; ++row) {
-        p2_exec_reflex_row(L, rf, row);
+        p2_exec_reflex_row(L, rf, row, prev, has_prev);
     }
     p2_reflex_leave();
     memcpy(p2_action_cols, outer, sizeof(outer));
@@ -2981,6 +2984,9 @@ static void p2_merge_emit(lua_State *L) {
     }
 
     bool started[P2_MERGE_FILES] = {false};
+    char prev[P2_MERGE_FILES][P2_MERGE_COLS][P2_MAX_VALUE];
+    bool has_prev[P2_MERGE_FILES][P2_MERGE_COLS];
+    memset(has_prev, 0, sizeof(has_prev));
     for (int beat = 0; beat < beats && !robot_stop; ++beat) {
         int total = 0;
         char *vals[P2_MAX_COLS];
@@ -3032,7 +3038,21 @@ static void p2_merge_emit(lua_State *L) {
                 }
                 p2_copy_trim(p2_action_cols[total].param,
                     sizeof(p2_action_cols[total].param), param, NULL);
-                vals[total] = src->rows[row][c];
+                const char *cell = src->rows[row][c];
+                char cap_var[P2_MAX_NAME];
+                char cap_field[P2_MAX_NAME];
+                if (!p2_capture_cell(cell, cap_var, sizeof(cap_var),
+                        cap_field, sizeof(cap_field))) {
+                    if (strcmp(cell, "-") == 0) {
+                        if (has_prev[s][c]) {
+                            cell = prev[s][c];
+                        }
+                    } else {
+                        p2_copy_trim(prev[s][c], P2_MAX_VALUE, cell, NULL);
+                        has_prev[s][c] = true;
+                    }
+                }
+                vals[total] = (char *)cell;
                 ++total;
             }
         }
@@ -3286,7 +3306,8 @@ static void p2_parse_named_reflex(int start, int end) {
     robot_log("P2: named @Reflex %s parsed", name);
 }
 
-static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row) {
+static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row,
+        char prev[][P2_MAX_VALUE], bool *has_prev) {
     int total = 0;
     char *vals[P2_MAX_COLS];
     memset(p2_action_cols, 0, sizeof(p2_action_cols));
@@ -3311,6 +3332,7 @@ static int p2_exec_reflex_row(lua_State *L, p2_reflex_t *r, int row) {
         vals[total] = r->rows[row][c];
         ++total;
     }
+    p2_apply_inheritance(vals, total, prev, has_prev);
     if (total > 0) {
         p2_execute_row(L, vals, total);
     }
@@ -3327,8 +3349,10 @@ static void p2_exec_reflex(lua_State *L, const char *name) {
         return;
     }
     robot_log("P2: @Trigger %s", name);
+    char prev[P2_MAX_COLS][P2_MAX_VALUE];
+    bool has_prev[P2_MAX_COLS] = {false};
     for (int row = 0; row < r->nrows; ++row) {
-        p2_exec_reflex_row(L, r, row);
+        p2_exec_reflex_row(L, r, row, prev, has_prev);
     }
     p2_reflex_leave();
 }

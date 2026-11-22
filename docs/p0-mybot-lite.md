@@ -47,6 +47,7 @@ VGA 显示、framebuffer console、USB HID 键盘/鼠标、中文输入法全部
 39. **P38：`/use` 与 `/autostart` 持久化开机配置**
 40. **P39：`@Merge` 容量扩展、负相位与前导 `-` 跳过**
 41. **P40：`@Action` 行内 `-` 继承**
+42. **P41：`@Reflex` / `@Merge` 的 `-` 继承**
 
 还没有实现：完整 `@Merge` 片段递归/include-once/预算语义、完整 mybot 表达式 AST、trigger 返回值嵌套合并。
 
@@ -123,7 +124,7 @@ picotool uf2 convert build/firmware.elf build/firmware.uf2 --family rp2040
 
 ```text
 text   data   bss
-274648    0 110544
+274984    0 110544
 ```
 
 BSS 中主要是 16KB core1 栈、32KB Lua 源码加载缓冲、SQL/MT 解析缓冲和设备表；
@@ -278,6 +279,7 @@ sdcard/
     p34.sql
     p39.sql
     p40.sql
+    p41.sql
     pca9685.sql
     pca9685_fake.sql
     ads1015.sql
@@ -315,6 +317,7 @@ sdcard/
     p34.mt
     p39.mt
     p40.mt
+    p41.mt
     parts/inc_p6.mt
     parts/merge_ca.mt
     parts/merge_cb.mt
@@ -323,6 +326,8 @@ sdcard/
     parts/merge_39_b.mt
     parts/merge_39_c.mt
     parts/merge_39_d.mt
+    parts/merge_41_a.mt
+    parts/merge_41_b.mt
     parts/level1.mt
     parts/level2.mt
     pca9685.mt
@@ -627,7 +632,8 @@ p29             -> /scripts/p29.mt（/action 重播测试，无独立 SQL）
 p33             -> /robots/p33.sql + /scripts/p33.mt（@SQL 事务回滚）
 p34             -> /robots/p34.sql + /scripts/p34.mt（设备列 @Alias）
 p39             -> /robots/p39.sql + /scripts/p39.mt（@Merge 容量/相位）
-p40             -> /robots/p40.sql + /scripts/p40.mt（行内 - 继承）
+p40             -> /robots/p40.sql + /scripts/p40.mt（@Action 行内 - 继承）
+p41             -> /robots/p41.sql + /scripts/p41.mt（Reflex/Merge - 继承）
 p2b             -> /robots/p2b.sql + /scripts/p2b.mt
 ```
 
@@ -2168,7 +2174,7 @@ P26-A 把 SD 从可选构建项改成固定功能：
 
 ```text
 text    data     bss
-274648     0  110544
+274984     0  110544
 ```
 
 构建：
@@ -2973,7 +2979,7 @@ P5Check: call value=50 name=d item=nil angle=nil
 
 - 仍不是完整 mybot `@Merge`
 - 没有片段递归 `@Merge`、include-once、8MiB 预算、嵌套控制块归并
-- 数据格 `-` 只在“前导未起拍”时跳过；行内继承仍依赖驱动处理
+- 数据格 `-` 只在“前导未起拍”时跳过；P41 起 `@Merge` 行内 `-` 也做框架级继承
 - 负相位整源丢弃只告警，不中止脚本
 - 列数上限仍为 6
 
@@ -3024,8 +3030,81 @@ P2: p40.call result=OK
 限制：
 
 - `-` 继承只在单个 `@Action` / 控制块动作序列内，不跨块
-- `@Reflex`、`@Merge` 暂无框架级继承
+- P41 起 `@Reflex`、`@Merge` 也接入框架级继承
 - `-` 缓存是原始文本，不保存 `$(...)` 求值后的结果
+- 行内缺列仍按当前解析器行为处理
+
+## P41：@Reflex / @Merge 的 `-` 继承
+
+P41-A 把 P40 的 `-` 继承接到 `@Reflex` 和 `@Merge`：
+
+- `@Reflex` / named `@Reflex`：每次反射调用维护自己的上一行缓存
+- `@Merge`：每个源分别维护缓存，`-` 按“源内同列”继承
+- 捕获格仍不参与继承
+- 首行没有可继承值时保留字面 `-`
+
+测试 profile：
+
+```text
+p41
+```
+
+脚本：
+
+```mt
+@Reflex
+name  p41.value  p41.item;
+fire  10         20;
+fire  -          30;
+@
+
+@Trigger
+fire;
+@
+
+@Merge
+path phase;
+  parts/merge_41_a.mt 0;
+  parts/merge_41_b.mt 0;
+@
+```
+
+片段：
+
+```mt
+@Action
+m1.value;
+  100;
+  -;
+@
+```
+
+```mt
+@Action
+m2.value;
+  200;
+  -;
+@
+```
+
+预期：
+
+```text
+P5Check: call value=10 name=p41 item=20 angle=nil
+P5Check: call value=10 name=p41 item=30 angle=nil
+P5Check: call value=100 name=m1 item=nil angle=nil
+P5Check: call value=200 name=m2 item=nil angle=nil
+P5Check: call value=100 name=m1 item=nil angle=nil
+P5Check: call value=200 name=m2 item=nil angle=nil
+P2: @Merge timeline 2 beat(s)
+```
+
+限制：
+
+- 缓存只在单次反射调用 / 单个 merge 源内有效
+- 不跨 `@Action` 块、`@Reflex` 调用或 `/action` 执行
+- 缓存的是原始文本，不是 `$(...)` 求值后的结果
+- `@Merge` 前导 `-` 跳过逻辑与继承缓存相互独立
 - 行内缺列仍按当前解析器行为处理
 
 ## 运行现象
