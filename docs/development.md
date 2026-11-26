@@ -123,10 +123,22 @@ as the only place that knows about frozen paths; other modules call
 Nuitka standalone builds also work: Nuitka does not set `sys.frozen` but injects
 `__compiled__` into every compiled module, which `paths.frozen()` recognises.
 Place the data next to the executable as `pymybot/assets/` (the same layout
-`asset_dir()` probes when `_MEIPASS` is absent). An experimental Windows
-command lives in
-[`tools/nuitka_compile_test.ps1`](../tools/nuitka_compile_test.ps1); it is not
-part of release CI and is not a supported release artifact.
+`asset_dir()` probes when `_MEIPASS` is absent).
+
+[`tools/nuitka_build.py`](../tools/nuitka_build.py) builds the POSIX bundle:
+
+```sh
+pip install -e ".[agent,camera,web,mcp]"      # add gui for PySide6
+pip install nuitka
+python tools/nuitka_build.py                  # add --no-gui, --onefile, --dry-run
+```
+
+It derives the include list from what is installed, so the same command yields a
+CLI-only bundle or a windowed one. After the build it copies the Python driver
+sources that Nuitka skips from data directories and runs the frozen prompt smoke
+test. Windows uses
+[`tools/nuitka_compile_test.ps1`](../tools/nuitka_compile_test.ps1). Neither is
+part of release CI or a supported release artifact.
 
 ### Prompt asset checks
 
