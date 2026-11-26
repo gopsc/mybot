@@ -6,6 +6,8 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0+plus] – 2026-11-26
+
 ### Added
 
 - Block-level lexical scope for MT scripts: `Alias`/`Vars`/`Struct` may be
