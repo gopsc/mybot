@@ -16,6 +16,14 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Agent receipts for requests that provably did not run now carry the reason
+  (SQL syntax, argument validation, path or permission refusal) instead of a
+  generic "not executed" line, so the model can correct itself rather than
+  retrying blind. Dispatched failures stay deliberately vague.
+- `pymybot mcp` crashed at startup (`Server` has no `list_tools`) once the
+  agent extra was installed: `pydantic-ai-slim[mcp]` pulled fastmcp-slim 4,
+  which requires mcp>=2.3, while the server targets the 1.x contract. The
+  agent extra now pins `fastmcp-slim[client]>=3.3,<4`.
 - Asset resolution: a source-tree `assets/<kind>` directory that holds only
   bytecode caches (for example a leftover `assets/modules/__pycache__`) no
   longer shadows the checkout's `modules/`, `robots/` or `scripts/`. It made

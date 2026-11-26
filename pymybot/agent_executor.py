@@ -22,7 +22,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from .agent_skills import SkillsLibrary
 from .agent_workspace import WORKSPACE_TOOLS, Workspace
 from .sandbox import SANDBOX_MODES, describe_backend
-from .errors import BudgetExceeded
+from .errors import BudgetExceeded, ScriptError
 from .hal import HALManager
 from .hardware import Budget, ensure_ok, safe_ident
 from .include import MAX_INCLUDE_BYTES, _Expander, expand_includes
@@ -815,8 +815,14 @@ class RobotExecutor:
                 except BaseException:
                     pass  # close will retry cleanup, never the action.
             result = self._failure(exc, executed)
-            if isinstance(name, str) and name in WORKSPACE_TOOLS and not executed and isinstance(exc, SecurityError):
-                result["error"]["message"] = str(exc)
+            # A request that provably did not run may say why: the reason comes
+            # from the model's own arguments (bad SQL, denied variable, bad
+            # path), so the agent can correct itself instead of retrying blind.
+            # Dispatched failures stay vague; driver text may contain user data.
+            if not executed and isinstance(exc, (ScriptError, SecurityError, ValueError, PermissionError)):
+                reason = " ".join(str(exc).split())[:300]
+                if reason:
+                    result["error"]["message"] = reason
         return self._record(name, result)
 
     async def call(self, name, arguments: dict, *, timeout: float = 180) -> dict:

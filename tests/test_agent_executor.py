@@ -157,6 +157,22 @@ def test_static_context_and_single_owner(setup):
     asyncio.run(scenario())
 
 
+def test_rejected_request_explains_why(setup):
+    # The vague "not executed" text made the agent retry blindly; a request that
+    # provably did not run may name the reason from the model's own arguments.
+    async def scenario():
+        ex = setup.factory()
+        await ex.start()
+        result = await ex.call("query_sql", {"sql": "SHOW TABLES"})
+        rejected(result)
+        assert "end with ';'" in result["error"]["message"]
+        denied = await ex.call("query_sql", {"sql": "DROP TABLE Relay;"})
+        rejected(denied)
+        assert "read-only" in denied["error"]["message"]
+        await ex.close()
+    asyncio.run(scenario())
+
+
 def test_start_honors_deadline_before_validation(setup):
     calls = []
 

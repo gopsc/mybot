@@ -258,7 +258,8 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         return await ctx.deps.dispatch("list_action_scripts", {})
 
     async def query_sql(ctx: RunContext[AgentSession], sql: str) -> dict:
-        """Read structure tables using SELECT * or SHOW TABLES; never mutate SQL."""
+        """Read structure tables using SELECT * or SHOW TABLES; never mutate SQL.
+        Every statement must end with ';' (for example "SHOW TABLES;")."""
         return await ctx.deps.dispatch("query_sql", {"sql": sql})
 
     async def run_action_script(ctx: RunContext[AgentSession], script: str, vars: dict[str, str] | None = None) -> ToolReturn:
