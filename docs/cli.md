@@ -18,6 +18,7 @@ python -m pymybot doctor
 | `pymybot --no-gui ...` | Terminal agent or controller command | Depending on command |
 | `pymybot gui` | Explicit GUI entry | No |
 | `pymybot check --robot SQL [--input MT]` | Static validation of SQL, modules, references and MT/Include syntax | No |
+| `pymybot discover [--buses i2c,spi,uart,ftdi] [--probe]` | Read-only host device enumeration with structure SQL hints | No |
 | `pymybot hardware --robot SQL` | List declared hardware and metadata | No |
 | `pymybot scripts [--scripts-dir DIR]` | List `.mt` action scripts | No |
 | `pymybot query --robot SQL --sql "..."` | `SHOW TABLES;` or `SELECT * FROM table [WHERE ...];` | No |
@@ -28,11 +29,22 @@ python -m pymybot doctor
 | `pymybot serve` | Long-lived stdio JSON-RPC backend | Via requests |
 | `pymybot mcp --robot SQL` | Standard MCP stdio server, read-only by default | Via `--allow-execution` |
 | `pymybot new NAME [--dir DIR] [--force]` | Generate a runnable `robots/`, `scripts/` and `modules/` skeleton | No |
+| `pymybot assets list [--kind all\|robots\|modules\|scripts]` | List bundled asset files, read-only | No |
+| `pymybot assets read --kind KIND --path REL` | Print one bundled asset as UTF-8 text, read-only | No |
 | `pymybot doctor` | Environment/dependency/asset diagnostics, including prompt manifest and safety hashes | No |
 | `pymybot sessions [--prune ...]` | List or prune `~/.mybot/sessions` transcripts | No |
 | `pymybot prompts list` | List runtime prompt layers, hashes and modification status | No |
 | `pymybot prompts restore [--missing-only \| --all --yes]` | Refill missing defaults, or back up and reset all layers | No |
 | `pymybot roles list/create/show/clear-history` | Manage role-owned prompts, skills, MCP and resumable history | No |
+
+`discover` enumerates UART/FTDI/I2C/SPI without opening anything; `--probe`
+only opens and closes real serial ports (no writes, though DTR/RTS may pulse).
+Its `hints` are ready-to-paste `CREATE TABLE`/`INSERT` statements, capped at 64
+entries. `assets` is read-only: paths must stay inside the selected asset root
+and match the kind's suffix (`.sql`, `.mt`, `.py`/`.lua`); symlinks, absolute
+paths and traversal are rejected. For direct controller commands, a relative
+`--robot`/`--input` name that does not exist relative to the current directory
+falls back to the bundled `robots/` or `scripts/` root.
 
 ## Agent roles
 
