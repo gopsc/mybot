@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 from .actions import ActionRunner
-from .errors import ControllerError, DriverError, ScriptError
+from .errors import DriverError, ScriptError
 from .expr import Expression, expr_body
 from .hardware import Alias, Budget, DriverVariable, FLOW, Metadata, Number, Registry, safe_ident
 from .include import expand_includes

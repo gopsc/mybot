@@ -711,7 +711,7 @@ class HALManager:
             raise ValueError("HTTP base requires an http(s):// URL with a host")
         if u.username is not None or u.password is not None or u.query or u.fragment:
             raise ValueError("HTTP base must not embed credentials, query, or fragment")
-        u.port  # property access raises ValueError on malformed ports
+        _ = u.port  # property access raises ValueError on malformed ports
         if not re.fullmatch(r"[0-9A-Za-z.\[\]:\-]+", u.netloc):
             raise ValueError("HTTP base host contains invalid characters")
         path = u.path or "/"

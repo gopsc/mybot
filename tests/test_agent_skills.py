@@ -1,6 +1,5 @@
 """Skills library and agent skill tools: shape checks, sandboxed reads, wiring."""
 import asyncio
-import os
 from pathlib import Path
 import sys
 

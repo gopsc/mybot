@@ -50,7 +50,7 @@ def _loopback_addresses(base):
         return ()
     try:
         parts = urlsplit(base)
-        parts.port
+        _ = parts.port  # property access raises ValueError on malformed ports
     except ValueError:
         return ()
     if parts.scheme not in {"http", "https"}:

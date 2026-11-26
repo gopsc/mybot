@@ -48,7 +48,7 @@ def read_operator_prompt(path, cap=MAX_OPERATOR_PROMPT):
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
-        raise SecurityError("Operator prompt must be UTF-8")
+        raise SecurityError("Operator prompt must be UTF-8") from None
     if "\x00" in text:
         raise SecurityError("Operator prompt contains a NUL byte")
     return text.strip()

@@ -124,11 +124,11 @@ def test_i2c_scan_call_without_build(tmp_path):
     try:
         state.load(MODULES / "I2C_scan.py")
         result = state.call("call", {"name": "scan0"})
-    except Exception:
-        pass  # Expected — fd < 0
     finally:
         state.close()
         hal.close()
+    assert result["result"] == "ERR"
+    assert "build first" in result["message"]
 
 
 # ---- end-to-end via robot.run -------------------------------------------- #

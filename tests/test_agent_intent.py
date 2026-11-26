@@ -6,7 +6,7 @@ import threading
 
 import pytest
 
-from pymybot.agent_intent import INTENTS, TOOLS_BY_INTENT, classify_intent
+from pymybot.agent_intent import INTENTS, classify_intent
 
 pytest.importorskip("pydantic_ai")
 

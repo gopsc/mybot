@@ -409,7 +409,9 @@ class DaemonVariable:
                 self._done.set()
 
     def read(self):
-        self.stopping  # Observe a controller-wide stop even during a long tick.
+        # Deliberate side effect: the property latches a controller-wide stop
+        # into the slot, so a stale snapshot is refused below even mid-tick.
+        _ = self.stopping
         with self.slot.condition:
             if self.slot.status < 0:
                 raise DriverError(f"Daemon '{self.name}' permanently failed (status {self.slot.status}): {self.slot.error}")

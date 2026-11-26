@@ -1362,8 +1362,8 @@ def test_sessions_dialog_lists_filters_deletes_and_prunes(qapp, tmp_path):
     from pymybot.gui.dialogs import SessionsDialog
 
     root = tmp_path / "sessions"
-    first = _fake_session(root, "20261028-090000-12345678", "robots/a.sql", "2026-10-28T09:00:00")
-    second = _fake_session(root, "20261029-120000-abcdef12", "robots/b.sql", "2026-10-29T12:00:00")
+    _fake_session(root, "20261028-090000-12345678", "robots/a.sql", "2026-10-28T09:00:00")
+    _fake_session(root, "20261029-120000-abcdef12", "robots/b.sql", "2026-10-29T12:00:00")
     dialog = SessionsDialog(None, root=root, confirm=lambda *_: True)
     try:
         assert dialog.table.rowCount() == 2
@@ -1774,6 +1774,7 @@ def test_splash_shows_real_status_and_waits_for_entry(qapp):
 def test_splash_can_be_disabled(monkeypatch):
     from types import SimpleNamespace
 
+    pytest.importorskip("PySide6")
     from pymybot.gui import app as gui_app
 
     monkeypatch.delenv("MYBOT_GUI_SPLASH", raising=False)

@@ -92,7 +92,7 @@ class _Executor:
 
 
 def test_role_history_reopens_and_clears(tmp_path):
-    pydantic_ai = pytest.importorskip("pydantic_ai")
+    pytest.importorskip("pydantic_ai")
     from pydantic_ai.messages import ModelResponse, TextPart, UserPromptPart
     from pydantic_ai.models.function import FunctionModel
     from pymybot.agent import AgentConfig, AgentSession

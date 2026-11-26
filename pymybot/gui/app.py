@@ -29,7 +29,7 @@ from ..session_log import session_root
 from . import GuiUnavailable
 from .branding import logo_icon, logo_pixmap
 from .config import GuiConfig, config_home, default_workspace, merge_args
-from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog, PreviewDialog,
+from .dialogs import (AboutDialog, CommandDialog, DoctorDialog, McpConfigDialog,
                       PromptPanel, ResourcePanel, SessionsDialog)
 from .editor import ScriptEditorPanel
 from .protocol import CANCELLED, CliCall, RpcError, ServeClient, cli_args, resolve_python

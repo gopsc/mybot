@@ -245,6 +245,8 @@ class _PinnedExpander(_Expander):
 
 def _bounded(payload):
     """Bound every list and the entire JSON envelope, not just its raw strings."""
+    if not isinstance(payload, dict):
+        raise TypeError("_bounded expects a receipt dictionary")
     clipped = False
 
     def visit(value):
