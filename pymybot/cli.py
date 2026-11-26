@@ -119,6 +119,7 @@ def parser():
     commands = p.add_subparsers(dest="command", required=True)
     descriptions = {
         "check": "Statically validate structure SQL, modules/references and optional action Includes",
+        "discover": "Enumerate host UART/FTDI/I2C/SPI devices read-only and suggest structure SQL",
         "hardware": "List declared hardware without probing or activating it",
         "scripts": "List relative .mt script paths without executing Lua",
         "query": "Read structure tables using SELECT * or SHOW TABLES, without activation",
@@ -134,6 +135,7 @@ def parser():
         "prompts": "List or restore runtime prompt layers without a robot or model",
         "roles": "Create, inspect and clear self-contained Agent roles under ~/.mybot/roles",
         "new": "Create a runnable robot SQL/MT/driver skeleton in the current directory",
+        "assets": "List and read bundled robots/modules/scripts asset files",
     }
     for name, description in descriptions.items():
         command = commands.add_parser(name, help=description, description=description, allow_abbrev=False)
@@ -174,6 +176,24 @@ def parser():
             command.add_argument("--dir", default=".", metavar="DIR",
                                  help="workspace root (default: current directory)")
             command.add_argument("--force", action="store_true", help="overwrite existing generated files")
+            continue
+        if name == "assets":
+            kinds = ("robots", "modules", "scripts")
+            actions = command.add_subparsers(dest="asset_action", required=True)
+            listing = actions.add_parser("list", help="list asset files under a kind root", allow_abbrev=False)
+            listing.add_argument("--kind", choices=kinds + ("all",), default="all",
+                                 help="which asset root to list (default: all)")
+            reader = actions.add_parser("read", help="read one asset file as UTF-8 text", allow_abbrev=False)
+            reader.add_argument("--kind", choices=kinds, required=True)
+            reader.add_argument("--path", required=True, metavar="REL",
+                                help="path relative to the kind's asset root")
+            continue
+        if name == "discover":
+            command.add_argument("--buses", default="all",
+                                 help="comma-separated subset of i2c,spi,uart,ftdi or all (default: all)")
+            command.add_argument("--probe", action="store_true",
+                                 help="briefly open each real UART port to report in-use state;"
+                                      " nothing is written, but DTR/RTS may pulse")
             continue
         if name in {"agent", "gui"}:
             command.add_argument("--role", metavar="NAME",
@@ -359,7 +379,8 @@ def parse_args(argv=None):
         print(f"pymybot {__version__}")
         raise SystemExit(0)
     commands = {"check", "hardware", "scripts", "query", "run", "sample", "apply-sql",
-                 "agent", "gui", "serve", "mcp", "doctor", "sessions", "prompts", "roles", "new"}
+                 "agent", "gui", "serve", "mcp", "doctor", "sessions", "prompts", "roles", "new",
+                 "discover", "assets"}
     # --no-gui is a top-level switch: the GUI is the default entry, so drop it
     # before choosing a command, and let a subcommand keep its own semantics.
     no_gui = "--no-gui" in arguments
@@ -379,6 +400,13 @@ def parse_args(argv=None):
     if not arguments or arguments[0] not in commands | {"--help", "-h"}:
         arguments.insert(0, "agent" if no_gui else "gui")
     args = parser().parse_args(arguments)
+    # --robot/--input default to the bundled asset roots: an absolute path or a
+    # path that already exists relative to CWD wins, otherwise a bare or relative
+    # name resolves under the bundled robots/scripts root.
+    if getattr(args, "robot", None):
+        args.robot = resolve_asset_relative(args.robot, "robots")
+    if getattr(args, "input", None):
+        args.input = resolve_asset_relative(args.input, "scripts")
     if args.command == "mcp":
         if args.allow_hardware and not args.allow_execution:
             raise UsageError("--allow-hardware requires --allow-execution")
@@ -424,6 +452,73 @@ def parse_args(argv=None):
 
 def default_scripts_dir():
     return asset_path("scripts")
+
+
+ASSET_SUFFIXES = {"robots": (".sql",), "modules": (".py", ".lua"), "scripts": (".mt",)}
+
+
+def resolve_asset_relative(value, kind):
+    """Resolve a possibly-relative --robot/--input against its bundled asset root.
+
+    Absolute paths and paths that already exist relative to CWD are returned
+    unchanged; any other relative name resolves under the bundled asset root.
+    """
+    if value is None:
+        return None
+    path = Path(value)
+    if path.is_absolute() or path.exists():
+        return value
+    return str(asset_path(kind) / value)
+
+
+def _asset_root(kind):
+    root = asset_path(kind)
+    if not root.is_dir():
+        raise UsageError(f"Asset root for '{kind}' does not exist: {root}")
+    return root.resolve()
+
+
+def _asset_target(kind, rel):
+    """Resolve a relative asset path safely under its kind root."""
+    if not isinstance(rel, str) or not rel or rel.strip() != rel:
+        raise UsageError("Asset path must be a non-empty, trimmed relative path")
+    candidate = Path(rel)
+    if candidate.is_absolute():
+        raise UsageError("Asset path must be relative to the asset root")
+    root = _asset_root(kind)
+    target = (root / candidate).resolve()
+    if target != root and root not in target.parents:
+        raise UsageError("Asset path escaped the asset root")
+    if target.suffix not in ASSET_SUFFIXES[kind]:
+        raise UsageError(
+            f"Asset path for '{kind}' must end in one of {', '.join(ASSET_SUFFIXES[kind])}")
+    return root, target
+
+
+def assets_command(args):
+    """List or read bundled robots/modules/scripts files."""
+    action = args.asset_action
+    if action == "list":
+        kinds = ("robots", "modules", "scripts") if args.kind == "all" else (args.kind,)
+        listed = {}
+        for kind in kinds:
+            root = _asset_root(kind)
+            files = sorted(
+                path.relative_to(root).as_posix()
+                for path in root.rglob("*")
+                if path.suffix in ASSET_SUFFIXES[kind]
+                and path.is_file() and not path.is_symlink())
+            listed[kind] = {"root": str(root), "files": files}
+        if args.kind == "all":
+            return {"assets": listed, "activated": False}
+        return {"kind": args.kind, **listed[args.kind], "activated": False}
+    root, target = _asset_target(args.kind, args.path)
+    relative = target.relative_to(root).as_posix()
+    if not target.is_file() or target.is_symlink():
+        raise UsageError(f"Asset is not an existing regular file: {relative}")
+    content = read_file(target)
+    return {"kind": args.kind, "path": relative,
+            "bytes": len(content.encode("utf-8")), "content": content}
 
 
 def doctor():
@@ -611,6 +706,14 @@ def execute(args, stop):
     if args.command == "new":
         from .scaffold import create_robot
         return create_robot(args.dir, args.name, force=args.force)
+    if args.command == "assets":
+        return assets_command(args)
+    if args.command == "discover":
+        from .discover import DiscoveryError, discover, parse_buses
+        try:
+            return discover(parse_buses(args.buses), probe=args.probe)
+        except DiscoveryError as exc:
+            raise UsageError(str(exc)) from None
     if args.command == "doctor":
         return doctor()
     if args.command == "prompts":

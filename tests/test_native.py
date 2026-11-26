@@ -459,7 +459,7 @@ class Driver:
     monkeypatch.setattr(robot.hal, "call", trace)
     with pytest.raises(BudgetExceeded):
         robot.active()
-    assert robot.state == "Inactive"
+    assert robot.state == "Aborted" and robot.aborted
     assert "uart_open" not in operations
     assert not robot.hal._handles
 

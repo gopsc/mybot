@@ -17,6 +17,7 @@ _KEYWORDS = frozenset("CREATE TABLE STRING NUMBER INSERT INTO VALUES SELECT FROM
                       "WHERE AND SHOW TABLES DELETE DROP UPDATE SET".split())
 _KINDS = frozenset("CREATE INSERT SELECT SHOW DELETE DROP UPDATE".split())
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
+_MAX_SEPARATORS = 10_000
 # Only Action columns use device.param names (including hyphenated devices).
 # Table names and ordinary columns must retain the stricter identifier grammar.
 _ACTION_COLUMN = re.compile(r"[A-Za-z_][A-Za-z_0-9-]*\.[A-Za-z_][A-Za-z_0-9-]*")
@@ -333,6 +334,8 @@ def parse_sql(text: str) -> list[Statement]:
         raise ScriptError("SQL input contains a NUL character")
     if len(text.encode("utf-8")) > _MAX_SCRIPT_BYTES:
         raise ScriptError(f"SQL script exceeds the {_MAX_SCRIPT_BYTES} byte limit")
+    if text.count(";") > _MAX_SEPARATORS:
+        raise ScriptError("Unsupported SQL statement")
     parser = _Parser(_tokens(text))
     statements: list[Statement] = []
     while parser.pos < len(parser.tokens):

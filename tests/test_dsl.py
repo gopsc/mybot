@@ -16,6 +16,7 @@ from pymybot.matrix import Matrix, parse_matrices
 class FakeRegistry:
     def __init__(self, *variables):
         self.variables = {v.name: v for v in variables}
+        self.flow_refs = set()
 
     def get(self, name):
         return self.variables.get(name)
@@ -41,8 +42,20 @@ class FakeRegistry:
             raise ScriptError(f"Expression identifier '{name}' must be an @Vars number or @Struct value")
         return variable.numeric()
 
-    def override(self, name, variable):
+    def override(self, name, variable, *, shadow_struct=False):
         self.variables[name] = variable
+
+    @contextmanager
+    def scope(self, names):
+        names = set(names)
+        saved = {name: self.variables[name] for name in names if name in self.variables}
+        missing = names - set(saved)
+        try:
+            yield self
+        finally:
+            for name in missing:
+                self.variables.pop(name, None)
+            self.variables.update(saved)
 
     @contextmanager
     def session(self):
@@ -106,6 +119,31 @@ def test_matrix_comments_crlf_and_eof():
     assert second.name == "Action"
     assert parse_matrices("# nothing\n\n") == []
     assert parse_matrices("@Action\na b;\n50# split\n60;\n@\n")[0].data == [["50", "60"]]
+
+
+def test_matrix_quoted_cells_keep_delimiters_and_reach_driver():
+    def callback(params):
+        return {"result": "OK", "value": params["p"]}
+
+    device = Driver("d", callback)
+    _, outputs = run('@Action\nd.p;\n$("a b;c#d");\n@\n', device)
+    assert outputs == [{"result": "OK", "value": "a b;c#d"}]
+
+    _, outputs = run('@Action\nd.p;\n$("a\\"b c");\n@\n', device)
+    assert outputs == [{"result": "OK", "value": 'a"b c'}]
+
+
+def test_matrix_quoted_strings_group_condition_names():
+    matrix = parse_matrices('@if(cfg.tag=="a b")\n@Action\nd.p;1;\n@\n@\n')[0]
+    assert matrix.name == 'if(cfg.tag=="a b")'
+    assert matrix.children[0].data == [["1"]]
+
+
+def test_matrix_rejects_unterminated_quoted_cell():
+    with pytest.raises(ScriptError, match="unterminated quoted string"):
+        parse_matrices('@Action\nd.p;\n$("a b);\n@\n')
+    with pytest.raises(ScriptError, match="unterminated quoted string"):
+        parse_matrices('@Action\nd.p;\n$("a b)')
 
 
 def test_matrix_nested_interleaved_implicit_actions():
@@ -173,22 +211,130 @@ def test_matrix_plain_action_keeps_rows_but_reflex_always_has_action_children():
 
 
 @pytest.mark.parametrize("parent", ["Action", "if(0>1)", "while(0>1)", "Reflex(outer)"])
-@pytest.mark.parametrize("declaration", [body("Reflex(inner)"), '@Struct(state)\n{}\n@\n'])
-def test_reflex_and_struct_definitions_are_top_level_only(parent, declaration):
+def test_reflex_definitions_are_top_level_only(parent):
     with pytest.raises(ScriptError):
-        parse_matrices(body(parent, declaration))
+        parse_matrices(body(parent, body("Reflex(inner)")))
+
+
+def _find_matrix(matrices, name):
+    for matrix in matrices:
+        if matrix.name == name or matrix.name.startswith(name + "("):
+            return matrix
+        found = _find_matrix(matrix.children, name)
+        if found is not None:
+            return found
+    return None
+
+
+@pytest.mark.parametrize(("declaration", "expected"), [
+    ('@Struct(state)\n{"x":1}\n@\n', "Struct"),
+    (block("Alias", "name alias", "target dev"), "Alias"),
+    (block("Vars", "name value", "n 1"), "Vars"),
+])
+@pytest.mark.parametrize("parent", ["Action", "if(0>1)", "while(0>1)", "Reflex(outer)"])
+def test_declarations_parse_inside_any_executable_body(declaration, expected, parent):
+    script = body(parent, declaration)
+    assert _find_matrix(parse_matrices(script), expected) is not None
 
 
 @pytest.mark.parametrize("declaration", [block("Alias", "name alias", "target dev"),
                                           block("Vars", "name value", "n 1")])
 @pytest.mark.parametrize("parent", ["Action", "if(0>1)", "while(0>1)"])
 @pytest.mark.parametrize("in_reflex", [False, True])
-def test_scalar_declarations_cannot_be_inside_action_or_control(declaration, parent, in_reflex):
+def test_scalar_declarations_parse_inside_action_or_control(declaration, parent, in_reflex):
     script = body(parent, declaration)
     if in_reflex:
         script = body("Reflex(f)", script)
-    with pytest.raises(ScriptError):
-        parse_matrices(script)
+    assert _find_matrix(parse_matrices(script), "Alias" if "alias" in declaration else "Vars") is not None
+
+
+def test_nested_declarations_are_hoisted_and_restored():
+    dev = Driver()
+    script = body("Action",
+                  block("Action", "dev.p", "$(n)"),
+                  block("Vars", "name value", "n 7"),
+                  block("Action", "dev.p", "$(n)"))
+    registry, _ = run(script, dev)
+    assert dev.calls == [{"p": 7.0}, {"p": 7.0}]
+    assert registry.get("n") is None
+
+
+def test_nested_struct_shadows_outer_and_restores():
+    from pymybot.hardware import Struct
+
+    dev = Driver()
+    original = Struct("s", {"v": 1})
+    script = ('@Action\n@Struct(s)\n{"v":7}\n@\ndev.p;$(s.v);\n@\n'
+              '@Action\ndev.p;$(s.v);\n@\n')
+    registry, _ = run(script, dev, original)
+    assert dev.calls == [{"p": 7.0}, {"p": 1.0}]
+    assert registry.get("s") is original
+
+
+def test_nested_scope_restores_declarations_on_driver_failure():
+    def fail(_params):
+        raise RuntimeError("synthetic failure")
+
+    dev = Driver(callback=fail)
+    script = body("Action", block("Vars", "name value", "n 5"),
+                  block("Action", "dev.p", "$(n)"))
+    registry = FakeRegistry(dev)
+    with pytest.raises(RuntimeError):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert dev.calls == [{"p": 5.0}]
+    assert registry.get("n") is None
+
+
+def test_nested_declaration_cannot_replace_driver():
+    from pymybot.hardware import Registry
+
+    dev = Driver()
+    registry = Registry()
+    registry.add(dev)
+    script = body("Action", block("Vars", "name value", "dev 1"),
+                  block("Action", "dev.p", "$(dev)"))
+    with pytest.raises(ScriptError, match="(?i)cannot replace"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert dev.calls == []
+    assert registry.get("dev") is dev
+
+
+def test_nested_declaration_cannot_replace_flow_reference():
+    from pymybot.hardware import Registry
+
+    dev, protected = Driver(), Number("protected", 42)
+    registry = Registry()
+    registry.add(dev)
+    registry.add(protected)
+    registry.flow_refs.add("protected")
+    script = body("Action", block("Vars", "name value", "protected 1"),
+                  block("Action", "dev.p", "1"))
+    with pytest.raises(ScriptError, match="referenced|override"):
+        ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert dev.calls == []
+    assert registry.get("protected") is protected
+
+
+def test_nested_scope_restores_only_its_own_names():
+    dev = Driver()
+    script = body("Action",
+                  block("Action", "dev.p dev.cap", "2 $outer=reading"),
+                  body("Action", block("Vars", "name value", "n 9"),
+                       block("Action", "dev.p dev.cap", "$(n) $outer=reading")),
+                  block("Action", "dev.p", "$(outer)"))
+    registry, _ = run(script, dev)
+    assert dev.calls == [{"p": 2.0}, {"p": 9.0}, {"p": 2.0}]
+    assert registry.get("n") is None
+    assert registry.get("outer").numeric() == 2.0
+
+
+def test_nested_scope_rejects_duplicate_declarations():
+    dev = Driver()
+    script = body("Action", block("Vars", "name value", "n 1", "n 2"),
+                  block("Action", "dev.p", "$(n)"))
+    with pytest.raises(ScriptError, match="Duplicate"):
+        run(script, dev)
+    assert dev.calls == []
 
 
 @pytest.mark.parametrize("name", ["Reflex", "Reflex()", "Reflex(1bad)", "Reflex(a.b)",
@@ -692,7 +838,7 @@ def test_reflex_action_rejects_invalid_parameter_names(parameter):
     assert dev.calls == []
 
 
-@pytest.mark.parametrize("kind", ["lua", "daemon", "struct"])
+@pytest.mark.parametrize("kind", ["lua", "daemon"])
 @pytest.mark.parametrize("source", ["parameter", "Alias", "Vars"])
 def test_reflex_bindings_cannot_replace_non_scalars(kind, source):
     dev, protected = Driver(), Driver("protected")
@@ -706,6 +852,25 @@ def test_reflex_bindings_cannot_replace_non_scalars(kind, source):
         ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
     assert registry.get("protected") is protected
     assert dev.calls == []
+
+
+@pytest.mark.parametrize("source", ["parameter", "Alias", "Vars"])
+def test_reflex_bindings_can_shadow_struct_and_restore(source):
+    from pymybot.hardware import Registry, Struct
+
+    dev = Driver()
+    original = Struct("protected", {"x": 1})
+    registry = Registry()
+    registry.add(dev)
+    registry.add(original)
+    declaration = "" if source == "parameter" else block(
+        source, "name alias" if source == "Alias" else "name value", "protected 1")
+    script = (body("Reflex(f)", declaration, block("Action", "dev.p", "$(protected)"))
+              + block("Action", "f.protected" if source == "parameter" else "f.unused", "1"))
+    ActionRunner(registry, FakeBudget()).run(parse_matrices(script))
+    assert dev.calls == [{"p": "1" if source == "Alias" else 1.0}]
+    assert registry.get("protected") is original
+    assert original.value == {"x": 1}
 
 
 @pytest.mark.parametrize("source", ["parameter", "Alias", "Vars", "capture"])
@@ -971,6 +1136,47 @@ def test_include_copy_repeated_once_named_files_and_nested_relative_paths(tmp_pa
     matrices = expand(block("Include", "path", "sub/mid.mt") + block("Action", "b.p", "2"), tmp_path)
     assert [m.name for m in matrices] == ["if(1>0)", "if(1>0)", "Action"]
     assert matrices[0].children[0].header == ["a.p"]
+
+
+@pytest.mark.parametrize("parent", [None, "Action", "if(1>0)", "Reflex(step)"])
+def test_included_merges_keep_their_declaring_directory(tmp_path, parent):
+    sub = tmp_path / "sub"
+    deep = sub / "deep"
+    deep.mkdir(parents=True)
+    (deep / "leaf.mt").write_text(block("Action", "b.p", "2"), encoding="utf-8")
+    (tmp_path / "leaf.mt").write_text(block("Action", "wrong.p", "99"), encoding="utf-8")
+    contents = block("Merge", "path", "leaf.mt") + block("Action", "a.p", "1")
+    if parent is not None:
+        contents = body(parent, contents)
+    (deep / "part.mt").write_text(contents, encoding="utf-8")
+    (sub / "mid.mt").write_text(block("Include", "path", "deep/part.mt"), encoding="utf-8")
+    expected = expand(contents, deep)
+    actual = expand(block("Include", "path", "sub/mid.mt"), tmp_path)
+    assert actual == expected
+
+
+def test_sibling_includes_keep_separate_nested_merge_origins(tmp_path):
+    includes, expected = [], []
+    for name, value in (("a", "1"), ("b", "2")):
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / "leaf.mt").write_text(block("Action", name + "_leaf.p", value), encoding="utf-8")
+        contents = body("if(1>0)", block("Merge", "path", "leaf.mt"), block("Action", name + ".p", value))
+        (folder / "part.mt").write_text(contents, encoding="utf-8")
+        includes.append(block("Include", "path", name + "/part.mt"))
+        expected.extend(expand(contents, folder))
+    assert expand("".join(includes), tmp_path) == expected
+
+
+def test_root_and_included_top_level_merges_keep_separate_origins(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (sub / "leaf.mt").write_text(block("Action", "b.p", "2"), encoding="utf-8")
+    (tmp_path / "leaf.mt").write_text(block("Action", "c.p", "3"), encoding="utf-8")
+    (sub / "part.mt").write_text(block("Merge", "path", "leaf.mt") + block("Action", "a.p", "1"),
+                                  encoding="utf-8")
+    matrices = expand(block("Include", "path", "sub/part.mt") + block("Merge", "path", "leaf.mt"), tmp_path)
+    assert matrices[0].rows == [["a.p", "b.p", "c.p"], ["1", "2", "3"]]
 
 
 def test_merge_phase_padding_inherited_phase_and_anchor(tmp_path):
@@ -1556,11 +1762,11 @@ def test_struct_rejects_invalid_declaration_names(name):
         parse_matrices("@" + name + "\n{}\n@\n")
 
 
-def test_struct_top_level_and_json_depth_limits():
+def test_struct_nested_blocks_and_json_depth_limits():
     from pymybot.matrix import struct_json
 
-    with pytest.raises(ScriptError, match="top level"):
-        parse_matrices("@if(1>0)\n@Struct(state)\n{}\n@\n@\n")
+    nested = parse_matrices("@if(1>0)\n@Struct(state)\n{}\n@\n@\n")
+    assert _find_matrix(nested, "Struct") is not None
     with pytest.raises(ScriptError, match="unclosed"):
         parse_matrices("@Struct(state)\n{}")
     assert parse_matrices("@Struct(state)\n" + "[" * 32 + "0" + "]" * 32 + "\n@")

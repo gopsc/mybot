@@ -170,11 +170,11 @@ class _Expander:
             raise ScriptError(f"Cannot parse included script {str(path)[-180:]!r}") from None
 
     def splice(self, seq: list[Matrix], base: Path, depth: int = 0,
-               active: frozenset[Path] = frozenset()) -> list[Matrix]:
+               active: frozenset[Path] = frozenset()) -> list[tuple[Matrix, Path]]:
         out = []
         for matrix in seq:
             if matrix.name.strip() != "Include":
-                out.append(matrix)
+                out.append((matrix, base))
                 continue
             for relative, _ in _specs(matrix):
                 path = self.path(base, relative, depth + 1)
@@ -234,7 +234,8 @@ class _Expander:
                                   "use @Include for content copying")
         return self.accumulate(seq, path.parent, depth)
 
-    def accumulate(self, seq: list[Matrix], base: Path, depth: int) -> dict[str, Matrix | list[Matrix] | None]:
+    def accumulate(self, seq: list[Matrix], base: Path, depth: int, *,
+                   origins: list[Path] | None = None) -> dict[str, Matrix | list[Matrix] | None]:
         acc = {name: _fold(seq, name) for name in ("Alias", "Vars")}
         acc["Struct"] = [matrix for matrix in seq if struct_name(matrix.name) is not None]
         if any(matrix.name.strip() == "Action" and matrix.children for matrix in seq):
@@ -250,11 +251,12 @@ class _Expander:
             # rather than silently losing a copied action.
             _LOG.warning("Top-level @Merge uses only the first @Action; %s later "
                          "@Action block(s) are discarded", actions - 1)
-        for matrix in seq:
+        for index, matrix in enumerate(seq):
             if matrix.name.strip() != "Merge":
                 continue
+            origin = origins[index] if origins is not None else base
             for relative, phase in _specs(matrix):
-                path = self.path(base, relative, depth + 1)
+                path = self.path(origin, relative, depth + 1)
                 parts = self.fragment(path, depth + 1)
                 acc["Struct"].extend(parts.get("Struct", []))
                 for kind in ("Alias", "Vars"):
@@ -274,11 +276,11 @@ class _Expander:
         return acc
 
     def run(self, matrices: list[Matrix]) -> list[Matrix]:
-        seq = self.splice(matrices, self.root)
-        seq = [Matrix(m.name, m.rows, self.nested(m.children, self.root), m.json_text) for m in seq]
+        spliced = self.splice(matrices, self.root)
+        seq = [Matrix(m.name, m.rows, self.nested(m.children, base), m.json_text) for m, base in spliced]
         if not any(m.name.strip() == "Merge" for m in seq):
             return seq
-        acc = self.accumulate(seq, self.root, 0)
+        acc = self.accumulate(seq, self.root, 0, origins=[base for _, base in spliced])
         out = [acc[k] for k in ("Alias", "Vars") if acc[k] is not None] + acc["Struct"]
         action = acc["Action"]
         if action is not None and not any(m.name.strip() == "Action" for m in seq):

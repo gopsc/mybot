@@ -221,7 +221,12 @@ class Robot:
                         consumers.append((driver, path, address, f"{name}[{index}]"))
             for driver, bus_path, address, consumer in consumers:
                 path = self._module(driver + ".lua") if table.name == "Daemon" else self._driver(driver)
-                source = path.read_text(encoding="utf-8")
+                # Bounded read, matching native.compile_driver's 8 MiB ceiling.
+                with path.open("rb") as stream:
+                    raw = stream.read(MAX_SCRIPT_BYTES + 1)
+                if len(raw) > MAX_SCRIPT_BYTES:
+                    raise ScriptError(f"Driver source exceeds {MAX_SCRIPT_BYTES} bytes: {path}")
+                source = raw.decode("utf-8")
                 if not re.search(r"^[ \t]*SINGLE_CONSUMER\b", source, re.MULTILINE):
                     continue
                 try:
@@ -312,7 +317,10 @@ class Robot:
                     Budget(self.stop_event).check()
                     var.build()
             except BaseException:
-                self.deactivate()
+                if self.stop_event.is_set():
+                    self.abort("activation-stopped")
+                else:
+                    self.deactivate()
                 raise
         return self
 
@@ -342,17 +350,19 @@ class Robot:
 
     def _safe_all(self, variables, reason):
         failures = []
-        deadline = time.monotonic() + self.safe_budget_ms / 1000
-        for var in reversed(variables):
-            if var.kind not in {"python", "lua"}:
-                continue
+        candidates = [var for var in reversed(variables)
+                      if var.kind in {"python", "lua"} and var.has_safe()]
+        # Give every driver its own bounded safe() window; a fixed 5s total
+        # silently skipped most drivers on a robot with several devices.
+        budget = max(self.safe_budget_ms / 1000,
+                     len(candidates) * self.safe_timeout_ms / 1000)
+        deadline = time.monotonic() + budget
+        for var in candidates:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 failures.append("safe() budget exhausted before all drivers ran")
                 break
             try:
-                if not var.has_safe():
-                    continue
                 var.safe(reason, timeout=min(self.safe_timeout_ms / 1000, remaining))
             except Exception as exc:
                 message = str(exc).replace("\n", " ")[:512]
@@ -521,6 +531,8 @@ class Robot:
                 try:
                     var.destroy()
                 except Exception as exc:
+                    if var.kind == "daemon" and not var._done.is_set():
+                        raise DriverError(f"Hot deletion failed at '{name}'; worker retained until exit: {exc}") from exc
                     failure = exc
                 self.registry.remove(name)
                 self._metas.pop(name, None)
@@ -583,7 +595,8 @@ class Robot:
                 if overlap:
                     raise ScriptError(f"Cannot delete/update {sorted(overlap)}: still referenced by '{name}'")
             budget.check()
-            delete_first = bool(updates)
+            # Retiring daemons retain device ownership until their workers exit.
+            delete_first = bool(updates) or any(self.registry.require(name).kind == "daemon" for name in removed)
             if delete_first:
                 self._remove_variables(removed, budget)
             before = set(self.registry)
@@ -611,12 +624,19 @@ class Robot:
                     self._remove_variables(removed, budget)
                 budget.check()
             except BaseException as exc:
+                if self.stop_event.is_set():
+                    self.abort("hot-sql-stopped")
+                    raise
                 for name in reversed(list(self.registry)):
                     if name not in before:
+                        variable = self.registry.require(name)
                         try:
-                            self.registry.require(name).destroy()
+                            variable.destroy()
                         except Exception as cleanup_error:
                             print(f"Rollback warning: {cleanup_error}", file=sys.stderr)
+                            if variable.kind == "daemon" and not variable._done.is_set():
+                                self.state = "Deactivating"
+                                continue
                         self.registry.remove(name)
                         self._metas.pop(name, None)
                 self._refresh_flow_refs()

@@ -187,7 +187,12 @@ class _Frame:
 
 
 def parse_matrices(text: str) -> list[Matrix]:
-    """Parse all top-level blocks; whitespace never quotes an expression cell."""
+    """Parse all top-level blocks.
+
+    Whitespace, ``;`` and ``#`` delimit cells only outside a double-quoted
+    segment. A quoted segment is kept verbatim (quotes included) and must close
+    on the same line; use ``\\n`` inside an expression string for a newline.
+    """
     if len(text.encode("utf-8")) > MAX_SCRIPT_BYTES:
         raise ScriptError(f"Script exceeds the {MAX_SCRIPT_BYTES} byte limit")
     # CRLF and LF have identical semantics on every host.
@@ -198,6 +203,7 @@ def parse_matrices(text: str) -> list[Matrix]:
     header: list[str] = []
     line = 1
     at_start, comment, naming = True, False, False
+    quoted, escaped = False, False
 
     def builder() -> _Frame:
         return stack[-1] if stack else scratch
@@ -216,25 +222,22 @@ def parse_matrices(text: str) -> list[Matrix]:
                 raise ScriptError("@Trigger is not supported; call @Reflex(name) from @Action")
             if reflex_name(name) is not None and stack:
                 raise ScriptError("@Reflex definitions may only appear at the top level")
-            if struct_name(name) is not None:
-                if stack:
-                    raise ScriptError("@Struct declarations may only appear at the top level")
-                stack.append(_Frame(Matrix(name, json_text=""), json_header_line=line))
-                return
+            is_struct = struct_name(name) is not None
             if stack:
                 parent = stack[-1]
                 if not (parent.matrix.name == "Action" or is_control(parent.matrix.name)
                         or reflex_name(parent.matrix.name) is not None):
                     raise ScriptError(f"Line {line}: leaf @{parent.matrix.name} "
                                       f"cannot contain nested @{name[:160]}")
-                if name in {"Alias", "Vars"} and reflex_name(parent.matrix.name) is None:
-                    raise ScriptError(f"@{name} declarations require the top level or a Reflex body")
                 if parent.matrix.name == "Action" and parent.matrix.rows:
                     parent.pending, parent.matrix.rows = parent.matrix.rows, []
                 parent.flush()
             if len(stack) >= MAX_BLOCK_DEPTH:
                 raise ScriptError(f"Block nesting depth exceeds {MAX_BLOCK_DEPTH}")
-            stack.append(_Frame(Matrix(name)))
+            if is_struct:
+                stack.append(_Frame(Matrix(name, json_text=""), json_header_line=line))
+            else:
+                stack.append(_Frame(Matrix(name)))
 
     line_prefix = True
     for index, char in enumerate(text):
@@ -254,13 +257,28 @@ def parse_matrices(text: str) -> list[Matrix]:
                     raise ScriptError("Struct JSON must start on the line after its declaration")
                 continue
             if char == "@" and at_line_prefix and _STRUCT_END.match(text, index):
+                frame = stack.pop()
                 frame.matrix.json_text = parse_struct_json("".join(frame.json_chars))
-                out.append(stack.pop().matrix)
+                (stack[-1].matrix.children if stack else out).append(frame.matrix)
                 at_start = True
             else:
                 frame.json_chars.append(char)
                 if char == "\n":
                     line += 1
+            continue
+        if quoted:
+            if char == "\n":
+                raise ScriptError(
+                    f"Line {line}: unterminated quoted string; close it before the "
+                    "line ends (use \\n inside an expression string for a newline)")
+            target = header if naming else builder().token
+            target.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                quoted = False
             continue
         if not comment and char == "#":
             comment = True
@@ -273,6 +291,10 @@ def parse_matrices(text: str) -> list[Matrix]:
             if char == "\n":
                 at_start, comment = True, False
                 line += 1
+        elif char == '"':
+            at_start = False
+            quoted, escaped = True, False
+            (header if naming else builder().token).append(char)
         elif at_start and char in " \t\r":
             continue
         elif at_start and char == "\n":
@@ -303,6 +325,8 @@ def parse_matrices(text: str) -> list[Matrix]:
             at_start = True
         else:
             builder().token.append(char)
+    if quoted:
+        raise ScriptError(f"EOF at line {line}: unterminated quoted string")
     if naming:
         commit_header()
     if stack:

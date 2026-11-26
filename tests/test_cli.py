@@ -842,3 +842,131 @@ def test_camera_script_captures_a_file_image(workspace, capsys):
     shot = result["outputs"][0]
     assert shot["result"] == "OK" and shot["source"] == "file"
     assert shot["format"] == "png" and (shot["width"], shot["height"]) == (2, 2)
+
+
+@pytest.fixture
+def asset_root(tmp_path, monkeypatch):
+    root = tmp_path / "assets"
+    for kind in ("robots", "modules", "scripts"):
+        (root / kind).mkdir(parents=True)
+    monkeypatch.setattr(cli, "asset_path", lambda name: root / name)
+    return root
+
+
+def test_assets_list_reports_each_kind(asset_root, capsys):
+    (asset_root / "robots" / "a.sql").write_text("x", encoding="utf-8")
+    (asset_root / "modules" / "lib").mkdir()
+    (asset_root / "modules" / "lib" / "b.lua").write_text("x", encoding="utf-8")
+    (asset_root / "modules" / "c.py").write_text("x", encoding="utf-8")
+    (asset_root / "scripts" / "d.mt").write_text("x", encoding="utf-8")
+    code, result, _ = invoke(capsys, "assets", "list")
+    assert code == 0 and result["activated"] is False
+    assert result["assets"]["robots"]["files"] == ["a.sql"]
+    assert result["assets"]["modules"]["files"] == ["c.py", "lib/b.lua"]
+    assert result["assets"]["scripts"]["files"] == ["d.mt"]
+    code, result, _ = invoke(capsys, "assets", "list", "--kind", "robots")
+    assert code == 0 and result["kind"] == "robots" and result["files"] == ["a.sql"]
+
+
+@pytest.mark.parametrize("kind, filename", [("robots", "demo.sql"), ("scripts", "demo.mt"),
+                                           ("modules", "Demo.py"), ("modules", "Demo.lua")])
+def test_assets_read_preserves_content(asset_root, capsys, kind, filename):
+    content = "只读示例\n"
+    target = asset_root / kind / filename
+    target.write_text(content, encoding="utf-8", newline="")
+    code, result, _ = invoke(capsys, "assets", "read", "--kind", kind, "--path", filename)
+    assert code == 0 and result["content"] == content and result["path"] == filename
+    assert result["bytes"] == len(content.encode("utf-8"))
+    assert target.read_text(encoding="utf-8") == content
+
+
+@pytest.mark.parametrize("action, options", [("write", ["--content", "changed", "--force"]),
+                                            ("delete", ["--yes"])])
+@pytest.mark.parametrize("filename", ["demo.sql", "new.sql"])
+def test_assets_mutating_commands_are_rejected(asset_root, capsys, action, options, filename):
+    target = asset_root / "robots" / "demo.sql"
+    target.write_text("original", encoding="utf-8")
+    code, result, _ = invoke(capsys, "assets", action, "--kind", "robots", "--path", filename, *options)
+    assert code == 2 and result["error"]["type"] == "UsageError"
+    assert "invalid choice" in result["error"]["message"]
+    assert target.read_text(encoding="utf-8") == "original"
+    assert sorted(path.name for path in (asset_root / "robots").iterdir()) == ["demo.sql"]
+
+
+@pytest.mark.parametrize("path", ["../evil.sql", "demo.txt", "missing.sql"])
+def test_assets_read_rejects_invalid_paths(asset_root, capsys, path):
+    code, result, _ = invoke(capsys, "assets", "read", "--kind", "robots", "--path", path)
+    assert code == 2 and result["error"]["type"] == "UsageError"
+
+
+def test_assets_help_only_advertises_read_commands(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["assets", "--help"])
+    assert exc.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "{list,read}" in help_text
+    assert "write" not in help_text and "delete" not in help_text
+
+
+def test_robot_and_input_resolve_under_asset_root(asset_root):
+    (asset_root / "robots" / "r.sql").write_text(VIRTUAL_SQL, encoding="utf-8")
+    (asset_root / "scripts" / "s.mt").write_text(ACTION, encoding="utf-8")
+    args = cli.parse_args(["check", "--robot", "r.sql", "--input", "s.mt"])
+    assert args.robot == str(asset_root / "robots" / "r.sql")
+    assert args.input == str(asset_root / "scripts" / "s.mt")
+    absolute = str(asset_root / "robots" / "r.sql")
+    args = cli.parse_args(["check", "--robot", absolute])
+    assert args.robot == absolute
+
+
+def test_robot_relative_existing_cwd_wins(asset_root, monkeypatch, tmp_path):
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "local.sql").write_text(VIRTUAL_SQL, encoding="utf-8")
+    monkeypatch.chdir(cwd)
+    args = cli.parse_args(["check", "--robot", "local.sql"])
+    assert args.robot == "local.sql"
+
+
+def test_cli_runs_included_merge_from_declaring_directory(tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    (tmp_path / "main.mt").write_text("@Include\npath;\nsub/part.mt;\n@\n", encoding="utf-8")
+    (sub / "part.mt").write_text("@Merge\npath;\nleaf.mt;\n@\n@Action\nrelay0.test;\n1;\n@\n",
+                                  encoding="utf-8")
+    (sub / "leaf.mt").write_text("@Action\ntimer-0.delay;\n1;\n@\n", encoding="utf-8")
+    (tmp_path / "leaf.mt").write_text("@Action\ntimer-0.delay;\n99;\n@\n", encoding="utf-8")
+    result = run_cli(tmp_path, "run", "--robot", ROOT / "robots/relay-test.sql",
+                     "--input", "main.mt", "--timeout", "10")
+    assert result.returncode == 0, result.stderr
+    assert [output["slept"] for output in json.loads(result.stdout)["outputs"]] == [1, 1]
+
+
+@pytest.mark.parametrize("replace", [False, True])
+def test_bounded_read_rejects_file_changes(tmp_path, monkeypatch, replace):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    if replace and sys.platform == "win32":
+        pytest.skip("Windows cannot replace a file while it is open")
+    path = tmp_path / "input.txt"
+    path.write_text("original", encoding="utf-8")
+    original = os.fdopen
+
+    @contextmanager
+    def fdopen(*args, **kwargs):
+        with original(*args, **kwargs) as stream:
+            def read(count):
+                data = stream.read(count)
+                if replace:
+                    replacement = tmp_path / "replacement.txt"
+                    replacement.write_bytes(data)
+                    replacement.replace(path)
+                else:
+                    path.write_bytes(data + b" changed")
+                return data
+            yield SimpleNamespace(fileno=stream.fileno, read=read)
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    with pytest.raises(SecurityError, match="File changed while reading"):
+        read_file(path)

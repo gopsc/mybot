@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-__all__ = ["asset_dir", "asset_path", "frozen", "package_dir", "source_root"]
+__all__ = ["asset_dir", "asset_path", "bundle_roots", "frozen", "package_dir", "source_root"]
 
 
 def frozen() -> bool:
@@ -25,8 +25,12 @@ def package_dir() -> Path:
 
 
 def source_root() -> Path:
-    """Repository root for a source checkout (the package's parent)."""
-    return package_dir().parent
+    """Repository root for a source checkout (first ancestor with pyproject.toml)."""
+    package = package_dir()
+    for candidate in (package.parent, *package.parents):
+        if (candidate / "pyproject.toml").is_file():
+            return candidate
+    return package.parent
 
 
 def asset_dir() -> Path:
@@ -56,4 +60,20 @@ def asset_path(name: str) -> Path:
     packaged = asset_dir() / name
     if frozen() or packaged.exists():
         return packaged
+    source_asset = source_root() / "assets" / name
+    if source_asset.is_dir():
+        return source_asset
     return source_root() / name
+
+
+def bundle_roots() -> set[Path]:
+    package = package_dir().resolve()
+    roots = {package, asset_dir().resolve()}
+    roots.update(asset_path(kind).resolve() for kind in ("robots", "modules", "scripts"))
+    if frozen():
+        roots.add(Path(sys.executable).resolve().parent)
+        if hasattr(sys, "_MEIPASS"):
+            roots.add(Path(sys._MEIPASS).resolve())
+    elif package.parent.name == "scripts":
+        roots.add(package.parent.parent)
+    return roots

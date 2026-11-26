@@ -42,16 +42,29 @@ class ActionRunner:
         self._reflex_actions: dict[str, Matrix] = {}
         self._execution_depth = 0
 
-    def declare_scalars(self, matrices: list[Matrix], *, local=False):
+    def _prepare_scalars(self, matrices: list[Matrix], *, local=False):
+        """Validate and build declarations without touching the registry.
+
+        Returning the prepared list lets a nested block snapshot exactly the
+        names it declares, then apply them atomically inside that scope.
+        """
         declared = set()
+        prepared = []
         for matrix in matrices:
             self.budget.check()
             name = struct_name(matrix.name)
             if name is not None:
-                if name in declared or self.registry.get(name) is not None:
+                if name in declared:
+                    raise ScriptError(f"Duplicate Struct variable '{name}'")
+                existing = self.registry.get(name)
+                if local:
+                    if existing is not None and existing.kind not in {"alias", "vars", "struct"}:
+                        raise ScriptError(
+                            f"Local declaration '{name}' cannot replace a driver, daemon or flow reference")
+                elif existing is not None:
                     raise ScriptError(f"Duplicate Struct variable '{name}'")
                 declared.add(name)
-                self.registry.override(name, Struct(name, json.loads(matrix.json_text)))
+                prepared.append((name, Struct(name, json.loads(matrix.json_text))))
                 continue
             if matrix.name not in {"Alias", "Vars"}:
                 continue
@@ -65,9 +78,11 @@ class ActionRunner:
                     raise ScriptError(f"Duplicate session variable '{name}'")
                 declared.add(name)
                 existing = self.registry.get(name)
-                if local and existing is not None and existing.kind not in {"alias", "vars"}:
-                    raise ScriptError(f"Reflex local '{name}' cannot replace a driver, daemon or Struct")
-                if not local and matrix.name == "Vars" and existing is not None:
+                if local:
+                    if existing is not None and existing.kind not in {"alias", "vars", "struct"}:
+                        raise ScriptError(
+                            f"Local declaration '{name}' cannot replace a driver, daemon or flow reference")
+                elif matrix.name == "Vars" and existing is not None:
                     raise ScriptError(f"@Vars '{name}' cannot override a structure variable")
                 value = matrix.inherited(i, matrix.header.index(field))
                 if matrix.name == "Alias":
@@ -82,7 +97,16 @@ class ActionRunner:
                             except ValueError:
                                 raise ScriptError(f"@Vars '{name}' precision must be an integer from 0 to 15") from None
                     variable = Number(name, value, self.registry.resolve_number, precision=precision)
-                self.registry.override(name, variable)
+                prepared.append((name, variable))
+        return prepared
+
+    def _apply_scalars(self, prepared, *, local=False):
+        for name, variable in prepared:
+            self.budget.check()
+            self.registry.override(name, variable, shadow_struct=local)
+
+    def declare_scalars(self, matrices: list[Matrix], *, local=False):
+        self._apply_scalars(self._prepare_scalars(matrices, local=local), local=local)
 
     def _value(self, expression: Expression):
         self.budget.check()
@@ -302,41 +326,54 @@ class ActionRunner:
             raise ScriptError("@if/@while condition must be logical; no implicit truth conversion")
         return value
 
-    def _sequence(self, matrices: list[Matrix], outputs: _OutputCollector, depth: int = 0) -> bool:
+    def _sequence(self, matrices: list[Matrix], outputs: _OutputCollector, depth: int = 0,
+                  *, scope: bool = False) -> bool:
         if self._execution_depth > MAX_BLOCK_DEPTH:
             raise ScriptError("Execution block nesting exceeds depth limit")
         self._execution_depth += 1
         try:
-            actionable = False
-            for matrix in matrices:
-                self.budget.check()
-                name = matrix.name.strip()
-                if name == "Action":
-                    actionable = True
-                    if matrix.children:
-                        self._sequence(matrix.children, outputs, depth + 1)
-                    else:
-                        self.dispatch(matrix, outputs)
-                elif is_control(name):
-                    actionable = True
-                    condition = self._condition(matrix)
-                    if name.startswith("if("):
-                        if self._test_condition(condition):
-                            self._sequence(matrix.children, outputs, depth + 1)
-                    else:
-                        while True:
-                            self.budget.check()
-                            if not self._test_condition(condition):
-                                break
-                            self._sequence(matrix.children, outputs, depth + 1)
-                elif name in {"Alias", "Vars"} or struct_name(name) is not None or reflex_name(name) is not None:
-                    if depth:
-                        raise ScriptError(f"@{name} declarations require the top level or a Reflex body")
-                else:
-                    raise ScriptError(f"Unsupported action block @{name[:160]}; Include/Merge must be expanded first")
-            return actionable
+            prepared = []
+            if scope and any(struct_name(matrix.name) is not None or matrix.name.strip() in {"Alias", "Vars"}
+                            for matrix in matrices):
+                prepared = self._prepare_scalars(matrices, local=True)
+            if prepared:
+                with self.registry.scope(name for name, _ in prepared):
+                    self._apply_scalars(prepared, local=True)
+                    return self._sequence_body(matrices, outputs, depth)
+            return self._sequence_body(matrices, outputs, depth)
         finally:
             self._execution_depth -= 1
+
+    def _sequence_body(self, matrices: list[Matrix], outputs: _OutputCollector, depth: int) -> bool:
+        actionable = False
+        for matrix in matrices:
+            self.budget.check()
+            name = matrix.name.strip()
+            if name == "Action":
+                actionable = True
+                if matrix.children:
+                    self._sequence(matrix.children, outputs, depth + 1, scope=True)
+                else:
+                    self.dispatch(matrix, outputs)
+            elif is_control(name):
+                actionable = True
+                condition = self._condition(matrix)
+                if name.startswith("if("):
+                    if self._test_condition(condition):
+                        self._sequence(matrix.children, outputs, depth + 1, scope=True)
+                else:
+                    while True:
+                        self.budget.check()
+                        if not self._test_condition(condition):
+                            break
+                        self._sequence(matrix.children, outputs, depth + 1, scope=True)
+            elif name in {"Alias", "Vars"} or struct_name(name) is not None or reflex_name(name) is not None:
+                # Declarations are hoisted into this body's scope above; Reflex
+                # definitions are collected by run() before execution starts.
+                continue
+            else:
+                raise ScriptError(f"Unsupported action block @{name[:160]}; Include/Merge must be expanded first")
+        return actionable
 
     def _reflex_action(self, name: str) -> Matrix | None:
         return self._reflex_actions.get(name)
@@ -350,14 +387,14 @@ class ActionRunner:
                 if not _SAFE_IDENT.fullmatch(key):
                     raise ScriptError("Reflex parameter names must be safe identifiers")
                 existing = self.registry.get(key)
-                if existing is not None and existing.kind not in {"alias", "vars"}:
-                    raise ScriptError(f"Reflex argument '{key}' cannot replace a driver, daemon or Struct")
+                if existing is not None and existing.kind not in {"alias", "vars", "struct"}:
+                    raise ScriptError(f"Reflex argument '{key}' cannot replace a driver, daemon or flow reference")
                 bindings[key] = Alias(key, value) if isinstance(value, str) else Number(key, value)
             start = len(outputs.items)
             with self.registry.session():
                 self.declare_scalars(action.children, local=True)
                 for key, variable in bindings.items():
-                    self.registry.override(key, variable)
+                    self.registry.override(key, variable, shadow_struct=True)
                 self._sequence(action.children, outputs)
             return outputs.items[-1] if len(outputs.items) > start else {"result": "OK"}
 

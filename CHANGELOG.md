@@ -6,6 +6,50 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Block-level lexical scope for MT scripts: `Alias`/`Vars`/`Struct` may be
+  declared at the top level or inside any Action/control/Reflex body.
+  Declarations are hoisted and registered atomically per body, shadow outer
+  names (including Structs), and are restored on exit, including errors and
+  cancellation; driver/daemon/flow references cannot be shadowed.
+- Double-quoted MT cells: whitespace, `;` and `#` inside quotes no longer
+  delimit cells. Quotes must close on the same line (`\n` for newlines);
+  unterminated strings fail at parse time.
+- `pymybot discover`: read-only host UART/FTDI/I2C/SPI enumeration with
+  ready-to-use structure SQL hints. Nothing is opened unless `--probe` is
+  set, and probing only opens and closes serial ports without writing.
+  Ships with `Dev_enum`/`I2C_scan` drivers, `dev-enum`/`i2c-scan` examples
+  and virtual fixtures.
+- `pymybot assets list/read`: read-only browsing of bundled
+  robots/modules/scripts assets with traversal/suffix guards.
+- `--robot`/`--input` fall back to the bundled asset roots when a relative
+  name does not exist relative to the current directory.
+
+### Fixed
+
+- Include/Merge resolution: a `Merge` inside an included fragment now
+  resolves relative paths against that fragment's own directory instead of
+  the entry file's directory.
+- HTTP loopback gate: `localhost` must resolve to loopback addresses only,
+  the resolved addresses are pinned for the actual connection (DNS rebinding
+  and TOCTOU resistant, Host/TLS identity preserved), and environment proxies
+  are bypassed so they cannot forward loopback-allowed requests elsewhere.
+- `security.read_file` rejects files swapped or modified mid-read using
+  `O_NOFOLLOW` plus identity/size/timestamp comparisons before open, after
+  open and after reading.
+- Abort lifecycle: `safe()` gets a bounded window per candidate driver
+  instead of one fixed total; stops during activation or hot SQL now run
+  `abort()` with `safe()` hooks and latch the robot; metadata collection for
+  `read`/`safe`/`destroy` observes the operation budget; hot-deleted daemons
+  retain device ownership until their workers exit.
+- Driver sources are read with the 8 MiB ceiling enforced; SQL scripts with
+  more than 10,000 separators are rejected.
+- `pymybot new` refuses to generate into package/skill directories (including
+  symlink aliases), paths escaping the workspace, non-file targets and
+  hard-linked files; printed follow-up commands include `--module-path`.
+- HAL `shell_run` no longer kills an already-cleaned process tree twice.
+
 ## [0.5.0] – 2026-11-02
 
 ### Added

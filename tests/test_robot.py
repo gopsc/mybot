@@ -10,6 +10,7 @@ from pymybot.errors import BudgetExceeded, ControllerError, DriverError, ScriptE
 from pymybot.robot import Robot
 
 ROOT = Path(__file__).resolve().parents[1]
+ASSETS = ROOT
 
 
 @pytest.fixture
@@ -27,7 +28,7 @@ end
 function read(d) return {result="OK", count=count} end
 function destroy(d) return {result="OK"} end
 ''')
-    return [tmp_path, ROOT / "modules"]
+    return [tmp_path, ASSETS / "modules"]
 
 
 def probe_sql(extra=""):
@@ -55,7 +56,7 @@ function destroy(d) return {result="OK"} end
 
 
 def test_relay_controller_chain():
-    with Robot.from_file(ROOT / "robots" / "relay-test.sql") as robot:
+    with Robot.from_file(ASSETS / "robots" / "relay-test.sql") as robot:
         result = robot.run("@Action\nrelay0.test;\n1;\n@")
         assert result[-1]["result"] == "OK"
         assert result[-1]["slept"] == 1
@@ -87,6 +88,60 @@ dev.value;
         assert robot.registry["dev"].read()["count"] == 4
 
 
+def test_nested_declarations_are_block_scoped(modules):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        result = robot.run("""@Action
+@Vars
+name value;
+n 5;
+@
+@Struct(s)
+{"v":7}
+@
+dev.value;
+$(n+s.v);
+@
+""")
+        assert result[-1]["value"] == 12
+        assert robot.registry.get("n") is None
+        assert robot.registry.get("s") is None
+        with pytest.raises(ScriptError, match="n"):
+            robot.run("""@Action
+@Vars
+name value;
+n 5;
+@
+dev.value;
+$(n);
+@
+@Action
+dev.value;
+$(n);
+@
+""")
+        assert robot.registry.get("n") is None
+
+
+def test_nested_struct_shadows_outer_and_restores(modules):
+    with Robot(probe_sql(), module_paths=modules) as robot:
+        outputs = robot.run("""@Struct(s)
+{"v":1}
+@
+@Action
+@Struct(s)
+{"v":7}
+@
+dev.value;
+$(s.v);
+@
+@Action
+dev.value;
+$(s.v);
+@
+""")
+        assert [output["value"] for output in outputs] == [7, 1]
+
+
 def test_injected_alias_and_scope_on_failure(modules):
     with Robot(probe_sql(), module_paths=modules) as robot:
         result = robot.run("@Action\ndev.value;\n$(arg);\n@", vars={"arg": "hello"})
@@ -95,6 +150,37 @@ def test_injected_alias_and_scope_on_failure(modules):
         with pytest.raises(ControllerError):
             robot.run("@Alias\nname alias;\nx dev;\n@\n@Action\nmissing.value;\n1;\n@")
         assert "x" not in robot.registry
+
+
+@pytest.mark.parametrize("kind", ["lua", "python", "daemon"])
+@pytest.mark.parametrize("binding", [False, True])
+def test_session_scalars_cannot_redirect_devices(modules, kind, binding):
+    if kind == "lua":
+        sql = probe_sql()
+    else:
+        sql = "CREATE TABLE Probe(name String,fail String);"
+        if kind == "python":
+            (modules[0] / "Native.py").write_text('''
+class Driver:
+    def __init__(self, context): self.context = context
+    def build(self, data): return {"result": "OK"}
+    def call(self, data): return {"result": "OK"}
+''')
+            sql += "CREATE TABLE Native(name String); INSERT INTO Native(name) VALUES('dev');"
+        else:
+            (modules[0] / "worker.lua").write_text("function daemon_tick() end\n")
+            sql += "CREATE TABLE Daemon(name String,chunk String);"
+            sql += "INSERT INTO Daemon(name,chunk) VALUES('dev','worker.lua');"
+    sql += "INSERT INTO Probe(name,fail) VALUES('second','no');"
+    with Robot(sql, module_paths=modules) as robot:
+        original = robot.registry["dev"]
+        script = "@Action\ndev.value;\n1;\n@\n"
+        if not binding:
+            script = "@Alias\nname alias;\ndev second;\n@\n" + script
+        with pytest.raises(ScriptError, match="Cannot override hardware variable"):
+            robot.run(script, vars={"dev": "second"} if binding else None)
+        assert robot.registry["dev"] is original
+        assert robot.registry["second"].read()["count"] == 0
 
 
 def test_invalid_reference_rejected_before_activation(modules):
@@ -377,13 +463,13 @@ def test_repeated_lifecycle_starts_fresh_state(modules):
             assert robot.run("@Action\ndev.value;\n1;\n@")[0]["count"] == 1
 
 
-def test_repeated_lifecycle_reopens_hal():
-    robot = Robot("CREATE TABLE Camera(name String); INSERT INTO Camera(name) VALUES('cam');")
+def test_repeated_lifecycle_reopens_hal(modules):
+    robot = Robot(probe_sql(), module_paths=modules)
     previous = None
     for _ in range(2):
         with robot:
             assert robot.hal is not previous
-            assert robot.registry["cam"].runtime is not None
+            assert robot.registry["dev"].runtime is not None
             previous = robot.hal
 
 
@@ -450,7 +536,7 @@ CREATE TABLE I2C(name String,path String,proto String); INSERT INTO I2C(name,pat
 CREATE TABLE SyntheticI2C(name String,I2C String,address Number,proto String); INSERT INTO SyntheticI2C(name,I2C,address,proto) VALUES('dev','$bus',49,'virt');
 CREATE TABLE Daemon(name String,chunk String,proto String,driver String,addr Number,fields String);
 INSERT INTO Daemon(name,chunk,proto,driver,addr,fields) VALUES('d','lib/sensor_daemon.lua','virt','SyntheticI2C',49,'TAG:f');'''
-    with Robot(sql, module_paths=[root, ROOT / "modules"]) as robot:
+    with Robot(sql, module_paths=[root, ASSETS / "modules"]) as robot:
         assert robot.run("@Action\nrelay0.test;\n1;\n@")[-1]["result"] == "OK"
         assert robot.registry["d"].wait_for_sample(timeout=3)["values"] == [7]
     # The only expected miss: sensor_daemon prefers a standalone lib/virtbus/<driver>.lua
@@ -464,9 +550,9 @@ def test_empty_module_path_segments_use_default(monkeypatch):
     from pymybot.robot import module_roots
 
     monkeypatch.setenv("BOT4CJ_MODULE_PATH", os.pathsep * 2)
-    assert module_roots() == [ROOT / "modules"]
-    monkeypatch.setenv("BOT4CJ_MODULE_PATH", os.pathsep.join(["", str(ROOT / "modules"), str(ROOT / "modules"), ""]))
-    assert module_roots() == [ROOT / "modules"]
+    assert module_roots() == [ASSETS / "modules"]
+    monkeypatch.setenv("BOT4CJ_MODULE_PATH", os.pathsep.join(["", str(ASSETS / "modules"), str(ASSETS / "modules"), ""]))
+    assert module_roots() == [ASSETS / "modules"]
 
 
 @pytest.mark.parametrize("chunk, columns, values, consumer", [
@@ -520,7 +606,7 @@ def test_hot_delete_failure_removes_dead_variable_and_rolls_back_additions(modul
 def test_shell_driver_end_to_end_with_allow_hardware():
     sql = ("CREATE TABLE Shell(name String, timeout Number); "
            "INSERT INTO Shell(name,timeout) VALUES('sh',10000);")
-    with Robot(sql, module_paths=[ROOT / "modules"], allow_hardware=True) as robot:
+    with Robot(sql, module_paths=[ASSETS / "modules"], allow_hardware=True) as robot:
         result = robot.run('@Action\nsh.cmd;\n$("echo\\te2e-shell-ok");\n$("exit\\t7");\n@')
         assert result[0]["result"] == "OK" and result[0]["code"] == 0
         assert "e2e-shell-ok" in result[0]["out"] and result[0]["err"] == ""
@@ -531,7 +617,7 @@ def test_shell_driver_end_to_end_with_allow_hardware():
 def test_shell_driver_refused_without_allow_hardware():
     sql = ("CREATE TABLE Shell(name String, timeout Number); "
            "INSERT INTO Shell(name,timeout) VALUES('sh',10000);")
-    robot = Robot(sql, module_paths=[ROOT / "modules"])
+    robot = Robot(sql, module_paths=[ASSETS / "modules"])
     try:
         # activation fails at build: the session gate refuses shell_open
         with pytest.raises(DriverError, match="allow-hardware"):

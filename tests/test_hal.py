@@ -1075,3 +1075,157 @@ def test_lua_shell_globals(manager, monkeypatch):
         assert(shell_open(0) == -1)
         assert(shell_open(70000) == -1)
     ''')
+
+
+def test_http_ignores_environment_proxies(monkeypatch, httpd):
+    import runpy
+    import urllib.request
+
+    monkeypatch.setattr(urllib.request, "getproxies", lambda: {
+        "http": "http://192.0.2.20:8123", "https": "http://192.0.2.20:8123"})
+    monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
+    connect = socket.create_connection
+    attempts = []
+
+    def loopback_only(address, *args, **kwargs):
+        attempts.append(address)
+        if address[0] != "127.0.0.1":
+            raise OSError("Test blocked a non-loopback connection")
+        return connect(address, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "create_connection", loopback_only)
+    module = runpy.run_path(str(ROOT / "pymybot/hal.py"), run_name="pymybot._proxy_test")
+    manager = module["HALManager"]()
+    try:
+        handle = manager.call("http_open", httpd, 1000)
+        result = manager.call("http_request", handle, "GET", "/echo")
+        assert result["result"] == "OK" and result["status"] == 200
+        assert attempts and all(host == "127.0.0.1" for host, _ in attempts)
+    finally:
+        manager.close()
+
+
+def test_http_pins_localhost_addresses_and_preserves_host(manager, httpd, monkeypatch):
+    from urllib.parse import urlsplit
+    from pymybot.runtime import DriverRuntime
+
+    port = urlsplit(httpd).port
+    resolutions, hosts = [], []
+    respond = _EchoHandler._respond
+
+    def lookup(host, service, *args, **kwargs):
+        resolutions.append(host)
+        if len(resolutions) > 1:
+            raise OSError("Test blocked a changed resolver result")
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", service))]
+
+    def record_host(handler):
+        hosts.append(handler.headers["Host"])
+        respond(handler)
+
+    monkeypatch.setattr(socket, "getaddrinfo", lookup)
+    monkeypatch.setattr(_EchoHandler, "_respond", record_host)
+    runtime = DriverRuntime([], manager, threading.Event(), allow_hardware=False)
+    handle = runtime._hal_values("http_open", f"http://localhost:{port}/base", 1000)
+    for path, status in (("/echo", 200), ("/echo", 200), ("/redirect", 302)):
+        result = runtime._hal_values("http_request", handle, "GET", path)
+        assert result["result"] == "OK" and result["status"] == status
+    assert resolutions == ["localhost"]
+    assert hosts == [f"localhost:{port}"] * 3
+
+
+@pytest.mark.parametrize("tls,all_fail", [(False, False), (False, True), (True, False)])
+def test_pinned_http_fallback_and_tls_identity(manager, monkeypatch, tls, all_fail):
+    import io
+    import ssl
+    from pymybot.runtime import DriverRuntime
+
+    resolutions, attempts, connections, requests, tls_names = [], [], [], [], []
+
+    def lookup(host, port, *args, **kwargs):
+        resolutions.append(host)
+        assert resolutions == ["localhost"]
+        return [(socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", port, 0, 0)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+
+    class Connection:
+        def __init__(self, *args):
+            self.closed = False
+            connections.append(self)
+
+        def settimeout(self, timeout):
+            assert timeout == 0.1
+
+        def setsockopt(self, *args):
+            pass
+
+        def connect(self, address):
+            attempts.append(address)
+            if address[0] == "::1" or all_fail:
+                raise OSError("synthetic connection refusal")
+
+        def sendall(self, data):
+            requests.append(data)
+
+        def makefile(self, *args, **kwargs):
+            return io.BytesIO(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+
+        def close(self):
+            self.closed = True
+
+    def wrap(context, connection, *, server_hostname):
+        assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+        tls_names.append(server_hostname)
+        raise ssl.SSLCertVerificationError("synthetic certificate rejection")
+
+    monkeypatch.setattr(socket, "getaddrinfo", lookup)
+    monkeypatch.setattr(socket, "socket", Connection)
+    monkeypatch.setattr(ssl.SSLContext, "wrap_socket", wrap)
+    runtime = DriverRuntime([], manager, threading.Event(), allow_hardware=False)
+    handle = runtime._hal_values("http_open", ("https" if tls else "http") + "://localhost", 100)
+    result = runtime._hal_values("http_request", handle, "GET", "/")
+    port = 443 if tls else 80
+    assert attempts == [("::1", port), ("127.0.0.1", port)]
+    assert resolutions == ["localhost"]
+    assert all(connection.closed for connection in connections)
+    if tls:
+        assert result["result"] == "ERR" and "certificate rejection" in result["message"]
+        assert tls_names == ["localhost"]
+    elif all_fail:
+        assert result["result"] == "ERR" and requests == []
+    else:
+        assert result["result"] == "OK" and result["body"] == "ok"
+        assert b"Host: localhost\r\n" in b"".join(requests)
+
+
+@pytest.mark.parametrize("addresses", [(), ("127.0.0.1", "192.0.2.20")])
+def test_http_rejects_invalid_internal_pins(manager, addresses):
+    assert manager.call("http_open", "http://localhost", loopback_addresses=addresses) == -1
+    assert not manager._handles
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_shell_cleans_process_group_after_parent_exit(manager, monkeypatch, cancelled):
+    from tempfile import TemporaryFile
+    import pymybot.hal as hal
+
+    handle = manager.call("shell_open", 1000)
+    cleaned = []
+    with TemporaryFile() as stdout, TemporaryFile() as stderr:
+        child = SimpleNamespace(stdout=stdout, stderr=stderr, returncode=0,
+                                poll=lambda: 0, wait=lambda timeout=None: 0)
+        monkeypatch.setattr(hal.subprocess, "Popen", lambda *args, **kwargs: child)
+        monkeypatch.setattr(hal, "read_pipe", lambda pipe: b"")
+        monkeypatch.setattr(hal, "kill_tree", lambda process: cleaned.append(process))
+
+        def check():
+            if cancelled:
+                raise BudgetExceeded("Test cancellation")
+
+        if cancelled:
+            with pytest.raises(BudgetExceeded):
+                manager.call("shell_run", handle, "test-command", cancel_check=check)
+        else:
+            assert manager.call("shell_run", handle, "test-command", cancel_check=check)["result"] == "OK"
+        assert cleaned == [child]
+        assert stdout.closed and stderr.closed

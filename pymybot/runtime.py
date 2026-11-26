@@ -5,6 +5,7 @@ import ipaddress
 import math
 import os
 import re
+import socket
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -44,16 +45,34 @@ LuaRuntime = _LUA_MODULE.LuaRuntime
 lua_type = _LUA_MODULE.lua_type
 
 
-def _loopback_base(base):
-    """True when base is an http(s) URL whose host is a loopback address."""
+def _loopback_addresses(base):
     if not isinstance(base, str):
-        return False
+        return ()
     try:
         parts = urlsplit(base)
-        parts.port  # property access raises ValueError on malformed ports
+        parts.port
     except ValueError:
-        return False
-    return parts.scheme in {"http", "https"} and parts.hostname in {"127.0.0.1", "localhost", "::1"}
+        return ()
+    if parts.scheme not in {"http", "https"}:
+        return ()
+    host = parts.hostname
+    if not host:
+        return ()
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return (str(address),) if address.is_loopback else ()
+    if host != "localhost":
+        return ()
+    try:
+        infos = socket.getaddrinfo(host, parts.port or (443 if parts.scheme == "https" else 80),
+                                   type=socket.SOCK_STREAM)
+        addresses = tuple(dict.fromkeys(ipaddress.ip_address(info[4][0]) for info in infos))
+        return tuple(map(str, addresses)) if addresses and all(ip.is_loopback for ip in addresses) else ()
+    except (OSError, ValueError):
+        return ()
 
 
 _BOOTSTRAP = r'''
@@ -128,6 +147,7 @@ class DriverRuntime:
 
     def _hal_values(self, operation, *values):
         result = None
+        loopback_addresses = None
         try:
             self._check()
             if not self.allow_hardware:
@@ -140,8 +160,10 @@ class DriverRuntime:
                     physical |= not bool(options.get("src"))
                 if physical:
                     raise DriverError("Physical hardware access requires explicit --allow-hardware confirmation")
-                if operation == "http_open" and not _loopback_base(values[0] if values else None):
-                    raise DriverError("HTTP access beyond loopback requires explicit --allow-hardware confirmation")
+                if operation == "http_open":
+                    loopback_addresses = _loopback_addresses(values[0] if values else None)
+                    if not loopback_addresses:
+                        raise DriverError("HTTP access beyond loopback requires explicit --allow-hardware confirmation")
                 if operation == "tcp_open":
                     try:
                         loopback = isinstance(values[0], str) and ipaddress.ip_address(values[0]).is_loopback
@@ -162,7 +184,11 @@ class DriverRuntime:
                         remaining -= duration
                     self._check()
                     return 0
-            result = self.hal.call(operation, *values, cancel_check=self._check, owner=self._owner)
+            if loopback_addresses is not None:
+                result = self.hal.call(operation, *values, cancel_check=self._check, owner=self._owner,
+                                       loopback_addresses=loopback_addresses)
+            else:
+                result = self.hal.call(operation, *values, cancel_check=self._check, owner=self._owner)
             self._check()
             return result
         except BaseException:
