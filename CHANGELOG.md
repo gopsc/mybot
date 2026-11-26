@@ -6,6 +6,29 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Agent `web_fetch`/`web_search`: the validated DNS answer is now the
+  connection target. Previously the HTTP client resolved the hostname again
+  after validation, so a rebinding DNS answer could reach loopback or private
+  services. Host header, TLS SNI and certificate verification still use the
+  original hostname.
+
+### Fixed
+
+- Asset resolution: a source-tree `assets/<kind>` directory that holds only
+  bytecode caches (for example a leftover `assets/modules/__pycache__`) no
+  longer shadows the checkout's `modules/`, `robots/` or `scripts/`. It made
+  every bundled driver unresolvable. `/assets/` is now git-ignored.
+- `test_splash_can_be_disabled` skips without PySide6 instead of failing on
+  base installs.
+
+### Changed
+
+- The ruff gate in `pyproject.toml` (used by CI and `make lint`) also checks
+  unused imports/variables, exception chaining and side-effect-only
+  expressions.
+
 ## [0.5.0+plus] – 2026-11-26
 
 ### Added
