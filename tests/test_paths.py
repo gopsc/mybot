@@ -16,6 +16,7 @@ def test_source_assets_fall_back_to_the_checkout(tmp_path, monkeypatch):
     assert paths.asset_path("modules") == packaged
     source_robots = tmp_path / "assets" / "robots"
     source_robots.mkdir(parents=True)
+    (source_robots / "demo.sql").write_text("", encoding="utf-8")
     assert paths.asset_path("robots") == source_robots
     assert paths.asset_path("shared") == tmp_path / "shared"
     (package / "assets" / "shared").mkdir()
@@ -59,6 +60,21 @@ def test_real_checkout_uses_top_level_directories():
     assert paths.asset_path("prompts") == paths.source_root() / "prompts"
 
 
+def test_bytecode_only_source_assets_do_not_shadow_the_checkout(tmp_path, monkeypatch):
+    # Regression: a leftover assets/modules/__pycache__ (only .pyc files) made
+    # asset_path("modules") return an empty root, so no driver could be found.
+    monkeypatch.setattr(paths, "package_dir", lambda: tmp_path / "pkg")
+    monkeypatch.setattr(paths, "source_root", lambda: tmp_path)
+    monkeypatch.setattr(paths, "frozen", lambda: False)
+    cache = tmp_path / "assets" / "modules" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "Dev_enum.cpython-313.pyc").write_bytes(b"\0")
+    (tmp_path / "assets" / "scripts").mkdir()
+
+    assert paths.asset_path("modules") == tmp_path / "modules"
+    assert paths.asset_path("scripts") == tmp_path / "scripts"
+
+
 @pytest.mark.parametrize("with_pyproject", [False, True], ids=["skill-copy", "checkout"])
 def test_source_bundle_roots_protect_skill_root(tmp_path, monkeypatch, with_pyproject):
     skill = tmp_path / "skill"
@@ -70,6 +86,7 @@ def test_source_bundle_roots_protect_skill_root(tmp_path, monkeypatch, with_pypr
     assets = {source / "assets" / kind for kind in ("robots", "modules", "scripts")}
     for asset in assets:
         asset.mkdir(parents=True)
+        (asset / "placeholder.txt").write_text("", encoding="utf-8")
     monkeypatch.setattr(paths, "package_dir", lambda: package)
     monkeypatch.setattr(paths, "frozen", lambda: False)
 

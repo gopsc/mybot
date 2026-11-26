@@ -4,7 +4,8 @@
 
 The repository tag `vX.Y.Z` describes the Python package. The version sources
 are `pymybot/__init__.py`, `pyproject.toml` and `CITATION.cff` (currently
-0.5.0).
+0.5.0+plus). The `+plus` suffix is a PEP 440 local version: fine for tags,
+wheels and internal distribution, but PyPI rejects uploads with a local version.
 
 ## Compatibility promises
 

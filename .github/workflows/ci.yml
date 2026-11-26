@@ -19,7 +19,7 @@ env:
 
 jobs:
   lint:
-    name: lint / syntax + undefined names
+    name: lint / ruff gate (pyproject)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

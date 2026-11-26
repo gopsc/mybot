@@ -14,3 +14,6 @@ htmlcov/
 *.log
 .DS_Store
 Thumbs.db
+# Stray source-tree bundle dirs shadow modules/robots/scripts; see pymybot/paths.py.
+/assets/
+/.tmp/

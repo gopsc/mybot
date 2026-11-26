@@ -61,9 +61,22 @@ def asset_path(name: str) -> Path:
     if frozen() or packaged.exists():
         return packaged
     source_asset = source_root() / "assets" / name
-    if source_asset.is_dir():
+    if _has_assets(source_asset):
         return source_asset
     return source_root() / name
+
+
+def _has_assets(directory: Path) -> bool:
+    """True if a source ``assets/<kind>`` holds real files, not just bytecode caches.
+
+    A stray ``assets/modules/__pycache__`` left by an old layout must not hide
+    the checkout's top-level ``modules/`` directory.
+    """
+    if not directory.is_dir():
+        return False
+    return any(path.is_file() and "__pycache__" not in path.relative_to(directory).parts
+               and path.suffix not in {".pyc", ".pyo"}
+               for path in directory.rglob("*"))
 
 
 def bundle_roots() -> set[Path]:

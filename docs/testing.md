@@ -40,7 +40,7 @@ python -m pytest --durations=10 -q
 | agent | Ubuntu 3.11; Windows 3.13 | Offline model/agent integration + MCP server/client |
 | wheel | Ubuntu 3.11; Windows 3.13 | Build from sdist, install into clean venv |
 | quickstart | Ubuntu 3.14 | README commands actually run |
-| lint | Ubuntu | syntax/undefined names, docs/skill sync and release metadata |
+| lint | Ubuntu | ruff gate from `pyproject.toml` (syntax, undefined names, unused imports/variables, exception chaining), docs/skill sync and release metadata |
 | docker | Ubuntu | headless image builds and `doctor` runs inside it |
 
 ## Virtual device fixtures

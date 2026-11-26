@@ -80,6 +80,7 @@ target-version = "py311"
 line-length = 120
 
 [tool.ruff.lint]
-# Narrow, meaningful gate: syntax errors and undefined names only. The
-# repository predates a full formatter baseline; style churn belongs in its own PR.
-select = ["E9", "F63", "F7", "F82"]
+# Narrow, meaningful gate: syntax errors, undefined names, plus unused
+# imports/variables, exception chaining and side-effect-only expressions.
+# The repository predates a full formatter baseline; style churn belongs in its own PR.
+select = ["E9", "F63", "F7", "F82", "F401", "F841", "B904", "B018"]

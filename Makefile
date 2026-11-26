@@ -26,7 +26,7 @@ test:
 	$(PY) -m pytest -q
 
 lint:
-	$(PY) -m ruff check pymybot tests tools build_support.py --select E9,F63,F7,F82
+	$(PY) -m ruff check pymybot tests tools build_support.py
 
 check:
 	$(PY) -m pymybot check --robot robots/relay-test.sql --input scripts/relay-test.mt
