@@ -43,6 +43,12 @@ def _httpx():
 
 
 def _validate_target(url, policy):
+    """Resolve once and return the vetted addresses the request must connect to.
+
+    The caller connects to these literals instead of letting the HTTP client
+    resolve the name again, so a DNS answer that changes between validation and
+    connection (rebinding) cannot redirect the request to a private address.
+    """
     try:
         parts = urlsplit(url)
         port = parts.port
@@ -65,6 +71,7 @@ def _validate_target(url, policy):
         raise WebError("DNS resolution failed") from None
     if not infos:
         raise WebError("DNS resolution returned no address")
+    addresses = []
     for info in infos:
         address = info[4][0]
         try:
@@ -72,11 +79,36 @@ def _validate_target(url, policy):
         except ValueError:
             raise WebError("URL resolved to an invalid address") from None
         if ip.is_loopback:
-            if policy.allow_loopback:
-                continue
-            raise WebError("URL resolves to a loopback address")
-        if not ip.is_global or ip.is_multicast:
+            if not policy.allow_loopback:
+                raise WebError("URL resolves to a loopback address")
+        elif not ip.is_global or ip.is_multicast:
             raise WebError("URL resolves to a private, link-local or reserved address")
+        if ip not in addresses:
+            addresses.append(ip)
+    return addresses
+
+
+def _pinned_send(client, method, url, addresses, *, stream=False, **kwargs):
+    """Send to a vetted address literal while keeping the URL's Host and TLS name.
+
+    The request line targets the IP, the Host header carries the original
+    authority, and httpcore's ``sni_hostname`` extension makes TLS send SNI for,
+    and verify the certificate against, the original hostname.
+    """
+    httpx = _httpx()
+    parts = urlsplit(url)
+    error = None
+    for ip in addresses:
+        literal = f"[{ip}]" if ip.version == 6 else str(ip)
+        netloc = literal if parts.port is None else f"{literal}:{parts.port}"
+        request = client.build_request(
+            method, parts._replace(netloc=netloc).geturl(),
+            headers={"Host": parts.netloc}, extensions={"sni_hostname": parts.hostname}, **kwargs)
+        try:
+            return client.send(request, stream=stream)
+        except httpx.ConnectError as exc:
+            error = exc  # Nothing was sent; try the next vetted address.
+    raise error
 
 
 def _extract(body, content_type, max_chars, charset="utf-8"):
@@ -105,8 +137,9 @@ def fetch(url, *, policy=None):
     current = str(url or "")
     try:
         for _ in range(MAX_REDIRECTS + 1):
-            _validate_target(current, policy)
-            with client.stream("GET", current) as response:
+            addresses = _validate_target(current, policy)
+            response = _pinned_send(client, "GET", current, addresses, stream=True)
+            try:
                 if response.is_redirect:
                     location = response.headers.get("location")
                     if not location:
@@ -137,6 +170,8 @@ def fetch(url, *, policy=None):
                     "content_type": content_type, "title": title, "text": text,
                     "bytes": len(body), "truncated": truncated,
                 }
+            finally:
+                response.close()
         raise WebError("Too many redirects")
     finally:
         client.close()
@@ -153,11 +188,12 @@ def search(query, *, endpoint, policy=None):
         raise WebError("Web search is not configured; set a SearXNG endpoint")
     httpx = _httpx()
     url = base + "/search"
-    _validate_target(url, policy)
+    addresses = _validate_target(url, policy)
     client = httpx.Client(follow_redirects=False, timeout=policy.timeout, trust_env=False,
                           headers={"User-Agent": f"pymybot/{__version__} (agent web tool)"})
     try:
-        response = client.get(url, params={"q": query, "format": "json", "safesearch": "1"})
+        response = _pinned_send(client, "GET", url, addresses,
+                                params={"q": query, "format": "json", "safesearch": "1"})
     finally:
         client.close()
     if response.status_code >= 400:

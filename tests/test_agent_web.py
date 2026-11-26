@@ -49,6 +49,8 @@ class _Handler(BaseHTTPRequestHandler):
             ]}
             body = json.dumps(payload).encode()
             self._send(200, "application/json", body)
+        elif self.path.startswith("/host"):
+            self._send(200, "text/plain", self.headers.get("Host", "").encode())
         else:
             self._send(404, "text/plain", b"missing")
 
@@ -90,6 +92,86 @@ def test_fetch_extracts_text_and_follows_redirect(base_url):
     assert "bad()" not in data["text"]
     redirected = fetch(f"{base_url}/redirect", policy=_loopback())
     assert redirected["final_url"] == f"{base_url}/page"
+
+
+def _resolver(monkeypatch, answers):
+    """Answer successive lookups of a *name* with the next address.
+
+    Address literals go to the real resolver: it never consults DNS for them,
+    so they cannot be rebound. Only name lookups are recorded.
+    """
+    import ipaddress
+    import socket
+
+    real = socket.getaddrinfo
+    calls = []
+
+    def resolve(host, port, *args, **kwargs):
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            return real(host, port, *args, **kwargs)
+        calls.append(host)
+        address = answers[min(len(calls), len(answers)) - 1]
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    return calls
+
+
+def test_fetch_connects_only_to_the_validated_address(base_url, monkeypatch):
+    # DNS rebinding: the name passes validation as a public address, then a
+    # second lookup would answer loopback. The connection must target the
+    # validated answer and the name must never be resolved again.
+    import socket
+
+    port = base_url.rsplit(":", 1)[1]
+    calls = _resolver(monkeypatch, ["93.184.216.34", "127.0.0.1"])
+    targets = []
+
+    def refuse(address, *args, **kwargs):
+        targets.append(address[0])
+        raise ConnectionRefusedError("test: no outbound connections")
+
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    with pytest.raises(Exception) as caught:
+        fetch(f"http://rebind.example:{port}/page", policy=_loopback())
+    assert not isinstance(caught.value, WebError)
+    assert targets == ["93.184.216.34"]
+    assert calls == ["rebind.example"]
+
+
+def test_fetch_keeps_the_original_host_header(base_url, monkeypatch):
+    port = base_url.rsplit(":", 1)[1]
+    calls = _resolver(monkeypatch, ["127.0.0.1"])
+    data = fetch(f"http://named.example:{port}/host", policy=_loopback())
+    assert data["text"] == f"named.example:{port}"
+    assert calls == ["named.example"]
+
+
+def test_pinned_https_verifies_the_hostname_not_the_ip(monkeypatch):
+    # The request line targets the vetted IP literal; TLS must still send SNI
+    # for, and verify the certificate against, the original hostname.
+    import httpx
+
+    from pymybot import agent_web
+
+    seen = {}
+
+    def handler(request):
+        seen.update(url=str(request.url), host=request.headers["host"],
+                    sni=request.extensions.get("sni_hostname"))
+        return httpx.Response(200, headers={"content-type": "text/plain"}, text="ok")
+
+    _resolver(monkeypatch, ["93.184.216.34"])
+    real_client = httpx.Client
+    monkeypatch.setattr(httpx, "Client",
+                        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs))
+    data = agent_web.fetch("https://docs.example/page")
+    assert data["text"] == "ok"
+    assert seen == {"url": "https://93.184.216.34/page", "host": "docs.example", "sni": "docs.example"}
 
 
 def test_fetch_limits_redirects_types_size_and_status(base_url):
