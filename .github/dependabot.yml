@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    ignore:
+      # The low-level MCP server targets the 1.x API; a major bump breaks it.
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
+    groups:
+      python-runtime:
+        patterns: ["*"]
+        exclude-patterns: ["pydantic-ai-*", "anthropic", "mcp", "fastmcp-*"]
+      agent:
+        patterns: ["pydantic-ai-*", "anthropic", "openai", "mcp", "fastmcp-*"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5

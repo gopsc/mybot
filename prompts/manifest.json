@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "layers": [
+    {"id": "0", "file": "000_safety_prefix.md", "editable": false, "max_bytes": 16384, "sha256": "6e352d925e3d25c8ee31db7f28081ae02f13538cf519f38d3eb45e41021ca597"},
+    {"id": "10", "file": "010_core.md", "editable": true, "max_bytes": 32768, "sha256": "f83f1fbcf091c5aed6f38f0837bef32c2d408f96bc510838bc328430488939b8"},
+    {"id": "97", "file": "097_soul.md", "editable": "agent", "max_bytes": 8192, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+    {"id": "98", "file": "098_user.md", "editable": "agent", "max_bytes": 16384, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+    {"id": "99", "file": "099_stats.md", "editable": "agent", "max_bytes": 4096, "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+    {"id": "100", "file": "100_safety_suffix.md", "editable": false, "max_bytes": 16384, "sha256": "4ae812ec97374643978be1260dff27dac4e2e0684537763ce26b01cbc8f08f6d"}
+  ]
+}

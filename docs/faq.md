@@ -1,0 +1,129 @@
+# FAQ
+
+## Why does `pymybot` open a window instead of the terminal agent?
+
+The GUI is the default entry point. Use `pymybot --no-gui ...` for the terminal
+agent or a controller command. `pymybot check|run|...` subcommands are always
+terminal.
+
+## The GUI says “智能体不可用”
+
+The selected interpreter does not have the agent extras. Install them into that
+interpreter:
+
+```sh
+python -m pip install -e ".[agent,test]"
+```
+
+Then choose the same interpreter in **设置**.
+
+## `pymybot mcp` says MCP dependencies are unavailable
+
+The MCP SDK is optional. Install it into the interpreter that starts the server:
+
+```sh
+python -m pip install -e ".[mcp]"
+```
+
+For the agent’s external MCP client, install `.[agent,mcp]`. Restart the client
+after upgrading so it launches the new process.
+
+## An external MCP tool was denied or reported `unknown`
+
+Denied means the operator (or the missing approval channel) rejected the call
+before it ran; do not retry or work around it. `unknown` means the call may
+already have had side effects; inspect the host and the MCP server before
+restarting. External MCP servers run with host-user permissions and are not a
+sandbox. See [mcp.md](mcp.md).
+
+## Can I use pymybot without any API key?
+
+Yes. `check`, `hardware`, `scripts`, `query`, `run`, `sample`, `apply-sql`, the
+GUI’s hardware view and the virtual-bus tests need no model. Only the agent
+needs a provider key.
+
+## Can the GUI change the system prompt?
+
+Only the parts that are meant to be edited. Layers 0 and 100 (the safety prefix
+and suffix) are pinned to hashes shipped with the build; change a byte and
+validation fails, which blocks sending until you restore them. Layer 10 (core)
+is operator-only and stays out of the GUI editor. 设置 → 提示词 can edit 97, 98
+and 99 (SOUL/USER/STATS). When the model proposes a change to one of those, it
+opens a dedicated `prompt:update_prompt` approval with the full diff; approved
+actions or file writes do not cover it.
+
+## Hardware is not detected
+
+- UART: check the port name (`COMn`, `/dev/tty*`) and permissions.
+- I2C/SPI: pymybot uses pyftdi/MPSSE; install the FTDI driver and use
+  `ftdi://ftdi:232h/1`.
+- Linux `/dev/i2c-*`: `smbus2` comes with the base install; make sure the bus
+  is enabled (`/dev/i2c-*` exists) and add the user to the `i2c` group.
+- Linux `/dev/spidev*`: install `.[linux]` for `spidev` (it usually builds from
+  source, so you may need gcc and kernel headers) and add the user to the `spi`
+  group.
+- Camera: install `.[camera]`; on Windows the device index (`0`) must be
+  correct and some cameras need administrator access.
+- Remember that physical access requires `--allow-hardware` (CLI) or the GUI
+  “允许硬件” toggle.
+
+## Why did a virtual run write to a device?
+
+`proto='virt'` chooses a virtual model only when the driver declares one. A
+real structure without `proto='virt'` activates the physical device. Use the
+provided `*_virt.sql` examples for hardware-free work.
+
+## A long conversation hits the model context limit
+
+pymybot retains six complete turns by default and applies a byte budget. Use
+`--history-turns` (1–20) to adjust the retained-turn limit. A structured JSON
+error is returned instead of crashing when the provider rejects a request.
+Use `--max-history-bytes` (64 KiB–64 MiB, default 4 MiB),
+start a new conversation, or lower `--max-requests` / `--max-tool-calls` for a
+smaller working set. The runtime does not guess a model’s context window; the
+byte budget is an explicit, provider-independent guard.
+
+For request-time protection, set `--max-context-tokens` to the model's context
+window. Before every model request, including requests inside a tool loop,
+mybot conservatively estimates message, instruction and tool-schema tokens,
+reserves 4096 output tokens plus `--context-reserve-tokens` (default 2048), and
+prunes oldest complete turns. If the current turn alone still exceeds the
+available input budget, the request stops with `AgentBudgetExceeded` before it
+reaches the provider. The estimator is provider-independent rather than an
+exact provider tokenizer, so keep a safety reserve appropriate for the model.
+
+## Where are logs and session history?
+
+Diagnostics go to stderr and the GUI “日志” tab. Agent conversations are also
+transcribed to `~/.mybot/sessions/` by default (tool arguments, bounded results
+and images). API keys in environment variables are not read into the
+transcript, but tool output may contain other sensitive data. Disable with
+`--no-session-log`, `MYBOT_SESSION_LOG=0`, or the GUI settings toggle; list and
+prune old transcripts with `pymybot sessions` and
+`pymybot sessions --prune --keep 20 --yes`. Transcripts are not resumable;
+the GUI's **工具 → 会话管理** provides filtering, preview, delete and prune
+controls; see
+[`cli.md`](cli.md#session-transcripts).
+
+## Should I document a change in `docs/` or in `skills/`?
+
+In `docs/` first. It is the authoritative operator documentation; the files under
+`skills/` are the agent's working reference and may only keep the hard rules it
+gets wrong without help — exact error strings, limits, worked examples — plus a
+link to the docs page that owns the behaviour. The scripting grammars (structure
+SQL, MT actions) are the exception: they have no prose authority outside the
+implementation, so the reference *is* their written source and docs link to it.
+
+Each `references/*.md` declares its authority in a `Source:` line and is
+registered in [`../skills/README.md`](../skills/README.md).
+`tools/check_docs_skill_sync.py` runs in the CI lint job and fails on dead
+links, missing repository paths, a missing `Source:` line or an unregistered
+reference; long verbatim runs shared with a docs page are reported as warnings,
+because a shared code block is legitimate. The agent cannot read `docs/` — only
+`read_skill` — so a reference that merely links must still leave the scripting
+rules usable on their own.
+
+## Why is the Windows build unsigned?
+
+Code signing requires a certificate owned by the maintainer. Verify the
+published SHA-256 checksum and build from source if your policy requires it.
