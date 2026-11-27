@@ -8,6 +8,10 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- The CLI/GUI agent can read a trusted `.mt` script's source with
+  `read_action_script` (static, no approval, available under every intent),
+  matching the MCP server. Previously it could run scripts it could not read,
+  so it had to ask the operator which gait was symmetric or complete.
 - `@Include` / `@Merge` `path` cells now accept `$(...)` text expressions,
   resolved once at expansion time. Only top-level `@Alias` literals (the
   declaring file's own for `@Include`; the spliced main script and included
@@ -27,6 +31,14 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The CLI agent ended the whole session, reporting success, when a console
+  line was not valid text: `TextIOWrapper.readline` raised
+  `UnicodeDecodeError` (a `ValueError`), which was treated as EOF. A backspace
+  over a CJK character in a terminal without `iutf8` leaves half a UTF-8
+  sequence, so the next instruction was silently dropped. Console input is
+  now read as bytes and decoded per line; undecodable input prints a notice
+  and asks again (including approval prompts), and only real EOF ends the
+  session.
 - CLI agent approvals rendered on the wrong line: the turn watchdog kept
   draining stream events while the confirmation waited on stdin, so the
   `→ run_action_script(...)` line was appended to the `Approve ... [y/N]`

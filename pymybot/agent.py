@@ -257,6 +257,10 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         """List existing relative .mt paths in the operator's trusted scripts root."""
         return await ctx.deps.dispatch("list_action_scripts", {})
 
+    async def read_action_script(ctx: RunContext[AgentSession], script: str) -> dict:
+        """Read one existing relative .mt script's source without running it; nothing is activated."""
+        return await ctx.deps.dispatch("read_action_script", {"script": script})
+
     async def query_sql(ctx: RunContext[AgentSession], sql: str) -> dict:
         """Read structure tables using SELECT * or SHOW TABLES; never mutate SQL.
         Every statement must end with ';' (for example "SHOW TABLES;")."""
@@ -328,7 +332,8 @@ def make_agent(model, *, read_vars=(), camera_vars=(), skills=None, workspace=Fa
         """Propose replacing layer 97/98/99 with Markdown, requiring explicit host approval; once per turn."""
         return await ctx.deps.dispatch("update_prompt", {"layer": layer, "content": content, "reason": reason})
 
-    functions = [list_hardware, list_action_scripts, query_sql, run_action_script, read_prompt, update_prompt]
+    functions = [list_hardware, list_action_scripts, read_action_script, query_sql, run_action_script,
+                 read_prompt, update_prompt]
     if read_vars:
         functions.append(read_variables)
     if camera_vars:
@@ -933,36 +938,66 @@ class AgentSession:
                 self.session_log.close()
 
 
+_INVALID_INPUT = object()
+
+
+def _read_console():
+    """Read one stdin line; ``_INVALID_INPUT`` for undecodable text, "" at EOF.
+
+    Bytes are decoded here rather than through the text wrapper: once
+    ``TextIOWrapper.readline`` hits a decode error it discards its buffered
+    input, so a retry would see EOF. In a terminal without ``iutf8``, a
+    backspace over a CJK character leaves half a UTF-8 sequence behind; that
+    must ask again, not end the session.
+    """
+    stream = sys.stdin
+    raw = getattr(stream, "buffer", None)
+    try:
+        if raw is None:
+            return stream.readline()
+        data = raw.readline()
+        try:
+            return data.decode(getattr(stream, "encoding", None) or "utf-8")
+        except (UnicodeDecodeError, LookupError):
+            return _INVALID_INPUT
+    except UnicodeDecodeError:
+        return _INVALID_INPUT
+    except (OSError, ValueError):
+        return ""
+
+
 async def console_line(prompt, stop):
     """Cancelable console wait; a blocked stdin reader must not hold shutdown open."""
-    print(prompt, file=sys.stderr, end="", flush=True)
     loop = asyncio.get_running_loop()
-    ready = loop.create_future()
+    while True:
+        print(prompt, file=sys.stderr, end="", flush=True)
+        ready = loop.create_future()
 
-    def finish(value):
-        if not ready.done():
-            ready.set_result(value)
+        def finish(value, ready=ready):
+            if not ready.done():
+                ready.set_result(value)
 
-    def read():
+        def read(finish=finish):
+            line = _read_console()
+            try:
+                loop.call_soon_threadsafe(finish, line)
+            except RuntimeError:
+                pass  # The session exited while this daemon reader was waiting.
+
+        threading.Thread(target=read, name="mybot-console", daemon=True).start()
         try:
-            line = sys.stdin.readline()
-        except (OSError, ValueError):
-            line = ""
-        try:
-            loop.call_soon_threadsafe(finish, line)
-        except RuntimeError:
-            pass  # The session exited while this daemon reader was waiting.
-
-    threading.Thread(target=read, name="mybot-console", daemon=True).start()
-    try:
-        while not ready.done():
-            if stop.is_set():
-                raise AgentInterrupted("Interrupted while waiting for input")
-            await asyncio.wait({ready}, timeout=0.05)
-        line = ready.result()
+            while not ready.done():
+                if stop.is_set():
+                    raise AgentInterrupted("Interrupted while waiting for input")
+                await asyncio.wait({ready}, timeout=0.05)
+            line = ready.result()
+        finally:
+            ready.cancel()
+        if line is _INVALID_INPUT:
+            print("mybot: input was not valid text (a partly deleted character?); please type it again.",
+                  file=sys.stderr, flush=True)
+            continue
         return line.rstrip("\r\n") if line else None
-    finally:
-        ready.cancel()
 
 
 async def confirm_console(name, arguments, stop, renderer=None):
