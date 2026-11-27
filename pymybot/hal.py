@@ -129,6 +129,8 @@ class HALManager:
     MAX_IMAGE_BYTES = 16 * 1024 * 1024
     MAX_IMAGE_PIXELS = 32 * 1024 * 1024
     CAMERA_TIMEOUT = 10.0
+    # Seconds of frames discarded after opening a camera while auto exposure settles.
+    CAMERA_WARMUP = 1.0
     CAMERA_FORMATS = {"win32": "dshow", "linux": "v4l2", "darwin": "avfoundation"}
     UART_MAX_BYTES = 512
     UART_MAX_MS = 60000
@@ -1079,19 +1081,24 @@ class HALManager:
             raise IOError(f"camera unavailable: {device} ({len(names)} video devices found)")
         return "video=" + names[device], fmt
 
-    def _latest_frame(self, container):
+    def _latest_frame(self, container, warmup=0.0):
         """Decode the newest frame, discarding the backlog queued since the last capture.
 
         FFmpeg devices (dshow especially) queue seconds of frames while idle. A read
-        that has to wait on the camera proves the backlog is drained.
+        that has to wait on the camera proves the backlog is drained. ``warmup``
+        seconds of frames are discarded first so a freshly opened camera can settle
+        its auto exposure; its first frames are often black.
         """
         stream = container.streams.video[0]
         rate = stream.average_rate or stream.guessed_rate
         live_wait = 0.5 / float(rate) if rate else 0.005
-        deadline = time.monotonic() + self.CAMERA_TIMEOUT
+        now = time.monotonic()
+        settled = now + min(warmup, self.CAMERA_TIMEOUT)
+        deadline = now + self.CAMERA_TIMEOUT
         packets = container.demux(stream)
         pending = []
         while True:
+            self._tick_cancel()
             started = time.monotonic()
             packet = next(packets, None)
             if packet is None or packet.size == 0:
@@ -1099,7 +1106,9 @@ class HALManager:
             if packet.is_keyframe:
                 pending.clear()
             pending.append(packet)
-            if time.monotonic() - started >= live_wait or started >= deadline:
+            if started >= deadline:
+                break
+            if time.monotonic() - started >= live_wait and started >= settled:
                 break
         # Decode from the last keyframe so inter-frame codecs keep their references.
         frames = [frame for packet in pending for frame in packet.decode()]
@@ -1129,6 +1138,7 @@ class HALManager:
                 if r.device is not None and r.state != desired:
                     r.device.close()
                     r.device = None
+                warmup = 0.0
                 if r.device is None:
                     file, fmt = self._camera_input(av, device)
                     # Unlike OpenCV, FFmpeg devices reject sizes the camera does not offer.
@@ -1142,7 +1152,8 @@ class HALManager:
                     except av.FFmpegError as exc:
                         raise IOError(f"camera unavailable: {device} ({exc})") from exc
                     r.state = desired
-                frame = self._latest_frame(r.device)
+                    warmup = self.CAMERA_WARMUP
+                frame = self._latest_frame(r.device, warmup)
                 size = self._size(frame.width, frame.height)
                 quality = self._integer(options.get("quality", 90), 1, 100)
                 encoded = io.BytesIO()

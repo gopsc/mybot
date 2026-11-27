@@ -16,6 +16,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Camera capture on a freshly opened device returned the very first frame,
+  which webcams usually deliver before auto exposure settles, so one-shot
+  captures (every `run`/agent `run_action_script`) were often black. Frames
+  are now discarded for `HALManager.CAMERA_WARMUP` (1 s) after opening, bounded by
+  the capture timeout and cancellable; an already open stream is unaffected.
 - Agent receipts for requests that provably did not run now carry the reason
   (SQL syntax, argument validation, path or permission refusal) instead of a
   generic "not executed" line, so the model can correct itself rather than

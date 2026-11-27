@@ -418,6 +418,7 @@ DSHOW_DEVICES_NONE = (
 @pytest.fixture
 def av_fake(monkeypatch):
     containers = []
+    monkeypatch.setattr(HALManager, "CAMERA_WARMUP", 0.0)
 
     class FFmpegError(Exception):
         pass
@@ -454,12 +455,14 @@ def av_fake(monkeypatch):
             self.closed = 0
             self.read_ok = True
             self.backlog = 3
+            self.packets = 0
             self.streams = SimpleNamespace(video=[SimpleNamespace(average_rate=1000, guessed_rate=None)])
             containers.append(self)
 
         def demux(self, stream):
             assert stream is self.streams.video[0]
             while self.read_ok:
+                self.packets += 1
                 if self.backlog:
                     self.backlog -= 1
                     yield Packet(False)
@@ -525,6 +528,32 @@ def test_camera_lazy_capture_fields_reconfigure_close(manager, av_fake):
     assert manager.call("close_handle", h) == 0
     assert av_fake.containers[1].closed == 1
     assert manager.call("camera_capture", h, {})["result"] == "ERR"
+
+
+def test_camera_fresh_open_discards_warmup_frames(manager, av_fake, monkeypatch):
+    monkeypatch.setattr(HALManager, "CAMERA_WARMUP", 0.05)
+    h = manager.call("camera_open", 0, 640, 480)
+    started = time.monotonic()
+    assert manager.call("camera_capture", h, {})["result"] == "OK", manager.call("last_error")
+    assert time.monotonic() - started >= 0.05
+    container = av_fake.containers[0]
+    # Without warmup the first live packet after the 3-frame backlog is returned.
+    assert container.packets > 10
+    # An already open stream has settled: the next capture only drains the backlog.
+    container.packets, container.backlog = 0, 5
+    assert manager.call("camera_capture", h, {})["result"] == "OK"
+    assert container.packets == 6
+    assert manager.call("close_handle", h) == 0
+
+
+def test_camera_warmup_is_bounded_by_timeout(manager, av_fake, monkeypatch):
+    monkeypatch.setattr(HALManager, "CAMERA_WARMUP", 60.0)
+    monkeypatch.setattr(HALManager, "CAMERA_TIMEOUT", 0.05)
+    h = manager.call("camera_open", 0, 640, 480)
+    started = time.monotonic()
+    assert manager.call("camera_capture", h, {})["result"] == "OK", manager.call("last_error")
+    assert time.monotonic() - started < 1.0
+    assert manager.call("close_handle", h) == 0
 
 
 @pytest.mark.parametrize("platform, device, file, fmt", [
