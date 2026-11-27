@@ -27,6 +27,13 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- CLI agent approvals rendered on the wrong line: the turn watchdog kept
+  draining stream events while the confirmation waited on stdin, so the
+  `→ run_action_script(...)` line was appended to the `Approve ... [y/N]`
+  prompt and the answer looked shifted. Stream events are now buffered while
+  an approval prompt is open and replayed after the answer; a partially
+  streamed text line is closed before the prompt, and a `⇦` result no longer
+  joins an open text line.
 - Camera capture on a freshly opened device returned the very first frame,
   which webcams usually deliver before auto exposure settles, so one-shot
   captures (every `run`/agent `run_action_script`) were often black. Frames

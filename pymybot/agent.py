@@ -965,23 +965,29 @@ async def console_line(prompt, stop):
         ready.cancel()
 
 
-async def confirm_console(name, arguments, stop):
+async def confirm_console(name, arguments, stop, renderer=None):
     if not sys.stdin.isatty():
         return False
+    if renderer is not None:
+        renderer.prompt()
     if name == "prompt:update_prompt":
         description = dumps(arguments)
         if len(description.encode("utf-8")) > 128 * 1024:
             print("Prompt approval denied: diff too large to display completely.", file=sys.stderr)
+            if renderer is not None:
+                renderer.answer()
             return False
         print(_display_text(f"Layer {arguments['layer']} · {arguments['reason']}\n{arguments['diff']}"),
               file=sys.stderr)
-        answer = await console_line("Approve prompt replacement and private backup? [y/N] ", stop)
+        answer = await _ask("Approve prompt replacement and private backup? [y/N] ", stop, renderer)
         return answer is not None and answer.strip().lower() in {"y", "yes"}
     # Never approve hidden/truncated arguments. repr neutralizes terminal controls.
     description = repr(dumps(arguments))
     limit = 512 * 1024 if name == "create_skill" else 2000
     if len(description) > limit:
         print("Approval denied: arguments too long to display completely; reduce the request.", file=sys.stderr)
+        if renderer is not None:
+            renderer.answer()
         return False
     if name.startswith("mcp:"):
         warning = ("This calls an operator-configured MCP server with host-user permissions, "
@@ -995,8 +1001,17 @@ async def confirm_console(name, arguments, stop):
         warning = "This changes workspace files, potentially including executable scripts or drivers."
     else:
         warning = "Activation may write to devices."
-    answer = await console_line(f"Approve {name} {description}? {warning} [y/N] ", stop)
+    answer = await _ask(f"Approve {name} {description}? {warning} [y/N] ", stop, renderer)
     return answer is not None and answer.strip().lower() in {"y", "yes"}
+
+
+async def _ask(prompt, stop, renderer):
+    """Read one approval answer, closing the operator's line afterwards."""
+    try:
+        return await console_line(prompt, stop)
+    finally:
+        if renderer is not None:
+            renderer.answer()
 
 
 class StreamRenderer:
@@ -1006,8 +1021,34 @@ class StreamRenderer:
         self.stream = stream if stream is not None else sys.stderr
         self.mid_line = False
         self.text_chars = 0
+        self._asking = False
+        self._deferred = []
+
+    def prompt(self):
+        """Start an approval prompt.
+
+        The turn watchdog keeps draining stream events while the approval waits
+        on stdin, so the tool-call line used to be appended to the prompt line and
+        the operator's ``y`` then looked like it belonged to the wrong request.
+        Buffer events until the answer has been read.
+        """
+        self._end_line()
+        self._asking = True
+        self._deferred = []
+
+    def answer(self):
+        """Stop deferring and replay the events raised while the prompt waited."""
+        if not self._asking:
+            return
+        self._asking = False
+        deferred, self._deferred = self._deferred, []
+        for event in deferred:
+            self(event)
 
     def __call__(self, event):
+        if self._asking:
+            self._deferred.append(event)
+            return
         kind = event.get("type")
         if kind == "text_delta":
             remaining = MAX_TEXT - self.text_chars
@@ -1027,6 +1068,7 @@ class StreamRenderer:
             self.stream.write(f"→ {_display_text(str(event['tool']))}({brief})\n")
             self.stream.flush()
         elif kind == "tool_result":
+            self._end_line()
             state = event.get("state")
             tail = f" {_display_text(str(state))}" if state else ""
             self.stream.write(f"⇦ {_display_text(str(event['tool']))}{tail}\n")
@@ -1134,10 +1176,11 @@ async def run_cli_agent(args, stop):
             print(f"Shell enabled: {describe_backend(config.sandbox_mode)}; "
                   f"approval is still separate.", file=sys.stderr)
 
-        async def confirm(name, arguments):
-            return await confirm_console(name, arguments, stop)
-
         renderer = StreamRenderer()
+
+        async def confirm(name, arguments):
+            return await confirm_console(name, arguments, stop, renderer)
+
         session = AgentSession(executor, model, config, confirm=confirm,
                                read_vars=args.read_var, camera_vars=args.camera_var,
                                on_event=renderer, skills=skills, workspace=args.workspace_dir is not None,

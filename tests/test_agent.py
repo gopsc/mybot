@@ -187,6 +187,33 @@ def test_stream_renderer_neutralizes_controls_in_text_and_tool_labels():
     assert "\\x1b" in output and "\\x07" in output and "\\x9b" in output
 
 
+def test_stream_renderer_defers_tool_events_until_the_approval_answer():
+    buffer = io.StringIO()
+    renderer = agent_module.StreamRenderer(stream=buffer)
+    renderer.prompt()
+    renderer({"type": "tool_call", "tool": "run_action_script", "arguments": {"script": "Camera.mt"}})
+    assert buffer.getvalue() == ""
+    renderer.answer()
+    assert buffer.getvalue() == "→ run_action_script('{\"script\":\"Camera.mt\"}')\n"
+    renderer({"type": "tool_result", "tool": "run_action_script", "ok": True, "state": "completed"})
+    assert "⇦ run_action_script completed" in buffer.getvalue()
+    # A prompt that never reaches a streamed event still resumes normally.
+    renderer.prompt()
+    renderer.answer()
+    renderer({"type": "text_delta", "text": "ok"})
+    assert buffer.getvalue().endswith("ok")
+
+
+def test_stream_renderer_ends_a_partial_text_line_before_the_prompt():
+    buffer = io.StringIO()
+    renderer = agent_module.StreamRenderer(stream=buffer)
+    renderer({"type": "text_delta", "text": "思考中"})
+    renderer.prompt()
+    renderer.answer()
+    renderer({"type": "tool_call", "tool": "capture_image", "arguments": {"name": "cam"}})
+    assert buffer.getvalue() == "思考中\n→ capture_image('{\"name\":\"cam\"}')\n"
+
+
 def test_stream_renderer_neutralizes_and_truncates_tool_arguments():
     buffer = io.StringIO()
     renderer = agent_module.StreamRenderer(stream=buffer)
@@ -631,6 +658,29 @@ def test_console_approval_never_hides_arguments(monkeypatch, capsys, long):
         assert "too long" in output.err
     else:
         assert approved and repr(agent_module.dumps(arguments)) in output.err
+
+
+@pytest.mark.parametrize("answer, approved", [("y\n", True), ("n\n", False), ("", False)])
+def test_console_approval_keeps_streamed_events_off_the_prompt_line(monkeypatch, capsys, answer, approved):
+    monkeypatch.setattr(sys, "stdin", FakeTTY(answer))
+    stream = io.StringIO()
+    renderer = agent_module.StreamRenderer(stream=stream)
+    real = agent_module.console_line
+    during = []
+
+    async def console_line(prompt, stop):
+        # The turn watchdog emits the tool-call line while stdin is still waiting.
+        renderer({"type": "tool_call", "tool": "run_action_script", "arguments": {"script": "Camera.mt"}})
+        during.append(stream.getvalue())
+        return await real(prompt, stop)
+
+    monkeypatch.setattr(agent_module, "console_line", console_line)
+    result = asyncio.run(confirm_console("run_action_script", {"script": "Camera.mt"},
+                                         threading.Event(), renderer))
+    assert result is approved
+    assert during == [""]
+    assert stream.getvalue().startswith("→ run_action_script(")
+    assert "[y/N]" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("name,args,warning", [
