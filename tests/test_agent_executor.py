@@ -1250,6 +1250,30 @@ def test_include_merge_and_control_frozen_for_real_robot(tmp_path):
     asyncio.run(scenario())
 
 
+def test_agent_vars_resolve_merge_paths_before_the_frozen_snapshot(tmp_path):
+    frag = tmp_path / "frag"
+    frag.mkdir()
+    (frag / "one.mt").write_text("@Action\ntimer-0.delay;\n2;\n@", encoding="utf-8")
+    (frag / "two.mt").write_text("@Action\ntimer-0.delay;\n3;\n@", encoding="utf-8")
+    (tmp_path / "main.mt").write_text(
+        '@Alias\nname alias;\ndir frag/;\nleg one;\n@\n'
+        '@Merge\npath;\n$(dir+leg+".mt");\n@\n'
+        '@Action\nrelay0.test;\n1;\n@\n', encoding="utf-8")
+    frozen, _ = executor_module._Scripts(tmp_path).prepare("main.mt", lambda: None, {"leg": "two"})
+    assert "@Merge" not in frozen and "$(dir" not in frozen
+    assert parse_matrices(frozen)[-1].data == [["1", "3"]]
+
+    async def scenario():
+        ex = RobotExecutor(ROOT / "robots" / "relay-test.sql", scripts_dir=tmp_path, allow_hardware=False)
+        try:
+            result = await ex.call("run_action_script", {"script": "main.mt", "vars": {"leg": "two"}})
+            assert result["ok"], result
+            assert [item["slept"] for item in result["data"]["outputs"]] == [1, 3]
+        finally:
+            await ex.close()
+    asyncio.run(scenario())
+
+
 def test_reflex_action_calls_survive_include_snapshot(tmp_path):
     (tmp_path / "main.mt").write_text("@Include\npath;\npart.mt;\n@\n", encoding="utf-8")
     (tmp_path / "part.mt").write_text('''@Reflex(step)

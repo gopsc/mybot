@@ -106,8 +106,8 @@ def body(name, *parts):
     return "@" + name + "\n" + "".join(parts) + "@\n"
 
 
-def expand(text, base):
-    return expand_includes(parse_matrices(text), base)
+def expand(text, base, bindings=None):
+    return expand_includes(parse_matrices(text), base, bindings)
 
 
 def test_matrix_comments_crlf_and_eof():
@@ -1371,6 +1371,78 @@ def test_reflex_capture_is_local_until_outer_capture_explicitly_returns_it():
 def test_no_directives_fast_path_does_not_touch_filesystem(tmp_path):
     matrices = parse_matrices(block("Action", "dev.p", "1"))
     assert expand_includes(matrices, tmp_path / "nonexistent") is matrices
+
+
+def test_include_and_merge_paths_use_top_level_alias_expressions(tmp_path):
+    frag = tmp_path / "frag"
+    frag.mkdir()
+    (frag / "head.mt").write_text(block("Alias", "name alias", "extra frag/extra.mt"), encoding="utf-8")
+    (frag / "extra.mt").write_text(block("Action", "e.p", "2"), encoding="utf-8")
+    script = (block("Include", "path", '$(dir+leg+".mt")')
+              + block("Alias", "name alias", "dir frag/", "leg head")
+              + block("Merge", "path", "$(extra)")
+              + block("Action", "a.p", "0"))
+    matrices = expand(script, tmp_path)
+    assert matrices[0].rows == [["name", "alias"], ["extra", "frag/extra.mt"], ["dir", "frag/"], ["leg", "head"]]
+    assert matrices[1].rows == [["a.p", "e.p"], ["0", "2"]]
+
+
+def test_nested_merge_path_uses_top_level_alias_and_session_binding(tmp_path):
+    frag = tmp_path / "frag"
+    frag.mkdir()
+    (frag / "front.mt").write_text(block("Action", "b.p", "1"), encoding="utf-8")
+    (frag / "back.mt").write_text(block("Action", "b.p", "2"), encoding="utf-8")
+    script = (block("Alias", "name alias", "dir frag/", "leg front")
+              + "@if(1>0)\n" + block("Merge", "path", '$(dir+leg+".mt")') + block("Action", "a.p", "0") + "@\n")
+
+    def merged(bindings=None):
+        block_ = next(m for m in expand(script, tmp_path, bindings) if m.name.startswith("if"))
+        return block_.children[0]
+
+    assert merged().data == [["0", "1"]]
+    assert merged({"leg": "back"}).data == [["0", "2"]]
+
+
+@pytest.mark.parametrize(("path", "message"), [
+    ("$(missing)", "not available"),
+    ("$(1+1)", "must produce text"),
+])
+def test_include_path_expression_rejects_unknown_names_and_non_text(tmp_path, path, message):
+    with pytest.raises(ScriptError, match=message):
+        expand(block("Include", "path", path), tmp_path)
+
+
+def test_merge_path_expression_cannot_use_fragment_owned_aliases(tmp_path):
+    (tmp_path / "extra.mt").write_text(block("Action", "b.p", "2"), encoding="utf-8")
+    (tmp_path / "frag.mt").write_text(
+        block("Alias", "name alias", "dir .") + block("Merge", "path", '$(dir+"/extra.mt")')
+        + block("Action", "a.p", "1"), encoding="utf-8")
+    with pytest.raises(ScriptError, match="not available"):
+        expand(block("Merge", "path", "frag.mt"), tmp_path)
+
+
+def test_path_expression_rejects_duplicate_alias_names(tmp_path):
+    script = (block("Alias", "name alias", "dir a/") + block("Alias", "name alias", "dir b/")
+              + block("Include", "path", "$(dir)"))
+    with pytest.raises(ScriptError, match="declared more than once"):
+        expand(script, tmp_path)
+
+
+@pytest.mark.parametrize("value", ["../secret.mt", "/secret.mt", "a.lua", "./a.mt", r"a\b.mt"])
+def test_resolved_include_paths_still_go_through_the_sandbox(tmp_path, value):
+    with pytest.raises(ScriptError):
+        expand(block("Alias", "name alias", "p " + value) + block("Include", "path", "$(p)"), tmp_path)
+
+
+def test_session_binding_overrides_alias_for_merge_path(tmp_path):
+    frag = tmp_path / "frag"
+    frag.mkdir()
+    (frag / "front.mt").write_text(block("Action", "b.p", "1"), encoding="utf-8")
+    (frag / "back.mt").write_text(block("Action", "b.p", "2"), encoding="utf-8")
+    script = (block("Alias", "name alias", "dir frag/", "leg front")
+              + block("Merge", "path", '$(dir+leg+".mt")') + block("Action", "a.p", "0"))
+    assert expand(script, tmp_path)[1].data == [["0", "1"]]
+    assert expand(script, tmp_path, {"leg": "back"})[1].data == [["0", "2"]]
 
 
 def test_top_level_merge_retains_only_first_action_like_cpp(tmp_path, caplog):

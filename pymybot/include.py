@@ -7,11 +7,13 @@ import stat
 from pathlib import Path, PureWindowsPath
 
 from .errors import ScriptError
+from .expr import Expression, expr_body
 from .matrix import Matrix, is_control, parse_matrices, reflex_name, split_action_column, struct_name
 
 MAX_INCLUDES = 32
 MAX_INCLUDE_DEPTH = 32
 MAX_INCLUDE_BYTES = 8 * 1024 * 1024
+MAX_PATH_CHARS = 4096
 MAX_PHASE = 100_000
 MAX_MERGED_ROWS = 20_000
 MAX_MERGED_CELLS = 200_000
@@ -67,7 +69,65 @@ def _merge(a: Matrix, b: Matrix, phase: int) -> Matrix:
     return Matrix(a.name, rows)
 
 
-def _specs(matrix: Matrix) -> list[tuple[str, int]]:
+class _PathEnv:
+    """Values an Include/Merge path may use before any block is executed.
+
+    Only top-level @Alias literals from the supplied sequence and session
+    bindings are visible: declarations inside merged fragments cannot select
+    the fragments they are merged from, and @Vars/@Struct values do not exist
+    yet.
+    """
+
+    def __init__(self, matrices: list[Matrix], bindings=None):
+        self.values: dict[str, object] = {}
+        self.duplicates: set[str] = set()
+        for matrix in matrices:
+            if matrix.name.strip() != "Alias" or not matrix.rows:
+                continue
+            header = matrix.header
+            if "name" not in header or "alias" not in header:
+                continue  # Declared later with the regular name/alias error.
+            name_col, alias_col = header.index("name"), header.index("alias")
+            for index, row in enumerate(matrix.data, start=1):
+                name = matrix.inherited(index, name_col)
+                if name in self.values:
+                    self.duplicates.add(name)
+                self.values[name] = matrix.inherited(index, alias_col)
+        for name, value in (bindings or {}).items():
+            if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+                raise ScriptError("Session bindings used in Include/Merge paths must be text or numbers")
+            self.values[name] = value
+            self.duplicates.discard(name)
+
+    def resolve(self, name: str):
+        if name in self.duplicates:
+            raise ScriptError(f"@Alias '{name}' is declared more than once; cannot resolve an Include/Merge path")
+        try:
+            return self.values[name]
+        except KeyError:
+            raise ScriptError(
+                f"'{name}' is not available to Include/Merge paths; "
+                "use a top-level @Alias literal or a session binding") from None
+
+
+def _path_text(matrix: Matrix, text: str, env: _PathEnv) -> str:
+    body = expr_body(text)
+    if body is None:
+        return text.strip()
+    directive = matrix.name.strip()
+    try:
+        value = Expression(body).evaluate(env.resolve)
+    except ScriptError as exc:
+        raise ScriptError(f"@{directive} path expression failed: {exc}") from None
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise ScriptError(f"@{directive} path expression must produce text")
+    value = value.strip()
+    if len(value) > MAX_PATH_CHARS:
+        raise ScriptError(f"@{directive} path is too long")
+    return value
+
+
+def _specs(matrix: Matrix, env: _PathEnv) -> list[tuple[str, int]]:
     if not matrix.rows:
         return []
     name = matrix.name.strip()
@@ -93,18 +153,19 @@ def _specs(matrix: Matrix) -> list[tuple[str, int]]:
                 phase = int(("-" if raw.startswith("-") else "") + (digits or "0"))
                 if abs(phase) > MAX_PHASE:
                     raise ScriptError(f"@Merge phase out of range +/-{MAX_PHASE}")
-        specs.append((matrix.rows[row][path_col].strip(), phase))
+        specs.append((_path_text(matrix, matrix.rows[row][path_col].strip(), env), phase))
     return specs
 
 
 class _Expander:
-    def __init__(self, base: Path):
+    def __init__(self, base: Path, bindings=None):
         try:
             self.root = base.resolve(strict=True)
         except (OSError, RuntimeError, ValueError):
             raise ScriptError("Include base directory does not exist") from None
         if not self.root.is_dir():
             raise ScriptError("Include base must be a directory")
+        self.bindings = dict(bindings or {})
         self.count = 0
         self.total_bytes = 0
         self.visited: set[Path] = set()
@@ -123,7 +184,7 @@ class _Expander:
         if any(part in {"", ".", ".."} for part in requested.split("/")):
             raise ScriptError("Include path must not traverse outside its base or contain empty/dot segments")
         if not requested.endswith(".mt"):
-            raise ScriptError("Include/Merge only accepts .mt scripts")
+            raise ScriptError("Include/Merge only accepts relative .mt scripts (after evaluating any path expression)")
         path = base.joinpath(*requested.split("/"))
         self.check_path(path)
         return path
@@ -172,11 +233,15 @@ class _Expander:
     def splice(self, seq: list[Matrix], base: Path, depth: int = 0,
                active: frozenset[Path] = frozenset()) -> list[tuple[Matrix, Path]]:
         out = []
+        # Each source file resolves its own Include paths against its own
+        # top-level aliases; aliases from included files cannot select the
+        # Include that would read them.
+        env = _PathEnv(seq, self.bindings)
         for matrix in seq:
             if matrix.name.strip() != "Include":
                 out.append((matrix, base))
                 continue
-            for relative, _ in _specs(matrix):
+            for relative, _ in _specs(matrix, env):
                 path = self.path(base, relative, depth + 1)
                 # Include is textual copy even for *.once.mt; only Merge has
                 # once semantics. Repeated non-recursive copies remain legal.
@@ -185,7 +250,7 @@ class _Expander:
                 out.extend(self.splice(self.read(path), path.parent, depth + 1, active | {path}))
         return out
 
-    def nested(self, seq: list[Matrix], base: Path) -> list[Matrix]:
+    def nested(self, seq: list[Matrix], base: Path, env: _PathEnv) -> list[Matrix]:
         pending: list[Matrix] = []
         out = []
         for matrix in seq:
@@ -200,7 +265,7 @@ class _Expander:
                         or reflex_name(name) is not None or struct_name(name) is not None):
                     raise ScriptError("Nested @Merge must be followed by a plain matrix table")
                 for directive in pending:
-                    for relative, phase in _specs(directive):
+                    for relative, phase in _specs(directive, env):
                         path = self.path(base, relative, 1)
                         targets = self.read(path)
                         if not targets:
@@ -211,13 +276,13 @@ class _Expander:
                                 raise ScriptError("Nested @Merge target must contain only plain matrix tables")
                             matrix = _merge(matrix, target, phase)
                 pending.clear()
-            children = self.nested(matrix.children, base) if matrix.children else []
+            children = self.nested(matrix.children, base, env) if matrix.children else []
             out.append(Matrix(matrix.name, matrix.rows, children, matrix.json_text))
         if pending:
             raise ScriptError("Nested @Merge has no following table to merge into")
         return out
 
-    def fragment(self, path: Path, depth: int) -> dict[str, Matrix | list[Matrix] | None]:
+    def fragment(self, path: Path, depth: int, env: _PathEnv) -> dict[str, Matrix | list[Matrix] | None]:
         if path in self.visited:
             if path.name.endswith(".once.mt"):
                 _LOG.info("%s already included, skipped (include-once)", path)
@@ -232,9 +297,9 @@ class _Expander:
                     and struct_name(matrix.name) is None):
                 raise ScriptError(f"@{matrix.name[:100]} is not supported in @Merge fragments; "
                                   "use @Include for content copying")
-        return self.accumulate(seq, path.parent, depth)
+        return self.accumulate(seq, path.parent, depth, env)
 
-    def accumulate(self, seq: list[Matrix], base: Path, depth: int, *,
+    def accumulate(self, seq: list[Matrix], base: Path, depth: int, env: _PathEnv, *,
                    origins: list[Path] | None = None) -> dict[str, Matrix | list[Matrix] | None]:
         acc = {name: _fold(seq, name) for name in ("Alias", "Vars")}
         acc["Struct"] = [matrix for matrix in seq if struct_name(matrix.name) is not None]
@@ -255,9 +320,9 @@ class _Expander:
             if matrix.name.strip() != "Merge":
                 continue
             origin = origins[index] if origins is not None else base
-            for relative, phase in _specs(matrix):
+            for relative, phase in _specs(matrix, env):
                 path = self.path(origin, relative, depth + 1)
-                parts = self.fragment(path, depth + 1)
+                parts = self.fragment(path, depth + 1, env)
                 acc["Struct"].extend(parts.get("Struct", []))
                 for kind in ("Alias", "Vars"):
                     child = parts.get(kind)
@@ -277,10 +342,14 @@ class _Expander:
 
     def run(self, matrices: list[Matrix]) -> list[Matrix]:
         spliced = self.splice(matrices, self.root)
-        seq = [Matrix(m.name, m.rows, self.nested(m.children, base), m.json_text) for m, base in spliced]
+        # After Include splicing, Merge paths may also use aliases that copied
+        # blocks declared. Fragment-owned aliases stay invisible to keep the
+        # expansion acyclic.
+        env = _PathEnv([matrix for matrix, _ in spliced], self.bindings)
+        seq = [Matrix(m.name, m.rows, self.nested(m.children, base, env), m.json_text) for m, base in spliced]
         if not any(m.name.strip() == "Merge" for m in seq):
             return seq
-        acc = self.accumulate(seq, self.root, 0, origins=[base for _, base in spliced])
+        acc = self.accumulate(seq, self.root, 0, env, origins=[base for _, base in spliced])
         out = [acc[k] for k in ("Alias", "Vars") if acc[k] is not None] + acc["Struct"]
         action = acc["Action"]
         if action is not None and not any(m.name.strip() == "Action" for m in seq):
@@ -298,12 +367,12 @@ class _Expander:
         return out
 
 
-def expand_includes(matrices: list[Matrix], base_dir: Path) -> list[Matrix]:
+def expand_includes(matrices: list[Matrix], base_dir: Path, bindings=None) -> list[Matrix]:
     """Expand Include copies, local nested Merges, then top-level Merge trees."""
     pending = list(matrices)
     while pending:
         matrix = pending.pop()
         if matrix.name.strip() in {"Include", "Merge"}:
-            return _Expander(Path(base_dir)).run(matrices)
+            return _Expander(Path(base_dir), bindings).run(matrices)
         pending.extend(matrix.children)
     return matrices  # No file directives: no filesystem access or reordering.

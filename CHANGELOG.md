@@ -6,6 +6,17 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `@Include` / `@Merge` `path` cells now accept `$(...)` text expressions,
+  resolved once at expansion time. Only top-level `@Alias` literals (the
+  declaring file's own for `@Include`; the spliced main script and included
+  files for `@Merge`) and session bindings (`--var`, `--var-env`, agent
+  `vars`, which override aliases) are visible; `@Vars`, `@Struct`, block
+  locals and fragment-owned aliases are rejected. Resolved paths still pass
+  the existing relative-path/symlink sandbox, and the agent freeze snapshot
+  contains the literal paths.
+
 ### Security
 
 - Agent `web_fetch`/`web_search`: the validated DNS answer is now the

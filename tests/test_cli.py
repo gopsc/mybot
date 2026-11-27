@@ -942,6 +942,21 @@ def test_cli_runs_included_merge_from_declaring_directory(tmp_path):
     assert [output["slept"] for output in json.loads(result.stdout)["outputs"]] == [1, 1]
 
 
+def test_cli_merge_path_uses_session_binding(tmp_path):
+    frag = tmp_path / "frag"
+    frag.mkdir()
+    (frag / "one.mt").write_text("@Action\ntimer-0.delay;\n2;\n@\n", encoding="utf-8")
+    (frag / "two.mt").write_text("@Action\ntimer-0.delay;\n3;\n@\n", encoding="utf-8")
+    (tmp_path / "main.mt").write_text(
+        '@Alias\nname alias;\ndir frag/;\nleg one;\n@\n'
+        '@Merge\npath;\n$(dir+leg+".mt");\n@\n'
+        '@Action\nrelay0.test;\n1;\n@\n', encoding="utf-8")
+    result = run_cli(tmp_path, "run", "--robot", ROOT / "robots/relay-test.sql",
+                     "--input", "main.mt", "--var", "leg=two", "--timeout", "10")
+    assert result.returncode == 0, result.stderr
+    assert [output["slept"] for output in json.loads(result.stdout)["outputs"]] == [1, 3]
+
+
 @pytest.mark.parametrize("replace", [False, True])
 def test_bounded_read_rejects_file_changes(tmp_path, monkeypatch, replace):
     from contextlib import contextmanager

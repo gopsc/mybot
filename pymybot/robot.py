@@ -440,7 +440,7 @@ class Robot:
         with self._lock:
             if self.state != "Active":
                 raise ScriptError("Robot is not active")
-            matrices = expand_includes(parse_matrices(check_script(script_text)), Path(base_dir))
+            matrices = expand_includes(parse_matrices(check_script(script_text)), Path(base_dir), vars)
             budget = Budget(self.stop_event, timeout, cancel)
             with self.registry.session():
                 runner = ActionRunner(self.registry, budget)

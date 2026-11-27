@@ -180,7 +180,7 @@ class _Scripts:
         self.check()
         return {"scripts": sorted(result), "truncated": truncated}
 
-    def prepare(self, relative, check):
+    def prepare(self, relative, check, bindings=None):
         path = self.path.joinpath(*_relative(relative).split("/"))
         matrices = parse_matrices(self.read(path))
         check()
@@ -192,8 +192,8 @@ class _Scripts:
             matrix = pending.pop()
             directives |= matrix.name.strip() in {"Include", "Merge"}
             pending.extend(matrix.children)
-        matrices = (_PinnedExpander(path.parent, self, check).run(matrices) if directives
-                    else expand_includes(matrices, path.parent))
+        matrices = (_PinnedExpander(path.parent, self, check, bindings).run(matrices) if directives
+                    else expand_includes(matrices, path.parent, bindings))
         lines = []
 
         def render(seq, *, implicit=False):
@@ -225,10 +225,10 @@ class _Scripts:
 
 
 class _PinnedExpander(_Expander):
-    def __init__(self, base, scripts, check):
+    def __init__(self, base, scripts, check, bindings=None):
         self.scripts, self.check_budget = scripts, check
         scripts.check(base)
-        super().__init__(base)
+        super().__init__(base, bindings)
 
     def check_path(self, path):
         self.check_budget()
@@ -757,8 +757,12 @@ class RobotExecutor:
                 data = self._workspace.call(name, arguments, lambda: self._check(deadline), started)
             else:
                 self._preflight_io(name, arguments)
+                bindings = None
                 if name == "run_action_script":
-                    script, base = self._scripts.prepare(arguments["script"], lambda: self._check(deadline))
+                    # Operator-provided bindings win over model-supplied ones.
+                    bindings = {**arguments.get("vars", {}), **self._vars}
+                    script, base = self._scripts.prepare(
+                        arguments["script"], lambda: self._check(deadline), bindings)
                 self._check(deadline)
                 executed = True  # active() may already have written before raising.
                 if not self._active:
@@ -770,8 +774,6 @@ class RobotExecutor:
                 self._check(deadline)
                 if name == "run_action_script":
                     self._scripts.check()
-                    # Operator-provided bindings win over model-supplied ones.
-                    bindings = {**arguments.get("vars", {}), **self._vars}
                     outputs, images, omitted = _lift_images(self._robot.run(
                         script, base_dir=str(base), vars=bindings,
                         timeout=self._remaining(deadline)))

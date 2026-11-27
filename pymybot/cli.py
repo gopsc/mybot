@@ -783,7 +783,7 @@ def execute(args, stop):
     if getattr(args, "input", None):
         path = Path(args.input).absolute()
         action, base_dir = read_file(path), path.parent
-        matrices = expand_includes(parse_matrices(action), base_dir)
+        matrices = expand_includes(parse_matrices(action), base_dir, bindings)
     if hasattr(args, "sql"):
         checked_text(args.sql)
     if args.command == "sample":
