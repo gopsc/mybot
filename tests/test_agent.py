@@ -290,10 +290,44 @@ def test_workspace_approvals_are_independent(tool, arguments, permission, mode, 
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("prompt", ["这个脚本是什么", "运行前先看看 walk.mt"])
+def test_agent_reads_action_script_source_without_approval(tmp_path, prompt):
+    from pymybot.agent_executor import RobotExecutor
+
+    source = "@Action\nrelay0.test;\n1;\n@\n"
+    (tmp_path / "spider").mkdir()
+    (tmp_path / "spider" / "walk.mt").write_text(source, encoding="utf-8")
+    seen = []
+
+    async def respond(messages, info):
+        if not seen:
+            seen.append(True)
+            return ModelResponse(parts=[ToolCallPart("read_action_script", {"script": "spider/walk.mt"})])
+        returns = [part for message in messages for part in message.parts if isinstance(part, ToolReturnPart)]
+        seen.append(returns[-1].content)
+        return ModelResponse(parts=[TextPart("done")])
+
+    async def deny(name, arguments):
+        pytest.fail(f"reading a script must not ask for approval: {name}")
+
+    async def scenario():
+        executor = RobotExecutor(asset_path("robots") / "relay-test.sql", scripts_dir=tmp_path)
+        session = AgentSession(executor, FunctionModel(respond), confirm=deny)
+        try:
+            await session.ask(prompt)
+            assert session.events == [{"tool": "read_action_script", "ok": True,
+                                       "executed": False, "state": "completed"}]
+        finally:
+            await session.close()
+    asyncio.run(scenario())
+    assert seen[-1]["data"] == {"script": "spider/walk.mt", "content": source}
+
+
 @pytest.mark.parametrize("workspace,enable_shell", [(False, False), (True, False), (True, True)])
 def test_workspace_tool_registration(workspace, enable_shell):
     async def respond(messages, info):
         names = {tool.name for tool in info.function_tools}
+        assert "read_action_script" in names
         assert ({"list_files", "read_file", "write_file", "edit_file"} <= names) is workspace
         assert ("shell" in names) is enable_shell
         return ModelResponse(parts=[TextPart("done")])
@@ -643,6 +677,36 @@ def test_model_request_hook_checks_stop_even_outside_ask():
 class FakeTTY(io.StringIO):
     def isatty(self):
         return True
+
+
+class ByteTTY(io.TextIOWrapper):
+    """A real text wrapper over bytes, so undecodable input behaves like a terminal."""
+
+    def __init__(self, data):
+        super().__init__(io.BytesIO(data), encoding="utf-8")
+
+    def isatty(self):
+        return True
+
+
+def test_console_line_reprompts_on_undecodable_input_instead_of_ending(monkeypatch, capsys):
+    # Backspace over a CJK character in a terminal without iutf8 leaves half of it.
+    monkeypatch.setattr(sys, "stdin", ByteTTY("往".encode()[:2] + b"\n" + "往前\n".encode()))
+    line = asyncio.run(agent_module.console_line("mybot> ", threading.Event()))
+    err = capsys.readouterr().err
+    assert line == "往前"
+    assert "not valid text" in err and err.count("mybot> ") == 2
+
+
+def test_console_line_still_reports_real_eof(monkeypatch):
+    monkeypatch.setattr(sys, "stdin", ByteTTY(b""))
+    assert asyncio.run(agent_module.console_line("mybot> ", threading.Event())) is None
+
+
+def test_undecodable_approval_answer_is_asked_again(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "stdin", ByteTTY(b"\xe5\n" + b"y\n"))
+    assert asyncio.run(confirm_console("run_action_script", {"script": "a.mt"}, threading.Event()))
+    assert capsys.readouterr().err.count("[y/N] ") == 2
 
 
 @pytest.mark.parametrize("long", [False, True])

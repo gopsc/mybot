@@ -15,7 +15,7 @@ import re
 INTENTS = ("chat", "inspect", "control", "author", "diagnose")
 MODES = ("auto", "off", *INTENTS)
 
-READ_TOOLS = frozenset({"list_hardware", "list_action_scripts", "query_sql",
+READ_TOOLS = frozenset({"list_hardware", "list_action_scripts", "read_action_script", "query_sql",
                         "list_skills", "read_skill", "list_files", "read_file", "read_prompt",
                         "web_fetch", "web_search"})
 TOOLS_BY_INTENT = {

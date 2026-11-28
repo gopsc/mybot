@@ -269,7 +269,8 @@ def test_make_agent_wires_skills_into_instructions_and_tools():
     assert "- pymybot-scripting:" in instructions
     assert "Operator-provided reference skills" in instructions
     assert "Operator-provided reference skills" not in without
-    base_tools = ["list_hardware", "list_action_scripts", "query_sql", "run_action_script", "read_prompt", "update_prompt"]
+    base_tools = ["list_hardware", "list_action_scripts", "read_action_script", "query_sql", "run_action_script",
+                  "read_prompt", "update_prompt"]
     assert sorted(agent._function_toolset.tools) == sorted(base_tools + ["list_skills", "read_skill", "create_skill"])
     assert sorted(plain._function_toolset.tools) == sorted(base_tools)
 
