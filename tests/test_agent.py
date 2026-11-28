@@ -296,7 +296,9 @@ def test_agent_reads_action_script_source_without_approval(tmp_path, prompt):
 
     source = "@Action\nrelay0.test;\n1;\n@\n"
     (tmp_path / "spider").mkdir()
-    (tmp_path / "spider" / "walk.mt").write_text(source, encoding="utf-8")
+    # newline="\n": the reader returns the file verbatim, so a Windows default
+    # newline translation would turn the expected source into CRLF on disk.
+    (tmp_path / "spider" / "walk.mt").write_text(source, encoding="utf-8", newline="\n")
     seen = []
 
     async def respond(messages, info):
