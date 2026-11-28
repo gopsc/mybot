@@ -65,6 +65,11 @@ the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every bundled driver unresolvable. `/assets/` is now git-ignored.
 - `test_splash_can_be_disabled` skips without PySide6 instead of failing on
   base installs.
+- `test_camera_fresh_open_discards_warmup_frames` asserted the exact packet
+  count of a live frame. Windows ticks `time.monotonic()` at ~15.6 ms, so the
+  fake stream's 0.5 ms live wait is unobservable and the capture read a few
+  extra frames. The assertion is now a bound that still proves an open stream
+  does not repeat the warmup.
 
 ### Changed
 

@@ -539,10 +539,14 @@ def test_camera_fresh_open_discards_warmup_frames(manager, av_fake, monkeypatch)
     container = av_fake.containers[0]
     # Without warmup the first live packet after the 3-frame backlog is returned.
     assert container.packets > 10
-    # An already open stream has settled: the next capture only drains the backlog.
+    warmed = container.packets
+    # An already open stream has settled: the next capture only drains the backlog and
+    # returns one live frame. The exact count depends on the platform's monotonic clock
+    # resolution (Windows ticks at ~15.6 ms, so a 0.5 ms live wait is invisible), hence
+    # the bound: far more than the 5-frame backlog, far less than a repeated warmup.
     container.packets, container.backlog = 0, 5
     assert manager.call("camera_capture", h, {})["result"] == "OK"
-    assert container.packets == 6
+    assert 6 <= container.packets < warmed // 2
     assert manager.call("close_handle", h) == 0
 
 
